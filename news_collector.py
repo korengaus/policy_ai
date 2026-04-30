@@ -1,9 +1,10 @@
 import feedparser
+import re
 import requests
 from bs4 import BeautifulSoup
 from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone, timedelta
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urljoin, urlparse
 from googlenewsdecoder import gnewsdecoder
 
 from config import RECENT_DAYS
@@ -18,10 +19,144 @@ REQUEST_HEADERS = {
     "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
 }
 
+MEDIA_ONLY_TITLES = {
+    "SBS Biz",
+    "SBSBiz",
+    "연합뉴스",
+    "뉴스1",
+    "이데일리",
+    "한국경제",
+    "매일경제",
+    "조선일보",
+    "중앙일보",
+    "한겨레",
+    "경향신문",
+    "머니투데이",
+    "파이낸셜뉴스",
+    "서울경제",
+    "아시아경제",
+    "헤럴드경제",
+    "디지털타임스",
+    "전자신문",
+    "뉴시스",
+    "KBS 뉴스",
+    "MBC 뉴스",
+    "SBS 뉴스",
+    "YTN",
+}
+
 
 def clean_html(raw_html: str) -> str:
     soup = BeautifulSoup(raw_html or "", "html.parser")
     return soup.get_text(" ", strip=True)
+
+
+def _normalize_spaces(text: str) -> str:
+    return re.sub(r"\s+", " ", clean_html(text or "")).strip()
+
+
+def _query_terms(query: str) -> list[str]:
+    return [
+        term
+        for term in re.split(r"[\s,./|·ㆍ]+", query or "")
+        if len(term.strip()) >= 2
+    ]
+
+
+def _is_media_only_title(title: str) -> bool:
+    normalized = _normalize_spaces(title).strip(" -–—|:")
+    return normalized in MEDIA_ONLY_TITLES
+
+
+def is_good_news_title(title: str, query: str = "") -> bool:
+    normalized = _normalize_spaces(title)
+    if not normalized:
+        return False
+    if len(normalized) < 8:
+        return False
+    if _is_media_only_title(normalized):
+        return False
+    if not re.search(r"[가-힣A-Za-z0-9]", normalized):
+        return False
+
+    terms = _query_terms(query)
+    if terms:
+        matched = [term for term in terms if term in normalized]
+        has_policy_signal = re.search(
+            r"전세|대출|금리|부동산|주택|청년|중소기업|금융|정책|규제|지원|은행|감면",
+            normalized,
+        )
+        if not matched and not has_policy_signal:
+            return False
+
+    return True
+
+
+def _candidate_title(link) -> str:
+    for attr in ("title", "aria-label"):
+        value = _normalize_spaces(link.get(attr, ""))
+        if value:
+            return value
+    return _normalize_spaces(link.get_text(" ", strip=True))
+
+
+def _absolute_url(href: str, base_url: str) -> str:
+    if not href:
+        return ""
+    return urljoin(base_url, href)
+
+
+def _summary_from_container(container) -> str:
+    if not container:
+        return ""
+    selectors = [
+        ".news_dsc",
+        ".dsc_wrap",
+        ".api_txt_lines",
+        ".desc",
+        ".cont",
+        ".txt_info",
+        ".desc_news",
+        "p",
+    ]
+    for selector in selectors:
+        summary_el = container.select_one(selector)
+        if summary_el:
+            summary = _normalize_spaces(summary_el.get_text(" ", strip=True))
+            if summary:
+                return summary
+    return ""
+
+
+def _accept_fallback_candidate(
+    items: list[dict],
+    *,
+    title: str,
+    href: str,
+    summary: str,
+    source: str,
+    query: str,
+    base_url: str,
+    max_results: int,
+) -> bool:
+    title = _normalize_spaces(title)
+    print(f"[NewsCollector] {source.split('_')[0].capitalize()} candidate title: {title}")
+
+    if not is_good_news_title(title, query):
+        print(f"[NewsCollector] Skipped low quality title: {title}")
+        return False
+
+    original_url = _absolute_url(href, base_url)
+    parsed = urlparse(original_url)
+    if not parsed.scheme or not parsed.netloc:
+        print(f"[NewsCollector] Skipped low quality title: {title}")
+        return False
+
+    items.append(_fallback_item(title, original_url, summary, source))
+    unique = _dedupe_news_items(items)
+    items[:] = unique
+    print(f"[NewsCollector] Accepted fallback title: {title}")
+    return len(items) >= max_results
 
 
 def is_recent(published_text: str, days: int = 30) -> bool:
@@ -87,24 +222,42 @@ def search_naver_news_fallback(query: str, max_results: int = 3) -> tuple[list[d
         soup = BeautifulSoup(response.text, "html.parser")
         items = []
 
-        for link in soup.select("a.news_tit"):
-            href = link.get("href", "")
-            title = link.get("title") or link.get_text(" ", strip=True)
-            if not href or not title:
-                continue
+        selectors = [
+            "a.news_tit",
+            "a[href*='news.naver.com']",
+            "a[href*='n.news.naver.com']",
+            "a[href*='media.naver.com']",
+            "a[class*='title']",
+            "a[class*='news']",
+        ]
+        seen_links = set()
 
-            container = link.find_parent(["li", "div"])
-            summary = ""
-            if container:
-                summary_el = container.select_one(".news_dsc, .dsc_wrap, .api_txt_lines")
-                if summary_el:
-                    summary = summary_el.get_text(" ", strip=True)
+        for selector in selectors:
+            for link in soup.select(selector):
+                href = link.get("href", "")
+                if not href or href in seen_links:
+                    continue
+                seen_links.add(href)
 
-            items.append(_fallback_item(title, href, summary, "naver_fallback"))
-            if len(_dedupe_news_items(items)) >= max_results:
-                break
+                title = _candidate_title(link)
+                container = link.find_parent(["li", "div"])
+                summary = _summary_from_container(container)
 
-        return _dedupe_news_items(items)[:max_results], None
+                if _accept_fallback_candidate(
+                    items,
+                    title=title,
+                    href=href,
+                    summary=summary,
+                    source="naver_fallback",
+                    query=query,
+                    base_url=url,
+                    max_results=max_results,
+                ):
+                    print(f"[NewsCollector] Fallback selected: {len(items)}")
+                    return items[:max_results], None
+
+        print(f"[NewsCollector] Fallback selected: {len(items)}")
+        return items[:max_results], None
     except Exception as error:
         return [], str(error)
 
@@ -119,30 +272,40 @@ def search_daum_news_fallback(query: str, max_results: int = 3) -> tuple[list[di
             "a.f_link_b",
             "a.tit_main",
             "a.link_tit",
+            "a[class*='tit']",
+            "a[class*='news']",
             "a[href*='news.v.daum.net']",
             "a[href*='v.daum.net']",
         ]
         items = []
+        seen_links = set()
 
         for selector in selectors:
             for link in soup.select(selector):
                 href = link.get("href", "")
-                title = link.get_text(" ", strip=True) or link.get("title", "")
-                if not href or not title or len(title) < 5:
+                if not href or href in seen_links:
                     continue
+                seen_links.add(href)
 
+                title = _candidate_title(link)
                 container = link.find_parent(["li", "div"])
-                summary = ""
-                if container:
-                    summary_el = container.select_one(".desc, .cont, .txt_info, .desc_news")
-                    if summary_el:
-                        summary = summary_el.get_text(" ", strip=True)
+                summary = _summary_from_container(container)
 
-                items.append(_fallback_item(title, href, summary, "daum_fallback"))
-                if len(_dedupe_news_items(items)) >= max_results:
-                    return _dedupe_news_items(items)[:max_results], None
+                if _accept_fallback_candidate(
+                    items,
+                    title=title,
+                    href=href,
+                    summary=summary,
+                    source="daum_fallback",
+                    query=query,
+                    base_url=url,
+                    max_results=max_results,
+                ):
+                    print(f"[NewsCollector] Fallback selected: {len(items)}")
+                    return items[:max_results], None
 
-        return _dedupe_news_items(items)[:max_results], None
+        print(f"[NewsCollector] Fallback selected: {len(items)}")
+        return items[:max_results], None
     except Exception as error:
         return [], str(error)
 
