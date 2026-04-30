@@ -1,0 +1,12 @@
+beautifulsoup4
+fastapi
+feedparser
+googlenewsdecoder
+langchain
+langchain-openai
+openai
+playwright
+python-dotenv
+requests
+trafilatura
+uvicorn

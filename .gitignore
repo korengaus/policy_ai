@@ -1,0 +1,7 @@
+.env
+__pycache__/
+*.pyc
+policy_memory_backup.json
+reports/
+policy_memory.json
+policy_ai.db

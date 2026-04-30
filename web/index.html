@@ -1,0 +1,789 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>정책 AI 대시보드</title>
+  <style>
+    :root {
+      --bg: #f3f5f8;
+      --surface: #ffffff;
+      --surface-soft: #f9fafb;
+      --border: #d9dee7;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --blue: #2563eb;
+      --blue-dark: #1d4ed8;
+      --dark: #374151;
+      --dark-hover: #111827;
+      --red: #dc2626;
+      --orange: #f59e0b;
+      --gray: #6b7280;
+      --shadow: 0 10px 26px rgba(31, 41, 55, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .page {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 28px 22px 44px;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 22px;
+    }
+
+    .title-block h1 {
+      margin: 0;
+      font-size: 30px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .api-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid #cbd5e1;
+      border-radius: 999px;
+      background: var(--surface);
+      color: #334155;
+      padding: 8px 12px;
+      font-size: 13px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .api-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: #22c55e;
+    }
+
+    .panel,
+    .metric,
+    .result-card,
+    .history-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      box-shadow: var(--shadow);
+    }
+
+    .panel {
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr 132px auto auto;
+      gap: 12px;
+      align-items: end;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 7px;
+      color: #374151;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    input {
+      width: 100%;
+      min-height: 42px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 10px 12px;
+      background: white;
+      color: var(--text);
+      font-size: 15px;
+    }
+
+    input:focus {
+      outline: 2px solid rgba(37, 99, 235, 0.22);
+      border-color: var(--blue);
+    }
+
+    button {
+      min-height: 42px;
+      border: 0;
+      border-radius: 8px;
+      padding: 10px 16px;
+      color: white;
+      font-size: 14px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: background 120ms ease, opacity 120ms ease;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.65;
+    }
+
+    .primary {
+      background: var(--blue);
+    }
+
+    .primary:hover:not(:disabled) {
+      background: var(--blue-dark);
+    }
+
+    .secondary {
+      background: var(--dark);
+    }
+
+    .secondary:hover:not(:disabled) {
+      background: var(--dark-hover);
+    }
+
+    .status-line {
+      display: none;
+      margin-top: 14px;
+      color: #334155;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .status-line.success {
+      color: #047857;
+    }
+
+    .error-box {
+      display: none;
+      margin-top: 14px;
+      border: 1px solid #fecaca;
+      border-radius: 8px;
+      background: #fef2f2;
+      color: #991b1b;
+      padding: 11px 12px;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .metrics {
+      display: none;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+    }
+
+    .metric {
+      padding: 15px;
+    }
+
+    .metric-label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .metric-value {
+      margin-top: 7px;
+      color: #111827;
+      font-size: 24px;
+      font-weight: 900;
+    }
+
+    .empty-state {
+      border: 1px dashed #cbd5e1;
+      border-radius: 10px;
+      background: var(--surface-soft);
+      color: var(--muted);
+      padding: 28px;
+      text-align: center;
+      font-weight: 700;
+    }
+
+    .results {
+      display: grid;
+      gap: 14px;
+      margin-top: 16px;
+    }
+
+    .result-card {
+      padding: 18px;
+    }
+
+    .card-top {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 5px 10px;
+      color: white;
+      font-size: 12px;
+      font-weight: 900;
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    .topic-badge {
+      background: #e0e7ff;
+      color: #3730a3;
+    }
+
+    .alert-watch { background: var(--orange); }
+    .alert-low { background: var(--gray); }
+    .alert-medium { background: var(--blue); }
+    .alert-high { background: var(--red); }
+
+    .result-title {
+      margin: 0 0 14px;
+      font-size: 19px;
+      line-height: 1.38;
+    }
+
+    a {
+      color: #1d4ed8;
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    .detail-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin: 14px 0;
+    }
+
+    .detail-box {
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      background: var(--surface-soft);
+      padding: 12px;
+    }
+
+    .detail-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      border-top: 1px solid #e5e7eb;
+      padding: 8px 0;
+      font-size: 14px;
+    }
+
+    .detail-row:first-child {
+      border-top: 0;
+      padding-top: 0;
+    }
+
+    .detail-row:last-child {
+      padding-bottom: 0;
+    }
+
+    .label {
+      color: var(--muted);
+      font-weight: 800;
+    }
+
+    .value {
+      text-align: right;
+      font-weight: 700;
+    }
+
+    .decision-summary {
+      margin: 14px 0 10px;
+      border-left: 4px solid #cbd5e1;
+      padding: 10px 12px;
+      background: #f8fafc;
+      color: #334155;
+      line-height: 1.55;
+      font-size: 14px;
+    }
+
+    .source-link {
+      font-size: 13px;
+      word-break: break-all;
+    }
+
+    .source-button {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid #bfdbfe;
+      border-radius: 8px;
+      background: #eff6ff;
+      color: #1d4ed8;
+      padding: 8px 12px;
+      font-size: 13px;
+      font-weight: 800;
+      text-decoration: none;
+    }
+
+    .source-button:hover {
+      background: #dbeafe;
+      text-decoration: none;
+    }
+
+    .history-card {
+      margin-top: 18px;
+      padding: 18px;
+    }
+
+    .history-title {
+      margin: 0 0 12px;
+      font-size: 18px;
+    }
+
+    .history-row {
+      display: grid;
+      grid-template-columns: 60px 1fr;
+      gap: 10px;
+      border-top: 1px solid #e5e7eb;
+      padding: 13px 0;
+      font-size: 14px;
+    }
+
+    .history-row:first-child {
+      border-top: 0;
+    }
+
+    .history-id {
+      color: #334155;
+      font-weight: 900;
+    }
+
+    .history-meta {
+      margin-top: 6px;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    @media (max-width: 820px) {
+      .controls,
+      .metrics,
+      .detail-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .topbar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .page {
+        padding: 20px 14px 34px;
+      }
+
+      .detail-row {
+        display: block;
+      }
+
+      .value {
+        display: block;
+        margin-top: 4px;
+        text-align: left;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="topbar">
+      <div class="title-block">
+        <h1>정책 AI 대시보드</h1>
+        <p class="subtitle">한국 뉴스 기반 정책 검증 인텔리전스</p>
+      </div>
+      <div class="api-badge"><span class="api-dot"></span>로컬 API 연결됨</div>
+    </header>
+
+    <section class="panel">
+      <div class="controls">
+        <div>
+          <label for="query">검색어</label>
+          <input id="query" type="text" value="전세대출" autocomplete="off">
+        </div>
+        <div>
+          <label for="maxNews">뉴스 개수</label>
+          <input id="maxNews" type="number" min="1" value="2">
+        </div>
+        <button id="analyzeBtn" class="primary" type="button">분석하기</button>
+        <button id="historyBtn" class="secondary" type="button">최근 분석 불러오기</button>
+      </div>
+      <div id="statusLine" class="status-line"></div>
+      <div id="errorBox" class="error-box"></div>
+    </section>
+
+    <section id="metrics" class="metrics">
+      <div class="metric">
+        <div class="metric-label">분석 결과 수</div>
+        <div id="metricResults" class="metric-value">0</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">최고 경고 단계</div>
+        <div id="metricAlert" class="metric-value">-</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">평균 신뢰도</div>
+        <div id="metricConfidence" class="metric-value">0</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">고영향 뉴스 수</div>
+        <div id="metricImpact" class="metric-value">0</div>
+      </div>
+    </section>
+
+    <section id="results" class="results">
+      <div class="empty-state">분석을 실행하면 결과가 여기에 표시됩니다.</div>
+    </section>
+
+    <section class="history-card">
+      <h2 class="history-title">최근 분석 기록</h2>
+      <div id="history">
+        <div class="empty-state">아직 저장된 분석 기록이 없습니다.</div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const API_BASE = window.location.origin;
+
+    const queryInput = document.getElementById("query");
+    const maxNewsInput = document.getElementById("maxNews");
+    const analyzeBtn = document.getElementById("analyzeBtn");
+    const historyBtn = document.getElementById("historyBtn");
+    const statusLine = document.getElementById("statusLine");
+    const errorBox = document.getElementById("errorBox");
+    const metricsEl = document.getElementById("metrics");
+    const resultsEl = document.getElementById("results");
+    const historyEl = document.getElementById("history");
+
+    const metricResults = document.getElementById("metricResults");
+    const metricAlert = document.getElementById("metricAlert");
+    const metricConfidence = document.getElementById("metricConfidence");
+    const metricImpact = document.getElementById("metricImpact");
+
+    const ALERT_RANK = { LOW: 1, WATCH: 2, MEDIUM: 3, HIGH: 4 };
+    const ALERT_LABELS = {
+      WATCH: "관찰",
+      LOW: "낮음",
+      MEDIUM: "중간",
+      HIGH: "높음",
+    };
+    const MARKET_SIGNAL_LABELS = {
+      housing_tightening_risk: "주거금융 규제 위험",
+      housing_support_pressure: "주거지원 압박",
+      consumer_credit_relief: "소비자 금융 완화",
+      sme_finance_support: "중소기업 금융지원",
+      bank_margin_pressure: "은행 마진 압박",
+      policy_uncertainty: "정책 불확실성",
+      no_clear_signal: "명확한 신호 없음",
+    };
+    const LEVEL_LABELS = {
+      none: "검증 없음",
+      low: "낮음",
+      medium: "보통",
+      high: "높음",
+    };
+    const DIRECTION_LABELS = {
+      positive: "긍정",
+      negative: "부정",
+      mixed: "혼합",
+      uncertain: "불확실",
+    };
+    const RECOMMENDATION_LABELS = {
+      "Monitor official FSC/FSS follow-up before treating as confirmed policy.": "공식 금융당국 후속 발표를 확인하기 전까지 확정 정책으로 보지 말고 관찰하세요.",
+      "Track official housing finance restrictions and lender implementation guidance.": "공식 주거금융 규제와 금융기관 실행 지침을 추적하세요.",
+      "Track youth housing finance support measures and budget changes.": "청년 주거금융 지원 대책과 예산 변화를 추적하세요.",
+      "Treat as verified product-level support and monitor borrower adoption.": "검증된 금융상품 지원으로 보고 실제 이용 확산을 확인하세요.",
+      "Monitor SME finance support terms and uptake by eligible workers.": "중소기업 금융지원 조건과 대상 근로자의 이용 현황을 확인하세요.",
+      "Monitor product-level rate relief and consumer eligibility conditions.": "상품별 금리 감면 내용과 대상 조건을 확인하세요.",
+      "Keep on watchlist until usable official evidence is available.": "확인 가능한 공식 근거가 나올 때까지 관찰 목록에 유지하세요.",
+      "No immediate action beyond routine monitoring.": "즉각적인 대응보다는 일반 모니터링을 유지하세요.",
+    };
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function alertClass(level) {
+      const normalized = String(level || "WATCH").toUpperCase();
+      if (normalized === "HIGH") return "alert-high";
+      if (normalized === "MEDIUM") return "alert-medium";
+      if (normalized === "LOW") return "alert-low";
+      return "alert-watch";
+    }
+
+    function formatSignal(signal) {
+      if (Array.isArray(signal)) {
+        return signal.map((item) => MARKET_SIGNAL_LABELS[item] || item).join(", ");
+      }
+      return MARKET_SIGNAL_LABELS[signal] || signal || "-";
+    }
+
+    function formatAlert(level) {
+      const normalized = String(level || "WATCH").toUpperCase();
+      const label = ALERT_LABELS[normalized] || normalized;
+      return `${label}(${normalized})`;
+    }
+
+    function formatLevel(value) {
+      const normalized = String(value || "").toLowerCase();
+      return LEVEL_LABELS[normalized] || value || "-";
+    }
+
+    function formatDirection(value) {
+      const normalized = String(value || "").toLowerCase();
+      return DIRECTION_LABELS[normalized] || value || "-";
+    }
+
+    function formatRecommendation(value) {
+      return RECOMMENDATION_LABELS[value] || value || "-";
+    }
+
+    function showStatus(message, success = false) {
+      statusLine.textContent = message;
+      statusLine.className = success ? "status-line success" : "status-line";
+      statusLine.style.display = "block";
+    }
+
+    function hideStatus() {
+      statusLine.style.display = "none";
+      statusLine.textContent = "";
+    }
+
+    function showError(message) {
+      errorBox.textContent = message;
+      errorBox.style.display = "block";
+    }
+
+    function hideError() {
+      errorBox.style.display = "none";
+      errorBox.textContent = "";
+    }
+
+    function setBusy(isBusy) {
+      analyzeBtn.disabled = isBusy;
+      historyBtn.disabled = isBusy;
+      queryInput.disabled = isBusy;
+      maxNewsInput.disabled = isBusy;
+    }
+
+    function computeMetrics(results) {
+      const count = results.length;
+      const highest = results.reduce((current, result) => {
+        const level = String(result.final_decision?.policy_alert_level || "LOW").toUpperCase();
+        return (ALERT_RANK[level] || 0) > (ALERT_RANK[current] || 0) ? level : current;
+      }, "LOW");
+      const totalConfidence = results.reduce((sum, result) => {
+        return sum + Number(result.policy_confidence?.policy_confidence_score || 0);
+      }, 0);
+      const highImpactCount = results.filter((result) => {
+        return String(result.policy_impact?.impact_level || "").toLowerCase() === "high";
+      }).length;
+
+      return {
+        count,
+        highest: count ? highest : "-",
+        averageConfidence: count ? Math.round(totalConfidence / count) : 0,
+        highImpactCount,
+      };
+    }
+
+    function renderMetrics(results) {
+      const metrics = computeMetrics(results);
+      metricResults.textContent = metrics.count;
+      metricAlert.textContent = metrics.highest === "-" ? "-" : formatAlert(metrics.highest);
+      metricConfidence.textContent = metrics.averageConfidence;
+      metricImpact.textContent = metrics.highImpactCount;
+      metricsEl.style.display = "grid";
+    }
+
+    function renderResults(results) {
+      if (!results.length) {
+        metricsEl.style.display = "none";
+        resultsEl.innerHTML = '<div class="empty-state">분석을 실행하면 결과가 여기에 표시됩니다.</div>';
+        return;
+      }
+
+      renderMetrics(results);
+      resultsEl.innerHTML = results.map((result) => {
+        const confidence = result.policy_confidence || {};
+        const impact = result.policy_impact || {};
+        const decision = result.final_decision || {};
+        const level = String(decision.policy_alert_level || "WATCH").toUpperCase();
+        const title = escapeHtml(result.title);
+        const url = escapeHtml(result.original_url);
+
+        return `
+          <article class="result-card">
+            <div class="card-top">
+              <span class="badge ${alertClass(level)}">${escapeHtml(formatAlert(level))}</span>
+              <span class="badge topic-badge">${escapeHtml(result.topic || "미분류")}</span>
+            </div>
+            <h2 class="result-title">
+              <a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a>
+            </h2>
+            <div class="detail-grid">
+              <div class="detail-box">
+                <div class="detail-row">
+                  <span class="label">신뢰도 점수</span>
+                  <span class="value">${escapeHtml(confidence.policy_confidence_score)}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="label">검증 강도</span>
+                  <span class="value">${escapeHtml(formatLevel(confidence.verification_strength))}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="label">위험도</span>
+                  <span class="value">${escapeHtml(formatLevel(confidence.risk_level))}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="label">대응 우선순위</span>
+                  <span class="value">${escapeHtml(formatLevel(confidence.action_priority))}</span>
+                </div>
+              </div>
+              <div class="detail-box">
+                <div class="detail-row">
+                  <span class="label">영향도</span>
+                  <span class="value">${escapeHtml(formatLevel(impact.impact_level))}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="label">영향 방향</span>
+                  <span class="value">${escapeHtml(formatDirection(impact.impact_direction))}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="label">시장 신호</span>
+                  <span class="value">${escapeHtml(formatSignal(decision.market_signal))}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="label">권장 조치</span>
+                  <span class="value">${escapeHtml(formatRecommendation(decision.action_recommendation))}</span>
+                </div>
+              </div>
+            </div>
+            <div class="decision-summary">${escapeHtml(decision.decision_summary)}</div>
+            <div class="source-link">
+              <a class="source-button" href="${url}" target="_blank" rel="noopener noreferrer">원문 보기</a>
+            </div>
+          </article>
+        `;
+      }).join("");
+    }
+
+    function renderHistory(rows) {
+      if (!rows.length) {
+        historyEl.innerHTML = '<div class="empty-state">아직 저장된 분석 기록이 없습니다.</div>';
+        return;
+      }
+
+      historyEl.innerHTML = rows.map((row) => `
+        <div class="history-row">
+          <div class="history-id">#${escapeHtml(row.id)}</div>
+          <div>
+            <strong>${escapeHtml(row.title)}</strong>
+            <div class="history-meta">
+              <span class="label">검색어:</span> ${escapeHtml(row.query)}
+              &nbsp; <span class="label">주제:</span> ${escapeHtml(row.topic)}
+              &nbsp; <span class="label">경고:</span> ${escapeHtml(formatAlert(row.policy_alert_level))}
+              <br>
+              <span class="label">생성 시각:</span> ${escapeHtml(row.created_at)}
+            </div>
+          </div>
+        </div>
+      `).join("");
+    }
+
+    async function analyze() {
+      const query = queryInput.value.trim();
+      const maxNews = Number(maxNewsInput.value || 2);
+
+      if (!query) {
+        alert("검색어를 입력해주세요.");
+        return;
+      }
+
+      hideError();
+      showStatus("정책 신호 분석 중...");
+      setBusy(true);
+
+      try {
+        const response = await fetch(`${API_BASE}/analyze`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query, max_news: maxNews }),
+        });
+
+        if (!response.ok) {
+          const body = await response.text();
+          throw new Error(body || `HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        renderResults(data.results || []);
+        showStatus("분석 완료", true);
+      } catch (error) {
+        showError(`분석 실패: ${error.message}`);
+        hideStatus();
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function loadHistory() {
+      hideError();
+      showStatus("최근 분석 불러오는 중...");
+      setBusy(true);
+
+      try {
+        const response = await fetch(`${API_BASE}/history?limit=10`);
+        if (!response.ok) {
+          const body = await response.text();
+          throw new Error(body || `HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        renderHistory(data.results || []);
+        showStatus("최근 분석 불러오기 완료", true);
+      } catch (error) {
+        showError(`최근 분석 불러오기 실패: ${error.message}`);
+        hideStatus();
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    analyzeBtn.addEventListener("click", analyze);
+    historyBtn.addEventListener("click", loadHistory);
+  </script>
+</body>
+</html>
