@@ -52,6 +52,7 @@ class AnalyzeResult(BaseModel):
 class AnalyzeResponse(BaseModel):
     status: str
     results: List[AnalyzeResult]
+    news_collection_debug: dict = {}
 
 
 class HistoryResponse(BaseModel):
@@ -113,7 +114,11 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
         elapsed,
     )
 
-    return AnalyzeResponse(status="ok", results=results)
+    return AnalyzeResponse(
+        status="ok",
+        results=results,
+        news_collection_debug=report.get("news_collection_debug") or {},
+    )
 
 
 @app.get("/history", response_model=HistoryResponse)

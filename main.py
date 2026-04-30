@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from config import MAX_ARTICLE_CHARS, MAX_NEWS_RESULTS, MAX_POLICY_SENTENCES, QUERY
-from news_collector import search_google_news_rss, resolve_google_news_url
+from news_collector import search_google_news_rss_with_meta, resolve_google_news_url
 from article_extractor import fetch_article_body
 from rule_engine import extract_policy_claim_sentences
 from ai_reasoner import run_ai_reasoning
@@ -163,7 +163,9 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
     move_existing_articles_to_better_topics(memory)
     save_policy_memory(memory)
 
-    news_results = search_google_news_rss(query, max_results=max_news)
+    news_collection = search_google_news_rss_with_meta(query, max_results=max_news)
+    news_results = news_collection.get("results", [])
+    news_collection_debug = news_collection.get("debug", {})
 
     if not news_results:
         print("No news found in the recent window.")
@@ -175,6 +177,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
             "total_news_count": 0,
             "saved_event_count": 0,
             "duplicate_count": 0,
+            "news_collection_debug": news_collection_debug,
             "topics_summary": build_topics_summary(memory),
             "news_results": [],
         }
@@ -370,6 +373,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
         "total_news_count": len(report_items),
         "saved_event_count": saved_event_count,
         "duplicate_count": duplicate_count,
+        "news_collection_debug": news_collection_debug,
         "topics_summary": build_topics_summary(memory),
         "news_results": report_items,
     }
