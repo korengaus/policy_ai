@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from urllib.parse import urlparse
+import re
 
 
 OFFICIAL_GOVERNMENT_TYPES = {
@@ -25,7 +26,82 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _first_policy_claim(policy_claims: list[dict], news_title: str, news_summary: str) -> str:
+POLICY_ACTION_KEYWORDS = [
+    "검토",
+    "추진",
+    "발표",
+    "조사",
+    "착수",
+    "시행",
+    "확대",
+    "축소",
+    "제한",
+    "차단",
+    "금지",
+    "지원",
+    "감면",
+    "인하",
+    "인상",
+    "대출",
+    "금리",
+    "규제",
+    "정책",
+]
+
+
+def _split_sentences(text: str) -> list[str]:
+    normalized = re.sub(r"\s+", " ", text or "").strip()
+    if not normalized:
+        return []
+    parts = re.split(r"(?<=[.!?。])\s+|(?<=[다요죠음임함됨])\.\s*|(?<=다)\s+", normalized)
+    sentences = []
+    for part in parts:
+        sentence = part.strip(" -•·\t\r\n")
+        if len(sentence) >= 25:
+            sentences.append(sentence)
+    return sentences
+
+
+def _sentence_score(sentence: str) -> int:
+    score = min(len(sentence), 160)
+    if any(keyword in sentence for keyword in POLICY_ACTION_KEYWORDS):
+        score += 60
+    if re.search(r"\d", sentence):
+        score += 25
+    if any(actor in sentence for actor in ["정부", "금융당국", "국토부", "금융위", "금감원", "한국은행", "은행", "기업은행"]):
+        score += 30
+    if any(target in sentence for target in ["전세대출", "주택담보대출", "주담대", "금리", "부동산", "청년", "중소기업", "대출"]):
+        score += 30
+    return score
+
+
+def _content_based_claim(article_body: str) -> str:
+    if not article_body or len(article_body) < 300:
+        return ""
+
+    sentences = _split_sentences(article_body)
+    if not sentences:
+        return ""
+
+    ranked = sorted(sentences[:20], key=_sentence_score, reverse=True)
+    chosen = []
+    for sentence in ranked:
+        if sentence not in chosen:
+            chosen.append(sentence)
+        if len(chosen) >= 2:
+            break
+
+    claim = " ".join(chosen).strip()
+    if len(claim) > 450:
+        claim = claim[:447].rstrip() + "..."
+    return claim
+
+
+def _first_policy_claim(policy_claims: list[dict], news_title: str, news_summary: str, article_body: str = "") -> str:
+    content_claim = _content_based_claim(article_body)
+    if content_claim:
+        return content_claim
+
     if policy_claims:
         first = policy_claims[0] or {}
         sentence = first.get("sentence")
@@ -167,6 +243,7 @@ def build_verification_card(
     official_evidence_results: list[dict],
     evidence_comparison: dict,
     policy_confidence: dict,
+    article_body: str = "",
 ) -> dict:
     official_sources = _official_evidence_sources(official_evidence_results)
     evidence_sources = official_sources + [_news_source(news, original_url)]
@@ -178,6 +255,7 @@ def build_verification_card(
             policy_claims,
             news.get("title") or "",
             news.get("summary") or "",
+            article_body,
         ),
         "verdict_label": _verdict_label(policy_confidence, evidence_comparison, official_sources),
         "verdict_confidence": verdict_confidence,

@@ -288,6 +288,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
             official_evidence_results=official_evidence_results,
             evidence_comparison=evidence_comparison,
             policy_confidence=policy_confidence,
+            article_body=article_body,
         )
         print_verification_card(verification_card)
 
