@@ -57,7 +57,7 @@ def _normalize_spaces(text: str) -> str:
 
 def _query_terms(query: str) -> list[str]:
     return [
-        term
+        term.strip()
         for term in re.split(r"[\s,./|·ㆍ]+", query or "")
         if len(term.strip()) >= 2
     ]
@@ -72,24 +72,19 @@ def is_good_news_title(title: str, query: str = "") -> bool:
     normalized = _normalize_spaces(title)
     if not normalized:
         return False
-    if len(normalized) < 8:
-        return False
     if _is_media_only_title(normalized):
+        return False
+    if normalized.isdigit():
         return False
     if not re.search(r"[가-힣A-Za-z0-9]", normalized):
         return False
 
-    terms = _query_terms(query)
-    if terms:
-        matched = [term for term in terms if term in normalized]
-        has_policy_signal = re.search(
-            r"전세|대출|금리|부동산|주택|청년|중소기업|금융|정책|규제|지원|은행|감면",
-            normalized,
-        )
-        if not matched and not has_policy_signal:
-            return False
+    # Keep this deliberately permissive for Render fallback pages: only
+    # single media names and unusable strings should be rejected.
+    if len(normalized) >= 10:
+        return True
 
-    return True
+    return any(term in normalized for term in _query_terms(query))
 
 
 def _candidate_title(link) -> str:
@@ -109,6 +104,7 @@ def _absolute_url(href: str, base_url: str) -> str:
 def _summary_from_container(container) -> str:
     if not container:
         return ""
+
     selectors = [
         ".news_dsc",
         ".dsc_wrap",
@@ -128,8 +124,73 @@ def _summary_from_container(container) -> str:
     return ""
 
 
+def _fallback_item(title: str, link: str, summary: str, source: str) -> dict:
+    return {
+        "title": _normalize_spaces(title),
+        "summary": _normalize_spaces(summary),
+        "google_link": link,
+        "original_url": link,
+        "link": link,
+        "published": _utc_now_rfc2822(),
+        "published_at": datetime.now(timezone.utc).isoformat(),
+        "source": source,
+    }
+
+
+def _dedupe_news_items(items: list[dict]) -> list[dict]:
+    seen = set()
+    unique = []
+
+    for item in items:
+        key = item.get("original_url") or item.get("google_link") or item.get("link") or item.get("title")
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+
+    return unique
+
+
+def _raw_fallback_candidate(title: str, href: str, summary: str, source: str, base_url: str) -> dict | None:
+    original_url = _absolute_url(href, base_url)
+    parsed = urlparse(original_url)
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    title = _normalize_spaces(title)
+    summary = _normalize_spaces(summary)
+    if (_is_media_only_title(title) or len(title) < 10) and len(summary) >= 10:
+        title = summary
+    title = title or summary or original_url
+    if title.isdigit():
+        return None
+    return _fallback_item(title, original_url, summary, source)
+
+
+def _force_select_first(items: list[dict], source: str) -> list[dict]:
+    unique = _dedupe_news_items([item for item in items if item])
+    if not unique:
+        return []
+    print("[NewsCollector] Forcing fallback selection: 1 item")
+    forced = dict(unique[0])
+    forced["source"] = forced.get("source") or source
+    forced["forced_fallback"] = True
+    return [forced]
+
+
+def _emergency_search_item(query: str) -> dict:
+    search_url = f"https://search.naver.com/search.naver?where=news&query={quote(query)}"
+    print("[NewsCollector] Forcing fallback selection: 1 item")
+    return _fallback_item(
+        title=f"{query} 뉴스 검색 결과",
+        link=search_url,
+        summary="Google/Naver/Daum에서 기사 링크를 확정하지 못해 검색 결과 페이지를 임시 분석 대상으로 사용합니다.",
+        source="forced_search_fallback",
+    )
+
+
 def _accept_fallback_candidate(
     items: list[dict],
+    raw_candidates: list[dict],
     *,
     title: str,
     href: str,
@@ -142,19 +203,20 @@ def _accept_fallback_candidate(
     title = _normalize_spaces(title)
     print(f"[NewsCollector] {source.split('_')[0].capitalize()} candidate title: {title}")
 
+    raw_item = _raw_fallback_candidate(title, href, summary, source, base_url)
+    if raw_item:
+        raw_candidates.append(raw_item)
+
     if not is_good_news_title(title, query):
         print(f"[NewsCollector] Skipped low quality title: {title}")
         return False
 
-    original_url = _absolute_url(href, base_url)
-    parsed = urlparse(original_url)
-    if not parsed.scheme or not parsed.netloc:
+    if not raw_item:
         print(f"[NewsCollector] Skipped low quality title: {title}")
         return False
 
-    items.append(_fallback_item(title, original_url, summary, source))
-    unique = _dedupe_news_items(items)
-    items[:] = unique
+    items.append(raw_item)
+    items[:] = _dedupe_news_items(items)
     print(f"[NewsCollector] Accepted fallback title: {title}")
     return len(items) >= max_results
 
@@ -187,33 +249,6 @@ def _entry_to_news(entry) -> dict:
     }
 
 
-def _fallback_item(title: str, link: str, summary: str, source: str) -> dict:
-    return {
-        "title": clean_html(title),
-        "summary": clean_html(summary),
-        "google_link": link,
-        "original_url": link,
-        "link": link,
-        "published": _utc_now_rfc2822(),
-        "published_at": datetime.now(timezone.utc).isoformat(),
-        "source": source,
-    }
-
-
-def _dedupe_news_items(items: list[dict]) -> list[dict]:
-    seen = set()
-    unique = []
-
-    for item in items:
-        key = item.get("original_url") or item.get("google_link") or item.get("link") or item.get("title")
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        unique.append(item)
-
-    return unique
-
-
 def search_naver_news_fallback(query: str, max_results: int = 3) -> tuple[list[dict], str | None]:
     try:
         url = f"https://search.naver.com/search.naver?where=news&query={quote(query)}"
@@ -221,6 +256,7 @@ def search_naver_news_fallback(query: str, max_results: int = 3) -> tuple[list[d
         response.raise_for_status()
         soup = BeautifulSoup(response.text, "html.parser")
         items = []
+        raw_candidates = []
 
         selectors = [
             "a.news_tit",
@@ -229,6 +265,7 @@ def search_naver_news_fallback(query: str, max_results: int = 3) -> tuple[list[d
             "a[href*='media.naver.com']",
             "a[class*='title']",
             "a[class*='news']",
+            "a[href]",
         ]
         seen_links = set()
 
@@ -245,6 +282,7 @@ def search_naver_news_fallback(query: str, max_results: int = 3) -> tuple[list[d
 
                 if _accept_fallback_candidate(
                     items,
+                    raw_candidates,
                     title=title,
                     href=href,
                     summary=summary,
@@ -255,6 +293,9 @@ def search_naver_news_fallback(query: str, max_results: int = 3) -> tuple[list[d
                 ):
                     print(f"[NewsCollector] Fallback selected: {len(items)}")
                     return items[:max_results], None
+
+        if not items:
+            items = _force_select_first(raw_candidates, "naver_fallback")
 
         print(f"[NewsCollector] Fallback selected: {len(items)}")
         return items[:max_results], None
@@ -276,8 +317,10 @@ def search_daum_news_fallback(query: str, max_results: int = 3) -> tuple[list[di
             "a[class*='news']",
             "a[href*='news.v.daum.net']",
             "a[href*='v.daum.net']",
+            "a[href]",
         ]
         items = []
+        raw_candidates = []
         seen_links = set()
 
         for selector in selectors:
@@ -293,6 +336,7 @@ def search_daum_news_fallback(query: str, max_results: int = 3) -> tuple[list[di
 
                 if _accept_fallback_candidate(
                     items,
+                    raw_candidates,
                     title=title,
                     href=href,
                     summary=summary,
@@ -303,6 +347,9 @@ def search_daum_news_fallback(query: str, max_results: int = 3) -> tuple[list[di
                 ):
                     print(f"[NewsCollector] Fallback selected: {len(items)}")
                     return items[:max_results], None
+
+        if not items:
+            items = _force_select_first(raw_candidates, "daum_fallback")
 
         print(f"[NewsCollector] Fallback selected: {len(items)}")
         return items[:max_results], None
@@ -370,10 +417,16 @@ def search_google_news_rss_with_meta(query: str, max_results: int = 3):
             mode = "daum_fallback"
             collection_source = "daum_fallback"
 
+    if not selected and raw_results:
+        selected = _force_select_first(raw_results, "google_rss")
+        mode = "forced_google_rss"
+        collection_source = "google_rss"
+
     if not selected:
-        mode = "none"
-        collection_source = "none"
-        no_results_reason = "Google RSS and fallback news sources returned no usable items."
+        selected = [_emergency_search_item(query)]
+        mode = "forced_search_fallback"
+        collection_source = "forced_search_fallback"
+        no_results_reason = "News source parsing failed; using search result page as emergency fallback."
 
     print(f"[NewsCollector] Selected news count: {len(selected)}")
     print(f"[NewsCollector] Collection source: {collection_source}")
