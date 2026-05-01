@@ -65,6 +65,30 @@ def _mojibake_score(text: str) -> int:
     return marker_score + replacement_score
 
 
+def _text_quality_score(text: str) -> int:
+    if not text:
+        return -10000
+    normalized = _normalize_text(text)
+    hangul = _hangul_count(normalized)
+    mojibake = _mojibake_score(normalized)
+    replacement = normalized.count("�")
+    readable = len(re.findall(r"[가-힣A-Za-z0-9]", normalized))
+    return hangul * 5 + readable - mojibake * 30 - replacement * 80
+
+
+def _repair_utf8_mojibake(text: str) -> str:
+    if not text or not any(marker in text for marker in ["ì", "í", "ë", "ê", "Â", "Ã"]):
+        return text
+    for source_encoding in ("latin1", "cp1252"):
+        try:
+            repaired = text.encode(source_encoding, errors="strict").decode("utf-8", errors="strict")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            continue
+        if _text_quality_score(repaired) > _text_quality_score(text):
+            return repaired
+    return text
+
+
 def _is_probably_broken(text: str) -> bool:
     if not text:
         return True
@@ -79,30 +103,42 @@ def _is_probably_broken(text: str) -> bool:
 
 
 def _decode_response_content(response: requests.Response) -> tuple[str, str, bool]:
-    candidates = []
-
-    apparent = response.apparent_encoding
     declared = response.encoding
-    for encoding in [apparent, declared, *ENCODING_CANDIDATES]:
-        if encoding and encoding not in candidates:
-            candidates.append(encoding)
+    apparent = response.apparent_encoding
 
     decoded_candidates = []
-    for encoding in candidates:
-        try:
-            decoded = response.content.decode(encoding, errors="replace")
-        except LookupError:
+
+    if apparent:
+        response.encoding = apparent
+        decoded_candidates.append((response.text, apparent, "apparent"))
+
+    for encoding in [*ENCODING_CANDIDATES, declared, apparent]:
+        if not encoding:
             continue
-        decoded_candidates.append((decoded, encoding))
+        try:
+            decoded = response.content.decode(encoding, errors="strict")
+        except (LookupError, UnicodeDecodeError):
+            try:
+                decoded = response.content.decode(encoding, errors="replace")
+            except LookupError:
+                continue
+        decoded_candidates.append((decoded, encoding, "candidate"))
 
     if not decoded_candidates:
         return response.text, response.encoding or "unknown", False
 
-    best_text, best_encoding = min(
-        decoded_candidates,
-        key=lambda item: (_mojibake_score(item[0]), -_hangul_count(item[0]), -len(item[0])),
+    expanded_candidates = []
+    for decoded, encoding, source in decoded_candidates:
+        expanded_candidates.append((decoded, encoding, source))
+        repaired = _repair_utf8_mojibake(decoded)
+        if repaired != decoded:
+            expanded_candidates.append((repaired, f"{encoding}+utf8-repair", "repair"))
+
+    best_text, best_encoding, source = max(
+        expanded_candidates,
+        key=lambda item: (_text_quality_score(item[0]), len(item[0])),
     )
-    fallback_used = best_encoding != (declared or "")
+    fallback_used = source != "apparent" or best_encoding != (apparent or "")
     return best_text, best_encoding, fallback_used
 
 
@@ -110,7 +146,7 @@ def clean_extracted_text(text: str) -> str:
     if not text:
         return ""
 
-    text = _normalize_text(text)
+    text = _repair_utf8_mojibake(_normalize_text(text))
     cleaned_lines = []
     seen = set()
 
@@ -122,6 +158,8 @@ def clean_extracted_text(text: str) -> str:
 
         if any(keyword in line for keyword in BAD_KEYWORDS):
             continue
+
+        line = _repair_utf8_mojibake(line)
 
         if _mojibake_score(line) >= 8 and _hangul_count(line) < 5:
             continue
@@ -142,7 +180,7 @@ def _fetch_html(url: str) -> tuple[str, str, bool]:
     response.encoding = encoding
     print(f"[ArticleExtractor] encoding used: {encoding}")
     if fallback_used:
-        print("[ArticleExtractor] encoding fallback used")
+        print("[ArticleExtractor] fallback encoding triggered")
     return html, encoding, fallback_used
 
 
@@ -208,10 +246,12 @@ def fetch_article_body(url: str, max_chars: int = 5000) -> str:
                 extracted = fallback
 
         extracted = clean_extracted_text(extracted)
+        quality_score = _text_quality_score(extracted)
+        print(f"[ArticleExtractor] text quality score: {quality_score}")
         print(f"[ArticleExtractor] text length: {len(extracted)}")
         print(f"[ArticleExtractor] Extracted length: {len(extracted)}")
 
-        if extracted and not _is_probably_broken(extracted) and len(extracted) >= 50:
+        if extracted and not _is_probably_broken(extracted) and len(extracted) >= 100:
             if len(extracted) >= 300:
                 print("[ArticleExtractor] Using content for claim")
             else:
@@ -223,6 +263,7 @@ def fetch_article_body(url: str, max_chars: int = 5000) -> str:
 
     except Exception as error:
         print("[ArticleExtractor] encoding used: unknown")
+        print("[ArticleExtractor] text quality score: -10000")
         print("[ArticleExtractor] text length: 0")
         print("[ArticleExtractor] Extracted length: 0")
         print("[ArticleExtractor] Fallback to title")
