@@ -55,7 +55,63 @@ LOW_QUALITY_TITLE_PHRASES = {
     "\ub274\uc2a4 \ubaa9\ub85d",
     "\ucd94\ucc9c \uae30\uc0ac",
     "\uc5b8\ub860\uc0ac\uac00 \uc120\uc815\ud55c \uc8fc\uc694\uae30\uc0ac",
+    "메뉴",
+    "바로가기",
+    "로그인",
+    "뉴스홈",
+    "전체보기",
+    "구독",
+    "설정",
 }
+
+UI_ONLY_TITLES = {
+    "홈",
+    "메뉴",
+    "더보기",
+    "로그인",
+    "뉴스홈",
+    "전체보기",
+    "구독",
+    "설정",
+    "메뉴 영역으로 바로가기",
+    "본문 영역으로 바로가기",
+}
+
+NAVER_NEWS_ZONE_SELECTORS = [
+    "div.group_news",
+    "ul.list_news",
+    "div.news_wrap",
+    "div.news_area",
+    "div.api_subject_bx",
+    "section.sc_new.sp_nnews",
+    "div#main_pack div.api_subject_bx",
+]
+
+DAUM_NEWS_ZONE_SELECTORS = [
+    "div#newsColl",
+    "div.coll_cont",
+    "ul.c-list-basic",
+    "ul.list_news",
+    "div.wrap_cont",
+    "div.cont_inner",
+    "div.item-title",
+]
+
+NEWS_LINK_SELECTORS = [
+    "a.news_tit",
+    "a.f_link_b",
+    "a.tit_main",
+    "a.link_tit",
+    "a[class*='tit']",
+    "a[class*='news']",
+    "a[href*='news']",
+    "a[href*='article']",
+    "a[href*='v.daum.net']",
+    "a[href*='n.news.naver.com']",
+    "a[href*='media.naver.com']",
+    "a[href*='oid=']",
+    "a[href*='aid=']",
+]
 
 
 def clean_html(raw_html: str) -> str:
@@ -82,10 +138,20 @@ def _is_media_only_title(title: str) -> bool:
 
 def _low_quality_phrase(title: str) -> str | None:
     normalized = _normalize_spaces(title)
+    if normalized in UI_ONLY_TITLES:
+        return "UI element"
     for phrase in LOW_QUALITY_TITLE_PHRASES:
         if phrase in normalized:
             return phrase
     return None
+
+
+def _looks_sentence_like(title: str) -> bool:
+    normalized = _normalize_spaces(title)
+    has_space_or_punctuation = bool(re.search(r"\s|[.?!…\"'“”‘’·ㆍ,-]", normalized))
+    has_josa = bool(re.search(r"[은는이가을를에의로과와]\b", normalized))
+    has_mixed_words = len(re.findall(r"[가-힣A-Za-z0-9]{2,}", normalized)) >= 2
+    return has_space_or_punctuation and (has_josa or has_mixed_words)
 
 
 def _reject_title_reason(title: str, query: str = "") -> str | None:
@@ -100,8 +166,10 @@ def _reject_title_reason(title: str, query: str = "") -> str | None:
         return "numeric only"
     if not re.search(r"[가-힣A-Za-z0-9]", normalized):
         return "no readable characters"
-    if len(normalized) < 10 and not any(term in normalized for term in _query_terms(query)):
+    if len(normalized) < 15:
         return "too short"
+    if not _looks_sentence_like(normalized):
+        return "not sentence-like"
     return None
 
 
@@ -127,6 +195,61 @@ def _absolute_url(href: str, base_url: str) -> str:
     if not href:
         return ""
     return urljoin(base_url, href)
+
+
+def _is_valid_news_href(href: str, base_url: str) -> tuple[bool, str]:
+    if not href:
+        return False, "invalid link"
+    lowered = href.strip().lower()
+    if lowered.startswith(("javascript:", "#", "mailto:")):
+        return False, "invalid link"
+
+    absolute = _absolute_url(href, base_url)
+    parsed = urlparse(absolute)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return False, "invalid link"
+
+    link_text = absolute.lower()
+    news_patterns = [
+        "news",
+        "article",
+        "view",
+        "v.daum.net",
+        "n.news.naver.com",
+        "media.naver.com",
+        "oid=",
+        "aid=",
+    ]
+    if not any(pattern in link_text for pattern in news_patterns):
+        return False, "invalid link"
+    return True, ""
+
+
+def _news_zones(soup: BeautifulSoup, selectors: list[str]):
+    zones = []
+    seen = set()
+    for selector in selectors:
+        for zone in soup.select(selector):
+            marker = id(zone)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            zones.append(zone)
+    return zones
+
+
+def _iter_news_links(soup: BeautifulSoup, zone_selectors: list[str]):
+    zones = _news_zones(soup, zone_selectors)
+    seen_links = set()
+
+    for zone in zones:
+        for selector in NEWS_LINK_SELECTORS:
+            for link in zone.select(selector):
+                href = link.get("href", "")
+                if not href or href in seen_links:
+                    continue
+                seen_links.add(href)
+                yield link
 
 
 def _summary_from_container(container) -> str:
@@ -180,6 +303,10 @@ def _dedupe_news_items(items: list[dict]) -> list[dict]:
 
 
 def _raw_fallback_candidate(title: str, href: str, summary: str, source: str, base_url: str) -> dict | None:
+    valid, _ = _is_valid_news_href(href, base_url)
+    if not valid:
+        return None
+
     original_url = _absolute_url(href, base_url)
     parsed = urlparse(original_url)
     if not parsed.scheme or not parsed.netloc:
@@ -253,6 +380,11 @@ def _accept_fallback_candidate(
     title = _normalize_spaces(title)
     print(f"[NewsCollector] Raw candidate: {title}")
 
+    valid_link, link_reason = _is_valid_news_href(href, base_url)
+    if not valid_link:
+        print(f"[NewsCollector] Rejected reason: {link_reason}")
+        return False
+
     raw_item = _raw_fallback_candidate(title, href, summary, source, base_url)
     if raw_item:
         raw_candidates.append(raw_item)
@@ -309,41 +441,25 @@ def search_naver_news_fallback(query: str, max_results: int = 3) -> tuple[list[d
         items = []
         raw_candidates = []
 
-        selectors = [
-            "a.news_tit",
-            "a[href*='news.naver.com']",
-            "a[href*='n.news.naver.com']",
-            "a[href*='media.naver.com']",
-            "a[class*='title']",
-            "a[class*='news']",
-            "a[href]",
-        ]
-        seen_links = set()
+        for link in _iter_news_links(soup, NAVER_NEWS_ZONE_SELECTORS):
+            href = link.get("href", "")
+            title = _candidate_title(link)
+            container = link.find_parent(["li", "div"])
+            summary = _summary_from_container(container)
 
-        for selector in selectors:
-            for link in soup.select(selector):
-                href = link.get("href", "")
-                if not href or href in seen_links:
-                    continue
-                seen_links.add(href)
-
-                title = _candidate_title(link)
-                container = link.find_parent(["li", "div"])
-                summary = _summary_from_container(container)
-
-                if _accept_fallback_candidate(
-                    items,
-                    raw_candidates,
-                    title=title,
-                    href=href,
-                    summary=summary,
-                    source="naver_fallback",
-                    query=query,
-                    base_url=url,
-                    max_results=max_results,
-                ):
-                    print(f"[NewsCollector] Fallback selected: {len(items)}")
-                    return items[:max_results], None
+            if _accept_fallback_candidate(
+                items,
+                raw_candidates,
+                title=title,
+                href=href,
+                summary=summary,
+                source="naver_fallback",
+                query=query,
+                base_url=url,
+                max_results=max_results,
+            ):
+                print(f"[NewsCollector] Fallback selected: {len(items)}")
+                return items[:max_results], None
 
         if not items:
             items = _force_select_best(raw_candidates, "naver_fallback")
@@ -360,44 +476,28 @@ def search_daum_news_fallback(query: str, max_results: int = 3) -> tuple[list[di
         response = requests.get(url, headers=REQUEST_HEADERS, timeout=10)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, "html.parser")
-        selectors = [
-            "a.f_link_b",
-            "a.tit_main",
-            "a.link_tit",
-            "a[class*='tit']",
-            "a[class*='news']",
-            "a[href*='news.v.daum.net']",
-            "a[href*='v.daum.net']",
-            "a[href]",
-        ]
         items = []
         raw_candidates = []
-        seen_links = set()
 
-        for selector in selectors:
-            for link in soup.select(selector):
-                href = link.get("href", "")
-                if not href or href in seen_links:
-                    continue
-                seen_links.add(href)
+        for link in _iter_news_links(soup, DAUM_NEWS_ZONE_SELECTORS):
+            href = link.get("href", "")
+            title = _candidate_title(link)
+            container = link.find_parent(["li", "div"])
+            summary = _summary_from_container(container)
 
-                title = _candidate_title(link)
-                container = link.find_parent(["li", "div"])
-                summary = _summary_from_container(container)
-
-                if _accept_fallback_candidate(
-                    items,
-                    raw_candidates,
-                    title=title,
-                    href=href,
-                    summary=summary,
-                    source="daum_fallback",
-                    query=query,
-                    base_url=url,
-                    max_results=max_results,
-                ):
-                    print(f"[NewsCollector] Fallback selected: {len(items)}")
-                    return items[:max_results], None
+            if _accept_fallback_candidate(
+                items,
+                raw_candidates,
+                title=title,
+                href=href,
+                summary=summary,
+                source="daum_fallback",
+                query=query,
+                base_url=url,
+                max_results=max_results,
+            ):
+                print(f"[NewsCollector] Fallback selected: {len(items)}")
+                return items[:max_results], None
 
         if not items:
             items = _force_select_best(raw_candidates, "daum_fallback")
