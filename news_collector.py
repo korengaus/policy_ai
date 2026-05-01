@@ -22,27 +22,39 @@ REQUEST_HEADERS = {
 MEDIA_ONLY_TITLES = {
     "SBS Biz",
     "SBSBiz",
-    "연합뉴스",
-    "뉴스1",
-    "이데일리",
-    "한국경제",
-    "매일경제",
-    "조선일보",
-    "중앙일보",
-    "한겨레",
-    "경향신문",
-    "머니투데이",
-    "파이낸셜뉴스",
-    "서울경제",
-    "아시아경제",
-    "헤럴드경제",
-    "디지털타임스",
-    "전자신문",
-    "뉴시스",
-    "KBS 뉴스",
-    "MBC 뉴스",
-    "SBS 뉴스",
+    "\uc5f0\ud569\ub274\uc2a4",
+    "\ub274\uc2a41",
+    "\uc774\ub370\uc77c\ub9ac",
+    "\ud55c\uad6d\uacbd\uc81c",
+    "\ub9e4\uc77c\uacbd\uc81c",
+    "\uc870\uc120\uc77c\ubcf4",
+    "\uc911\uc559\uc77c\ubcf4",
+    "\ud55c\uaca8\ub808",
+    "\uacbd\ud5a5\uc2e0\ubb38",
+    "\uba38\ub2c8\ud22c\ub370\uc774",
+    "\ud30c\uc774\ub0b8\uc15c\ub274\uc2a4",
+    "\uc11c\uc6b8\uacbd\uc81c",
+    "\uc544\uc2dc\uc544\uacbd\uc81c",
+    "\ud5e4\ub7f4\ub4dc\uacbd\uc81c",
+    "\ub514\uc9c0\ud138\ud0c0\uc784\uc2a4",
+    "\uc804\uc790\uc2e0\ubb38",
+    "\ub274\uc2dc\uc2a4",
+    "KBS \ub274\uc2a4",
+    "MBC \ub274\uc2a4",
+    "SBS \ub274\uc2a4",
     "YTN",
+}
+
+LOW_QUALITY_TITLE_PHRASES = {
+    "\uc120\uc815\ub41c \uc8fc\uc694\uae30\uc0ac",
+    "\uc2ec\uce35\uae30\ud68d \uae30\uc0ac\uc785\ub2c8\ub2e4",
+    "\uc5b8\ub860\uc0ac \uad6c\ub3c5\ud558\uc138\uc694",
+    "\ub124\uc774\ubc84 \uba54\uc778",
+    "\uce74\ud14c\uace0\ub9ac \uc548\ub0b4",
+    "\ub354\ubcf4\uae30",
+    "\ub274\uc2a4 \ubaa9\ub85d",
+    "\ucd94\ucc9c \uae30\uc0ac",
+    "\uc5b8\ub860\uc0ac\uac00 \uc120\uc815\ud55c \uc8fc\uc694\uae30\uc0ac",
 }
 
 
@@ -68,31 +80,47 @@ def _is_media_only_title(title: str) -> bool:
     return normalized in MEDIA_ONLY_TITLES
 
 
-def is_good_news_title(title: str, query: str = "") -> bool:
+def _low_quality_phrase(title: str) -> str | None:
+    normalized = _normalize_spaces(title)
+    for phrase in LOW_QUALITY_TITLE_PHRASES:
+        if phrase in normalized:
+            return phrase
+    return None
+
+
+def _reject_title_reason(title: str, query: str = "") -> str | None:
     normalized = _normalize_spaces(title)
     if not normalized:
-        return False
+        return "empty title"
+    if _low_quality_phrase(normalized):
+        return f"low quality phrase: {_low_quality_phrase(normalized)}"
     if _is_media_only_title(normalized):
-        return False
+        return "media name only"
     if normalized.isdigit():
-        return False
+        return "numeric only"
     if not re.search(r"[가-힣A-Za-z0-9]", normalized):
-        return False
+        return "no readable characters"
+    if len(normalized) < 10 and not any(term in normalized for term in _query_terms(query)):
+        return "too short"
+    return None
 
-    # Keep this deliberately permissive for Render fallback pages: only
-    # single media names and unusable strings should be rejected.
-    if len(normalized) >= 10:
-        return True
 
-    return any(term in normalized for term in _query_terms(query))
+def is_good_news_title(title: str, query: str = "") -> bool:
+    return _reject_title_reason(title, query=query) is None
 
 
 def _candidate_title(link) -> str:
-    for attr in ("title", "aria-label"):
+    # Prefer the visible anchor text because title/aria-label often contain
+    # service descriptions on portal search pages.
+    visible_text = _normalize_spaces(link.get_text(" ", strip=True))
+    if visible_text:
+        return visible_text
+
+    for attr in ("aria-label", "title"):
         value = _normalize_spaces(link.get(attr, ""))
         if value:
             return value
-    return _normalize_spaces(link.get_text(" ", strip=True))
+    return ""
 
 
 def _absolute_url(href: str, base_url: str) -> str:
@@ -156,22 +184,44 @@ def _raw_fallback_candidate(title: str, href: str, summary: str, source: str, ba
     parsed = urlparse(original_url)
     if not parsed.scheme or not parsed.netloc:
         return None
+
     title = _normalize_spaces(title)
     summary = _normalize_spaces(summary)
-    if (_is_media_only_title(title) or len(title) < 10) and len(summary) >= 10:
+    if not title and summary:
         title = summary
-    title = title or summary or original_url
-    if title.isdigit():
+    if not title or title.isdigit():
         return None
     return _fallback_item(title, original_url, summary, source)
 
 
-def _force_select_first(items: list[dict], source: str) -> list[dict]:
+def _candidate_score(item: dict) -> int:
+    title = _normalize_spaces(item.get("title", ""))
+    url = item.get("original_url") or item.get("link") or ""
+    score = min(len(title), 120)
+
+    if _is_media_only_title(title):
+        score -= 100
+    if _low_quality_phrase(title):
+        score -= 80
+    if re.search(r"[가-힣]", title):
+        score += 20
+    if re.search(r"[.?!…\"'“”‘’]|[가-힣]{2,}\s+[가-힣]{2,}", title):
+        score += 15
+    if any(keyword in title for keyword in ["대출", "금리", "부동산", "정책", "규제", "지원", "전세", "주택"]):
+        score += 25
+    if any(pattern in url for pattern in ["news", "article", "v.daum.net", "naver.com"]):
+        score += 10
+    return score
+
+
+def _force_select_best(items: list[dict], source: str) -> list[dict]:
     unique = _dedupe_news_items([item for item in items if item])
     if not unique:
         return []
+
+    best = max(unique, key=_candidate_score)
     print("[NewsCollector] Forcing fallback selection: 1 item")
-    forced = dict(unique[0])
+    forced = dict(best)
     forced["source"] = forced.get("source") or source
     forced["forced_fallback"] = True
     return [forced]
@@ -201,23 +251,24 @@ def _accept_fallback_candidate(
     max_results: int,
 ) -> bool:
     title = _normalize_spaces(title)
-    print(f"[NewsCollector] {source.split('_')[0].capitalize()} candidate title: {title}")
+    print(f"[NewsCollector] Raw candidate: {title}")
 
     raw_item = _raw_fallback_candidate(title, href, summary, source, base_url)
     if raw_item:
         raw_candidates.append(raw_item)
 
-    if not is_good_news_title(title, query):
-        print(f"[NewsCollector] Skipped low quality title: {title}")
+    reject_reason = _reject_title_reason(title, query=query)
+    if reject_reason:
+        print(f"[NewsCollector] Rejected reason: {reject_reason}")
         return False
 
     if not raw_item:
-        print(f"[NewsCollector] Skipped low quality title: {title}")
+        print("[NewsCollector] Rejected reason: invalid URL")
         return False
 
     items.append(raw_item)
     items[:] = _dedupe_news_items(items)
-    print(f"[NewsCollector] Accepted fallback title: {title}")
+    print(f"[NewsCollector] Accepted title: {title}")
     return len(items) >= max_results
 
 
@@ -295,7 +346,7 @@ def search_naver_news_fallback(query: str, max_results: int = 3) -> tuple[list[d
                     return items[:max_results], None
 
         if not items:
-            items = _force_select_first(raw_candidates, "naver_fallback")
+            items = _force_select_best(raw_candidates, "naver_fallback")
 
         print(f"[NewsCollector] Fallback selected: {len(items)}")
         return items[:max_results], None
@@ -349,7 +400,7 @@ def search_daum_news_fallback(query: str, max_results: int = 3) -> tuple[list[di
                     return items[:max_results], None
 
         if not items:
-            items = _force_select_first(raw_candidates, "daum_fallback")
+            items = _force_select_best(raw_candidates, "daum_fallback")
 
         print(f"[NewsCollector] Fallback selected: {len(items)}")
         return items[:max_results], None
@@ -418,7 +469,7 @@ def search_google_news_rss_with_meta(query: str, max_results: int = 3):
             collection_source = "daum_fallback"
 
     if not selected and raw_results:
-        selected = _force_select_first(raw_results, "google_rss")
+        selected = _force_select_best(raw_results, "google_rss")
         mode = "forced_google_rss"
         collection_source = "google_rss"
 
