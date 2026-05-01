@@ -38,7 +38,33 @@ def init_db():
             )
             """
         )
+        _ensure_columns(connection)
         connection.commit()
+
+
+def _ensure_columns(connection):
+    existing_columns = {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(analysis_results)").fetchall()
+    }
+    desired_columns = {
+        "claim_text": "TEXT",
+        "verdict_label": "TEXT",
+        "verdict_confidence": "INTEGER",
+        "evidence_sources": "TEXT",
+        "source_reliability_score": "INTEGER",
+        "source_reliability_reason": "TEXT",
+        "evidence_summary": "TEXT",
+        "missing_context": "TEXT",
+        "last_checked_at": "TEXT",
+        "review_status": "TEXT",
+    }
+
+    for column, column_type in desired_columns.items():
+        if column not in existing_columns:
+            connection.execute(
+                f"ALTER TABLE analysis_results ADD COLUMN {column} {column_type}"
+            )
 
 
 def _serialize_market_signal(value) -> str:
@@ -47,6 +73,14 @@ def _serialize_market_signal(value) -> str:
     if value is None:
         return ""
     return str(value)
+
+
+def _serialize_json_value(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False)
 
 
 def result_exists_by_url(original_url: str) -> bool:
@@ -75,6 +109,7 @@ def save_analysis_result(result: dict, query: str):
     final_decision = result.get("final_decision") or {}
     policy_confidence = result.get("policy_confidence") or {}
     policy_impact = result.get("policy_impact") or {}
+    verification_card = result.get("verification_card") or {}
     created_at = datetime.now(timezone.utc).isoformat()
 
     with get_connection() as connection:
@@ -96,8 +131,18 @@ def save_analysis_result(result: dict, query: str):
                 market_sensitivity,
                 consumer_sensitivity,
                 business_sensitivity,
+                claim_text,
+                verdict_label,
+                verdict_confidence,
+                evidence_sources,
+                source_reliability_score,
+                source_reliability_reason,
+                evidence_summary,
+                missing_context,
+                last_checked_at,
+                review_status,
                 created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 query,
@@ -115,6 +160,24 @@ def save_analysis_result(result: dict, query: str):
                 policy_impact.get("market_sensitivity"),
                 policy_impact.get("consumer_sensitivity"),
                 policy_impact.get("business_sensitivity"),
+                verification_card.get("claim_text") or result.get("claim_text"),
+                verification_card.get("verdict_label") or result.get("verdict_label"),
+                verification_card.get("verdict_confidence") or result.get("verdict_confidence"),
+                _serialize_json_value(
+                    verification_card.get("evidence_sources")
+                    or result.get("evidence_sources")
+                ),
+                verification_card.get("source_reliability_score")
+                or result.get("source_reliability_score"),
+                verification_card.get("source_reliability_reason")
+                or result.get("source_reliability_reason"),
+                verification_card.get("evidence_summary") or result.get("evidence_summary"),
+                _serialize_json_value(
+                    verification_card.get("missing_context")
+                    or result.get("missing_context")
+                ),
+                verification_card.get("last_checked_at") or result.get("last_checked_at"),
+                verification_card.get("review_status") or result.get("review_status"),
                 created_at,
             ),
         )

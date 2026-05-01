@@ -47,6 +47,17 @@ class AnalyzeResult(BaseModel):
     policy_confidence: dict
     policy_impact: dict
     final_decision: dict
+    verification_card: dict = {}
+    claim_text: str = ""
+    verdict_label: str = ""
+    verdict_confidence: int = 0
+    evidence_sources: list = []
+    source_reliability_score: int = 0
+    source_reliability_reason: str = ""
+    evidence_summary: str = ""
+    missing_context: list = []
+    last_checked_at: str = ""
+    review_status: str = ""
 
 
 class AnalyzeResponse(BaseModel):
@@ -97,6 +108,17 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
                 policy_confidence=api_result.get("policy_confidence") or {},
                 policy_impact=api_result.get("policy_impact") or {},
                 final_decision=api_result.get("final_decision") or {},
+                verification_card=api_result.get("verification_card") or {},
+                claim_text=api_result.get("claim_text") or "",
+                verdict_label=api_result.get("verdict_label") or "",
+                verdict_confidence=api_result.get("verdict_confidence") or 0,
+                evidence_sources=api_result.get("evidence_sources") or [],
+                source_reliability_score=api_result.get("source_reliability_score") or 0,
+                source_reliability_reason=api_result.get("source_reliability_reason") or "",
+                evidence_summary=api_result.get("evidence_summary") or "",
+                missing_context=api_result.get("missing_context") or [],
+                last_checked_at=api_result.get("last_checked_at") or "",
+                review_status=api_result.get("review_status") or "",
             )
         )
         try:

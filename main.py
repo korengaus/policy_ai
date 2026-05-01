@@ -30,6 +30,7 @@ from policy_impact import analyze_policy_impact, print_policy_impact
 from policy_decision import make_final_decision, print_final_decision
 from topic_classifier import classify_policy_topic
 from timeline import print_timeline_summary
+from verification_card import build_verification_card, print_verification_card
 
 
 REPORTS_DIR = Path("reports")
@@ -280,6 +281,16 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
         )
         print_final_decision(final_decision)
 
+        verification_card = build_verification_card(
+            news=news,
+            original_url=original_url,
+            policy_claims=policy_claims,
+            official_evidence_results=official_evidence_results,
+            evidence_comparison=evidence_comparison,
+            policy_confidence=policy_confidence,
+        )
+        print_verification_card(verification_card)
+
         ai_result = run_ai_reasoning(
             news_title=news["title"],
             news_summary=news["summary"],
@@ -340,6 +351,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
                 "policy_confidence": policy_confidence,
                 "policy_impact": policy_impact,
                 "final_decision": final_decision,
+                "verification_card": verification_card,
                 "ai_result": ai_result,
                 "saved_to_memory": saved_to_memory,
                 "duplicate": duplicate,
@@ -353,6 +365,17 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
                     "policy_confidence": policy_confidence,
                     "policy_impact": policy_impact,
                     "final_decision": final_decision,
+                    "verification_card": verification_card,
+                    "claim_text": verification_card.get("claim_text"),
+                    "verdict_label": verification_card.get("verdict_label"),
+                    "verdict_confidence": verification_card.get("verdict_confidence"),
+                    "evidence_sources": verification_card.get("evidence_sources"),
+                    "source_reliability_score": verification_card.get("source_reliability_score"),
+                    "source_reliability_reason": verification_card.get("source_reliability_reason"),
+                    "evidence_summary": verification_card.get("evidence_summary"),
+                    "missing_context": verification_card.get("missing_context"),
+                    "last_checked_at": verification_card.get("last_checked_at"),
+                    "review_status": verification_card.get("review_status"),
                 },
             }
         )
