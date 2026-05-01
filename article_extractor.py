@@ -40,6 +40,8 @@ BAD_KEYWORDS = [
 ]
 
 MOJIBAKE_MARKERS = ["ì", "í", "ë", "ê", "Â", "Ã", "�", "媛", "쒓", "뺤", "댁", "齊"]
+COMMON_TEXT_PATTERN = re.compile(r"[가-힣A-Za-z0-9\s.,!?%·…~()\[\]{}<>:;\"'“”‘’/\-+_=|]")
+SPECIAL_SEQUENCE_PATTERN = re.compile(r"[^가-힣A-Za-z0-9\s.,!?%·…~()\[\]{}<>:;\"'“”‘’/\-+_=|]{2,}")
 
 
 def _normalize_text(text: str) -> str:
@@ -65,15 +67,38 @@ def _mojibake_score(text: str) -> int:
     return marker_score + replacement_score
 
 
+def _text_quality_metrics(text: str) -> dict:
+    normalized = _normalize_text(text)
+    non_space_chars = [char for char in normalized if not char.isspace()]
+    total = len(non_space_chars)
+    hangul = _hangul_count(normalized)
+    special = sum(1 for char in non_space_chars if not COMMON_TEXT_PATTERN.fullmatch(char))
+    mojibake = _mojibake_score(normalized)
+
+    hangul_ratio = hangul / total if total else 0.0
+    special_ratio = special / total if total else 1.0
+
+    return {
+        "length": len(normalized),
+        "hangul_count": hangul,
+        "hangul_ratio": hangul_ratio,
+        "special_ratio": special_ratio,
+        "mojibake_score": mojibake,
+    }
+
+
 def _text_quality_score(text: str) -> int:
     if not text:
         return -10000
     normalized = _normalize_text(text)
-    hangul = _hangul_count(normalized)
-    mojibake = _mojibake_score(normalized)
+    metrics = _text_quality_metrics(normalized)
+    hangul = metrics["hangul_count"]
+    mojibake = metrics["mojibake_score"]
     replacement = normalized.count("�")
     readable = len(re.findall(r"[가-힣A-Za-z0-9]", normalized))
-    return hangul * 5 + readable - mojibake * 30 - replacement * 80
+    special_penalty = int(metrics["special_ratio"] * 300)
+    low_hangul_penalty = 200 if len(normalized) >= 100 and metrics["hangul_ratio"] < 0.5 else 0
+    return hangul * 5 + readable - mojibake * 30 - replacement * 80 - special_penalty - low_hangul_penalty
 
 
 def _repair_utf8_mojibake(text: str) -> str:
@@ -95,14 +120,19 @@ def _is_probably_broken(text: str) -> bool:
     normalized = _normalize_text(text)
     if len(normalized) < 50:
         return True
-    if _mojibake_score(normalized) >= 8 and _hangul_count(normalized) < 20:
+    metrics = _text_quality_metrics(normalized)
+    if metrics["special_ratio"] > 0.2:
+        return True
+    if len(normalized) >= 100 and metrics["hangul_ratio"] < 0.5:
+        return True
+    if metrics["mojibake_score"] >= 8 and metrics["hangul_count"] < 20:
         return True
     if normalized.count("�") >= 3:
         return True
     return False
 
 
-def _decode_response_content(response: requests.Response) -> tuple[str, str, bool]:
+def _decode_response_candidates(response: requests.Response) -> list[tuple[str, str, bool]]:
     declared = response.encoding
     apparent = response.apparent_encoding
 
@@ -125,7 +155,7 @@ def _decode_response_content(response: requests.Response) -> tuple[str, str, boo
         decoded_candidates.append((decoded, encoding, "candidate"))
 
     if not decoded_candidates:
-        return response.text, response.encoding or "unknown", False
+        return [(response.text, response.encoding or "unknown", False)]
 
     expanded_candidates = []
     for decoded, encoding, source in decoded_candidates:
@@ -134,12 +164,33 @@ def _decode_response_content(response: requests.Response) -> tuple[str, str, boo
         if repaired != decoded:
             expanded_candidates.append((repaired, f"{encoding}+utf8-repair", "repair"))
 
-    best_text, best_encoding, source = max(
+    ranked = sorted(
         expanded_candidates,
         key=lambda item: (_text_quality_score(item[0]), len(item[0])),
+        reverse=True,
     )
-    fallback_used = source != "apparent" or best_encoding != (apparent or "")
-    return best_text, best_encoding, fallback_used
+
+    unique_candidates = []
+    seen = set()
+    for decoded, encoding, source in ranked:
+        key = (encoding, decoded[:500])
+        if key in seen:
+            continue
+        seen.add(key)
+        fallback_used = source != "apparent" or encoding != (apparent or "")
+        unique_candidates.append((decoded, encoding, fallback_used))
+
+    return unique_candidates
+
+
+def _decode_response_content(response: requests.Response) -> tuple[str, str, bool]:
+    decoded_candidates = _decode_response_candidates(response)
+
+    best_text, best_encoding, source = max(
+        decoded_candidates,
+        key=lambda item: (_text_quality_score(item[0]), len(item[0])),
+    )
+    return best_text, best_encoding, source
 
 
 def clean_extracted_text(text: str) -> str:
@@ -147,6 +198,8 @@ def clean_extracted_text(text: str) -> str:
         return ""
 
     text = _repair_utf8_mojibake(_normalize_text(text))
+    text = text.replace("�", " ")
+    text = SPECIAL_SEQUENCE_PATTERN.sub(" ", text)
     cleaned_lines = []
     seen = set()
 
@@ -160,8 +213,13 @@ def clean_extracted_text(text: str) -> str:
             continue
 
         line = _repair_utf8_mojibake(line)
+        line = line.replace("�", " ")
+        line = SPECIAL_SEQUENCE_PATTERN.sub(" ", line)
+        line = _normalize_text(line)
 
         if _mojibake_score(line) >= 8 and _hangul_count(line) < 5:
+            continue
+        if _is_probably_broken(line) and len(line) >= 50:
             continue
 
         if line in seen:
@@ -182,6 +240,12 @@ def _fetch_html(url: str) -> tuple[str, str, bool]:
     if fallback_used:
         print("[ArticleExtractor] fallback encoding triggered")
     return html, encoding, fallback_used
+
+
+def _fetch_html_candidates(url: str) -> list[tuple[str, str, bool]]:
+    response = requests.get(url, headers=REQUEST_HEADERS, timeout=12)
+    response.raise_for_status()
+    return _decode_response_candidates(response)
 
 
 def _extract_with_trafilatura_html(html: str) -> str:
@@ -235,17 +299,49 @@ def _extract_with_beautifulsoup_html(html: str, encoding: str = "utf-8") -> str:
     return _best_text_block(soup)
 
 
+def _extract_candidate_text(html: str, encoding: str) -> str:
+    extracted = _extract_with_trafilatura_html(html)
+
+    if len(extracted) < 300 or _is_probably_broken(extracted):
+        fallback = _extract_with_beautifulsoup_html(html, encoding=encoding)
+        if len(fallback) > len(extracted) or not _is_probably_broken(fallback):
+            extracted = fallback
+
+    return clean_extracted_text(extracted)
+
+
 def fetch_article_body(url: str, max_chars: int = 5000) -> str:
     try:
-        html, encoding, _ = _fetch_html(url)
-        extracted = _extract_with_trafilatura_html(html)
+        html_candidates = _fetch_html_candidates(url)
+        best_extracted = ""
+        best_encoding = "unknown"
+        best_score = -10000
+        retry_triggered = False
 
-        if len(extracted) < 300 or _is_probably_broken(extracted):
-            fallback = _extract_with_beautifulsoup_html(html, encoding=encoding)
-            if len(fallback) > len(extracted) or not _is_probably_broken(fallback):
-                extracted = fallback
+        for index, (html, encoding, fallback_used) in enumerate(html_candidates):
+            extracted_candidate = _extract_candidate_text(html, encoding)
+            candidate_score = _text_quality_score(extracted_candidate)
+            candidate_broken = _is_probably_broken(extracted_candidate)
 
-        extracted = clean_extracted_text(extracted)
+            if index > 0 or fallback_used or candidate_broken:
+                retry_triggered = True
+
+            if candidate_score > best_score:
+                best_extracted = extracted_candidate
+                best_encoding = encoding
+                best_score = candidate_score
+
+            if extracted_candidate and len(extracted_candidate) >= 100 and not candidate_broken:
+                best_extracted = extracted_candidate
+                best_encoding = encoding
+                best_score = candidate_score
+                break
+
+        if retry_triggered:
+            print("[ArticleExtractor] encoding retry triggered")
+
+        print(f"[ArticleExtractor] encoding used: {best_encoding}")
+        extracted = clean_extracted_text(best_extracted)
         quality_score = _text_quality_score(extracted)
         print(f"[ArticleExtractor] text quality score: {quality_score}")
         print(f"[ArticleExtractor] text length: {len(extracted)}")
@@ -259,6 +355,7 @@ def fetch_article_body(url: str, max_chars: int = 5000) -> str:
             return extracted[:max_chars]
 
         print("[ArticleExtractor] Fallback to title")
+        print("[ArticleExtractor] fallback to title due to encoding")
         return ""
 
     except Exception as error:
@@ -267,4 +364,5 @@ def fetch_article_body(url: str, max_chars: int = 5000) -> str:
         print("[ArticleExtractor] text length: 0")
         print("[ArticleExtractor] Extracted length: 0")
         print("[ArticleExtractor] Fallback to title")
+        print("[ArticleExtractor] fallback to title due to encoding")
         return ""
