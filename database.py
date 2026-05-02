@@ -58,6 +58,7 @@ def _ensure_columns(connection):
         "missing_context": "TEXT",
         "last_checked_at": "TEXT",
         "review_status": "TEXT",
+        "claims": "TEXT",
     }
 
     for column, column_type in desired_columns.items():
@@ -141,8 +142,9 @@ def save_analysis_result(result: dict, query: str):
                 missing_context,
                 last_checked_at,
                 review_status,
+                claims,
                 created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 query,
@@ -178,6 +180,10 @@ def save_analysis_result(result: dict, query: str):
                 ),
                 verification_card.get("last_checked_at") or result.get("last_checked_at"),
                 verification_card.get("review_status") or result.get("review_status"),
+                _serialize_json_value(
+                    verification_card.get("claims")
+                    or result.get("claims")
+                ),
                 created_at,
             ),
         )

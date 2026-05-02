@@ -244,19 +244,27 @@ def build_verification_card(
     evidence_comparison: dict,
     policy_confidence: dict,
     article_body: str = "",
+    claims: list[str] | None = None,
 ) -> dict:
     official_sources = _official_evidence_sources(official_evidence_results)
     evidence_sources = official_sources + [_news_source(news, original_url)]
     best_source = official_sources[0] if official_sources else evidence_sources[0]
     verdict_confidence = int(policy_confidence.get("policy_confidence_score") or 0)
-
-    return {
-        "claim_text": _first_policy_claim(
+    claim_list = [claim for claim in (claims or []) if claim]
+    claim_text = (
+        claim_list[0]
+        if claim_list
+        else _first_policy_claim(
             policy_claims,
             news.get("title") or "",
             news.get("summary") or "",
             article_body,
-        ),
+        )
+    )
+
+    return {
+        "claim_text": claim_text,
+        "claims": claim_list or [claim_text],
         "verdict_label": _verdict_label(policy_confidence, evidence_comparison, official_sources),
         "verdict_confidence": verdict_confidence,
         "evidence_sources": evidence_sources,
@@ -276,6 +284,9 @@ def build_verification_card(
 def print_verification_card(card: dict):
     print("\n----- Verification card -----")
     print("claim_text:", card.get("claim_text"))
+    print("claims:")
+    for claim in card.get("claims") or []:
+        print("-", claim)
     print("verdict_label:", card.get("verdict_label"))
     print("verdict_confidence:", card.get("verdict_confidence"))
     print("source_reliability_score:", card.get("source_reliability_score"))

@@ -380,6 +380,15 @@
       line-height: 1.45;
     }
 
+    .claim-list {
+      margin: 8px 0 0;
+      padding-left: 20px;
+    }
+
+    .claim-list li {
+      margin: 6px 0;
+    }
+
     .source-link {
       font-size: 13px;
       word-break: break-all;
@@ -691,6 +700,17 @@
       `;
     }
 
+    function renderClaimList(claims) {
+      const list = Array.isArray(claims) ? claims.filter(Boolean) : [];
+      if (!list.length) {
+        return '<div class="evidence-source-meta">표시할 핵심 주장 목록이 없습니다.</div>';
+      }
+
+      return `<ol class="claim-list">${list.map((claim) => `
+        <li>${escapeHtml(claim)}</li>
+      `).join("")}</ol>`;
+    }
+
     function showStatus(message, success = false) {
       statusLine.textContent = message;
       statusLine.className = success ? "status-line success" : "status-line";
@@ -762,6 +782,7 @@
         const impact = result.policy_impact || {};
         const decision = result.final_decision || {};
         const verification = result.verification_card || result || {};
+        const claims = verification.claims || result.claims || [];
         const level = String(decision.policy_alert_level || "WATCH").toUpperCase();
         const title = escapeHtml(result.title);
         const url = escapeHtml(result.original_url);
@@ -820,6 +841,10 @@
                 <div class="verification-item full">
                   <span class="label">핵심 주장</span><br>
                   ${escapeHtml(verification.claim_text || "-")}
+                </div>
+                <div class="verification-item full">
+                  <span class="label">핵심 주장 목록</span>
+                  ${renderClaimList(claims)}
                 </div>
                 <div class="verification-item">
                   <span class="label">AI 초안 판정</span><br>

@@ -44,6 +44,7 @@ class AnalyzeResult(BaseModel):
     title: str
     original_url: str
     topic: str
+    claims: list = []
     policy_confidence: dict
     policy_impact: dict
     final_decision: dict
@@ -105,6 +106,7 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
                 title=api_result.get("title") or "",
                 original_url=api_result.get("original_url") or "",
                 topic=api_result.get("topic") or "",
+                claims=api_result.get("claims") or [],
                 policy_confidence=api_result.get("policy_confidence") or {},
                 policy_impact=api_result.get("policy_impact") or {},
                 final_decision=api_result.get("final_decision") or {},

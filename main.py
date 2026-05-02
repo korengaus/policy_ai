@@ -6,6 +6,7 @@ from pathlib import Path
 from config import MAX_ARTICLE_CHARS, MAX_NEWS_RESULTS, MAX_POLICY_SENTENCES, QUERY
 from news_collector import search_google_news_rss_with_meta, resolve_google_news_url
 from article_extractor import fetch_article_body
+from claim_extractor import extract_verifiable_claims
 from rule_engine import extract_policy_claim_sentences
 from ai_reasoner import run_ai_reasoning
 from memory_store import (
@@ -206,6 +207,13 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
         article_body = fetch_article_body(original_url, max_chars=MAX_ARTICLE_CHARS)
         print(article_body[:1000])
 
+        claims = extract_verifiable_claims(
+            article_body=article_body,
+            title=news.get("title") or "",
+            summary=news.get("summary") or "",
+            max_claims=3,
+        )
+
         policy_claims = extract_policy_claim_sentences(
             article_body,
             max_sentences=MAX_POLICY_SENTENCES,
@@ -289,6 +297,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
             evidence_comparison=evidence_comparison,
             policy_confidence=policy_confidence,
             article_body=article_body,
+            claims=claims,
         )
         print_verification_card(verification_card)
 
@@ -345,6 +354,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
                 "original_url": original_url,
                 "summary": news.get("summary"),
                 "topic": topic,
+                "claims": claims,
                 "policy_claims": policy_claims,
                 "official_source_candidates": official_source_candidates,
                 "official_evidence_results": official_evidence_results,
@@ -360,6 +370,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
                     "title": news.get("title"),
                     "original_url": original_url,
                     "topic": topic,
+                    "claims": claims,
                     "policy_sentences": policy_claims,
                     "official_sources": official_source_candidates,
                     "evidence_comparison": evidence_comparison,
