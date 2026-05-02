@@ -22,6 +22,7 @@ from official_source_search import (
     generate_official_source_candidates,
     print_official_source_candidates,
 )
+from source_retrieval_agent import build_source_retrieval_context
 from official_crawler import fetch_official_evidence, print_official_evidence_results
 from evidence_comparator import (
     compare_news_with_official_evidence,
@@ -245,6 +246,17 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
         )
         print_official_source_candidates(official_source_candidates)
 
+        source_retrieval = build_source_retrieval_context(
+            normalized_claims=normalized_claims,
+            news=news,
+            original_url=original_url,
+            original_query=query,
+            article_body=article_body,
+            official_source_candidates=official_source_candidates,
+        )
+        source_queries = source_retrieval.get("source_queries", [])
+        source_candidates = source_retrieval.get("source_candidates", [])
+
         official_evidence_results = fetch_official_evidence(
             official_source_candidates,
             max_candidates=3,
@@ -301,6 +313,8 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
             article_body=article_body,
             claims=claims,
             normalized_claims=normalized_claims,
+            source_queries=source_queries,
+            source_candidates=source_candidates,
         )
         print_verification_card(verification_card)
 
@@ -359,6 +373,8 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
                 "topic": topic,
                 "claims": claims,
                 "normalized_claims": normalized_claims,
+                "source_queries": source_queries,
+                "source_candidates": source_candidates,
                 "policy_claims": policy_claims,
                 "official_source_candidates": official_source_candidates,
                 "official_evidence_results": official_evidence_results,
@@ -376,6 +392,8 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
                     "topic": topic,
                     "claims": claims,
                     "normalized_claims": normalized_claims,
+                    "source_queries": source_queries,
+                    "source_candidates": source_candidates,
                     "policy_sentences": policy_claims,
                     "official_sources": official_source_candidates,
                     "evidence_comparison": evidence_comparison,

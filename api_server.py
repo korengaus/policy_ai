@@ -46,6 +46,8 @@ class AnalyzeResult(BaseModel):
     topic: str
     claims: list = []
     normalized_claims: list = []
+    source_candidates: list = []
+    source_queries: list = []
     policy_confidence: dict
     policy_impact: dict
     final_decision: dict
@@ -109,6 +111,8 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
                 topic=api_result.get("topic") or "",
                 claims=api_result.get("claims") or [],
                 normalized_claims=api_result.get("normalized_claims") or [],
+                source_candidates=api_result.get("source_candidates") or [],
+                source_queries=api_result.get("source_queries") or [],
                 policy_confidence=api_result.get("policy_confidence") or {},
                 policy_impact=api_result.get("policy_impact") or {},
                 final_decision=api_result.get("final_decision") or {},

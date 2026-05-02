@@ -246,6 +246,8 @@ def build_verification_card(
     article_body: str = "",
     claims: list[str] | None = None,
     normalized_claims: list[dict] | None = None,
+    source_queries: list[dict] | None = None,
+    source_candidates: list[dict] | None = None,
 ) -> dict:
     official_sources = _official_evidence_sources(official_evidence_results)
     evidence_sources = official_sources + [_news_source(news, original_url)]
@@ -267,6 +269,8 @@ def build_verification_card(
         "claim_text": claim_text,
         "claims": claim_list or [claim_text],
         "normalized_claims": normalized_claims or [],
+        "source_queries": source_queries or [],
+        "source_candidates": source_candidates or [],
         "verdict_label": _verdict_label(policy_confidence, evidence_comparison, official_sources),
         "verdict_confidence": verdict_confidence,
         "evidence_sources": evidence_sources,
@@ -305,6 +309,8 @@ def print_verification_card(card: dict):
             "|",
             claim.get("uncertainty_level"),
         )
+    print("source_queries:", len(card.get("source_queries") or []))
+    print("source_candidates:", len(card.get("source_candidates") or []))
     print("verdict_label:", card.get("verdict_label"))
     print("verdict_confidence:", card.get("verdict_confidence"))
     print("source_reliability_score:", card.get("source_reliability_score"))
