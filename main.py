@@ -25,6 +25,7 @@ from official_source_search import (
 from source_retrieval_agent import build_source_retrieval_context
 from source_reliability_agent import evaluate_source_candidates
 from evidence_extraction_agent import extract_evidence_snippets
+from contradiction_agent import run_contradiction_checks
 from official_crawler import fetch_official_evidence, print_official_evidence_results
 from evidence_comparator import (
     compare_news_with_official_evidence,
@@ -267,6 +268,14 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
         )
         evidence_snippets = evidence_extraction.get("evidence_snippets", [])
         claim_evidence_map = evidence_extraction.get("claim_evidence_map", {})
+        contradiction_result = run_contradiction_checks(
+            normalized_claims=normalized_claims,
+            evidence_snippets=evidence_snippets,
+            claim_evidence_map=claim_evidence_map,
+            source_queries=source_queries,
+        )
+        contradiction_checks = contradiction_result.get("contradiction_checks", [])
+        contradiction_summary = contradiction_result.get("contradiction_summary", {})
 
         official_evidence_results = fetch_official_evidence(
             official_source_candidates,
@@ -328,6 +337,8 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
             source_candidates=source_candidates,
             evidence_snippets=evidence_snippets,
             claim_evidence_map=claim_evidence_map,
+            contradiction_checks=contradiction_checks,
+            contradiction_summary=contradiction_summary,
         )
         print_verification_card(verification_card)
 
@@ -390,6 +401,8 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
                 "source_candidates": source_candidates,
                 "evidence_snippets": evidence_snippets,
                 "claim_evidence_map": claim_evidence_map,
+                "contradiction_checks": contradiction_checks,
+                "contradiction_summary": contradiction_summary,
                 "policy_claims": policy_claims,
                 "official_source_candidates": official_source_candidates,
                 "official_evidence_results": official_evidence_results,
@@ -411,6 +424,8 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
                     "source_candidates": source_candidates,
                     "evidence_snippets": evidence_snippets,
                     "claim_evidence_map": claim_evidence_map,
+                    "contradiction_checks": contradiction_checks,
+                    "contradiction_summary": contradiction_summary,
                     "policy_sentences": policy_claims,
                     "official_sources": official_source_candidates,
                     "evidence_comparison": evidence_comparison,

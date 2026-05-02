@@ -4,6 +4,7 @@ import re
 
 from source_reliability_agent import summarize_source_reliability
 from evidence_extraction_agent import summarize_evidence_snippets
+from contradiction_agent import summarize_contradiction_checks
 
 
 OFFICIAL_GOVERNMENT_TYPES = {
@@ -184,6 +185,7 @@ def _verdict_label(
     evidence_comparison: dict,
     official_sources: list[dict],
     evidence_snippets: list[dict] | None = None,
+    contradiction_summary: dict | None = None,
     claim_count: int = 0,
 ) -> str:
     confidence_score = int(policy_confidence.get("policy_confidence_score") or 0)
@@ -197,6 +199,20 @@ def _verdict_label(
 
     if has_conflict or comparison_status == "official_conflict_possible":
         return "draft_disputed"
+
+    contradiction = contradiction_summary or {}
+    possible_count = int(contradiction.get("possible_contradiction_count") or 0)
+    likely_count = int(contradiction.get("likely_contradiction_count") or 0)
+    official_confirmation_count = int(
+        contradiction.get("needs_official_confirmation_count") or 0
+    )
+    insufficient_claim_count = int(contradiction.get("insufficient_evidence_count") or 0)
+    if possible_count or likely_count:
+        return "draft_needs_review"
+    if claim_count and official_confirmation_count >= max(1, claim_count // 2):
+        return "draft_needs_official_confirmation"
+    if claim_count and insufficient_claim_count >= max(1, claim_count // 2):
+        return "draft_needs_context"
 
     snippets = evidence_snippets or []
     direct_support_count = sum(1 for item in snippets if item.get("evidence_type") == "direct_support")
@@ -267,6 +283,8 @@ def build_verification_card(
     source_candidates: list[dict] | None = None,
     evidence_snippets: list[dict] | None = None,
     claim_evidence_map: dict | None = None,
+    contradiction_checks: list[dict] | None = None,
+    contradiction_summary: dict | None = None,
 ) -> dict:
     official_sources = _official_evidence_sources(official_evidence_results)
     evidence_sources = official_sources + [_news_source(news, original_url)]
@@ -294,11 +312,20 @@ def build_verification_card(
         "evidence_snippets": evidence_snippets or [],
         "claim_evidence_map": claim_evidence_map or {},
         "evidence_extraction_summary": summarize_evidence_snippets(evidence_snippets or []),
+        "contradiction_checks": contradiction_checks or [],
+        "contradiction_summary": (
+            contradiction_summary
+            or summarize_contradiction_checks(contradiction_checks or [])
+        ),
         "verdict_label": _verdict_label(
             policy_confidence,
             evidence_comparison,
             official_sources,
             evidence_snippets=evidence_snippets or [],
+            contradiction_summary=(
+                contradiction_summary
+                or summarize_contradiction_checks(contradiction_checks or [])
+            ),
             claim_count=len(claim_list or [claim_text]),
         ),
         "verdict_confidence": verdict_confidence,
@@ -343,6 +370,8 @@ def print_verification_card(card: dict):
     print("source_reliability_summary:", card.get("source_reliability_summary"))
     print("evidence_snippets:", len(card.get("evidence_snippets") or []))
     print("evidence_extraction_summary:", card.get("evidence_extraction_summary"))
+    print("contradiction_checks:", len(card.get("contradiction_checks") or []))
+    print("contradiction_summary:", card.get("contradiction_summary"))
     print("verdict_label:", card.get("verdict_label"))
     print("verdict_confidence:", card.get("verdict_confidence"))
     print("source_reliability_score:", card.get("source_reliability_score"))

@@ -737,6 +737,8 @@
     const REVIEW_STATUS_LABELS = {
       ai_draft_pending_human_review: "AI 초안, 사람 검토 대기",
     };
+    VERDICT_LABELS.draft_needs_review = "사람 검토 필요";
+
     const SOURCE_TYPE_LABELS = {
       official_government: "공식 정부기관",
       public_institution: "공공기관",
@@ -1032,6 +1034,93 @@
       `;
     }
 
+    function formatContradictionStatus(value) {
+      const labels = {
+        no_contradiction_found: "반박 신호 없음",
+        possible_contradiction: "반박 가능성",
+        likely_contradiction: "강한 모순 가능성",
+        insufficient_evidence: "근거 부족",
+        needs_official_confirmation: "공식 확인 필요",
+      };
+      return labels[value] ? `${labels[value]}(${value})` : value || "-";
+    }
+
+    function formatContradictionRisk(value) {
+      const labels = {
+        high: "높음",
+        medium: "보통",
+        watch: "관찰",
+        low: "낮음",
+      };
+      return labels[value] ? `${labels[value]}(${value})` : value || "-";
+    }
+
+    function renderContradictionSummary(summary) {
+      const data = summary || {};
+      const possibleCount = Number(data.possible_contradiction_count || 0)
+        + Number(data.likely_contradiction_count || 0);
+      return `
+        <div class="evidence-extraction-summary">
+          <div class="evidence-extraction-tile">
+            <span class="label">검사한 주장</span><br>${escapeHtml(data.total_claims_checked ?? 0)}
+          </div>
+          <div class="evidence-extraction-tile">
+            <span class="label">반박 가능성</span><br>${escapeHtml(possibleCount)}
+          </div>
+          <div class="evidence-extraction-tile">
+            <span class="label">공식 확인 필요</span><br>${escapeHtml(data.needs_official_confirmation_count ?? 0)}
+          </div>
+          <div class="evidence-extraction-tile">
+            <span class="label">전체 모순 위험도</span><br>${escapeHtml(formatContradictionRisk(data.overall_contradiction_risk))}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderContradictionChecks(claims, contradictionChecks) {
+      const claimList = Array.isArray(claims) ? claims : [];
+      const checks = Array.isArray(contradictionChecks) ? contradictionChecks : [];
+      if (!checks.length) {
+        return '<div class="evidence-source-meta">표시할 반박/모순 검사 결과가 없습니다.</div>';
+      }
+
+      return `<div class="evidence-snippet-list">${claimList.map((claim, index) => {
+        const check = checks.find((item) => Number(item.claim_index) === index) || {};
+        const conflicts = Array.isArray(check.conflicting_evidence) ? check.conflicting_evidence : [];
+        return `
+          <div class="evidence-snippet">
+            <div class="normalized-claim-text">claim #${index + 1}: ${escapeHtml(claim || check.claim_text || "-")}</div>
+            <div class="evidence-snippet-grid">
+              <div><span class="label">검사 상태</span><br>${escapeHtml(formatContradictionStatus(check.contradiction_status))}</div>
+              <div><span class="label">모순 점수</span><br>${escapeHtml(check.contradiction_score ?? "-")}</div>
+              <div><span class="label">사람 검토</span><br>${check.needs_human_review ? "필요" : "불필요"}</div>
+              <div><span class="label">확인 시각</span><br>${escapeHtml(check.checked_at || "-")}</div>
+            </div>
+            <div class="evidence-snippet-text">${escapeHtml(check.contradiction_reason || "-")}</div>
+            ${check.missing_evidence_warning ? `<div class="evidence-source-meta">${escapeHtml(check.missing_evidence_warning)}</div>` : ""}
+            ${conflicts.length ? `
+              <div class="source-list">
+                ${conflicts.map((conflict) => {
+                  const conflictUrl = escapeHtml(conflict.source_url || "");
+                  const conflictTitle = escapeHtml(conflict.source_title || "충돌 후보");
+                  const conflictHtml = conflictUrl
+                    ? `<a href="${conflictUrl}" target="_blank" rel="noopener noreferrer">${conflictTitle}</a>`
+                    : conflictTitle;
+                  return `
+                    <div class="evidence-source">
+                      <div class="evidence-source-title">${conflictHtml}</div>
+                      <div class="evidence-source-meta">유형: ${escapeHtml(conflict.conflict_type || "-")} · 신뢰도: ${escapeHtml(conflict.confidence || "-")}</div>
+                      <div class="evidence-snippet-text">${escapeHtml(conflict.evidence_text || "-")}</div>
+                    </div>
+                  `;
+                }).join("")}
+              </div>
+            ` : ""}
+          </div>
+        `;
+      }).join("")}</div>`;
+    }
+
     function renderEvidenceSnippets(claims, evidenceSnippets) {
       const claimList = Array.isArray(claims) ? claims : [];
       const snippets = Array.isArray(evidenceSnippets) ? evidenceSnippets : [];
@@ -1179,6 +1268,8 @@
         const sourceReliabilitySummary = verification.source_reliability_summary || {};
         const evidenceSnippets = verification.evidence_snippets || result.evidence_snippets || [];
         const evidenceExtractionSummary = verification.evidence_extraction_summary || {};
+        const contradictionChecks = verification.contradiction_checks || result.contradiction_checks || [];
+        const contradictionSummary = verification.contradiction_summary || result.contradiction_summary || {};
         const level = String(decision.policy_alert_level || "WATCH").toUpperCase();
         const title = escapeHtml(result.title);
         const url = escapeHtml(result.original_url);
@@ -1235,6 +1326,7 @@
               <h3>검증 카드</h3>
               ${renderSourceReliabilitySummary(sourceReliabilitySummary)}
               ${renderEvidenceExtractionSummary(evidenceExtractionSummary)}
+              ${renderContradictionSummary(contradictionSummary)}
               <div class="verification-grid">
                 <div class="verification-item full">
                   <span class="label">핵심 주장</span><br>
@@ -1251,6 +1343,10 @@
                 <div class="verification-item full">
                   <span class="label">근거 문장</span>
                   ${renderEvidenceSnippets(claims, evidenceSnippets)}
+                </div>
+                <div class="verification-item full">
+                  <span class="label">반박/모순 검사</span>
+                  ${renderContradictionChecks(claims, contradictionChecks)}
                 </div>
                 <div class="verification-item full">
                   <span class="label">출처 탐색 후보</span>

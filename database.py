@@ -66,6 +66,8 @@ def _ensure_columns(connection):
         "evidence_snippets": "TEXT",
         "claim_evidence_map": "TEXT",
         "evidence_extraction_summary": "TEXT",
+        "contradiction_checks": "TEXT",
+        "contradiction_summary": "TEXT",
     }
 
     for column, column_type in desired_columns.items():
@@ -157,8 +159,10 @@ def save_analysis_result(result: dict, query: str):
                 evidence_snippets,
                 claim_evidence_map,
                 evidence_extraction_summary,
+                contradiction_checks,
+                contradiction_summary,
                 created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 query,
@@ -225,6 +229,14 @@ def save_analysis_result(result: dict, query: str):
                 _serialize_json_value(
                     verification_card.get("evidence_extraction_summary")
                     or result.get("evidence_extraction_summary")
+                ),
+                _serialize_json_value(
+                    verification_card.get("contradiction_checks")
+                    or result.get("contradiction_checks")
+                ),
+                _serialize_json_value(
+                    verification_card.get("contradiction_summary")
+                    or result.get("contradiction_summary")
                 ),
                 created_at,
             ),
