@@ -389,6 +389,31 @@
       margin: 6px 0;
     }
 
+    .normalized-claims {
+      display: grid;
+      gap: 10px;
+      margin-top: 8px;
+    }
+
+    .normalized-claim {
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      background: #fff;
+      padding: 10px;
+    }
+
+    .normalized-claim-text {
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+
+    .normalized-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      font-size: 13px;
+    }
+
     .source-link {
       font-size: 13px;
       word-break: break-all;
@@ -452,6 +477,10 @@
       .detail-grid,
       .verification-grid {
         grid-template-columns: 1fr;
+      }
+
+      .normalized-grid {
+        grid-template-columns: 1fr 1fr;
       }
 
       .topbar {
@@ -711,6 +740,66 @@
       `).join("")}</ol>`;
     }
 
+    function formatClaimStatus(value) {
+      const labels = {
+        proposed: "제안",
+        under_review: "검토 중",
+        announced: "발표됨",
+        implemented: "시행됨",
+        denied: "부인됨",
+        uncertain: "불확실",
+      };
+      return labels[value] ? `${labels[value]}(${value})` : value || "-";
+    }
+
+    function formatClaimType(value) {
+      const labels = {
+        policy_action: "정책 조치",
+        financial_condition: "금융 조건",
+        eligibility: "대상/자격",
+        numerical_claim: "수치 주장",
+        timeline_claim: "시점 주장",
+        market_impact: "시장 영향",
+        expert_opinion: "전문가 의견",
+        unknown: "미분류",
+      };
+      return labels[value] ? `${labels[value]}(${value})` : value || "-";
+    }
+
+    function formatUncertainty(value) {
+      const labels = {
+        low: "낮음",
+        medium: "보통",
+        high: "높음",
+      };
+      return labels[value] ? `${labels[value]}(${value})` : value || "-";
+    }
+
+    function renderNormalizedClaims(normalizedClaims) {
+      const list = Array.isArray(normalizedClaims) ? normalizedClaims : [];
+      if (!list.length) {
+        return '<div class="evidence-source-meta">표시할 정규화된 주장이 없습니다.</div>';
+      }
+
+      return `<div class="normalized-claims">${list.map((claim) => `
+        <div class="normalized-claim">
+          <div class="normalized-claim-text">${escapeHtml(claim.claim_text || "-")}</div>
+          <div class="normalized-grid">
+            <div><span class="label">주체</span><br>${escapeHtml(claim.actor || "-")}</div>
+            <div><span class="label">행동</span><br>${escapeHtml(claim.action || "-")}</div>
+            <div><span class="label">대상</span><br>${escapeHtml(claim.target || "-")}</div>
+            <div><span class="label">수치</span><br>${escapeHtml(claim.quantity || "-")}</div>
+            <div><span class="label">시점</span><br>${escapeHtml(claim.date_or_time || "-")}</div>
+            <div><span class="label">지역</span><br>${escapeHtml(claim.location || "-")}</div>
+            <div><span class="label">상태</span><br>${escapeHtml(formatClaimStatus(claim.status))}</div>
+            <div><span class="label">주장 유형</span><br>${escapeHtml(formatClaimType(claim.claim_type))}</div>
+            <div><span class="label">불확실성</span><br>${escapeHtml(formatUncertainty(claim.uncertainty_level))}</div>
+            <div><span class="label">객체</span><br>${escapeHtml(claim.object || "-")}</div>
+          </div>
+        </div>
+      `).join("")}</div>`;
+    }
+
     function showStatus(message, success = false) {
       statusLine.textContent = message;
       statusLine.className = success ? "status-line success" : "status-line";
@@ -783,6 +872,7 @@
         const decision = result.final_decision || {};
         const verification = result.verification_card || result || {};
         const claims = verification.claims || result.claims || [];
+        const normalizedClaims = verification.normalized_claims || result.normalized_claims || [];
         const level = String(decision.policy_alert_level || "WATCH").toUpperCase();
         const title = escapeHtml(result.title);
         const url = escapeHtml(result.original_url);
@@ -845,6 +935,10 @@
                 <div class="verification-item full">
                   <span class="label">핵심 주장 목록</span>
                   ${renderClaimList(claims)}
+                </div>
+                <div class="verification-item full">
+                  <span class="label">정규화된 주장</span>
+                  ${renderNormalizedClaims(normalizedClaims)}
                 </div>
                 <div class="verification-item">
                   <span class="label">AI 초안 판정</span><br>

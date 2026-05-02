@@ -7,6 +7,7 @@ from config import MAX_ARTICLE_CHARS, MAX_NEWS_RESULTS, MAX_POLICY_SENTENCES, QU
 from news_collector import search_google_news_rss_with_meta, resolve_google_news_url
 from article_extractor import fetch_article_body
 from claim_extractor import extract_verifiable_claims
+from claim_normalizer import normalize_claims
 from rule_engine import extract_policy_claim_sentences
 from ai_reasoner import run_ai_reasoning
 from memory_store import (
@@ -213,6 +214,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
             summary=news.get("summary") or "",
             max_claims=3,
         )
+        normalized_claims = normalize_claims(claims)
 
         policy_claims = extract_policy_claim_sentences(
             article_body,
@@ -298,6 +300,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
             policy_confidence=policy_confidence,
             article_body=article_body,
             claims=claims,
+            normalized_claims=normalized_claims,
         )
         print_verification_card(verification_card)
 
@@ -355,6 +358,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
                 "summary": news.get("summary"),
                 "topic": topic,
                 "claims": claims,
+                "normalized_claims": normalized_claims,
                 "policy_claims": policy_claims,
                 "official_source_candidates": official_source_candidates,
                 "official_evidence_results": official_evidence_results,
@@ -371,6 +375,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
                     "original_url": original_url,
                     "topic": topic,
                     "claims": claims,
+                    "normalized_claims": normalized_claims,
                     "policy_sentences": policy_claims,
                     "official_sources": official_source_candidates,
                     "evidence_comparison": evidence_comparison,
