@@ -446,6 +446,27 @@
       font-size: 13px;
     }
 
+    .source-reliability-summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin: 8px 0 12px;
+    }
+
+    .source-reliability-tile {
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      background: #fff;
+      padding: 9px;
+      font-size: 13px;
+    }
+
+    .risk-flags {
+      color: #b45309;
+      font-size: 12px;
+      margin-top: 5px;
+    }
+
     .source-link {
       font-size: 13px;
       word-break: break-all;
@@ -517,6 +538,10 @@
 
       .source-candidate-grid {
         grid-template-columns: 1fr;
+      }
+
+      .source-reliability-summary {
+        grid-template-columns: 1fr 1fr;
       }
 
       .topbar {
@@ -848,6 +873,53 @@
       return labels[value] ? `${labels[value]}(${value})` : value || "-";
     }
 
+    function formatReliabilityLevel(value) {
+      const labels = {
+        very_high: "매우 높음",
+        high: "높음",
+        medium: "보통",
+        low: "낮음",
+        unknown: "알 수 없음",
+      };
+      return labels[value] ? `${labels[value]}(${value})` : value || "-";
+    }
+
+    function formatVerificationRole(value) {
+      const labels = {
+        primary_evidence: "핵심 근거",
+        supporting_evidence: "보조 근거",
+        context_only: "맥락 참고",
+        contradiction_check: "반박 확인",
+        not_reliable_enough: "신뢰 부족",
+      };
+      return labels[value] ? `${labels[value]}(${value})` : value || "-";
+    }
+
+    function renderSourceReliabilitySummary(summary) {
+      const data = summary || {};
+      const topTitle = data.top_source_title || "-";
+      const topUrl = data.top_source_url || "";
+      const topHtml = topUrl
+        ? `<a href="${escapeHtml(topUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(topTitle)}</a>`
+        : escapeHtml(topTitle);
+      return `
+        <div class="source-reliability-summary">
+          <div class="source-reliability-tile">
+            <span class="label">최고 신뢰 출처</span><br>${topHtml}
+          </div>
+          <div class="source-reliability-tile">
+            <span class="label">공식 출처 후보 수</span><br>${escapeHtml(data.official_candidate_count ?? 0)}
+          </div>
+          <div class="source-reliability-tile">
+            <span class="label">본문 확보 출처</span><br>${escapeHtml(data.raw_text_available_count ?? 0)}
+          </div>
+          <div class="source-reliability-tile">
+            <span class="label">평균 출처 신뢰도</span><br>${escapeHtml(data.average_reliability_score ?? 0)}
+          </div>
+        </div>
+      `;
+    }
+
     function renderSourceQueries(sourceQueries) {
       const list = Array.isArray(sourceQueries) ? sourceQueries.slice(0, 8) : [];
       if (!list.length) {
@@ -885,7 +957,12 @@
               <div><span class="label">수집 방식</span><br>${escapeHtml(source.retrieval_method || "-")}</div>
               <div><span class="label">발행처</span><br>${escapeHtml(source.publisher || "-")}</div>
               <div><span class="label">본문 확보</span><br>${source.raw_text_available ? "예" : "아니오"}</div>
+              <div><span class="label">신뢰도 점수</span><br>${escapeHtml(source.reliability_score ?? "-")}</div>
+              <div><span class="label">신뢰도 등급</span><br>${escapeHtml(formatReliabilityLevel(source.reliability_level))}</div>
+              <div><span class="label">검증 역할</span><br>${escapeHtml(formatVerificationRole(source.verification_role))}</div>
             </div>
+            <div class="evidence-source-meta">${escapeHtml(source.reliability_reason || "")}</div>
+            <div class="risk-flags">${escapeHtml(formatList(source.source_risk_flags))}</div>
           </div>
         `;
       }).join("")}</div>`;
@@ -966,6 +1043,7 @@
         const normalizedClaims = verification.normalized_claims || result.normalized_claims || [];
         const sourceQueries = verification.source_queries || result.source_queries || [];
         const sourceCandidates = verification.source_candidates || result.source_candidates || [];
+        const sourceReliabilitySummary = verification.source_reliability_summary || {};
         const level = String(decision.policy_alert_level || "WATCH").toUpperCase();
         const title = escapeHtml(result.title);
         const url = escapeHtml(result.original_url);
@@ -1020,6 +1098,7 @@
             <div class="decision-summary">${escapeHtml(decision.decision_summary)}</div>
             <section class="verification-card">
               <h3>검증 카드</h3>
+              ${renderSourceReliabilitySummary(sourceReliabilitySummary)}
               <div class="verification-grid">
                 <div class="verification-item full">
                   <span class="label">핵심 주장</span><br>

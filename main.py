@@ -23,6 +23,7 @@ from official_source_search import (
     print_official_source_candidates,
 )
 from source_retrieval_agent import build_source_retrieval_context
+from source_reliability_agent import evaluate_source_candidates
 from official_crawler import fetch_official_evidence, print_official_evidence_results
 from evidence_comparator import (
     compare_news_with_official_evidence,
@@ -255,7 +256,9 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
             official_source_candidates=official_source_candidates,
         )
         source_queries = source_retrieval.get("source_queries", [])
-        source_candidates = source_retrieval.get("source_candidates", [])
+        source_candidates = evaluate_source_candidates(
+            source_retrieval.get("source_candidates", [])
+        )
 
         official_evidence_results = fetch_official_evidence(
             official_source_candidates,

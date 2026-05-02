@@ -2,6 +2,8 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 import re
 
+from source_reliability_agent import summarize_source_reliability
+
 
 OFFICIAL_GOVERNMENT_TYPES = {
     "central_government",
@@ -271,6 +273,7 @@ def build_verification_card(
         "normalized_claims": normalized_claims or [],
         "source_queries": source_queries or [],
         "source_candidates": source_candidates or [],
+        "source_reliability_summary": summarize_source_reliability(source_candidates or []),
         "verdict_label": _verdict_label(policy_confidence, evidence_comparison, official_sources),
         "verdict_confidence": verdict_confidence,
         "evidence_sources": evidence_sources,
@@ -311,6 +314,7 @@ def print_verification_card(card: dict):
         )
     print("source_queries:", len(card.get("source_queries") or []))
     print("source_candidates:", len(card.get("source_candidates") or []))
+    print("source_reliability_summary:", card.get("source_reliability_summary"))
     print("verdict_label:", card.get("verdict_label"))
     print("verdict_confidence:", card.get("verdict_confidence"))
     print("source_reliability_score:", card.get("source_reliability_score"))

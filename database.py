@@ -62,6 +62,7 @@ def _ensure_columns(connection):
         "normalized_claims": "TEXT",
         "source_candidates": "TEXT",
         "source_queries": "TEXT",
+        "source_reliability_summary": "TEXT",
     }
 
     for column, column_type in desired_columns.items():
@@ -149,8 +150,9 @@ def save_analysis_result(result: dict, query: str):
                 normalized_claims,
                 source_candidates,
                 source_queries,
+                source_reliability_summary,
                 created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 query,
@@ -201,6 +203,10 @@ def save_analysis_result(result: dict, query: str):
                 _serialize_json_value(
                     verification_card.get("source_queries")
                     or result.get("source_queries")
+                ),
+                _serialize_json_value(
+                    verification_card.get("source_reliability_summary")
+                    or result.get("source_reliability_summary")
                 ),
                 created_at,
             ),
