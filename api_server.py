@@ -48,6 +48,8 @@ class AnalyzeResult(BaseModel):
     normalized_claims: list = []
     source_candidates: list = []
     source_queries: list = []
+    evidence_snippets: list = []
+    claim_evidence_map: dict = {}
     policy_confidence: dict
     policy_impact: dict
     final_decision: dict
@@ -113,6 +115,8 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
                 normalized_claims=api_result.get("normalized_claims") or [],
                 source_candidates=api_result.get("source_candidates") or [],
                 source_queries=api_result.get("source_queries") or [],
+                evidence_snippets=api_result.get("evidence_snippets") or [],
+                claim_evidence_map=api_result.get("claim_evidence_map") or {},
                 policy_confidence=api_result.get("policy_confidence") or {},
                 policy_impact=api_result.get("policy_impact") or {},
                 final_decision=api_result.get("final_decision") or {},

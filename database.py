@@ -63,6 +63,9 @@ def _ensure_columns(connection):
         "source_candidates": "TEXT",
         "source_queries": "TEXT",
         "source_reliability_summary": "TEXT",
+        "evidence_snippets": "TEXT",
+        "claim_evidence_map": "TEXT",
+        "evidence_extraction_summary": "TEXT",
     }
 
     for column, column_type in desired_columns.items():
@@ -151,8 +154,11 @@ def save_analysis_result(result: dict, query: str):
                 source_candidates,
                 source_queries,
                 source_reliability_summary,
+                evidence_snippets,
+                claim_evidence_map,
+                evidence_extraction_summary,
                 created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 query,
@@ -207,6 +213,18 @@ def save_analysis_result(result: dict, query: str):
                 _serialize_json_value(
                     verification_card.get("source_reliability_summary")
                     or result.get("source_reliability_summary")
+                ),
+                _serialize_json_value(
+                    verification_card.get("evidence_snippets")
+                    or result.get("evidence_snippets")
+                ),
+                _serialize_json_value(
+                    verification_card.get("claim_evidence_map")
+                    or result.get("claim_evidence_map")
+                ),
+                _serialize_json_value(
+                    verification_card.get("evidence_extraction_summary")
+                    or result.get("evidence_extraction_summary")
                 ),
                 created_at,
             ),
