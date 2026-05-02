@@ -5,6 +5,7 @@ import re
 from source_reliability_agent import summarize_source_reliability
 from evidence_extraction_agent import summarize_evidence_snippets
 from contradiction_agent import summarize_contradiction_checks
+from bias_framing_agent import summarize_bias_framing
 
 
 OFFICIAL_GOVERNMENT_TYPES = {
@@ -186,6 +187,7 @@ def _verdict_label(
     official_sources: list[dict],
     evidence_snippets: list[dict] | None = None,
     contradiction_summary: dict | None = None,
+    bias_framing_summary: dict | None = None,
     claim_count: int = 0,
 ) -> str:
     confidence_score = int(policy_confidence.get("policy_confidence_score") or 0)
@@ -201,12 +203,18 @@ def _verdict_label(
         return "draft_disputed"
 
     contradiction = contradiction_summary or {}
+    bias = bias_framing_summary or {}
     possible_count = int(contradiction.get("possible_contradiction_count") or 0)
     likely_count = int(contradiction.get("likely_contradiction_count") or 0)
+    high_framing_count = int(bias.get("high_framing_count") or 0)
     official_confirmation_count = int(
         contradiction.get("needs_official_confirmation_count") or 0
     )
     insufficient_claim_count = int(contradiction.get("insufficient_evidence_count") or 0)
+    if high_framing_count and (possible_count or likely_count):
+        return "draft_high_risk_review"
+    if high_framing_count:
+        return "draft_needs_review"
     if possible_count or likely_count:
         return "draft_needs_review"
     if claim_count and official_confirmation_count >= max(1, claim_count // 2):
@@ -285,6 +293,8 @@ def build_verification_card(
     claim_evidence_map: dict | None = None,
     contradiction_checks: list[dict] | None = None,
     contradiction_summary: dict | None = None,
+    bias_framing_analysis: list[dict] | None = None,
+    bias_framing_summary: dict | None = None,
 ) -> dict:
     official_sources = _official_evidence_sources(official_evidence_results)
     evidence_sources = official_sources + [_news_source(news, original_url)]
@@ -294,12 +304,20 @@ def build_verification_card(
     claim_text = (
         claim_list[0]
         if claim_list
-        else _first_policy_claim(
+            else _first_policy_claim(
             policy_claims,
             news.get("title") or "",
             news.get("summary") or "",
             article_body,
         )
+    )
+    final_contradiction_summary = (
+        contradiction_summary
+        or summarize_contradiction_checks(contradiction_checks or [])
+    )
+    final_bias_summary = (
+        bias_framing_summary
+        or summarize_bias_framing(bias_framing_analysis or [])
     )
 
     return {
@@ -313,19 +331,16 @@ def build_verification_card(
         "claim_evidence_map": claim_evidence_map or {},
         "evidence_extraction_summary": summarize_evidence_snippets(evidence_snippets or []),
         "contradiction_checks": contradiction_checks or [],
-        "contradiction_summary": (
-            contradiction_summary
-            or summarize_contradiction_checks(contradiction_checks or [])
-        ),
+        "contradiction_summary": final_contradiction_summary,
+        "bias_framing_analysis": bias_framing_analysis or [],
+        "bias_framing_summary": final_bias_summary,
         "verdict_label": _verdict_label(
             policy_confidence,
             evidence_comparison,
             official_sources,
             evidence_snippets=evidence_snippets or [],
-            contradiction_summary=(
-                contradiction_summary
-                or summarize_contradiction_checks(contradiction_checks or [])
-            ),
+            contradiction_summary=final_contradiction_summary,
+            bias_framing_summary=final_bias_summary,
             claim_count=len(claim_list or [claim_text]),
         ),
         "verdict_confidence": verdict_confidence,
@@ -372,6 +387,8 @@ def print_verification_card(card: dict):
     print("evidence_extraction_summary:", card.get("evidence_extraction_summary"))
     print("contradiction_checks:", len(card.get("contradiction_checks") or []))
     print("contradiction_summary:", card.get("contradiction_summary"))
+    print("bias_framing_analysis:", len(card.get("bias_framing_analysis") or []))
+    print("bias_framing_summary:", card.get("bias_framing_summary"))
     print("verdict_label:", card.get("verdict_label"))
     print("verdict_confidence:", card.get("verdict_confidence"))
     print("source_reliability_score:", card.get("source_reliability_score"))

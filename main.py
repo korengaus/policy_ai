@@ -26,6 +26,7 @@ from source_retrieval_agent import build_source_retrieval_context
 from source_reliability_agent import evaluate_source_candidates
 from evidence_extraction_agent import extract_evidence_snippets
 from contradiction_agent import run_contradiction_checks
+from bias_framing_agent import analyze_bias_framing
 from official_crawler import fetch_official_evidence, print_official_evidence_results
 from evidence_comparator import (
     compare_news_with_official_evidence,
@@ -276,6 +277,18 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
         )
         contradiction_checks = contradiction_result.get("contradiction_checks", [])
         contradiction_summary = contradiction_result.get("contradiction_summary", {})
+        bias_framing_result = analyze_bias_framing(
+            normalized_claims=normalized_claims,
+            news_title=news.get("title") or "",
+            news_summary=news.get("summary") or "",
+            article_body=article_body,
+            source_candidates=source_candidates,
+            evidence_snippets=evidence_snippets,
+            claim_evidence_map=claim_evidence_map,
+            contradiction_checks=contradiction_checks,
+        )
+        bias_framing_analysis = bias_framing_result.get("bias_framing_analysis", [])
+        bias_framing_summary = bias_framing_result.get("bias_framing_summary", {})
 
         official_evidence_results = fetch_official_evidence(
             official_source_candidates,
@@ -339,6 +352,8 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
             claim_evidence_map=claim_evidence_map,
             contradiction_checks=contradiction_checks,
             contradiction_summary=contradiction_summary,
+            bias_framing_analysis=bias_framing_analysis,
+            bias_framing_summary=bias_framing_summary,
         )
         print_verification_card(verification_card)
 
@@ -403,6 +418,8 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
                 "claim_evidence_map": claim_evidence_map,
                 "contradiction_checks": contradiction_checks,
                 "contradiction_summary": contradiction_summary,
+                "bias_framing_analysis": bias_framing_analysis,
+                "bias_framing_summary": bias_framing_summary,
                 "policy_claims": policy_claims,
                 "official_source_candidates": official_source_candidates,
                 "official_evidence_results": official_evidence_results,
@@ -426,6 +443,8 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
                     "claim_evidence_map": claim_evidence_map,
                     "contradiction_checks": contradiction_checks,
                     "contradiction_summary": contradiction_summary,
+                    "bias_framing_analysis": bias_framing_analysis,
+                    "bias_framing_summary": bias_framing_summary,
                     "policy_sentences": policy_claims,
                     "official_sources": official_source_candidates,
                     "evidence_comparison": evidence_comparison,

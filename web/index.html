@@ -738,6 +738,7 @@
       ai_draft_pending_human_review: "AI 초안, 사람 검토 대기",
     };
     VERDICT_LABELS.draft_needs_review = "사람 검토 필요";
+    VERDICT_LABELS.draft_high_risk_review = "고위험 검토 필요";
 
     const SOURCE_TYPE_LABELS = {
       official_government: "공식 정부기관",
@@ -1121,6 +1122,77 @@
       }).join("")}</div>`;
     }
 
+    function formatFramingLevel(value) {
+      const labels = {
+        low: "낮음",
+        medium: "보통",
+        high: "높음",
+      };
+      return labels[value] ? `${labels[value]}(${value})` : value || "-";
+    }
+
+    function formatBiasDirection(value) {
+      const labels = {
+        neutral: "중립",
+        pro_policy: "정책 우호",
+        anti_policy: "정책 비판",
+        pro_market: "시장 우호",
+        anti_market: "시장 비판",
+        pro_government: "정부 우호",
+        anti_government: "정부 비판",
+        unclear: "불명확",
+      };
+      return labels[value] ? `${labels[value]}(${value})` : value || "-";
+    }
+
+    function renderBiasFramingSummary(summary) {
+      const data = summary || {};
+      return `
+        <div class="evidence-extraction-summary">
+          <div class="evidence-extraction-tile">
+            <span class="label">프레이밍 위험 수</span><br>${escapeHtml(data.high_framing_count ?? 0)}
+          </div>
+          <div class="evidence-extraction-tile">
+            <span class="label">감정 표현 수</span><br>${escapeHtml(data.emotional_language_count ?? 0)}
+          </div>
+          <div class="evidence-extraction-tile">
+            <span class="label">불확실 표현 수</span><br>${escapeHtml(data.uncertainty_language_count ?? 0)}
+          </div>
+          <div class="evidence-extraction-tile">
+            <span class="label">편집자 검토 필요</span><br>${Number(data.editor_review_needed_count || 0) > 0 ? "필요" : "낮음"}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderBiasFramingAnalysis(claims, biasFramingAnalysis) {
+      const claimList = Array.isArray(claims) ? claims : [];
+      const analyses = Array.isArray(biasFramingAnalysis) ? biasFramingAnalysis : [];
+      if (!analyses.length) {
+        return '<div class="evidence-source-meta">표시할 프레이밍/편향 검사 결과가 없습니다.</div>';
+      }
+
+      return `<div class="evidence-snippet-list">${claimList.map((claim, index) => {
+        const analysis = analyses.find((item) => Number(item.claim_index) === index) || {};
+        return `
+          <div class="evidence-snippet">
+            <div class="normalized-claim-text">claim #${index + 1}: ${escapeHtml(claim || analysis.claim_text || "-")}</div>
+            <div class="evidence-snippet-grid">
+              <div><span class="label">프레이밍 수준</span><br>${escapeHtml(formatFramingLevel(analysis.framing_level))}</div>
+              <div><span class="label">프레이밍 점수</span><br>${escapeHtml(analysis.framing_score ?? "-")}</div>
+              <div><span class="label">편향 방향</span><br>${escapeHtml(formatBiasDirection(analysis.bias_direction))}</div>
+              <div><span class="label">편집자 검토</span><br>${analysis.needs_editor_review ? "필요" : "낮음"}</div>
+              <div><span class="label">감정 표현</span><br>${analysis.emotional_language_detected ? "감지됨" : "낮음"}</div>
+              <div><span class="label">자극 표현</span><br>${escapeHtml(formatList(analysis.sensational_phrases))}</div>
+              <div><span class="label">불확실 표현</span><br>${escapeHtml(formatList(analysis.uncertainty_language))}</div>
+              <div><span class="label">loaded terms</span><br>${escapeHtml(formatList(analysis.loaded_terms))}</div>
+            </div>
+            <div class="evidence-snippet-text">${escapeHtml(analysis.framing_reason || "-")}</div>
+          </div>
+        `;
+      }).join("")}</div>`;
+    }
+
     function renderEvidenceSnippets(claims, evidenceSnippets) {
       const claimList = Array.isArray(claims) ? claims : [];
       const snippets = Array.isArray(evidenceSnippets) ? evidenceSnippets : [];
@@ -1270,6 +1342,8 @@
         const evidenceExtractionSummary = verification.evidence_extraction_summary || {};
         const contradictionChecks = verification.contradiction_checks || result.contradiction_checks || [];
         const contradictionSummary = verification.contradiction_summary || result.contradiction_summary || {};
+        const biasFramingAnalysis = verification.bias_framing_analysis || result.bias_framing_analysis || [];
+        const biasFramingSummary = verification.bias_framing_summary || result.bias_framing_summary || {};
         const level = String(decision.policy_alert_level || "WATCH").toUpperCase();
         const title = escapeHtml(result.title);
         const url = escapeHtml(result.original_url);
@@ -1327,6 +1401,7 @@
               ${renderSourceReliabilitySummary(sourceReliabilitySummary)}
               ${renderEvidenceExtractionSummary(evidenceExtractionSummary)}
               ${renderContradictionSummary(contradictionSummary)}
+              ${renderBiasFramingSummary(biasFramingSummary)}
               <div class="verification-grid">
                 <div class="verification-item full">
                   <span class="label">핵심 주장</span><br>
@@ -1347,6 +1422,10 @@
                 <div class="verification-item full">
                   <span class="label">반박/모순 검사</span>
                   ${renderContradictionChecks(claims, contradictionChecks)}
+                </div>
+                <div class="verification-item full">
+                  <span class="label">프레이밍/편향 검사</span>
+                  ${renderBiasFramingAnalysis(claims, biasFramingAnalysis)}
                 </div>
                 <div class="verification-item full">
                   <span class="label">출처 탐색 후보</span>

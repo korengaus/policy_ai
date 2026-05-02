@@ -68,6 +68,8 @@ def _ensure_columns(connection):
         "evidence_extraction_summary": "TEXT",
         "contradiction_checks": "TEXT",
         "contradiction_summary": "TEXT",
+        "bias_framing_analysis": "TEXT",
+        "bias_framing_summary": "TEXT",
     }
 
     for column, column_type in desired_columns.items():
@@ -161,8 +163,10 @@ def save_analysis_result(result: dict, query: str):
                 evidence_extraction_summary,
                 contradiction_checks,
                 contradiction_summary,
+                bias_framing_analysis,
+                bias_framing_summary,
                 created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 query,
@@ -237,6 +241,14 @@ def save_analysis_result(result: dict, query: str):
                 _serialize_json_value(
                     verification_card.get("contradiction_summary")
                     or result.get("contradiction_summary")
+                ),
+                _serialize_json_value(
+                    verification_card.get("bias_framing_analysis")
+                    or result.get("bias_framing_analysis")
+                ),
+                _serialize_json_value(
+                    verification_card.get("bias_framing_summary")
+                    or result.get("bias_framing_summary")
                 ),
                 created_at,
             ),
