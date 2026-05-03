@@ -389,6 +389,7 @@ def print_verification_card(card: dict):
     print("contradiction_summary:", card.get("contradiction_summary"))
     print("bias_framing_analysis:", len(card.get("bias_framing_analysis") or []))
     print("bias_framing_summary:", card.get("bias_framing_summary"))
+    print("debug_summary:", card.get("debug_summary"))
     print("verdict_label:", card.get("verdict_label"))
     print("verdict_confidence:", card.get("verdict_confidence"))
     print("source_reliability_score:", card.get("source_reliability_score"))

@@ -70,6 +70,7 @@ def _ensure_columns(connection):
         "contradiction_summary": "TEXT",
         "bias_framing_analysis": "TEXT",
         "bias_framing_summary": "TEXT",
+        "debug_summary": "TEXT",
     }
 
     for column, column_type in desired_columns.items():
@@ -165,8 +166,9 @@ def save_analysis_result(result: dict, query: str):
                 contradiction_summary,
                 bias_framing_analysis,
                 bias_framing_summary,
+                debug_summary,
                 created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 query,
@@ -249,6 +251,10 @@ def save_analysis_result(result: dict, query: str):
                 _serialize_json_value(
                     verification_card.get("bias_framing_summary")
                     or result.get("bias_framing_summary")
+                ),
+                _serialize_json_value(
+                    verification_card.get("debug_summary")
+                    or result.get("debug_summary")
                 ),
                 created_at,
             ),

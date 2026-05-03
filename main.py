@@ -38,6 +38,7 @@ from policy_decision import make_final_decision, print_final_decision
 from topic_classifier import classify_policy_topic
 from timeline import print_timeline_summary
 from verification_card import build_verification_card, print_verification_card
+from pipeline_debug import build_pipeline_debug_summary
 
 
 REPORTS_DIR = Path("reports")
@@ -355,6 +356,19 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
             bias_framing_analysis=bias_framing_analysis,
             bias_framing_summary=bias_framing_summary,
         )
+        debug_summary = build_pipeline_debug_summary(
+            news=news,
+            original_url=original_url,
+            claims=claims,
+            normalized_claims=normalized_claims,
+            source_candidates=source_candidates,
+            official_source_candidates=official_source_candidates,
+            evidence_snippets=evidence_snippets,
+            contradiction_checks=contradiction_checks,
+            bias_framing_analysis=bias_framing_analysis,
+            verification_card=verification_card,
+        )
+        verification_card["debug_summary"] = debug_summary
         print_verification_card(verification_card)
 
         ai_result = run_ai_reasoning(
@@ -428,6 +442,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
                 "policy_impact": policy_impact,
                 "final_decision": final_decision,
                 "verification_card": verification_card,
+                "debug_summary": debug_summary,
                 "ai_result": ai_result,
                 "saved_to_memory": saved_to_memory,
                 "duplicate": duplicate,
@@ -452,6 +467,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
                     "policy_impact": policy_impact,
                     "final_decision": final_decision,
                     "verification_card": verification_card,
+                    "debug_summary": debug_summary,
                     "claim_text": verification_card.get("claim_text"),
                     "verdict_label": verification_card.get("verdict_label"),
                     "verdict_confidence": verification_card.get("verdict_confidence"),

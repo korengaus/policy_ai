@@ -54,6 +54,7 @@ class AnalyzeResult(BaseModel):
     contradiction_summary: dict = {}
     bias_framing_analysis: list = []
     bias_framing_summary: dict = {}
+    debug_summary: dict = {}
     policy_confidence: dict
     policy_impact: dict
     final_decision: dict
@@ -125,6 +126,7 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
                 contradiction_summary=api_result.get("contradiction_summary") or {},
                 bias_framing_analysis=api_result.get("bias_framing_analysis") or [],
                 bias_framing_summary=api_result.get("bias_framing_summary") or {},
+                debug_summary=api_result.get("debug_summary") or {},
                 policy_confidence=api_result.get("policy_confidence") or {},
                 policy_impact=api_result.get("policy_impact") or {},
                 final_decision=api_result.get("final_decision") or {},

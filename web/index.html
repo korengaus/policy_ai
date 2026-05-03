@@ -507,6 +507,48 @@
       margin-top: 5px;
     }
 
+    .pipeline-debug {
+      border: 1px solid #d1d5db;
+      border-radius: 10px;
+      background: #ffffff;
+      margin: 10px 0 14px;
+      padding: 12px;
+    }
+
+    .pipeline-debug-title {
+      font-weight: 900;
+      margin-bottom: 8px;
+    }
+
+    .pipeline-debug-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      font-size: 13px;
+    }
+
+    .debug-status {
+      border-radius: 999px;
+      display: inline-flex;
+      font-weight: 900;
+      padding: 3px 8px;
+    }
+
+    .debug-ok {
+      background: #dcfce7;
+      color: #166534;
+    }
+
+    .debug-partial {
+      background: #fef3c7;
+      color: #92400e;
+    }
+
+    .debug-missing {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
     .source-link {
       font-size: 13px;
       word-break: break-all;
@@ -585,7 +627,8 @@
       }
 
       .evidence-extraction-summary,
-      .evidence-snippet-grid {
+      .evidence-snippet-grid,
+      .pipeline-debug-grid {
         grid-template-columns: 1fr 1fr;
       }
 
@@ -1193,6 +1236,56 @@
       }).join("")}</div>`;
     }
 
+    function debugState(ok, count) {
+      if (ok) return { label: "ok", className: "debug-ok" };
+      if (Number(count || 0) > 0) return { label: "partial", className: "debug-partial" };
+      return { label: "missing", className: "debug-missing" };
+    }
+
+    function renderDebugBadge(label, ok, count) {
+      const state = debugState(ok, count);
+      return `
+        <div class="evidence-extraction-tile">
+          <span class="label">${escapeHtml(label)}</span><br>
+          <span class="debug-status ${state.className}">${state.label}</span>
+          <div class="evidence-source-meta">count: ${escapeHtml(count ?? "-")}</div>
+        </div>
+      `;
+    }
+
+    function renderPipelineDebugSummary(summary) {
+      const data = summary || {};
+      const missing = Array.isArray(data.missing_steps) && data.missing_steps.length
+        ? data.missing_steps.join(", ")
+        : "없음";
+      return `
+        <div class="pipeline-debug">
+          <div class="pipeline-debug-title">Pipeline Debug Summary</div>
+          <div class="pipeline-debug-grid">
+            ${renderDebugBadge("intake", data.intake_ok, data.intake_ok ? 1 : 0)}
+            ${renderDebugBadge("claim extraction", data.claim_extraction_ok, data.claims_count)}
+            ${renderDebugBadge("claim normalization", data.claim_normalization_ok, data.normalized_claims_count)}
+            ${renderDebugBadge("source retrieval", data.source_retrieval_ok, data.evidence_candidates_count)}
+            ${renderDebugBadge("evidence matching", data.evidence_matching_ok, data.direct_evidence_count)}
+            ${renderDebugBadge("contradiction", data.contradiction_check_ok, data.contradiction_checks_count)}
+            ${renderDebugBadge("bias/framing", data.bias_framing_ok, data.framing_flags_count)}
+            <div class="evidence-extraction-tile">
+              <span class="label">human review</span><br>
+              <span class="debug-status ${data.needs_human_review ? "debug-partial" : "debug-ok"}">
+                ${data.needs_human_review ? "needed" : "not needed"}
+              </span>
+              <div class="evidence-source-meta">verdict: ${escapeHtml(data.overall_verdict || "-")}</div>
+            </div>
+          </div>
+          <div class="evidence-source-meta">
+            official sources: ${escapeHtml(data.official_sources_count ?? 0)}
+            · news sources: ${escapeHtml(data.news_sources_count ?? 0)}
+            · missing steps: ${escapeHtml(missing)}
+          </div>
+        </div>
+      `;
+    }
+
     function renderEvidenceSnippets(claims, evidenceSnippets) {
       const claimList = Array.isArray(claims) ? claims : [];
       const snippets = Array.isArray(evidenceSnippets) ? evidenceSnippets : [];
@@ -1344,6 +1437,7 @@
         const contradictionSummary = verification.contradiction_summary || result.contradiction_summary || {};
         const biasFramingAnalysis = verification.bias_framing_analysis || result.bias_framing_analysis || [];
         const biasFramingSummary = verification.bias_framing_summary || result.bias_framing_summary || {};
+        const debugSummary = verification.debug_summary || result.debug_summary || {};
         const level = String(decision.policy_alert_level || "WATCH").toUpperCase();
         const title = escapeHtml(result.title);
         const url = escapeHtml(result.original_url);
@@ -1398,6 +1492,7 @@
             <div class="decision-summary">${escapeHtml(decision.decision_summary)}</div>
             <section class="verification-card">
               <h3>검증 카드</h3>
+              ${renderPipelineDebugSummary(debugSummary)}
               ${renderSourceReliabilitySummary(sourceReliabilitySummary)}
               ${renderEvidenceExtractionSummary(evidenceExtractionSummary)}
               ${renderContradictionSummary(contradictionSummary)}
