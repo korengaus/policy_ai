@@ -9,6 +9,8 @@ from official_site_parsers import (
 from urllib.parse import urljoin, urlparse
 import re
 
+from text_utils import sanitize_data, sanitize_text
+
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -49,15 +51,16 @@ def fetch_rendered_page(url: str, timeout_ms: int = 15000) -> dict:
             page.wait_for_timeout(1000)
 
             result["status_code"] = response.status if response else None
-            result["title"] = page.title()
-            result["html"] = page.content()[:500000]
-            result["text"] = page.locator("body").inner_text(timeout=5000)[:50000]
+            result["title"] = sanitize_text(page.title())
+            result["html"] = sanitize_text(page.content())[:500000]
+            result["text"] = sanitize_text(page.locator("body").inner_text(timeout=5000))[:50000]
             result["raw_links"] = page.evaluate(
                 """() => Array.from(document.querySelectorAll('a[href]')).map((a) => ({
                     href: a.href || a.getAttribute('href') || '',
                     text: (a.innerText || a.textContent || '').trim()
                 }))"""
             )
+            result["raw_links"] = sanitize_data(result["raw_links"])
             result["rendered"] = True
 
             context.close()
@@ -243,7 +246,7 @@ def extract_rendered_links(
         except Exception as exc:
             rendered_page["error"] = str(exc)
 
-    return {
+    return sanitize_data({
         "rendered_used": bool(rendered_page.get("rendered")),
         "rendered_status_code": rendered_page.get("status_code"),
         "rendered_title": rendered_page.get("title"),
@@ -258,4 +261,4 @@ def extract_rendered_links(
         "rendered_rejected_links_count": rejected_links_count,
         "rendered_parser_used": parser_used,
         "rendered_error": rendered_page.get("error"),
-    }
+    })

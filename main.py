@@ -39,6 +39,7 @@ from topic_classifier import classify_policy_topic
 from timeline import print_timeline_summary
 from verification_card import build_verification_card, print_verification_card
 from pipeline_debug import build_pipeline_debug_summary
+from text_utils import sanitize_data, sanitize_text
 
 
 REPORTS_DIR = Path("reports")
@@ -173,8 +174,8 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
     save_policy_memory(memory)
 
     news_collection = search_google_news_rss_with_meta(query, max_results=max_news)
-    news_results = news_collection.get("results", [])
-    news_collection_debug = news_collection.get("debug", {})
+    news_results = sanitize_data(news_collection.get("results", []))
+    news_collection_debug = sanitize_data(news_collection.get("debug", {}))
 
     if not news_results:
         print("No news found in the recent window.")
@@ -211,7 +212,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
         duplicate = article_id in existing_ids
 
         print("\n----- Fetch article body -----")
-        article_body = fetch_article_body(original_url, max_chars=MAX_ARTICLE_CHARS)
+        article_body = sanitize_text(fetch_article_body(original_url, max_chars=MAX_ARTICLE_CHARS))
         print(article_body[:1000])
 
         claims = extract_verifiable_claims(
@@ -369,6 +370,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
             verification_card=verification_card,
         )
         verification_card["debug_summary"] = debug_summary
+        verification_card = sanitize_data(verification_card)
         print_verification_card(verification_card)
 
         ai_result = run_ai_reasoning(
@@ -418,7 +420,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
             duplicate_count += 1
 
         report_items.append(
-            {
+            sanitize_data({
                 "title": news.get("title"),
                 "published": news.get("published"),
                 "original_url": original_url,
@@ -479,7 +481,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
                     "last_checked_at": verification_card.get("last_checked_at"),
                     "review_status": verification_card.get("review_status"),
                 },
-            }
+            })
         )
 
         if not ai_result.get("ai_available"):
@@ -491,7 +493,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
     print_timeline_summary(memory)
 
     run_finished_at = utc_now_iso()
-    report = {
+    report = sanitize_data({
         "run_started_at": run_started_at,
         "run_finished_at": run_finished_at,
         "query": query,
@@ -501,7 +503,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
         "news_collection_debug": news_collection_debug,
         "topics_summary": build_topics_summary(memory),
         "news_results": report_items,
-    }
+    })
     report_path = save_run_report(report, run_started_at)
     print("\nSaved run report:", report_path)
     report["report_path"] = str(report_path)

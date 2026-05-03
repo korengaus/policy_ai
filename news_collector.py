@@ -8,6 +8,7 @@ from urllib.parse import quote, urljoin, urlparse
 from googlenewsdecoder import gnewsdecoder
 
 from config import RECENT_DAYS
+from text_utils import decode_response_text, sanitize_data, sanitize_text
 
 
 REQUEST_HEADERS = {
@@ -116,7 +117,7 @@ NEWS_LINK_SELECTORS = [
 
 def clean_html(raw_html: str) -> str:
     soup = BeautifulSoup(raw_html or "", "html.parser")
-    return soup.get_text(" ", strip=True)
+    return sanitize_text(soup.get_text(" ", strip=True))
 
 
 def _normalize_spaces(text: str) -> str:
@@ -276,7 +277,7 @@ def _summary_from_container(container) -> str:
 
 
 def _fallback_item(title: str, link: str, summary: str, source: str) -> dict:
-    return {
+    return sanitize_data({
         "title": _normalize_spaces(title),
         "summary": _normalize_spaces(summary),
         "google_link": link,
@@ -285,7 +286,7 @@ def _fallback_item(title: str, link: str, summary: str, source: str) -> dict:
         "published": _utc_now_rfc2822(),
         "published_at": datetime.now(timezone.utc).isoformat(),
         "source": source,
-    }
+    })
 
 
 def _dedupe_news_items(items: list[dict]) -> list[dict]:
@@ -423,13 +424,13 @@ def _utc_now_rfc2822() -> str:
 
 
 def _entry_to_news(entry) -> dict:
-    return {
+    return sanitize_data({
         "title": clean_html(entry.get("title", "")),
         "summary": clean_html(entry.get("summary", "")),
         "google_link": entry.get("link", ""),
         "published": entry.get("published", ""),
         "source": "google_rss",
-    }
+    })
 
 
 def search_naver_news_fallback(query: str, max_results: int = 3) -> tuple[list[dict], str | None]:
@@ -437,7 +438,8 @@ def search_naver_news_fallback(query: str, max_results: int = 3) -> tuple[list[d
         url = f"https://search.naver.com/search.naver?where=news&query={quote(query)}"
         response = requests.get(url, headers=REQUEST_HEADERS, timeout=10)
         response.raise_for_status()
-        soup = BeautifulSoup(response.text, "html.parser")
+        html, _encoding = decode_response_text(response)
+        soup = BeautifulSoup(html, "html.parser")
         items = []
         raw_candidates = []
 
@@ -475,7 +477,8 @@ def search_daum_news_fallback(query: str, max_results: int = 3) -> tuple[list[di
         url = f"https://search.daum.net/search?w=news&q={quote(query)}"
         response = requests.get(url, headers=REQUEST_HEADERS, timeout=10)
         response.raise_for_status()
-        soup = BeautifulSoup(response.text, "html.parser")
+        html, _encoding = decode_response_text(response)
+        soup = BeautifulSoup(html, "html.parser")
         items = []
         raw_candidates = []
 
@@ -581,6 +584,7 @@ def search_google_news_rss_with_meta(query: str, max_results: int = 3):
 
     print(f"[NewsCollector] Selected news count: {len(selected)}")
     print(f"[NewsCollector] Collection source: {collection_source}")
+    selected = sanitize_data(selected)
 
     return {
         "results": selected,

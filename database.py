@@ -3,6 +3,8 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+from text_utils import sanitize_data, sanitize_text
+
 
 DB_PATH = Path("policy_ai.db")
 
@@ -81,6 +83,7 @@ def _ensure_columns(connection):
 
 
 def _serialize_market_signal(value) -> str:
+    value = sanitize_data(value)
     if isinstance(value, (list, dict)):
         return json.dumps(value, ensure_ascii=False)
     if value is None:
@@ -89,6 +92,7 @@ def _serialize_market_signal(value) -> str:
 
 
 def _serialize_json_value(value) -> str:
+    value = sanitize_data(value)
     if value is None:
         return ""
     if isinstance(value, str):
@@ -115,6 +119,8 @@ def result_exists_by_url(original_url: str) -> bool:
 
 
 def save_analysis_result(result: dict, query: str):
+    result = sanitize_data(result)
+    query = sanitize_text(query)
     original_url = result.get("original_url")
     if result_exists_by_url(original_url):
         return {"saved": False, "duplicate": True, "id": None}

@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from database import get_recent_results, get_result_by_id, init_db, save_analysis_result
 from main import analyze_pipeline
+from text_utils import sanitize_data
 
 
 logging.basicConfig(level=logging.INFO)
@@ -110,6 +111,7 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
         api_result = item.get("api_result") or {}
         if not api_result:
             continue
+        api_result = sanitize_data(api_result)
 
         results.append(
             AnalyzeResult(

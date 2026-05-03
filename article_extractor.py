@@ -4,6 +4,8 @@ import requests
 import trafilatura
 from bs4 import BeautifulSoup
 
+from text_utils import sanitize_text
+
 
 REQUEST_HEADERS = {
     "User-Agent": (
@@ -45,6 +47,7 @@ SPECIAL_SEQUENCE_PATTERN = re.compile(r"[^가-힣A-Za-z0-9\s.,!?%·…~()\[\]{}<
 
 
 def _normalize_text(text: str) -> str:
+    text = sanitize_text(text)
     text = re.sub(r"[\u200b-\u200f\ufeff]", "", text or "")
     text = re.sub(r"[ \t\r\f\v]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)

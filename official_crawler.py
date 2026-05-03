@@ -1,4 +1,4 @@
-import re
+﻿import re
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -13,6 +13,7 @@ from official_site_parsers import (
 from official_document_classifier import EXCLUDED_DOCUMENT_TYPES, classify_official_document
 from official_relevance import score_document_relevance
 from official_source_search import build_official_search_url
+from text_utils import decode_response_text, sanitize_data, sanitize_text
 
 try:
     from official_browser_crawler import extract_rendered_links
@@ -172,6 +173,12 @@ def _request_url(url: str):
     raise last_error
 
 
+def _response_text(response) -> str:
+    text, encoding = decode_response_text(response)
+    response.encoding = encoding
+    return text
+
+
 def _clean_soup(html: str) -> BeautifulSoup:
     soup = BeautifulSoup(html or "", "html.parser")
 
@@ -182,7 +189,7 @@ def _clean_soup(html: str) -> BeautifulSoup:
 
 
 def _normalize_text(value) -> str:
-    return " ".join(str(value or "").split()).strip()
+    return sanitize_text(" ".join(str(value or "").split()).strip())
 
 
 def _extract_html_text(html: str, max_chars: int = 1500) -> tuple[str | None, str]:
@@ -310,7 +317,7 @@ def fetch_official_page(url: str) -> dict:
         result["status_code"] = response.status_code
         response.raise_for_status()
 
-        title, text_snippet = _extract_html_text(response.text, max_chars=1500)
+        title, text_snippet = _extract_html_text(_response_text(response), max_chars=1500)
         result["title"] = title
         result["text_snippet"] = text_snippet
         result["fetched"] = True
@@ -792,7 +799,7 @@ def fetch_best_official_document(search_result: dict, news_context: dict | None 
         result["fetched_search_page"] = True
 
         search_title, search_text_snippet = _extract_html_text(
-            search_response.text,
+            _response_text(search_response),
             max_chars=1500,
         )
         result["title"] = search_title
@@ -801,11 +808,11 @@ def fetch_best_official_document(search_result: dict, news_context: dict | None 
         result["fetched"] = True
         result["status_code"] = search_response.status_code
         result["rejected_links_count"] = _count_rejected_links(
-            search_response.text,
+            _response_text(search_response),
             search_url,
         )
 
-        if result["site_key"] == "fss" and "에러페이지" in (search_title or ""):
+        if result["site_key"] == "fss" and "?먮윭?섏씠吏" in (search_title or ""):
             result["search_attempt_count"] = max(result.get("search_attempt_count") or 0, 1)
             result["search_attempt_results"].append(
                 {
@@ -823,7 +830,7 @@ def fetch_best_official_document(search_result: dict, news_context: dict | None 
             return result
 
         candidate_links, parser_used = _extract_candidate_links(
-            search_html=search_response.text,
+            search_html=_response_text(search_response),
             search_url=search_url,
             source_name=search_result.get("source_name") or "",
             query=search_result.get("search_query") or "",
@@ -923,18 +930,18 @@ def fetch_best_official_document(search_result: dict, news_context: dict | None 
                     attempt_response.raise_for_status()
                     attempt_result["fetched"] = True
                     attempt_title, attempt_text_snippet = _extract_html_text(
-                        attempt_response.text,
+                        _response_text(attempt_response),
                         max_chars=1500,
                     )
                     attempt_result["title"] = attempt_title
 
-                    if result["site_key"] == "fss" and "?먮윭?섏씠吏" in (attempt_title or ""):
+                    if result["site_key"] == "fss" and "?癒?쑎??륁뵠筌왖" in (attempt_title or ""):
                         attempt_result["error"] = "FSS search returned error page"
                         result["search_attempt_results"].append(attempt_result)
                         continue
 
                     attempt_candidate_links, attempt_parser_used = _extract_candidate_links(
-                        search_html=attempt_response.text,
+                        search_html=_response_text(attempt_response),
                         search_url=attempt_url,
                         source_name=search_result.get("source_name") or "",
                         query=attempt_query,
@@ -1006,7 +1013,7 @@ def fetch_best_official_document(search_result: dict, news_context: dict | None 
                         result["text_snippet"] = attempt_text_snippet
                         result["fetched"] = True
                         result["status_code"] = attempt_response.status_code
-                        result["rejected_links_count"] = _count_rejected_links(attempt_response.text, attempt_url)
+                        result["rejected_links_count"] = _count_rejected_links(_response_text(attempt_response), attempt_url)
                         result["browser_fallback_used"] = bool(attempt_rendered.get("rendered_used"))
                         result["rendered_links_count"] = attempt_rendered.get("rendered_links_count", 0)
                         result["rendered_candidate_links_count"] = attempt_rendered.get(
@@ -1089,7 +1096,7 @@ def fetch_best_official_document(search_result: dict, news_context: dict | None 
                 document_response = _request_url(candidate.get("url"))
                 document_status_code = document_response.status_code
                 document_response.raise_for_status()
-                content = _extract_document_content(document_response.text, max_chars=4000)
+                content = _extract_document_content(_response_text(document_response), max_chars=4000)
                 content = _apply_candidate_title_fallback(
                     content,
                     candidate,
@@ -1248,7 +1255,9 @@ def fetch_official_evidence(candidates: list, max_candidates: int = 3, news_cont
     evidence_results = []
 
     for candidate in candidates[:max_candidates]:
-        evidence_results.append(fetch_best_official_document(candidate, news_context=news_context))
+        evidence_results.append(
+            sanitize_data(fetch_best_official_document(candidate, news_context=news_context))
+        )
 
     return evidence_results
 
@@ -1316,3 +1325,4 @@ def print_official_evidence_results(evidence_results: list[dict]):
         print(f"  evaluated_candidate_count: {result.get('evaluated_candidate_count')}")
         print(f"  candidate_links_count: {len(result.get('candidate_links') or [])}")
         print(f"  error: {result.get('error')}")
+

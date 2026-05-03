@@ -791,8 +791,31 @@
       unknown: "알 수 없음",
     };
 
+    function repairMojibake(value) {
+      const text = String(value ?? "");
+      if (!/[ëìêíÃÂð]/.test(text)) return text;
+      try {
+        let encoded = "";
+        for (const char of text) {
+          const code = char.charCodeAt(0);
+          if (code > 255) return text;
+          encoded += `%${code.toString(16).padStart(2, "0")}`;
+        }
+        const repaired = decodeURIComponent(encoded);
+        const oldMarkers = (text.match(/[ëìêíÃÂð]/g) || []).length;
+        const newMarkers = (repaired.match(/[ëìêíÃÂð]/g) || []).length;
+        return newMarkers < oldMarkers ? repaired : text;
+      } catch (error) {
+        return text;
+      }
+    }
+
+    function sanitizeDisplayText(value) {
+      return repairMojibake(value).replaceAll("\uFFFD", "").trim();
+    }
+
     function escapeHtml(value) {
-      return String(value ?? "")
+      return sanitizeDisplayText(value)
         .replaceAll("&", "&amp;")
         .replaceAll("<", "&lt;")
         .replaceAll(">", "&gt;")
