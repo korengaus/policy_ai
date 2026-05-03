@@ -1278,8 +1278,12 @@
 
     function renderPipelineDebugSummary(summary) {
       const data = summary || {};
+      const strength = data.evidence_strength_summary || {};
       const missing = Array.isArray(data.missing_steps) && data.missing_steps.length
         ? data.missing_steps.join(", ")
+        : "없음";
+      const zeroReasons = Array.isArray(data.evidence_zero_reasons) && data.evidence_zero_reasons.length
+        ? data.evidence_zero_reasons.join(", ")
         : "없음";
       return `
         <div class="pipeline-debug">
@@ -1289,7 +1293,7 @@
             ${renderDebugBadge("claim extraction", data.claim_extraction_ok, data.claims_count)}
             ${renderDebugBadge("claim normalization", data.claim_normalization_ok, data.normalized_claims_count)}
             ${renderDebugBadge("source retrieval", data.source_retrieval_ok, data.evidence_candidates_count)}
-            ${renderDebugBadge("evidence matching", data.evidence_matching_ok, data.direct_evidence_count)}
+            ${renderDebugBadge("evidence matching", data.evidence_matching_ok, data.matched_evidence_count ?? data.direct_evidence_count)}
             ${renderDebugBadge("contradiction", data.contradiction_check_ok, data.contradiction_checks_count)}
             ${renderDebugBadge("bias/framing", data.bias_framing_ok, data.framing_flags_count)}
             <div class="evidence-extraction-tile">
@@ -1303,6 +1307,8 @@
           <div class="evidence-source-meta">
             official sources: ${escapeHtml(data.official_sources_count ?? 0)}
             · news sources: ${escapeHtml(data.news_sources_count ?? 0)}
+            · evidence strength: strong ${escapeHtml(strength.strong ?? 0)}, medium ${escapeHtml(strength.medium ?? 0)}, weak ${escapeHtml(strength.weak ?? 0)}
+            · zero reasons: ${escapeHtml(zeroReasons)}
             · missing steps: ${escapeHtml(missing)}
           </div>
         </div>

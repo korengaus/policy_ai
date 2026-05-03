@@ -18,12 +18,42 @@ def _news_source_count(source_candidates: list[dict]) -> int:
     )
 
 
+def _evidence_strength_summary(evidence_snippets: list[dict]) -> dict:
+    snippets = evidence_snippets or []
+    return {
+        "strong": sum(1 for item in snippets if item.get("evidence_strength") == "strong"),
+        "medium": sum(1 for item in snippets if item.get("evidence_strength") == "medium"),
+        "weak": sum(1 for item in snippets if item.get("evidence_strength") == "weak"),
+        "none": sum(1 for item in snippets if item.get("evidence_strength") in {"none", None}),
+    }
+
+
 def _direct_evidence_count(evidence_snippets: list[dict]) -> int:
     return sum(
         1
         for evidence in evidence_snippets or []
         if evidence.get("evidence_type") == "direct_support"
     )
+
+
+def _matched_evidence_count(evidence_snippets: list[dict]) -> int:
+    return sum(
+        1
+        for evidence in evidence_snippets or []
+        if evidence.get("evidence_strength") in {"strong", "medium", "weak"}
+    )
+
+
+def _evidence_zero_reasons(evidence_snippets: list[dict], source_count: int) -> list[str]:
+    if not evidence_snippets:
+        return ["no matched text" if not source_count else "query overlap too low"]
+    reasons = [
+        evidence.get("match_reason") or evidence.get("extraction_method") or "unknown"
+        for evidence in evidence_snippets
+        if evidence.get("evidence_strength") in {"none", None}
+        or evidence.get("evidence_type") == "insufficient_evidence"
+    ]
+    return list(dict.fromkeys(reasons))[:5]
 
 
 def _framing_flags_count(bias_framing_analysis: list[dict]) -> int:
@@ -59,6 +89,9 @@ def build_pipeline_debug_summary(
     news_sources_count = _news_source_count(source_candidates)
     evidence_count = _count(evidence_snippets)
     direct_count = _direct_evidence_count(evidence_snippets)
+    matched_evidence_count = _matched_evidence_count(evidence_snippets)
+    strength_summary = _evidence_strength_summary(evidence_snippets)
+    zero_reasons = _evidence_zero_reasons(evidence_snippets, source_count)
     contradiction_count = _count(contradiction_checks)
     bias_count = _count(bias_framing_analysis)
     framing_flags_count = _framing_flags_count(bias_framing_analysis)
@@ -68,7 +101,7 @@ def build_pipeline_debug_summary(
     claim_extraction_ok = claims_count > 0
     claim_normalization_ok = normalized_count > 0 and normalized_count >= claims_count
     source_retrieval_ok = source_count > 0
-    evidence_matching_ok = evidence_count > 0
+    evidence_matching_ok = matched_evidence_count > 0
     contradiction_check_ok = contradiction_count > 0 and (
         not claims_count or contradiction_count >= claims_count
     )
@@ -115,6 +148,9 @@ def build_pipeline_debug_summary(
         "official_sources_count": official_sources_count,
         "news_sources_count": news_sources_count,
         "direct_evidence_count": direct_count,
+        "matched_evidence_count": matched_evidence_count,
+        "evidence_strength_summary": strength_summary,
+        "evidence_zero_reasons": zero_reasons,
         "contradiction_checks_count": contradiction_count,
         "framing_flags_count": framing_flags_count,
         "overall_verdict": overall_verdict,
@@ -125,7 +161,8 @@ def build_pipeline_debug_summary(
         "[PipelineDebug] "
         f"intake_ok={str(intake_ok).lower()} "
         f"claim_count={claims_count} "
-        f"evidence_count={evidence_count} "
+        f"evidence_count={matched_evidence_count} "
+        f"evidence_strength={strength_summary} "
         f"bias_framing_ok={str(bias_framing_ok).lower()}"
     )
     return summary
