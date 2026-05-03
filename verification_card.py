@@ -3,7 +3,10 @@ from urllib.parse import urlparse
 import re
 
 from source_reliability_agent import summarize_source_reliability
-from evidence_extraction_agent import summarize_evidence_snippets
+from evidence_extraction_agent import (
+    summarize_claim_evidence_quality,
+    summarize_evidence_snippets,
+)
 from contradiction_agent import summarize_contradiction_checks
 from bias_framing_agent import summarize_bias_framing
 
@@ -319,6 +322,11 @@ def build_verification_card(
         bias_framing_summary
         or summarize_bias_framing(bias_framing_analysis or [])
     )
+    evidence_extraction_summary = summarize_evidence_snippets(evidence_snippets or [])
+    claim_quality_summary = summarize_claim_evidence_quality(
+        claim_list or [claim_text],
+        evidence_snippets or [],
+    )
 
     return {
         "claim_text": claim_text,
@@ -329,7 +337,9 @@ def build_verification_card(
         "source_reliability_summary": summarize_source_reliability(source_candidates or []),
         "evidence_snippets": evidence_snippets or [],
         "claim_evidence_map": claim_evidence_map or {},
-        "evidence_extraction_summary": summarize_evidence_snippets(evidence_snippets or []),
+        "claim_evidence_quality_summary": claim_quality_summary,
+        "evidence_quality_summary": evidence_extraction_summary.get("evidence_quality_summary") or {},
+        "evidence_extraction_summary": evidence_extraction_summary,
         "contradiction_checks": contradiction_checks or [],
         "contradiction_summary": final_contradiction_summary,
         "bias_framing_analysis": bias_framing_analysis or [],
@@ -384,6 +394,8 @@ def print_verification_card(card: dict):
     print("source_candidates:", len(card.get("source_candidates") or []))
     print("source_reliability_summary:", card.get("source_reliability_summary"))
     print("evidence_snippets:", len(card.get("evidence_snippets") or []))
+    print("claim_evidence_quality_summary:", card.get("claim_evidence_quality_summary"))
+    print("evidence_quality_summary:", card.get("evidence_quality_summary"))
     print("evidence_extraction_summary:", card.get("evidence_extraction_summary"))
     print("contradiction_checks:", len(card.get("contradiction_checks") or []))
     print("contradiction_summary:", card.get("contradiction_summary"))

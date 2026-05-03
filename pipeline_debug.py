@@ -28,6 +28,25 @@ def _evidence_strength_summary(evidence_snippets: list[dict]) -> dict:
     }
 
 
+def _evidence_quality_summary(evidence_snippets: list[dict]) -> dict:
+    snippets = evidence_snippets or []
+    scores = [int(item.get("evidence_quality_score") or 0) for item in snippets]
+    average = round(sum(scores) / len(scores)) if scores else 0
+    if average >= 75:
+        overall = "strong"
+    elif average >= 45:
+        overall = "medium"
+    else:
+        overall = "weak"
+    return {
+        "strong": sum(1 for item in snippets if item.get("evidence_quality_label") == "strong"),
+        "medium": sum(1 for item in snippets if item.get("evidence_quality_label") == "medium"),
+        "weak": sum(1 for item in snippets if item.get("evidence_quality_label") == "weak"),
+        "average_evidence_quality_score": average,
+        "evidence_quality_overall_label": overall,
+    }
+
+
 def _direct_evidence_count(evidence_snippets: list[dict]) -> int:
     return sum(
         1
@@ -91,6 +110,7 @@ def build_pipeline_debug_summary(
     direct_count = _direct_evidence_count(evidence_snippets)
     matched_evidence_count = _matched_evidence_count(evidence_snippets)
     strength_summary = _evidence_strength_summary(evidence_snippets)
+    quality_summary = _evidence_quality_summary(evidence_snippets)
     zero_reasons = _evidence_zero_reasons(evidence_snippets, source_count)
     contradiction_count = _count(contradiction_checks)
     bias_count = _count(bias_framing_analysis)
@@ -150,6 +170,12 @@ def build_pipeline_debug_summary(
         "direct_evidence_count": direct_count,
         "matched_evidence_count": matched_evidence_count,
         "evidence_strength_summary": strength_summary,
+        "evidence_quality_summary": quality_summary,
+        "total_strong_evidence": quality_summary["strong"],
+        "total_medium_evidence": quality_summary["medium"],
+        "total_weak_evidence": quality_summary["weak"],
+        "average_evidence_quality_score": quality_summary["average_evidence_quality_score"],
+        "evidence_quality_overall_label": quality_summary["evidence_quality_overall_label"],
         "evidence_zero_reasons": zero_reasons,
         "contradiction_checks_count": contradiction_count,
         "framing_flags_count": framing_flags_count,
@@ -163,6 +189,7 @@ def build_pipeline_debug_summary(
         f"claim_count={claims_count} "
         f"evidence_count={matched_evidence_count} "
         f"evidence_strength={strength_summary} "
+        f"evidence_quality={quality_summary} "
         f"bias_framing_ok={str(bias_framing_ok).lower()}"
     )
     return summary

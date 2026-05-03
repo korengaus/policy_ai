@@ -25,7 +25,10 @@ def _split_sentences(text: str) -> list[str]:
     normalized = _normalize(text)
     if not normalized:
         return []
-    parts = re.split(r"(?<=[.!?。])\s+|(?<=[다요죠음함])\.\s*|(?<=다)\s+", normalized)
+    parts = re.split(
+        r"(?<=[.!?])\s+|(?<=[다요죠음함됨])\.\s*|(?<=[다요죠음함됨])\s+",
+        normalized,
+    )
     sentences = []
     for part in parts:
         sentence = part.strip(" -•·\t\r\n")
@@ -103,7 +106,7 @@ def _evidence_strength(evidence_type: str, score: int) -> str:
         return "strong"
     if evidence_type == "indirect_support" or score >= 40:
         return "medium"
-    if evidence_type in {"background_context", "official_reference"} or score > 0:
+    if evidence_type == "background_context" or score > 0:
         return "weak"
     return "none"
 
@@ -126,6 +129,111 @@ def _confidence(score: int, evidence_type: str) -> str:
     return "low"
 
 
+def _quality_label(score: int) -> str:
+    if score >= 75:
+        return "strong"
+    if score >= 45:
+        return "medium"
+    return "weak"
+
+
+def _source_confidence_score(source: dict) -> int:
+    score = source.get("reliability_score")
+    if isinstance(score, (int, float)):
+        return int(score)
+    return {
+        "very_high": 95,
+        "high": 82,
+        "medium": 62,
+        "low": 35,
+        "unknown": 20,
+    }.get(source.get("reliability_level"), 0)
+
+
+def _warning_penalty(source: dict, extraction_method: str, match_reason: str) -> int:
+    combined = " ".join(
+        [
+            extraction_method or "",
+            match_reason or "",
+            " ".join(source.get("source_risk_flags") or []),
+        ]
+    ).lower()
+    penalty = 0
+    for marker in [
+        "no_body_text",
+        "official_candidate_not_fetched",
+        "possible_redirect",
+        "official body not fetched",
+        "without_body",
+    ]:
+        if marker in combined:
+            penalty += 12
+    if "query overlap too low" in combined:
+        penalty += 15
+    if "no matched text" in combined:
+        penalty += 25
+    return min(penalty, 45)
+
+
+def _quality_score(
+    *,
+    source: dict,
+    evidence_text: str,
+    evidence_type: str,
+    relevance_score: int,
+    extraction_method: str,
+    match_reason: str,
+) -> int:
+    score = 20
+    source_type = source.get("source_type") or ""
+    verification_role = source.get("verification_role") or ""
+
+    if source_type in {"official_government", "public_institution"}:
+        score += 28
+    elif source_type == "established_news":
+        score += 16
+    elif source_type == "search_fallback_news":
+        score += 8
+
+    if verification_role == "primary_evidence":
+        score += 14
+    elif verification_role == "supporting_evidence":
+        score += 8
+
+    if evidence_type == "direct_support":
+        score += 28
+    elif evidence_type == "indirect_support":
+        score += 18
+    elif evidence_type == "background_context":
+        score += 6
+    elif evidence_type == "official_reference":
+        score += 8
+    elif evidence_type == "insufficient_evidence":
+        score -= 25
+
+    if extraction_method == "article_body_sentence_overlap":
+        score += 16
+    elif "metadata_overlap" in extraction_method:
+        score += 5
+    elif extraction_method == "official_candidate_without_body":
+        score -= 8
+    elif extraction_method == "no_relevant_sentence_found":
+        score -= 30
+
+    score += min(20, max(0, relevance_score) // 5)
+    source_confidence = _source_confidence_score(source)
+    if source_confidence:
+        score += min(12, source_confidence // 10)
+
+    if len(evidence_text or "") >= 80:
+        score += 5
+    if len(evidence_text or "") < 20:
+        score -= 10
+
+    score -= _warning_penalty(source, extraction_method, match_reason)
+    return max(0, min(100, score))
+
+
 def _make_snippet(
     *,
     claim_index: int,
@@ -139,6 +247,14 @@ def _make_snippet(
     evidence_text = sanitize_text(evidence_text)
     evidence_type = sanitize_text(evidence_type)
     strength = _evidence_strength(evidence_type, relevance_score)
+    quality_score = _quality_score(
+        source=source,
+        evidence_text=evidence_text,
+        evidence_type=evidence_type,
+        relevance_score=relevance_score,
+        extraction_method=extraction_method,
+        match_reason=match_reason,
+    )
     return {
         "evidence_id": _evidence_id(
             str(claim_index),
@@ -154,6 +270,8 @@ def _make_snippet(
         "evidence_text": evidence_text,
         "evidence_type": evidence_type,
         "evidence_strength": strength,
+        "evidence_quality_score": quality_score,
+        "evidence_quality_label": _quality_label(quality_score),
         "relevance_score": relevance_score,
         "supports_claim": _supports_claim(evidence_type),
         "extraction_method": extraction_method,
@@ -283,9 +401,7 @@ def extract_evidence_snippets(
             claim_snippet_ids.append(snippet["evidence_id"])
 
         if not claim_snippet_ids:
-            reason = "no matched text"
-            if source_candidates:
-                reason = "query overlap too low"
+            reason = "query overlap too low" if source_candidates else "no matched text"
             snippet = _make_snippet(
                 claim_index=index,
                 source=fallback_news_source,
@@ -304,6 +420,7 @@ def extract_evidence_snippets(
         1 for snippet in evidence_snippets if snippet.get("evidence_type") == "insufficient_evidence"
     )
     strength_summary = _strength_summary(evidence_snippets)
+    quality_summary = _quality_summary(evidence_snippets)
     print(f"[EvidenceExtractionAgent] extracted {len(evidence_snippets)} evidence snippets")
     print(f"[EvidenceExtractionAgent] mapped evidence to {len(claim_evidence_map)} claims")
     print(f"[EvidenceExtractionAgent] insufficient evidence count: {insufficient_count}")
@@ -312,6 +429,13 @@ def extract_evidence_snippets(
         f"strong={strength_summary['strong']} "
         f"medium={strength_summary['medium']} "
         f"weak={strength_summary['weak']}"
+    )
+    print(
+        "[EvidenceExtractionAgent] quality "
+        f"strong={quality_summary['strong']} "
+        f"medium={quality_summary['medium']} "
+        f"weak={quality_summary['weak']} "
+        f"avg={quality_summary['average_evidence_quality_score']}"
     )
     return {
         "evidence_snippets": evidence_snippets,
@@ -329,6 +453,62 @@ def _strength_summary(evidence_snippets: list[dict]) -> dict:
     }
 
 
+def _quality_summary(evidence_snippets: list[dict]) -> dict:
+    snippets = evidence_snippets or []
+    scores = [
+        int(item.get("evidence_quality_score") or 0)
+        for item in snippets
+        if item.get("evidence_quality_label") != "none"
+    ]
+    average = round(sum(scores) / len(scores)) if scores else 0
+    if average >= 75:
+        overall = "strong"
+    elif average >= 45:
+        overall = "medium"
+    else:
+        overall = "weak"
+    return {
+        "strong": sum(1 for item in snippets if item.get("evidence_quality_label") == "strong"),
+        "medium": sum(1 for item in snippets if item.get("evidence_quality_label") == "medium"),
+        "weak": sum(1 for item in snippets if item.get("evidence_quality_label") == "weak"),
+        "average_evidence_quality_score": average,
+        "evidence_quality_overall_label": overall,
+    }
+
+
+def summarize_claim_evidence_quality(
+    claims: list[str],
+    evidence_snippets: list[dict],
+) -> list[dict]:
+    summaries = []
+    claim_count = len(claims or [])
+    for index in range(claim_count):
+        related = [
+            item
+            for item in evidence_snippets or []
+            if int(item.get("claim_index", -1)) == index
+        ]
+        scores = [int(item.get("evidence_quality_score") or 0) for item in related]
+        best_score = max(scores) if scores else 0
+        summaries.append(
+            {
+                "claim_index": index,
+                "strong_evidence_count": sum(
+                    1 for item in related if item.get("evidence_quality_label") == "strong"
+                ),
+                "medium_evidence_count": sum(
+                    1 for item in related if item.get("evidence_quality_label") == "medium"
+                ),
+                "weak_evidence_count": sum(
+                    1 for item in related if item.get("evidence_quality_label") == "weak"
+                ),
+                "best_evidence_score": best_score,
+                "evidence_quality_summary": _quality_label(best_score) if related else "weak",
+            }
+        )
+    return summaries
+
+
 def summarize_evidence_snippets(evidence_snippets: list[dict]) -> dict:
     snippets = evidence_snippets or []
     zero_reasons = [
@@ -339,11 +519,20 @@ def summarize_evidence_snippets(evidence_snippets: list[dict]) -> dict:
     ]
     if not snippets:
         zero_reasons = ["no matched text"]
+    quality = _quality_summary(snippets)
     return {
         "evidence_snippet_count": len(snippets),
         "direct_support_count": sum(1 for item in snippets if item.get("evidence_type") == "direct_support"),
         "official_reference_count": sum(1 for item in snippets if item.get("evidence_type") == "official_reference"),
-        "insufficient_evidence_count": sum(1 for item in snippets if item.get("evidence_type") == "insufficient_evidence"),
+        "insufficient_evidence_count": sum(
+            1 for item in snippets if item.get("evidence_type") == "insufficient_evidence"
+        ),
         "evidence_strength_summary": _strength_summary(snippets),
         "evidence_zero_reasons": list(dict.fromkeys(zero_reasons))[:5],
+        "total_strong_evidence": quality["strong"],
+        "total_medium_evidence": quality["medium"],
+        "total_weak_evidence": quality["weak"],
+        "average_evidence_quality_score": quality["average_evidence_quality_score"],
+        "evidence_quality_overall_label": quality["evidence_quality_overall_label"],
+        "evidence_quality_summary": quality,
     }

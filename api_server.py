@@ -51,6 +51,8 @@ class AnalyzeResult(BaseModel):
     source_queries: list = []
     evidence_snippets: list = []
     claim_evidence_map: dict = {}
+    claim_evidence_quality_summary: list = []
+    evidence_quality_summary: dict = {}
     contradiction_checks: list = []
     contradiction_summary: dict = {}
     bias_framing_analysis: list = []
@@ -124,6 +126,8 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
                 source_queries=api_result.get("source_queries") or [],
                 evidence_snippets=api_result.get("evidence_snippets") or [],
                 claim_evidence_map=api_result.get("claim_evidence_map") or {},
+                claim_evidence_quality_summary=api_result.get("claim_evidence_quality_summary") or [],
+                evidence_quality_summary=api_result.get("evidence_quality_summary") or {},
                 contradiction_checks=api_result.get("contradiction_checks") or [],
                 contradiction_summary=api_result.get("contradiction_summary") or {},
                 bias_framing_analysis=api_result.get("bias_framing_analysis") or [],

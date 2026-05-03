@@ -371,6 +371,10 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
         )
         verification_card["debug_summary"] = debug_summary
         verification_card = sanitize_data(verification_card)
+        evidence_quality_summary = verification_card.get("evidence_quality_summary") or {}
+        claim_evidence_quality_summary = (
+            verification_card.get("claim_evidence_quality_summary") or []
+        )
         print_verification_card(verification_card)
 
         ai_result = run_ai_reasoning(
@@ -432,6 +436,8 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
                 "source_candidates": source_candidates,
                 "evidence_snippets": evidence_snippets,
                 "claim_evidence_map": claim_evidence_map,
+                "claim_evidence_quality_summary": claim_evidence_quality_summary,
+                "evidence_quality_summary": evidence_quality_summary,
                 "contradiction_checks": contradiction_checks,
                 "contradiction_summary": contradiction_summary,
                 "bias_framing_analysis": bias_framing_analysis,
@@ -458,6 +464,8 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
                     "source_candidates": source_candidates,
                     "evidence_snippets": evidence_snippets,
                     "claim_evidence_map": claim_evidence_map,
+                    "claim_evidence_quality_summary": claim_evidence_quality_summary,
+                    "evidence_quality_summary": evidence_quality_summary,
                     "contradiction_checks": contradiction_checks,
                     "contradiction_summary": contradiction_summary,
                     "bias_framing_analysis": bias_framing_analysis,
