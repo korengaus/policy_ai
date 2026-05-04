@@ -1,5 +1,7 @@
 import json
 import sys
+import hashlib
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -43,6 +45,8 @@ from text_utils import sanitize_data, sanitize_text
 
 
 REPORTS_DIR = Path("reports")
+ANALYSIS_CACHE_PATH = Path(".cache") / "analysis_result_cache.json"
+ANALYSIS_CACHE_TTL_SECONDS = 30 * 60
 
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -53,6 +57,171 @@ if hasattr(sys.stderr, "reconfigure"):
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _normalize_cache_text(value: str) -> str:
+    return re.sub(r"\s+", " ", sanitize_text(value or "").strip().lower())
+
+
+def _news_identity(news: dict, original_index: int) -> dict:
+    return {
+        "title": _normalize_cache_text(news.get("title") or ""),
+        "source": _normalize_cache_text(news.get("source") or news.get("publisher") or ""),
+        "url": news.get("original_url") or news.get("link") or news.get("google_link") or "",
+        "published": news.get("published") or news.get("published_at") or "",
+    }
+
+
+def build_analysis_cache_key(query: str, max_news: int, news_results: list[dict]) -> str:
+    identities = [_news_identity(news, index) for index, news in enumerate(news_results or [])]
+    identities.sort(
+        key=lambda item: (
+            item["title"],
+            item["source"],
+            item["url"],
+            item["published"],
+        )
+    )
+    payload = {
+        "query": _normalize_cache_text(query),
+        "max_news": int(max_news or 0),
+        "news": identities,
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:20]
+
+
+def _load_analysis_cache() -> dict:
+    try:
+        if ANALYSIS_CACHE_PATH.exists():
+            return json.loads(ANALYSIS_CACHE_PATH.read_text(encoding="utf-8"))
+    except Exception as error:
+        print(f"[AnalysisCache] read failed: {error}")
+    return {}
+
+
+def _save_analysis_cache(cache: dict) -> None:
+    try:
+        ANALYSIS_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        ANALYSIS_CACHE_PATH.write_text(
+            json.dumps(cache, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as error:
+        print(f"[AnalysisCache] write failed: {error}")
+
+
+def _analysis_cache_fresh(entry: dict) -> bool:
+    try:
+        cached_at = datetime.fromisoformat(entry.get("cached_at") or "")
+        if cached_at.tzinfo is None:
+            cached_at = cached_at.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - cached_at).total_seconds()
+        return age <= ANALYSIS_CACHE_TTL_SECONDS
+    except Exception:
+        return False
+
+
+def _apply_analysis_cache_debug(
+    report_items: list[dict],
+    *,
+    analysis_cache_hit: bool,
+    analysis_cache_key: str,
+    news_collection_debug: dict,
+) -> list[dict]:
+    updated_items = []
+    for item in report_items or []:
+        cloned = dict(item or {})
+        debug = dict(cloned.get("debug_summary") or {})
+        debug.update(
+            {
+                "analysis_cache_hit": analysis_cache_hit,
+                "analysis_cache_key": analysis_cache_key,
+                "analysis_cache_ttl_seconds": ANALYSIS_CACHE_TTL_SECONDS,
+                "news_cache_hit": bool(news_collection_debug.get("news_cache_hit")),
+                "news_cache_key": news_collection_debug.get("news_cache_key"),
+                "news_cache_ttl_seconds": news_collection_debug.get("news_cache_ttl_seconds"),
+                "news_collection_mode": news_collection_debug.get("news_collection_mode"),
+                "collection_source": news_collection_debug.get("collection_source"),
+            }
+        )
+        cloned["debug_summary"] = debug
+        verification_card = dict(cloned.get("verification_card") or {})
+        verification_card["debug_summary"] = debug
+        cloned["verification_card"] = verification_card
+        api_result = dict(cloned.get("api_result") or {})
+        api_result["debug_summary"] = debug
+        api_result["verification_card"] = verification_card
+        api_result["news_collection_debug"] = news_collection_debug
+        cloned["api_result"] = api_result
+        cloned["news_collection_debug"] = news_collection_debug
+        updated_items.append(cloned)
+    return sanitize_data(updated_items)
+
+
+def _get_cached_analysis_report(
+    *,
+    query: str,
+    run_started_at: str,
+    news_collection_debug: dict,
+    topics_summary: dict,
+    analysis_cache_key: str,
+) -> dict | None:
+    cache = _load_analysis_cache()
+    entry = cache.get(analysis_cache_key)
+    if not entry or not _analysis_cache_fresh(entry):
+        return None
+
+    print(f"[AnalysisCache] Cache hit: key={analysis_cache_key}")
+    report_items = _apply_analysis_cache_debug(
+        entry.get("news_results") or [],
+        analysis_cache_hit=True,
+        analysis_cache_key=analysis_cache_key,
+        news_collection_debug=news_collection_debug,
+    )
+    run_finished_at = utc_now_iso()
+    report = sanitize_data(
+        {
+            "run_started_at": run_started_at,
+            "run_finished_at": run_finished_at,
+            "query": query,
+            "total_news_count": len(report_items),
+            "saved_event_count": 0,
+            "duplicate_count": 0,
+            "news_collection_debug": {
+                **(news_collection_debug or {}),
+                "analysis_cache_hit": True,
+                "analysis_cache_key": analysis_cache_key,
+                "analysis_cache_ttl_seconds": ANALYSIS_CACHE_TTL_SECONDS,
+            },
+            "topics_summary": topics_summary,
+            "news_results": report_items,
+        }
+    )
+    report_path = save_run_report(report, run_started_at)
+    print("\nSaved cached run report:", report_path)
+    report["report_path"] = str(report_path)
+    return report
+
+
+def _store_analysis_report(
+    *,
+    analysis_cache_key: str,
+    query: str,
+    max_news: int,
+    news_results: list[dict],
+    report_items: list[dict],
+) -> None:
+    cache = _load_analysis_cache()
+    cache[analysis_cache_key] = {
+        "cached_at": utc_now_iso(),
+        "query": _normalize_cache_text(query),
+        "max_news": int(max_news or 0),
+        "news_identities": [_news_identity(news, index) for index, news in enumerate(news_results or [])],
+        "news_results": sanitize_data(report_items),
+    }
+    _save_analysis_cache(cache)
+    print(f"[AnalysisCache] Cache stored: key={analysis_cache_key} ttl={ANALYSIS_CACHE_TTL_SECONDS}s")
 
 
 def build_report_path(run_started_at: str) -> Path:
@@ -176,6 +345,16 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
     news_collection = search_google_news_rss_with_meta(query, max_results=max_news)
     news_results = sanitize_data(news_collection.get("results", []))
     news_collection_debug = sanitize_data(news_collection.get("debug", {}))
+    analysis_cache_key = build_analysis_cache_key(query, max_news, news_results)
+    cached_report = _get_cached_analysis_report(
+        query=query,
+        run_started_at=run_started_at,
+        news_collection_debug=news_collection_debug,
+        topics_summary=build_topics_summary(memory),
+        analysis_cache_key=analysis_cache_key,
+    )
+    if cached_report is not None:
+        return cached_report
 
     if not news_results:
         print("No news found in the recent window.")
@@ -374,6 +553,9 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
         debug_summary["news_cache_ttl_seconds"] = news_collection_debug.get("news_cache_ttl_seconds")
         debug_summary["news_collection_mode"] = news_collection_debug.get("news_collection_mode")
         debug_summary["collection_source"] = news_collection_debug.get("collection_source")
+        debug_summary["analysis_cache_hit"] = False
+        debug_summary["analysis_cache_key"] = analysis_cache_key
+        debug_summary["analysis_cache_ttl_seconds"] = ANALYSIS_CACHE_TTL_SECONDS
         if verification_card.get("official_mismatch"):
             policy_confidence = dict(policy_confidence)
             policy_confidence["policy_confidence_score"] = min(
@@ -554,6 +736,13 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
         "topics_summary": build_topics_summary(memory),
         "news_results": report_items,
     })
+    _store_analysis_report(
+        analysis_cache_key=analysis_cache_key,
+        query=query,
+        max_news=max_news,
+        news_results=news_results,
+        report_items=report_items,
+    )
     report_path = save_run_report(report, run_started_at)
     print("\nSaved run report:", report_path)
     report["report_path"] = str(report_path)

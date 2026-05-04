@@ -1505,7 +1505,8 @@
       const data = summary || {};
       const strength = data.evidence_strength_summary || {};
       const quality = data.evidence_quality_summary || {};
-      const cacheState = data.news_cache_hit ? "cache hit" : "fresh fetch";
+      const newsCacheState = data.news_cache_hit ? "news cache hit" : "fresh news fetch";
+      const analysisCacheState = data.analysis_cache_hit ? "analysis cache hit" : "fresh analysis";
       const missing = Array.isArray(data.missing_steps) && data.missing_steps.length
         ? data.missing_steps.join(", ")
         : "없음";
@@ -1536,7 +1537,9 @@
             · news sources: ${escapeHtml(data.news_sources_count ?? 0)}
             · evidence strength: strong ${escapeHtml(strength.strong ?? 0)}, medium ${escapeHtml(strength.medium ?? 0)}, weak ${escapeHtml(strength.weak ?? 0)}
             · evidence quality: strong ${escapeHtml(quality.strong ?? data.total_strong_evidence ?? 0)}, medium ${escapeHtml(quality.medium ?? data.total_medium_evidence ?? 0)}, weak ${escapeHtml(quality.weak ?? data.total_weak_evidence ?? 0)}, avg ${escapeHtml(quality.average_evidence_quality_score ?? data.average_evidence_quality_score ?? 0)}
-            · news input: ${escapeHtml(cacheState)} (${escapeHtml(data.collection_source || "-")}, ${escapeHtml(data.news_collection_mode || "-")})
+            · cache: ${escapeHtml(newsCacheState)}, ${escapeHtml(analysisCacheState)}
+            · history: ${escapeHtml(data.history_action || "-")} / ${escapeHtml(data.history_key || data.stable_history_key || "-")}
+            · news input: ${escapeHtml(data.collection_source || "-")} / ${escapeHtml(data.news_collection_mode || "-")}
             · zero reasons: ${escapeHtml(zeroReasons)}
             · missing steps: ${escapeHtml(missing)}
           </div>
@@ -1720,9 +1723,12 @@
         }
         return parsed.slice(0, LOCAL_HISTORY_LIMIT).map((record, index) => {
           const safeRecord = record && typeof record === "object" ? record : {};
+          const stableKey = safeRecord.stable_history_key
+            || buildStableHistoryKey(safeRecord.query || "", getHistoryResults(safeRecord));
           return {
             ...safeRecord,
-            id: safeRecord.id || `legacy-${index}-${String(safeRecord.analyzed_at || safeRecord.created_at || safeRecord.query || "record").replace(/[^A-Za-z0-9_-]/g, "")}`,
+            stable_history_key: stableKey,
+            id: safeRecord.id || stableKey || `legacy-${index}-${String(safeRecord.analyzed_at || safeRecord.created_at || safeRecord.query || "record").replace(/[^A-Za-z0-9_-]/g, "")}`,
           };
         });
       } catch (error) {
@@ -1754,6 +1760,89 @@
       } catch (error) {
         console.warn("Failed to save local analysis history", error);
       }
+    }
+
+    function normalizeHistoryText(value) {
+      return sanitizeDisplayText(value || "")
+        .toLowerCase()
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    function canonicalHistoryUrl(value) {
+      const raw = String(value || "").trim();
+      if (!raw) return "";
+      try {
+        const url = new URL(raw, window.location.origin);
+        url.hash = "";
+        const removableParams = [
+          "utm_source",
+          "utm_medium",
+          "utm_campaign",
+          "utm_term",
+          "utm_content",
+          "fbclid",
+          "gclid",
+        ];
+        removableParams.forEach((param) => url.searchParams.delete(param));
+        const params = Array.from(url.searchParams.entries()).sort(([a], [b]) => a.localeCompare(b));
+        url.search = "";
+        params.forEach(([key, val]) => url.searchParams.append(key, val));
+        return url.toString().replace(/\/$/, "");
+      } catch (error) {
+        return raw.replace(/#.*$/, "").replace(/\/$/, "");
+      }
+    }
+
+    function historyDomain(value) {
+      try {
+        return new URL(value || "", window.location.origin).hostname.replace(/^www\./, "").toLowerCase();
+      } catch (error) {
+        return "";
+      }
+    }
+
+    function topHistoryResult(results) {
+      return Array.isArray(results) && results.length ? results[0] : {};
+    }
+
+    function buildStableHistoryKey(query, results) {
+      const normalizedQuery = normalizeHistoryText(query);
+      const top = topHistoryResult(results);
+      const url = canonicalHistoryUrl(top.original_url || top.url || top.link || "");
+      if (url) {
+        return `q:${normalizedQuery}|url:${url}`;
+      }
+      const title = normalizeHistoryText(top.title || top.claim_text || "");
+      const source = normalizeHistoryText(
+        top.source
+          || top.publisher
+          || historyDomain(top.original_url || top.url || "")
+      );
+      return `q:${normalizedQuery}|title:${title || "untitled"}|source:${source || "unknown"}`;
+    }
+
+    function withHistoryDebug(responseData, stableHistoryKey, historyAction) {
+      const cloned = {
+        ...(responseData || {}),
+        results: Array.isArray(responseData?.results)
+          ? responseData.results.map((result) => {
+              const nextResult = { ...(result || {}) };
+              const verification = { ...(nextResult.verification_card || {}) };
+              const debug = {
+                ...(verification.debug_summary || nextResult.debug_summary || {}),
+                stable_history_key: stableHistoryKey,
+                history_key: stableHistoryKey,
+                history_action: historyAction,
+              };
+              verification.debug_summary = debug;
+              nextResult.debug_summary = debug;
+              nextResult.verification_card = verification;
+              return nextResult;
+            })
+          : [],
+      };
+      return cloned;
     }
 
     function getResultDebugSummary(result) {
@@ -1801,8 +1890,10 @@
       const results = Array.isArray(responseData?.results) ? responseData.results : [];
       const metrics = computeMetrics(results);
       const evidence = aggregateEvidenceSummaries(results);
+      const stableHistoryKey = buildStableHistoryKey(query, results);
       return {
-        id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+        id: stableHistoryKey,
+        stable_history_key: stableHistoryKey,
         query,
         max_news: maxNews,
         analyzed_at: new Date().toISOString(),
@@ -1817,14 +1908,25 @@
     }
 
     function saveLocalAnalysisHistory(query, maxNews, responseData) {
-      const record = buildLocalHistoryRecord(query, maxNews, responseData);
       const records = safeReadLocalHistory();
+      const rawResults = Array.isArray(responseData?.results) ? responseData.results : [];
+      const stableHistoryKey = buildStableHistoryKey(query, rawResults);
+      const existing = records.find((item) => {
+        const itemKey = item.stable_history_key || buildStableHistoryKey(item.query || "", getHistoryResults(item));
+        return itemKey === stableHistoryKey;
+      });
+      const historyAction = existing ? "updated" : "inserted";
+      const stableResponseData = withHistoryDebug(responseData, stableHistoryKey, historyAction);
+      const record = buildLocalHistoryRecord(query, maxNews, stableResponseData);
+      record.history_action = historyAction;
       const deduped = records.filter((item) => {
-        return !(item.query === query && JSON.stringify(item.response?.results || []) === JSON.stringify(record.response?.results || []));
+        const itemKey = item.stable_history_key || buildStableHistoryKey(item.query || "", getHistoryResults(item));
+        return itemKey !== stableHistoryKey;
       });
       safeWriteLocalHistory([record, ...deduped].slice(0, LOCAL_HISTORY_LIMIT));
       currentHistoryId = record.id;
       renderHistory(safeReadLocalHistory());
+      return { record, responseData: stableResponseData, historyAction, stableHistoryKey };
     }
 
     function loadHistoryRecord(record, message) {
@@ -2322,12 +2424,15 @@
         }
 
         const data = await response.json();
-        const results = data.results || [];
+        let renderData = data;
+        if ((data.results || []).length) {
+          const historyResult = saveLocalAnalysisHistory(query, maxNews, data);
+          renderData = historyResult.responseData;
+        }
+        const results = renderData.results || [];
         setCurrentReportContext(query, maxNews, results, new Date().toISOString());
         renderResults(results);
-        if ((data.results || []).length) {
-          saveLocalAnalysisHistory(query, maxNews, data);
-        }
+        renderHistory(safeReadLocalHistory());
         showStatus("분석 완료", true);
       } catch (error) {
         showError(`분석 실패: ${error.message}`);
