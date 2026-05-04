@@ -369,6 +369,11 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
             bias_framing_analysis=bias_framing_analysis,
             verification_card=verification_card,
         )
+        debug_summary["news_cache_hit"] = bool(news_collection_debug.get("news_cache_hit"))
+        debug_summary["news_cache_key"] = news_collection_debug.get("news_cache_key")
+        debug_summary["news_cache_ttl_seconds"] = news_collection_debug.get("news_cache_ttl_seconds")
+        debug_summary["news_collection_mode"] = news_collection_debug.get("news_collection_mode")
+        debug_summary["collection_source"] = news_collection_debug.get("collection_source")
         if verification_card.get("official_mismatch"):
             policy_confidence = dict(policy_confidence)
             policy_confidence["policy_confidence_score"] = min(
@@ -486,6 +491,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
                 "final_decision": final_decision,
                 "verification_card": verification_card,
                 "debug_summary": debug_summary,
+                "news_collection_debug": news_collection_debug,
                 "ai_result": ai_result,
                 "saved_to_memory": saved_to_memory,
                 "duplicate": duplicate,
@@ -513,6 +519,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
                     "final_decision": final_decision,
                     "verification_card": verification_card,
                     "debug_summary": debug_summary,
+                    "news_collection_debug": news_collection_debug,
                     "claim_text": verification_card.get("claim_text"),
                     "verdict_label": verification_card.get("verdict_label"),
                     "verdict_confidence": verification_card.get("verdict_confidence"),

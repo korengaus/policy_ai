@@ -239,6 +239,10 @@ def _quality_score(
         or "without_body" in (extraction_method or "").lower()
     ):
         score = min(score, 35)
+    if evidence_type == "official_reference" and not source.get("raw_text_available"):
+        score = min(score, 35)
+    if "topic mismatch" in (match_reason or "").lower():
+        score = min(score, 35)
     if source.get("source_type") == "search_fallback_news":
         score = min(score, 60)
     return max(0, min(100, score))
@@ -371,8 +375,7 @@ def extract_evidence_snippets(
                 (*_score_text_against_claim(claim, sentence), sentence)
                 for sentence in sentences
             ),
-            key=lambda item: item[0],
-            reverse=True,
+            key=lambda item: (-item[0], item[1], item[2]),
         )
         selected = [
             (score, reason, sentence)
@@ -405,7 +408,14 @@ def extract_evidence_snippets(
             if snippet:
                 metadata_snippets.append(snippet)
 
-        metadata_snippets.sort(key=lambda item: item.get("relevance_score", 0), reverse=True)
+        metadata_snippets.sort(
+            key=lambda item: (
+                -(item.get("relevance_score", 0) or 0),
+                item.get("source_id") or "",
+                item.get("source_title") or "",
+                item.get("source_url") or "",
+            )
+        )
         for snippet in metadata_snippets[:2]:
             evidence_snippets.append(snippet)
             claim_snippet_ids.append(snippet["evidence_id"])
@@ -425,6 +435,20 @@ def extract_evidence_snippets(
             claim_snippet_ids.append(snippet["evidence_id"])
 
         claim_evidence_map[str(index)] = claim_snippet_ids
+
+    evidence_snippets.sort(
+        key=lambda item: (
+            int(item.get("claim_index") or 0),
+            -(int(item.get("evidence_quality_score") or 0)),
+            -(int(item.get("relevance_score") or 0)),
+            item.get("source_id") or "",
+            item.get("evidence_id") or "",
+        )
+    )
+    claim_evidence_map = {}
+    for snippet in evidence_snippets:
+        key = str(snippet.get("claim_index", 0))
+        claim_evidence_map.setdefault(key, []).append(snippet.get("evidence_id"))
 
     insufficient_count = sum(
         1 for snippet in evidence_snippets if snippet.get("evidence_type") == "insufficient_evidence"

@@ -188,7 +188,38 @@ def create_source_candidates(
             )
 
     print(f"[SourceRetrievalAgent] created {len(source_candidates)} source candidates")
-    return source_candidates
+    return _stable_sort_source_candidates(source_candidates)
+
+
+def _stable_sort_source_candidates(source_candidates: list[dict]) -> list[dict]:
+    source_type_rank = {
+        "official_government": 0,
+        "public_institution": 1,
+        "established_news": 2,
+        "search_fallback_news": 3,
+        "unknown": 4,
+    }
+    purpose_rank = {
+        "primary_source": 0,
+        "support": 1,
+        "news_context": 2,
+        "contradiction": 3,
+        "fact_check": 4,
+        "update": 5,
+    }
+    indexed = list(enumerate(source_candidates or []))
+    indexed.sort(
+        key=lambda pair: (
+            int(pair[1].get("claim_index") or 0),
+            source_type_rank.get(pair[1].get("source_type") or "unknown", 9),
+            purpose_rank.get(pair[1].get("purpose") or "", 9),
+            pair[1].get("publisher") or "",
+            pair[1].get("title") or "",
+            pair[1].get("url") or "",
+            pair[0],
+        )
+    )
+    return [item for _index, item in indexed]
 
 
 def build_source_retrieval_context(
@@ -214,5 +245,5 @@ def build_source_retrieval_context(
     )
     return {
         "source_queries": source_queries,
-        "source_candidates": source_candidates,
+        "source_candidates": _stable_sort_source_candidates(source_candidates),
     }

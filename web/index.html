@@ -1505,6 +1505,7 @@
       const data = summary || {};
       const strength = data.evidence_strength_summary || {};
       const quality = data.evidence_quality_summary || {};
+      const cacheState = data.news_cache_hit ? "cache hit" : "fresh fetch";
       const missing = Array.isArray(data.missing_steps) && data.missing_steps.length
         ? data.missing_steps.join(", ")
         : "없음";
@@ -1535,6 +1536,7 @@
             · news sources: ${escapeHtml(data.news_sources_count ?? 0)}
             · evidence strength: strong ${escapeHtml(strength.strong ?? 0)}, medium ${escapeHtml(strength.medium ?? 0)}, weak ${escapeHtml(strength.weak ?? 0)}
             · evidence quality: strong ${escapeHtml(quality.strong ?? data.total_strong_evidence ?? 0)}, medium ${escapeHtml(quality.medium ?? data.total_medium_evidence ?? 0)}, weak ${escapeHtml(quality.weak ?? data.total_weak_evidence ?? 0)}, avg ${escapeHtml(quality.average_evidence_quality_score ?? data.average_evidence_quality_score ?? 0)}
+            · news input: ${escapeHtml(cacheState)} (${escapeHtml(data.collection_source || "-")}, ${escapeHtml(data.news_collection_mode || "-")})
             · zero reasons: ${escapeHtml(zeroReasons)}
             · missing steps: ${escapeHtml(missing)}
           </div>

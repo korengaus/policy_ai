@@ -130,12 +130,31 @@ def evaluate_source_candidate(source: dict) -> dict:
 
 def evaluate_source_candidates(source_candidates: list[dict]) -> list[dict]:
     evaluated = [evaluate_source_candidate(source) for source in (source_candidates or [])]
+    evaluated.sort(
+        key=lambda source: (
+            int(source.get("claim_index") or 0),
+            -(int(source.get("reliability_score") or 0)),
+            source.get("source_type") or "",
+            source.get("publisher") or "",
+            source.get("title") or "",
+            source.get("url") or "",
+            source.get("source_id") or "",
+        )
+    )
     official_count = sum(
         1
         for source in evaluated
         if source.get("source_type") in {"official_government", "public_institution"}
     )
-    top_source = max(evaluated, key=lambda source: source.get("reliability_score") or 0, default={})
+    top_source = max(
+        evaluated,
+        key=lambda source: (
+            source.get("reliability_score") or 0,
+            source.get("title") or "",
+            source.get("url") or "",
+        ),
+        default={},
+    )
     print(f"[SourceReliabilityAgent] evaluated {len(evaluated)} sources")
     print(f"[SourceReliabilityAgent] top source: {top_source.get('title') or top_source.get('url') or 'None'}")
     print(f"[SourceReliabilityAgent] official candidates: {official_count}")
@@ -171,7 +190,11 @@ def summarize_source_reliability(source_candidates: list[dict]) -> dict:
     eligible = [source for source in candidates if _is_top_source_eligible(source)]
     top_source = max(
         eligible or candidates,
-        key=lambda source: source.get("reliability_score") or 0,
+        key=lambda source: (
+            source.get("reliability_score") or 0,
+            source.get("title") or "",
+            source.get("url") or "",
+        ),
     )
     official_count = sum(
         1

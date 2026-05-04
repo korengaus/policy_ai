@@ -207,6 +207,8 @@ def run_ai_reasoning(
         response = client.responses.create(
             model=AI_MODEL,
             input=prompt,
+            temperature=0,
+            top_p=1,
             text={
                 "format": {
                     "type": "json_object",

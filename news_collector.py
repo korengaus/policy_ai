@@ -1,9 +1,12 @@
 import feedparser
+import hashlib
+import json
 import re
 import requests
 from bs4 import BeautifulSoup
 from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from urllib.parse import quote, urljoin, urlparse
 from googlenewsdecoder import gnewsdecoder
 
@@ -19,6 +22,9 @@ REQUEST_HEADERS = {
     ),
     "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
 }
+
+NEWS_CACHE_TTL_SECONDS = 30 * 60
+NEWS_CACHE_PATH = Path(".cache") / "news_collection_cache.json"
 
 MEDIA_ONLY_TITLES = {
     "SBS Biz",
@@ -122,6 +128,104 @@ def clean_html(raw_html: str) -> str:
 
 def _normalize_spaces(text: str) -> str:
     return re.sub(r"\s+", " ", clean_html(text or "")).strip()
+
+
+def _normalize_query(query: str) -> str:
+    return re.sub(r"\s+", " ", sanitize_text(query or "").strip().lower())
+
+
+def _cache_key(query: str, max_results: int) -> str:
+    raw = f"{_normalize_query(query)}|{int(max_results or 0)}"
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def _load_news_cache() -> dict:
+    try:
+        if NEWS_CACHE_PATH.exists():
+            return json.loads(NEWS_CACHE_PATH.read_text(encoding="utf-8"))
+    except Exception as error:
+        print(f"[NewsCollector] Cache read failed: {error}")
+    return {}
+
+
+def _save_news_cache(cache: dict) -> None:
+    try:
+        NEWS_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        NEWS_CACHE_PATH.write_text(
+            json.dumps(cache, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as error:
+        print(f"[NewsCollector] Cache write failed: {error}")
+
+
+def _cache_entry_fresh(entry: dict) -> bool:
+    try:
+        cached_at = datetime.fromisoformat(entry.get("cached_at") or "")
+        if cached_at.tzinfo is None:
+            cached_at = cached_at.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - cached_at).total_seconds()
+        return age <= NEWS_CACHE_TTL_SECONDS
+    except Exception:
+        return False
+
+
+def _published_sort_value(item: dict) -> float:
+    try:
+        published_date = parsedate_to_datetime(item.get("published", "") or "")
+        if published_date.tzinfo is None:
+            published_date = published_date.replace(tzinfo=timezone.utc)
+        return published_date.timestamp()
+    except Exception:
+        return 0.0
+
+
+def _stable_sort_news(items: list[dict]) -> list[dict]:
+    indexed = list(enumerate(items or []))
+    indexed.sort(
+        key=lambda pair: (
+            -_published_sort_value(pair[1]),
+            _normalize_spaces(pair[1].get("title") or ""),
+            pair[1].get("original_url") or pair[1].get("link") or pair[1].get("google_link") or "",
+            pair[0],
+        )
+    )
+    return [item for _index, item in indexed]
+
+
+def _cached_news_response(query: str, max_results: int) -> dict | None:
+    key = _cache_key(query, max_results)
+    cache = _load_news_cache()
+    entry = cache.get(key)
+    if not entry or not _cache_entry_fresh(entry):
+        return None
+    results = sanitize_data(_stable_sort_news(entry.get("results") or []))[:max_results]
+    debug = dict(entry.get("debug") or {})
+    debug.update(
+        {
+            "news_cache_hit": True,
+            "news_cache_key": key,
+            "news_cache_ttl_seconds": NEWS_CACHE_TTL_SECONDS,
+            "news_cache_cached_at": entry.get("cached_at"),
+            "selected_news_count": len(results),
+        }
+    )
+    print(f"[NewsCollector] Cache hit: key={key} selected={len(results)}")
+    return {"results": results, "debug": debug}
+
+
+def _store_news_response(query: str, max_results: int, results: list[dict], debug: dict) -> None:
+    key = _cache_key(query, max_results)
+    cache = _load_news_cache()
+    cache[key] = {
+        "cached_at": datetime.now(timezone.utc).isoformat(),
+        "query": _normalize_query(query),
+        "max_results": max_results,
+        "results": sanitize_data(_stable_sort_news(results))[:max_results],
+        "debug": sanitize_data(debug or {}),
+    }
+    _save_news_cache(cache)
+    print(f"[NewsCollector] Cache stored: key={key} ttl={NEWS_CACHE_TTL_SECONDS}s")
 
 
 def _query_terms(query: str) -> list[str]:
@@ -512,6 +616,10 @@ def search_daum_news_fallback(query: str, max_results: int = 3) -> tuple[list[di
 
 
 def search_google_news_rss_with_meta(query: str, max_results: int = 3):
+    cached = _cached_news_response(query, max_results)
+    if cached is not None:
+        return cached
+
     encoded_query = quote(query)
     rss_url = (
         f"https://news.google.com/rss/search?"
@@ -519,7 +627,7 @@ def search_google_news_rss_with_meta(query: str, max_results: int = 3):
     )
 
     feed = feedparser.parse(rss_url)
-    raw_results = [_entry_to_news(entry) for entry in feed.entries]
+    raw_results = _stable_sort_news([_entry_to_news(entry) for entry in feed.entries])
     raw_rss_count = len(raw_results)
     recent_results = [
         item for item in raw_results if is_recent(item.get("published", ""), days=RECENT_DAYS)
@@ -533,7 +641,7 @@ def search_google_news_rss_with_meta(query: str, max_results: int = 3):
     print(f"[NewsCollector] Recent window results: {filtered_recent_count}")
 
     if recent_results:
-        selected = recent_results[:max_results]
+        selected = _stable_sort_news(recent_results)[:max_results]
         mode = "recent_window"
         collection_source = "google_rss"
     else:
@@ -542,12 +650,12 @@ def search_google_news_rss_with_meta(query: str, max_results: int = 3):
         ]
         if relaxed_results:
             print("[NewsCollector] Falling back to relaxed recent window results")
-            selected = relaxed_results[:max_results]
+            selected = _stable_sort_news(relaxed_results)[:max_results]
             mode = "relaxed_recent_window"
             collection_source = "google_rss"
         else:
             print("[NewsCollector] Falling back to unfiltered RSS results")
-            selected = raw_results[:max_results]
+            selected = _stable_sort_news(raw_results)[:max_results]
             mode = "unfiltered_fallback"
             collection_source = "google_rss" if selected else "none"
 
@@ -582,23 +690,29 @@ def search_google_news_rss_with_meta(query: str, max_results: int = 3):
         collection_source = "forced_search_fallback"
         no_results_reason = "News source parsing failed; using search result page as emergency fallback."
 
+    selected = _stable_sort_news(selected)[:max_results]
     print(f"[NewsCollector] Selected news count: {len(selected)}")
     print(f"[NewsCollector] Collection source: {collection_source}")
     selected = sanitize_data(selected)
+    debug = {
+        "news_collection_mode": mode,
+        "raw_rss_count": raw_rss_count,
+        "google_raw_rss_count": raw_rss_count,
+        "filtered_recent_count": filtered_recent_count,
+        "selected_news_count": len(selected),
+        "collection_source": collection_source,
+        "fallback_source_attempted": fallback_source_attempted,
+        "fallback_error": fallback_error,
+        "no_results_reason": no_results_reason,
+        "news_cache_hit": False,
+        "news_cache_key": _cache_key(query, max_results),
+        "news_cache_ttl_seconds": NEWS_CACHE_TTL_SECONDS,
+    }
+    _store_news_response(query, max_results, selected, debug)
 
     return {
         "results": selected,
-        "debug": {
-            "news_collection_mode": mode,
-            "raw_rss_count": raw_rss_count,
-            "google_raw_rss_count": raw_rss_count,
-            "filtered_recent_count": filtered_recent_count,
-            "selected_news_count": len(selected),
-            "collection_source": collection_source,
-            "fallback_source_attempted": fallback_source_attempted,
-            "fallback_error": fallback_error,
-            "no_results_reason": no_results_reason,
-        },
+        "debug": debug,
     }
 
 
