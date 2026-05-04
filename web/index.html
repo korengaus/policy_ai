@@ -713,6 +713,8 @@
 
   <script>
     const API_BASE = window.location.origin;
+    const LOCAL_HISTORY_KEY = "policy_ai_recent_analysis";
+    const LOCAL_HISTORY_LIMIT = 5;
 
     const queryInput = document.getElementById("query");
     const maxNewsInput = document.getElementById("maxNews");
@@ -1466,6 +1468,101 @@
       metricsEl.style.display = "grid";
     }
 
+    function safeReadLocalHistory() {
+      try {
+        const raw = localStorage.getItem(LOCAL_HISTORY_KEY);
+        if (!raw) {
+          return [];
+        }
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed.slice(0, LOCAL_HISTORY_LIMIT) : [];
+      } catch (error) {
+        localStorage.removeItem(LOCAL_HISTORY_KEY);
+        return [];
+      }
+    }
+
+    function safeWriteLocalHistory(records) {
+      try {
+        localStorage.setItem(
+          LOCAL_HISTORY_KEY,
+          JSON.stringify((records || []).slice(0, LOCAL_HISTORY_LIMIT))
+        );
+      } catch (error) {
+        console.warn("Failed to save local analysis history", error);
+      }
+    }
+
+    function getResultDebugSummary(result) {
+      const verification = result?.verification_card || {};
+      return verification.debug_summary || result?.debug_summary || {};
+    }
+
+    function addCount(target, source, key) {
+      target[key] = Number(target[key] || 0) + Number(source?.[key] || 0);
+    }
+
+    function aggregateEvidenceSummaries(results) {
+      const strength = { strong: 0, medium: 0, weak: 0, none: 0 };
+      const quality = { strong: 0, medium: 0, weak: 0 };
+      let qualityTotal = 0;
+      let qualityCount = 0;
+
+      (results || []).forEach((result) => {
+        const debug = getResultDebugSummary(result);
+        const strengthPart = debug.evidence_strength_summary || {};
+        addCount(strength, strengthPart, "strong");
+        addCount(strength, strengthPart, "medium");
+        addCount(strength, strengthPart, "weak");
+        addCount(strength, strengthPart, "none");
+
+        const qualityPart = debug.evidence_quality_summary || result?.evidence_quality_summary || {};
+        addCount(quality, qualityPart, "strong");
+        addCount(quality, qualityPart, "medium");
+        addCount(quality, qualityPart, "weak");
+        const average = Number(qualityPart.average_evidence_quality_score ?? debug.average_evidence_quality_score ?? 0);
+        if (average > 0) {
+          qualityTotal += average;
+          qualityCount += 1;
+        }
+      });
+
+      quality.average_evidence_quality_score = qualityCount
+        ? Math.round(qualityTotal / qualityCount)
+        : 0;
+
+      return { strength, quality };
+    }
+
+    function buildLocalHistoryRecord(query, maxNews, responseData) {
+      const results = Array.isArray(responseData?.results) ? responseData.results : [];
+      const metrics = computeMetrics(results);
+      const evidence = aggregateEvidenceSummaries(results);
+      return {
+        id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+        query,
+        max_news: maxNews,
+        analyzed_at: new Date().toISOString(),
+        highest_alert: metrics.highest,
+        average_confidence: metrics.averageConfidence,
+        high_impact_count: metrics.highImpactCount,
+        results_count: metrics.count,
+        evidence_strength_summary: evidence.strength,
+        evidence_quality_summary: evidence.quality,
+        response: responseData || { status: "ok", results },
+      };
+    }
+
+    function saveLocalAnalysisHistory(query, maxNews, responseData) {
+      const record = buildLocalHistoryRecord(query, maxNews, responseData);
+      const records = safeReadLocalHistory();
+      const deduped = records.filter((item) => {
+        return !(item.query === query && JSON.stringify(item.response?.results || []) === JSON.stringify(record.response?.results || []));
+      });
+      safeWriteLocalHistory([record, ...deduped].slice(0, LOCAL_HISTORY_LIMIT));
+      renderHistory(safeReadLocalHistory());
+    }
+
     function renderResults(results) {
       if (!results.length) {
         metricsEl.style.display = "none";
@@ -1627,29 +1724,42 @@
     }
 
     function renderHistory(rows) {
-      if (!rows.length) {
+      const records = Array.isArray(rows) ? rows.slice(0, LOCAL_HISTORY_LIMIT) : [];
+      if (!records.length) {
         historyEl.innerHTML = '<div class="empty-state">아직 저장된 분석 기록이 없습니다.</div>';
         return;
       }
 
-      historyEl.innerHTML = rows.map((row) => `
+      historyEl.innerHTML = records.map((row, index) => {
+        const strength = row.evidence_strength_summary || {};
+        const quality = row.evidence_quality_summary || {};
+        const analyzedAt = row.analyzed_at || row.created_at || "-";
+        const alert = row.highest_alert || row.policy_alert_level || "LOW";
+        const avgConfidence = row.average_confidence ?? row.policy_confidence_score ?? "-";
+        const highImpactCount = row.high_impact_count ?? 0;
+        return `
         <div class="history-row">
-          <div class="history-id">#${escapeHtml(row.id)}</div>
+          <div class="history-id">#${escapeHtml(index + 1)}</div>
           <div>
-            <strong>${escapeHtml(row.title)}</strong>
+            <strong>${escapeHtml(row.query || row.title || "분석 기록")}</strong>
             <div class="history-meta">
-              <span class="label">검색어:</span> ${escapeHtml(row.query)}
-              &nbsp; <span class="label">주제:</span> ${escapeHtml(row.topic)}
-              &nbsp; <span class="label">경고:</span> ${escapeHtml(formatAlert(row.policy_alert_level))}
-              &nbsp; <span class="label">AI 초안 판정:</span> ${escapeHtml(formatVerdict(row.verdict_label))}
+              <span class="label">뉴스 개수:</span> ${escapeHtml(row.max_news ?? "-")}
+              &nbsp; <span class="label">최고 경고:</span> ${escapeHtml(formatAlert(alert))}
+              &nbsp; <span class="label">평균 신뢰도:</span> ${escapeHtml(avgConfidence)}
+              &nbsp; <span class="label">고영향 뉴스:</span> ${escapeHtml(highImpactCount)}
               <br>
-              <span class="label">핵심 주장:</span> ${escapeHtml(row.claim_text || "-")}
+              <span class="label">evidence strength:</span>
+              strong ${escapeHtml(strength.strong ?? 0)}, medium ${escapeHtml(strength.medium ?? 0)}, weak ${escapeHtml(strength.weak ?? 0)}
               <br>
-              <span class="label">생성 시각:</span> ${escapeHtml(row.created_at)}
+              <span class="label">evidence quality:</span>
+              strong ${escapeHtml(quality.strong ?? 0)}, medium ${escapeHtml(quality.medium ?? 0)}, weak ${escapeHtml(quality.weak ?? 0)}, avg ${escapeHtml(quality.average_evidence_quality_score ?? 0)}
+              <br>
+              <span class="label">분석 시간:</span> ${escapeHtml(analyzedAt)}
             </div>
           </div>
         </div>
-      `).join("");
+      `;
+      }).join("");
     }
 
     async function analyze() {
@@ -1679,6 +1789,9 @@
 
         const data = await response.json();
         renderResults(data.results || []);
+        if ((data.results || []).length) {
+          saveLocalAnalysisHistory(query, maxNews, data);
+        }
         showStatus("분석 완료", true);
       } catch (error) {
         showError(`분석 실패: ${error.message}`);
@@ -1694,14 +1807,24 @@
       setBusy(true);
 
       try {
-        const response = await fetch(`${API_BASE}/history?limit=10`);
-        if (!response.ok) {
-          const body = await response.text();
-          throw new Error(body || `HTTP ${response.status}`);
+        const records = safeReadLocalHistory();
+        renderHistory(records);
+        if (!records.length) {
+          renderResults([]);
+          showStatus("저장된 분석 기록이 없습니다.", true);
+          return;
         }
-
-        const data = await response.json();
-        renderHistory(data.results || []);
+        const latest = records[0] || {};
+        const results = Array.isArray(latest.response?.results)
+          ? latest.response.results
+          : (Array.isArray(latest.results) ? latest.results : []);
+        renderResults(results);
+        if (latest.query) {
+          queryInput.value = latest.query;
+        }
+        if (latest.max_news) {
+          maxNewsInput.value = latest.max_news;
+        }
         showStatus("최근 분석 불러오기 완료", true);
       } catch (error) {
         showError(`최근 분석 불러오기 실패: ${error.message}`);
@@ -1713,6 +1836,7 @@
 
     analyzeBtn.addEventListener("click", analyze);
     historyBtn.addEventListener("click", loadHistory);
+    renderHistory(safeReadLocalHistory());
   </script>
 </body>
 </html>
