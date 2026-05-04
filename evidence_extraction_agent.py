@@ -231,6 +231,16 @@ def _quality_score(
         score -= 10
 
     score -= _warning_penalty(source, extraction_method, match_reason)
+    flags = set(source.get("source_risk_flags") or [])
+    if (
+        "official_candidate_not_fetched" in flags
+        or "official_detail_not_verified" in flags
+        or "official body not fetched" in (match_reason or "").lower()
+        or "without_body" in (extraction_method or "").lower()
+    ):
+        score = min(score, 35)
+    if source.get("source_type") == "search_fallback_news":
+        score = min(score, 60)
     return max(0, min(100, score))
 
 

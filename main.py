@@ -369,6 +369,41 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
             bias_framing_analysis=bias_framing_analysis,
             verification_card=verification_card,
         )
+        if verification_card.get("official_mismatch"):
+            policy_confidence = dict(policy_confidence)
+            policy_confidence["policy_confidence_score"] = min(
+                int(policy_confidence.get("policy_confidence_score") or 0),
+                20,
+            )
+            policy_confidence["verification_strength"] = "none"
+            policy_confidence["confidence_evidence_source"] = None
+            policy_confidence["confidence_evidence_title"] = None
+            policy_confidence["confidence_evidence_url"] = None
+            policy_confidence["confidence_evidence_grade"] = None
+            mismatch_reasons = verification_card.get("official_mismatch_reasons") or []
+            policy_confidence["confidence_reasons"] = [
+                "no usable official document",
+                "official source topic mismatch",
+                *mismatch_reasons[:2],
+            ]
+
+            final_decision = dict(final_decision)
+            final_decision["policy_alert_level"] = (
+                "WATCH"
+                if policy_impact.get("impact_level") == "high"
+                else final_decision.get("policy_alert_level", "WATCH")
+            )
+            final_decision["action_recommendation"] = "추가 공식 출처 확인 필요"
+            final_decision["decision_summary"] = (
+                "공식 상세 근거가 부족하거나 뉴스 핵심 주제와 불일치하여 추가 공식 출처 확인이 필요합니다."
+            )
+            decision_reasons = list(final_decision.get("decision_reasons") or [])
+            for reason in ["no usable official evidence", "official source topic mismatch"]:
+                if reason not in decision_reasons:
+                    decision_reasons.append(reason)
+            final_decision["decision_reasons"] = decision_reasons
+            verification_card["verdict_confidence"] = policy_confidence["policy_confidence_score"]
+
         verification_card["debug_summary"] = debug_summary
         verification_card = sanitize_data(verification_card)
         evidence_quality_summary = verification_card.get("evidence_quality_summary") or {}

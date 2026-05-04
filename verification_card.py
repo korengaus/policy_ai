@@ -24,6 +24,54 @@ PUBLIC_INSTITUTION_TYPES = {
     "public_financial_institution",
 }
 
+EXCLUDED_TOP_SOURCE_TYPES = {
+    "search_page",
+    "index_page",
+    "menu_or_index_page",
+    "service_index_page",
+    "generic_list_page",
+    "service_page",
+    "faq_or_guide",
+    "error_page",
+    "attachment_only",
+}
+
+HOUSING_QUERY_TERMS = {
+    "부동산",
+    "주거",
+    "주택",
+    "전세",
+    "월세",
+    "임대",
+    "양도세",
+    "공급",
+    "재건축",
+    "재개발",
+}
+
+HOUSING_DOCUMENT_TERMS = {
+    "부동산",
+    "주거",
+    "주택",
+    "전세",
+    "월세",
+    "임대",
+    "양도세",
+    "공급",
+    "재건축",
+    "재개발",
+    "보증금",
+    "세입자",
+}
+
+MATERIAL_OFFICIAL_CONCEPTS = {
+    "rental_loan",
+    "mortgage_loan",
+    "interest_rate",
+    "regulation",
+    "financial_product_notice",
+}
+
 FALLBACK_NEWS_SOURCES = {
     "naver_fallback",
     "daum_fallback",
@@ -172,9 +220,152 @@ def _official_evidence_sources(official_evidence_results: list[dict]) -> list[di
     return sources
 
 
+def _split_csv_like(value) -> set[str]:
+    if isinstance(value, list):
+        return {str(item).strip() for item in value if str(item).strip()}
+    return {part.strip() for part in str(value or "").split(",") if part.strip()}
+
+
+def _official_topic_mismatch_reason(item: dict) -> str:
+    query_text = " ".join(
+        [
+            str(item.get("search_query_used") or ""),
+            " ".join(str(part) for part in item.get("search_query_variants") or []),
+        ]
+    )
+    document_text = " ".join(
+        [
+            str(item.get("document_title") or ""),
+            str(item.get("document_text_snippet") or "")[:800],
+        ]
+    )
+    title_text = str(item.get("document_title") or "")
+    site_key = str(item.get("site_key") or "").lower()
+    query_has_housing = any(term in query_text for term in HOUSING_QUERY_TERMS)
+    document_has_housing = any(term in document_text for term in HOUSING_DOCUMENT_TERMS)
+    title_has_housing = any(term in title_text for term in HOUSING_DOCUMENT_TERMS)
+    if query_has_housing and site_key in {"fsc", "fss", "ibk", "bok"} and not title_has_housing:
+        return "official document topic mismatch: financial-agency title lacks housing/real-estate terms"
+    if query_has_housing and not document_has_housing:
+        return "official document topic mismatch: housing/real-estate query without matching document terms"
+
+    concepts = _split_csv_like(item.get("matched_concepts"))
+    query_has_housing_finance = any(term in query_text for term in {"전세대출", "주담대", "주택담보대출", "금리", "규제"})
+    if query_has_housing_finance and not (concepts & MATERIAL_OFFICIAL_CONCEPTS):
+        return "official document topic mismatch: missing material policy concepts"
+
+    return ""
+
+
+def _is_usable_official_detail(item: dict) -> bool:
+    if not (item.get("usable") or item.get("weakly_usable")):
+        return False
+    if item.get("should_exclude_from_verification"):
+        return False
+    if item.get("evidence_grade") not in {"A", "B", "C"}:
+        return False
+    if item.get("document_type") in EXCLUDED_TOP_SOURCE_TYPES:
+        return False
+    if not item.get("selected_document_url"):
+        return False
+    return not _official_topic_mismatch_reason(item)
+
+
+def _official_verification_summary(
+    official_evidence_results: list[dict],
+    fallback_summary: dict,
+) -> dict:
+    results = official_evidence_results or []
+    usable = [item for item in results if _is_usable_official_detail(item)]
+    mismatch_results = [
+        item
+        for item in results
+        if item.get("should_exclude_from_verification")
+        or item.get("evidence_grade") == "F"
+        or item.get("document_type") in EXCLUDED_TOP_SOURCE_TYPES
+        or _official_topic_mismatch_reason(item)
+        or (item.get("document_relevance_score") is not None and int(item.get("document_relevance_score") or 0) < 40)
+    ]
+    mismatch_reasons = []
+    for item in mismatch_results[:4]:
+        reason = (
+            _official_topic_mismatch_reason(item)
+            or item.get("error")
+            or item.get("selected_document_reason")
+            or item.get("document_type")
+            or "official evidence mismatch"
+        )
+        if reason not in mismatch_reasons:
+            mismatch_reasons.append(reason)
+
+    summary = dict(fallback_summary or {})
+    summary["official_detail_available"] = bool(usable)
+    summary["official_mismatch"] = not bool(usable)
+    summary["official_mismatch_count"] = len(mismatch_results)
+    summary["official_mismatch_reasons"] = mismatch_reasons
+
+    if usable:
+        top = max(
+            usable,
+            key=lambda item: (
+                int(item.get("document_relevance_score") or 0),
+                {"A": 3, "B": 2, "C": 1}.get(item.get("evidence_grade"), 0),
+            ),
+        )
+        summary.update(
+            {
+                "top_source_title": top.get("document_title") or top.get("source_name"),
+                "top_source_url": top.get("selected_document_url") or top.get("search_url"),
+                "top_source_reliability_score": top.get("reliability_score") or 5,
+                "top_source_evidence_grade": top.get("evidence_grade"),
+                "top_source_document_type": top.get("document_type"),
+                "top_source_relevance_score": top.get("document_relevance_score") or 0,
+                "top_source_note": "usable official detail document",
+            }
+        )
+    else:
+        summary.update(
+            {
+                "top_source_title": "공식 상세 근거 부족",
+                "top_source_url": "",
+                "top_source_reliability_score": 0,
+                "top_source_evidence_grade": None,
+                "top_source_document_type": None,
+                "top_source_relevance_score": 0,
+                "top_source_note": "usable official detail document not found",
+            }
+        )
+    return summary
+
+
+def _official_adjusted_evidence_quality(
+    quality_summary: dict,
+    source_reliability_summary: dict,
+) -> dict:
+    adjusted = dict(quality_summary or {})
+    if not source_reliability_summary.get("official_mismatch"):
+        return adjusted
+
+    strong_count = int(adjusted.get("strong") or 0)
+    medium_count = int(adjusted.get("medium") or 0)
+    weak_count = int(adjusted.get("weak") or 0)
+    total_count = strong_count + medium_count + weak_count
+    adjusted["strong"] = 0
+    adjusted["medium"] = 0
+    adjusted["weak"] = total_count
+    adjusted["average_evidence_quality_score"] = min(
+        int(adjusted.get("average_evidence_quality_score") or 0),
+        35 if total_count else 0,
+    )
+    adjusted["evidence_quality_overall_label"] = "weak"
+    adjusted["official_quality_note"] = "official detail evidence missing or mismatched"
+    return adjusted
+
+
 def _news_source(news: dict, original_url: str) -> dict:
     source_type = _source_type_for_news(news.get("source") or "", original_url)
     reliability_score = 3 if source_type == "established_news" else 2
+
     return {
         "title": news.get("title") or "",
         "url": original_url,
@@ -327,6 +518,27 @@ def build_verification_card(
         claim_list or [claim_text],
         evidence_snippets or [],
     )
+    source_reliability_summary = _official_verification_summary(
+        official_evidence_results,
+        summarize_source_reliability(source_candidates or []),
+    )
+    evidence_quality_summary = _official_adjusted_evidence_quality(
+        evidence_extraction_summary.get("evidence_quality_summary") or {},
+        source_reliability_summary,
+    )
+    evidence_extraction_summary = dict(evidence_extraction_summary)
+    evidence_extraction_summary["evidence_quality_summary"] = evidence_quality_summary
+    evidence_extraction_summary["total_strong_evidence"] = evidence_quality_summary.get("strong", 0)
+    evidence_extraction_summary["total_medium_evidence"] = evidence_quality_summary.get("medium", 0)
+    evidence_extraction_summary["total_weak_evidence"] = evidence_quality_summary.get("weak", 0)
+    evidence_extraction_summary["average_evidence_quality_score"] = evidence_quality_summary.get(
+        "average_evidence_quality_score",
+        0,
+    )
+    evidence_extraction_summary["evidence_quality_overall_label"] = evidence_quality_summary.get(
+        "evidence_quality_overall_label",
+        "weak",
+    )
 
     return {
         "claim_text": claim_text,
@@ -334,11 +546,14 @@ def build_verification_card(
         "normalized_claims": normalized_claims or [],
         "source_queries": source_queries or [],
         "source_candidates": source_candidates or [],
-        "source_reliability_summary": summarize_source_reliability(source_candidates or []),
+        "source_reliability_summary": source_reliability_summary,
+        "official_mismatch": source_reliability_summary.get("official_mismatch"),
+        "official_mismatch_reasons": source_reliability_summary.get("official_mismatch_reasons") or [],
+        "official_detail_available": source_reliability_summary.get("official_detail_available"),
         "evidence_snippets": evidence_snippets or [],
         "claim_evidence_map": claim_evidence_map or {},
         "claim_evidence_quality_summary": claim_quality_summary,
-        "evidence_quality_summary": evidence_extraction_summary.get("evidence_quality_summary") or {},
+        "evidence_quality_summary": evidence_quality_summary,
         "evidence_extraction_summary": evidence_extraction_summary,
         "contradiction_checks": contradiction_checks or [],
         "contradiction_summary": final_contradiction_summary,

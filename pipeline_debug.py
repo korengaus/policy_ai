@@ -47,6 +47,27 @@ def _evidence_quality_summary(evidence_snippets: list[dict]) -> dict:
     }
 
 
+def _official_adjusted_quality_summary(quality_summary: dict, official_mismatch: bool) -> dict:
+    adjusted = dict(quality_summary or {})
+    if not official_mismatch:
+        return adjusted
+
+    strong_count = int(adjusted.get("strong") or 0)
+    medium_count = int(adjusted.get("medium") or 0)
+    weak_count = int(adjusted.get("weak") or 0)
+    total_count = strong_count + medium_count + weak_count
+    adjusted["strong"] = 0
+    adjusted["medium"] = 0
+    adjusted["weak"] = total_count
+    adjusted["average_evidence_quality_score"] = min(
+        int(adjusted.get("average_evidence_quality_score") or 0),
+        35 if total_count else 0,
+    )
+    adjusted["evidence_quality_overall_label"] = "weak"
+    adjusted["official_quality_note"] = "official detail evidence missing or mismatched"
+    return adjusted
+
+
 def _direct_evidence_count(evidence_snippets: list[dict]) -> int:
     return sum(
         1
@@ -110,12 +131,19 @@ def build_pipeline_debug_summary(
     direct_count = _direct_evidence_count(evidence_snippets)
     matched_evidence_count = _matched_evidence_count(evidence_snippets)
     strength_summary = _evidence_strength_summary(evidence_snippets)
-    quality_summary = _evidence_quality_summary(evidence_snippets)
     zero_reasons = _evidence_zero_reasons(evidence_snippets, source_count)
     contradiction_count = _count(contradiction_checks)
     bias_count = _count(bias_framing_analysis)
     framing_flags_count = _framing_flags_count(bias_framing_analysis)
     overall_verdict = verification_card.get("verdict_label") or ""
+    official_mismatch = bool(verification_card.get("official_mismatch"))
+    official_mismatch_reasons = verification_card.get("official_mismatch_reasons") or []
+    official_detail_available = bool(verification_card.get("official_detail_available"))
+    quality_summary = _official_adjusted_quality_summary(
+        verification_card.get("evidence_quality_summary")
+        or _evidence_quality_summary(evidence_snippets),
+        official_mismatch,
+    )
 
     intake_ok = bool(news.get("title") and original_url)
     claim_extraction_ok = claims_count > 0
@@ -180,6 +208,9 @@ def build_pipeline_debug_summary(
         "contradiction_checks_count": contradiction_count,
         "framing_flags_count": framing_flags_count,
         "overall_verdict": overall_verdict,
+        "official_detail_available": official_detail_available,
+        "official_mismatch": official_mismatch,
+        "official_mismatch_reasons": official_mismatch_reasons[:5],
         "needs_human_review": needs_human_review,
         "missing_steps": missing_steps,
     }
@@ -190,6 +221,7 @@ def build_pipeline_debug_summary(
         f"evidence_count={matched_evidence_count} "
         f"evidence_strength={strength_summary} "
         f"evidence_quality={quality_summary} "
+        f"official_mismatch={str(official_mismatch).lower()} "
         f"bias_framing_ok={str(bias_framing_ok).lower()}"
     )
     return summary

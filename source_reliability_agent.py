@@ -61,6 +61,8 @@ def _role(source_type: str, purpose: str, score: int) -> str:
         return "contradiction_check"
     if source_type in {"official_government", "public_institution"} and score >= 75:
         return "primary_evidence"
+    if source_type in {"official_government", "public_institution"}:
+        return "context_only"
     if purpose == "support" and score >= 50:
         return "supporting_evidence"
     if purpose == "news_context":
@@ -105,12 +107,13 @@ def evaluate_source_candidate(source: dict) -> dict:
         reason = "검색 fallback으로 확보한 뉴스 출처입니다."
     else:
         score = 30
-        reason = "출처 유형 또는 발행처 신뢰도를 명확히 판정하기 어렵습니다."
+        reason = "출처 유형 또는 발행처 신뢰도를 명확히 판단하기 어렵습니다."
 
     if retrieval_method == "official_search_url_candidate" and not raw_text_available:
         flags.append("official_candidate_not_fetched")
-        reason += " 공식기관 후보이지만 실제 문서 본문은 아직 수집되지 않음."
-        score = max(score, 88)
+        flags.append("official_detail_not_verified")
+        reason += " 공식기관 후보이지만 실제 상세 문서 본문은 아직 수집되지 않았습니다."
+        score = min(score, 70)
 
     if purpose in {"contradiction", "fact_check", "update"}:
         score = max(score - 5, 0)
@@ -139,6 +142,17 @@ def evaluate_source_candidates(source_candidates: list[dict]) -> list[dict]:
     return evaluated
 
 
+def _is_top_source_eligible(source: dict) -> bool:
+    flags = set(source.get("source_risk_flags") or [])
+    if "official_candidate_not_fetched" in flags or "official_detail_not_verified" in flags:
+        return False
+    if "no_body_text" in flags:
+        return False
+    if source.get("verification_role") == "not_reliable_enough":
+        return False
+    return True
+
+
 def summarize_source_reliability(source_candidates: list[dict]) -> dict:
     candidates = source_candidates or []
     if not candidates:
@@ -149,9 +163,16 @@ def summarize_source_reliability(source_candidates: list[dict]) -> dict:
             "official_candidate_count": 0,
             "raw_text_available_count": 0,
             "average_reliability_score": 0,
+            "official_detail_available": False,
+            "official_mismatch": True,
+            "official_mismatch_reasons": ["no source candidates"],
         }
 
-    top_source = max(candidates, key=lambda source: source.get("reliability_score") or 0)
+    eligible = [source for source in candidates if _is_top_source_eligible(source)]
+    top_source = max(
+        eligible or candidates,
+        key=lambda source: source.get("reliability_score") or 0,
+    )
     official_count = sum(
         1
         for source in candidates
@@ -168,4 +189,7 @@ def summarize_source_reliability(source_candidates: list[dict]) -> dict:
         "official_candidate_count": official_count,
         "raw_text_available_count": raw_text_count,
         "average_reliability_score": average,
+        "official_detail_available": False,
+        "official_mismatch": not bool(eligible),
+        "official_mismatch_reasons": [] if eligible else ["no eligible fetched source for top evidence"],
     }
