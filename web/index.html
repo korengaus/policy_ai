@@ -225,6 +225,55 @@
       margin-top: 16px;
     }
 
+    .report-actions {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border: 1px solid #dbeafe;
+      border-radius: 10px;
+      background: #eff6ff;
+      margin: 16px 0 0;
+      padding: 12px;
+    }
+
+    .report-actions-title {
+      color: #1e3a8a;
+      font-size: 14px;
+      font-weight: 900;
+    }
+
+    .report-actions-buttons {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .report-copy,
+    .report-download {
+      min-height: 34px;
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .report-copy {
+      background: var(--blue);
+    }
+
+    .report-copy:hover:not(:disabled) {
+      background: var(--blue-dark);
+    }
+
+    .report-download {
+      background: #0f766e;
+    }
+
+    .report-download:hover:not(:disabled) {
+      background: #115e59;
+    }
+
     .result-card {
       padding: 18px;
     }
@@ -761,6 +810,11 @@
         grid-template-columns: 1fr 1fr;
       }
 
+      .report-actions {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
       .evidence-extraction-summary,
       .evidence-snippet-grid,
       .pipeline-debug-grid {
@@ -834,6 +888,14 @@
       </div>
     </section>
 
+    <section id="reportActions" class="report-actions">
+      <div class="report-actions-title">공유용 분석 리포트</div>
+      <div class="report-actions-buttons">
+        <button id="copyReportBtn" class="report-copy" type="button">리포트 복사</button>
+        <button id="downloadReportBtn" class="report-download" type="button">리포트 다운로드</button>
+      </div>
+    </section>
+
     <section id="results" class="results">
       <div class="empty-state">분석을 실행하면 결과가 여기에 표시됩니다.</div>
     </section>
@@ -859,9 +921,12 @@
     const analyzeBtn = document.getElementById("analyzeBtn");
     const historyBtn = document.getElementById("historyBtn");
     const clearHistoryBtn = document.getElementById("clearHistoryBtn");
+    const copyReportBtn = document.getElementById("copyReportBtn");
+    const downloadReportBtn = document.getElementById("downloadReportBtn");
     const statusLine = document.getElementById("statusLine");
     const errorBox = document.getElementById("errorBox");
     const metricsEl = document.getElementById("metrics");
+    const reportActionsEl = document.getElementById("reportActions");
     const resultsEl = document.getElementById("results");
     const historyEl = document.getElementById("history");
 
@@ -872,6 +937,7 @@
 
     const ALERT_RANK = { LOW: 1, WATCH: 2, MEDIUM: 3, HIGH: 4 };
     let currentHistoryId = null;
+    let currentReportContext = null;
     const ALERT_LABELS = {
       WATCH: "관찰",
       LOW: "낮음",
@@ -1584,6 +1650,8 @@
       analyzeBtn.disabled = isBusy;
       historyBtn.disabled = isBusy;
       clearHistoryBtn.disabled = isBusy;
+      copyReportBtn.disabled = isBusy;
+      downloadReportBtn.disabled = isBusy;
       queryInput.disabled = isBusy;
       maxNewsInput.disabled = isBusy;
     }
@@ -1618,6 +1686,22 @@
       metricsEl.style.display = "grid";
     }
 
+    function setCurrentReportContext(query, maxNews, results, analyzedAt) {
+      const safeResults = Array.isArray(results) ? results : [];
+      currentReportContext = {
+        query: query || queryInput.value.trim() || "-",
+        maxNews: maxNews || Number(maxNewsInput.value || safeResults.length || 0),
+        analyzedAt: analyzedAt || new Date().toISOString(),
+        results: safeResults,
+      };
+      reportActionsEl.style.display = safeResults.length ? "flex" : "none";
+    }
+
+    function clearCurrentReportContext() {
+      currentReportContext = null;
+      reportActionsEl.style.display = "none";
+    }
+
     function safeReadLocalHistory() {
       try {
         const raw = localStorage.getItem(LOCAL_HISTORY_KEY);
@@ -1649,6 +1733,10 @@
         return record.results;
       }
       return [];
+    }
+
+    function getHistoryAnalyzedAt(record) {
+      return record?.analyzed_at || record?.created_at || new Date().toISOString();
     }
 
     function safeWriteLocalHistory(records) {
@@ -1736,6 +1824,12 @@
     function loadHistoryRecord(record, message) {
       const results = getHistoryResults(record);
       currentHistoryId = record?.id || null;
+      setCurrentReportContext(
+        record?.query || queryInput.value.trim(),
+        record?.max_news || results.length,
+        results,
+        getHistoryAnalyzedAt(record)
+      );
       renderResults(results);
       renderHistory(safeReadLocalHistory());
       if (record?.query) {
@@ -1771,6 +1865,7 @@
     function renderResults(results) {
       if (!results.length) {
         metricsEl.style.display = "none";
+        clearCurrentReportContext();
         resultsEl.innerHTML = '<div class="empty-state">분석을 실행하면 결과가 여기에 표시됩니다.</div>';
         return;
       }
@@ -2032,6 +2127,158 @@
       }).join("");
     }
 
+    function plain(value, fallback = "-") {
+      if (value === null || value === undefined || value === "") {
+        return fallback;
+      }
+      if (Array.isArray(value)) {
+        return value.length ? value.join(", ") : fallback;
+      }
+      return String(value);
+    }
+
+    function getTopSourceForReport(result) {
+      const verification = result?.verification_card || result || {};
+      const reliability = verification.source_reliability_summary || {};
+      const evidenceSource = Array.isArray(verification.evidence_sources)
+        ? verification.evidence_sources[0]
+        : null;
+      return {
+        title: reliability.top_source_title || evidenceSource?.title || "정보 없음",
+        url: reliability.top_source_url || evidenceSource?.url || "",
+      };
+    }
+
+    function getEvidenceSummaryForReport(result) {
+      const verification = result?.verification_card || result || {};
+      const extraction = verification.evidence_extraction_summary || {};
+      const debug = verification.debug_summary || result?.debug_summary || {};
+      return {
+        strength: debug.evidence_strength_summary || extraction.evidence_strength_summary || {},
+        quality: debug.evidence_quality_summary || extraction.evidence_quality_summary || result?.evidence_quality_summary || {},
+      };
+    }
+
+    function formatEvidenceCounts(summary) {
+      return `strong ${plain(summary.strong, 0)}, medium ${plain(summary.medium, 0)}, weak ${plain(summary.weak, 0)}`;
+    }
+
+    function buildReportText() {
+      const context = currentReportContext || {};
+      const results = Array.isArray(context.results) ? context.results : [];
+      const metrics = computeMetrics(results);
+      const aggregate = aggregateEvidenceSummaries(results);
+      const lines = [];
+
+      lines.push("정책 AI 분석 리포트");
+      lines.push("=".repeat(28));
+      lines.push(`검색어: ${plain(context.query)}`);
+      lines.push(`뉴스 개수: ${plain(context.maxNews || results.length, 0)}`);
+      lines.push(`분석 시간: ${plain(context.analyzedAt)}`);
+      lines.push(`최고 경고 단계: ${metrics.highest === "-" ? "-" : formatAlert(metrics.highest)}`);
+      lines.push(`평균 신뢰도: ${plain(metrics.averageConfidence, 0)}`);
+      lines.push(`고영향 뉴스 수: ${plain(metrics.highImpactCount, 0)}`);
+      lines.push(`전체 evidence strength: ${formatEvidenceCounts(aggregate.strength)}`);
+      lines.push(`전체 evidence quality: ${formatEvidenceCounts(aggregate.quality)}, avg ${plain(aggregate.quality.average_evidence_quality_score, 0)}`);
+      lines.push("");
+
+      if (!results.length) {
+        lines.push("분석 결과가 없습니다.");
+        return lines.join("\n");
+      }
+
+      results.forEach((result, index) => {
+        const confidence = result.policy_confidence || {};
+        const impact = result.policy_impact || {};
+        const decision = result.final_decision || {};
+        const verification = result.verification_card || result || {};
+        const evidence = getEvidenceSummaryForReport(result);
+        const topSource = getTopSourceForReport(result);
+
+        lines.push(`[${index + 1}] ${plain(result.title, "제목 없음")}`);
+        lines.push("-".repeat(28));
+        lines.push(`원문: ${plain(result.original_url)}`);
+        lines.push(`주제: ${plain(result.topic)}`);
+        lines.push(`경고 단계: ${formatAlert(String(decision.policy_alert_level || "WATCH").toUpperCase())}`);
+        lines.push(`신뢰도 점수: ${plain(confidence.policy_confidence_score)}`);
+        lines.push(`검증 강도: ${formatLevel(confidence.verification_strength)}`);
+        lines.push(`영향도: ${formatLevel(impact.impact_level)}`);
+        lines.push(`위험도: ${formatLevel(confidence.risk_level)}`);
+        lines.push(`영향 방향: ${formatDirection(impact.impact_direction)}`);
+        lines.push(`권장 조치: ${formatRecommendation(decision.action_recommendation)}`);
+        lines.push(`시장 신호: ${formatSignal(decision.market_signal)}`);
+        lines.push(`최고 신뢰 출처: ${plain(topSource.title, "정보 없음")}${topSource.url ? ` (${topSource.url})` : ""}`);
+        lines.push(`evidence strength: ${formatEvidenceCounts(evidence.strength)}`);
+        lines.push(`evidence quality: ${formatEvidenceCounts(evidence.quality)}, avg ${plain(evidence.quality.average_evidence_quality_score, 0)}`);
+        lines.push(`AI 초안 판정: ${formatVerdict(verification.verdict_label)}`);
+        lines.push(`핵심 주장: ${plain(verification.claim_text)}`);
+        lines.push(`근거 요약: ${plain(verification.evidence_summary)}`);
+        lines.push(`부족한 맥락: ${plain(formatList(verification.missing_context), "정보 없음")}`);
+        lines.push(`마지막 확인 시간: ${plain(verification.last_checked_at)}`);
+        lines.push("");
+      });
+
+      return lines.join("\n");
+    }
+
+    async function copyReport() {
+      try {
+        const reportText = buildReportText();
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(reportText);
+        } else {
+          const textarea = document.createElement("textarea");
+          textarea.value = reportText;
+          textarea.setAttribute("readonly", "");
+          textarea.style.position = "fixed";
+          textarea.style.left = "-9999px";
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand("copy");
+          document.body.removeChild(textarea);
+        }
+        showStatus("리포트를 복사했습니다.", true);
+      } catch (error) {
+        showError(`리포트 복사 실패: ${error.message}`);
+      }
+    }
+
+    function safeFilenamePart(value) {
+      return String(value || "report")
+        .replace(/[\\/:*?"<>|]/g, "-")
+        .replace(/\s+/g, "-")
+        .replace(/-+/g, "-")
+        .slice(0, 40) || "report";
+    }
+
+    function formatTimestampForFilename(dateValue) {
+      const date = dateValue ? new Date(dateValue) : new Date();
+      const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
+      const pad = (value) => String(value).padStart(2, "0");
+      return `${safeDate.getFullYear()}${pad(safeDate.getMonth() + 1)}${pad(safeDate.getDate())}-${pad(safeDate.getHours())}${pad(safeDate.getMinutes())}`;
+    }
+
+    function downloadReport() {
+      try {
+        const reportText = buildReportText();
+        const query = currentReportContext?.query || queryInput.value.trim() || "analysis";
+        const timestamp = formatTimestampForFilename(currentReportContext?.analyzedAt);
+        const filename = `policy-analysis-report-${safeFilenamePart(query)}-${timestamp}.txt`;
+        const blob = new Blob([reportText], { type: "text/plain;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        showStatus("리포트 다운로드를 시작했습니다.", true);
+      } catch (error) {
+        showError(`리포트 다운로드 실패: ${error.message}`);
+      }
+    }
+
     async function analyze() {
       const query = queryInput.value.trim();
       const maxNews = Number(maxNewsInput.value || 2);
@@ -2058,7 +2305,9 @@
         }
 
         const data = await response.json();
-        renderResults(data.results || []);
+        const results = data.results || [];
+        setCurrentReportContext(query, maxNews, results, new Date().toISOString());
+        renderResults(results);
         if ((data.results || []).length) {
           saveLocalAnalysisHistory(query, maxNews, data);
         }
@@ -2095,6 +2344,8 @@
 
     analyzeBtn.addEventListener("click", analyze);
     historyBtn.addEventListener("click", loadHistory);
+    copyReportBtn.addEventListener("click", copyReport);
+    downloadReportBtn.addEventListener("click", downloadReport);
     clearHistoryBtn.addEventListener("click", clearLocalHistory);
     historyEl.addEventListener("click", (event) => {
       const deleteButton = event.target.closest("[data-delete-history-id]");
