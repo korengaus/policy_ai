@@ -153,6 +153,29 @@ def build_pipeline_debug_summary(
     strength_summary = _evidence_strength_summary(evidence_snippets)
     zero_reasons = _evidence_zero_reasons(evidence_snippets, source_count)
     contradiction_count = _count(contradiction_checks)
+    contradiction_candidates_searched = sum(
+        int(item.get("contradiction_candidate_count") or 0)
+        for item in contradiction_checks or []
+    )
+    contradiction_candidates_matched = sum(
+        int(item.get("contradiction_matched_count") or 0)
+        for item in contradiction_checks or []
+    )
+    confirmed_contradictions = sum(
+        1
+        for item in contradiction_checks or []
+        if item.get("contradiction_status") in {"confirmed_contradiction", "likely_contradiction"}
+    )
+    possible_contradictions = sum(
+        1
+        for item in contradiction_checks or []
+        if item.get("contradiction_status") == "possible_contradiction"
+    )
+    verdict_sources = {}
+    for item in contradiction_checks or []:
+        source = item.get("contradiction_verdict_source") or "unknown"
+        verdict_sources[source] = verdict_sources.get(source, 0) + 1
+    contradiction_verdict_source = max(verdict_sources, key=verdict_sources.get, default="no_match")
     bias_count = _count(bias_framing_analysis)
     framing_flags_count = _framing_flags_count(bias_framing_analysis)
     overall_verdict = verification_card.get("verdict_label") or ""
@@ -227,6 +250,12 @@ def build_pipeline_debug_summary(
         "evidence_quality_overall_label": quality_summary["evidence_quality_overall_label"],
         "evidence_zero_reasons": zero_reasons,
         "contradiction_checks_count": contradiction_count,
+        "contradiction_candidates_searched": contradiction_candidates_searched,
+        "contradiction_candidates_matched": contradiction_candidates_matched,
+        "confirmed_contradictions": confirmed_contradictions,
+        "possible_contradictions": possible_contradictions,
+        "contradiction_verdict_source": contradiction_verdict_source,
+        "contradiction_verdict_source_counts": verdict_sources,
         "framing_flags_count": framing_flags_count,
         "overall_verdict": overall_verdict,
         "official_detail_available": official_detail_available,
@@ -241,6 +270,11 @@ def build_pipeline_debug_summary(
         f"intake_ok={str(intake_ok).lower()} "
         f"claim_count={claims_count} "
         f"evidence_count={matched_evidence_count} "
+        f"contradiction_candidates={contradiction_candidates_searched} "
+        f"contradiction_matched={contradiction_candidates_matched} "
+        f"confirmed_contradictions={confirmed_contradictions} "
+        f"possible_contradictions={possible_contradictions} "
+        f"contradiction_source={contradiction_verdict_source} "
         f"evidence_strength={strength_summary} "
         f"evidence_quality={quality_summary} "
         f"official_mismatch={str(official_mismatch).lower()} "

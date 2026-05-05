@@ -413,17 +413,23 @@ def _verdict_label(
     contradiction = contradiction_summary or {}
     bias = bias_framing_summary or {}
     possible_count = int(contradiction.get("possible_contradiction_count") or 0)
-    likely_count = int(contradiction.get("likely_contradiction_count") or 0)
+    confirmed_count = int(
+        contradiction.get("confirmed_contradiction_count")
+        or contradiction.get("likely_contradiction_count")
+        or 0
+    )
     high_framing_count = int(bias.get("high_framing_count") or 0)
     official_confirmation_count = int(
         contradiction.get("needs_official_confirmation_count") or 0
     )
     insufficient_claim_count = int(contradiction.get("insufficient_evidence_count") or 0)
-    if high_framing_count and (possible_count or likely_count):
+    if high_framing_count and confirmed_count:
         return "draft_high_risk_review"
     if high_framing_count:
         return "draft_needs_review"
-    if possible_count or likely_count:
+    if confirmed_count:
+        return "draft_disputed"
+    if possible_count:
         return "draft_needs_review"
     if claim_count and official_confirmation_count >= max(1, claim_count // 2):
         return "draft_needs_official_confirmation"

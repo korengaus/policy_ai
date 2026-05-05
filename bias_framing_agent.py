@@ -251,7 +251,7 @@ def analyze_bias_framing(
         if contradiction_status == "possible_contradiction":
             score += 20
             reasons.append("반박 가능성 신호가 있어 표현 검토가 필요함")
-        elif contradiction_status == "likely_contradiction":
+        elif contradiction_status in {"likely_contradiction", "confirmed_contradiction"}:
             score += 30
             reasons.append("강한 모순 가능성 신호가 있어 표현 검토가 필요함")
 
@@ -277,7 +277,7 @@ def analyze_bias_framing(
             framing_level == "high"
             or bool(low_confidence_evidence)
             or source_context["fallback_only"]
-            or contradiction_status in {"possible_contradiction", "likely_contradiction"}
+            or contradiction_status in {"possible_contradiction", "likely_contradiction", "confirmed_contradiction"}
         )
         if not reasons:
             reasons.append("자극적 표현이나 뚜렷한 편향 신호가 낮음")

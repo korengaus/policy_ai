@@ -1398,8 +1398,11 @@
 
     function formatContradictionStatus(value) {
       const labels = {
+        no_contradiction: "반박 근거 없음",
         no_contradiction_found: "반박 신호 없음",
+        insufficient_contradiction_evidence: "반박 판단 근거 부족",
         possible_contradiction: "반박 가능성",
+        confirmed_contradiction: "확인된 모순",
         likely_contradiction: "강한 모순 가능성",
         insufficient_evidence: "근거 부족",
         needs_official_confirmation: "공식 확인 필요",
@@ -1420,7 +1423,7 @@
     function renderContradictionSummary(summary) {
       const data = summary || {};
       const possibleCount = Number(data.possible_contradiction_count || 0)
-        + Number(data.likely_contradiction_count || 0);
+        + Number(data.confirmed_contradiction_count || data.likely_contradiction_count || 0);
       return `
         <div class="evidence-extraction-summary">
           <div class="evidence-extraction-tile">
@@ -1434,6 +1437,12 @@
           </div>
           <div class="evidence-extraction-tile">
             <span class="label">전체 모순 위험도</span><br>${escapeHtml(formatContradictionRisk(data.overall_contradiction_risk))}
+          </div>
+          <div class="evidence-extraction-tile">
+            <span class="label">후보/매칭</span><br>${escapeHtml(data.contradiction_candidates_searched ?? 0)} / ${escapeHtml(data.contradiction_candidates_matched ?? 0)}
+          </div>
+          <div class="evidence-extraction-tile">
+            <span class="label">판정 근거</span><br>${escapeHtml(data.contradiction_verdict_source || "-")}
           </div>
         </div>
       `;
@@ -1616,6 +1625,7 @@
             · rejected_penalty: ${escapeHtml(String(Boolean(data.rejected_penalty)))}
             · review_decision_source: ${escapeHtml(data.review_decision_source || "-")}
             · official body: candidates ${escapeHtml(data.official_body_candidates ?? 0)}, fetched ${escapeHtml(data.official_bodies_fetched ?? 0)}, usable ${escapeHtml(data.official_bodies_usable ?? 0)}, matched ${escapeHtml(data.official_body_matches ?? 0)}, failures ${escapeHtml(JSON.stringify(data.official_body_failures || {}))}
+            · contradiction: searched ${escapeHtml(data.contradiction_candidates_searched ?? 0)}, matched ${escapeHtml(data.contradiction_candidates_matched ?? 0)}, confirmed ${escapeHtml(data.confirmed_contradictions ?? 0)}, possible ${escapeHtml(data.possible_contradictions ?? 0)}, source ${escapeHtml(data.contradiction_verdict_source || "-")}
             · news input: ${escapeHtml(data.collection_source || "-")} / ${escapeHtml(data.news_collection_mode || "-")}
             · zero reasons: ${escapeHtml(zeroReasons)}
             · missing steps: ${escapeHtml(missing)}

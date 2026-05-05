@@ -3,6 +3,8 @@ from urllib.parse import urlparse
 import hashlib
 import re
 
+from text_utils import sanitize_text
+
 
 OFFICIAL_SOURCE_TYPES = {
     "central_government",
@@ -21,18 +23,19 @@ FALLBACK_NEWS_SOURCES = {"naver_fallback", "daum_fallback"}
 
 STOPWORDS = {
     "정부",
-    "당국",
-    "통해",
-    "대한",
+    "정책",
     "관련",
-    "내용",
+    "이번",
     "기사",
-    "지난",
-    "오늘",
-    "있다",
-    "한다",
+    "뉴스",
+    "있는",
+    "없는",
+    "대한",
+    "것으로",
+    "한다고",
     "했다",
-    "나섰다",
+    "한다",
+    "있다",
 }
 
 
@@ -67,33 +70,76 @@ def _official_source_type(source_type: str) -> str:
     return "unknown"
 
 
+def _token_variants(token: str) -> set[str]:
+    variants = {token}
+    for suffix in ["으로", "에서", "에게", "까지", "부터", "보다", "처럼", "했다", "한다", "되는", "하고", "하며", "을", "를", "은", "는", "이", "가", "의", "와", "과", "도", "만", "로"]:
+        if token.endswith(suffix) and len(token) - len(suffix) >= 2:
+            variants.add(token[: -len(suffix)])
+    return variants
+
+
 def _keywords_from_claim(normalized_claim: dict) -> list[str]:
-    claim_text = normalized_claim.get("claim_text") or ""
-    seeds = [
+    fields = [
         normalized_claim.get("actor") or "",
         normalized_claim.get("target") or "",
         normalized_claim.get("object") or "",
         normalized_claim.get("action") or "",
         normalized_claim.get("quantity") or "",
         normalized_claim.get("location") or "",
+        normalized_claim.get("claim_text") or "",
     ]
     words = []
-    for seed in seeds:
-        for token in re.findall(r"[가-힣A-Za-z0-9.%]+", seed):
-            if len(token) >= 2 and token not in STOPWORDS and token != "unknown":
-                words.append(token)
-
-    for token in re.findall(r"[가-힣A-Za-z0-9.%]+", claim_text):
-        if len(token) >= 3 and token not in STOPWORDS:
-            words.append(token)
+    for field in fields:
+        for raw in re.findall(r"[\uac00-\ud7a3A-Za-z0-9.%]+", sanitize_text(field)):
+            for token in _token_variants(raw):
+                if len(token) >= 2 and token not in STOPWORDS and token != "unknown":
+                    words.append(token)
 
     deduped = []
     for word in words:
         if word not in deduped:
             deduped.append(word)
-        if len(deduped) >= 6:
+        if len(deduped) >= 8:
             break
     return deduped
+
+
+def _numbers_from_claim(normalized_claim: dict) -> list[str]:
+    text = " ".join(
+        str(normalized_claim.get(key) or "")
+        for key in ["claim_text", "quantity", "date_or_time"]
+    )
+    return list(
+        dict.fromkeys(
+            re.findall(
+                r"\d+(?:\.\d+)?\s*(?:%p|%|조원|억원|만원|원|건|명|배)?|\d{4}년|\d{1,2}월|\d{1,2}일",
+                text,
+            )
+        )
+    )[:3]
+
+
+def _compact_contradiction_query(claim: dict) -> str:
+    keywords = _keywords_from_claim(claim)
+    numbers = _numbers_from_claim(claim)
+    institution_terms = [
+        term
+        for term in keywords
+        if term in {"한국은행", "금융위", "금융위원회", "금감원", "금융감독원", "국토부", "국토교통부", "국세청", "정부"}
+    ]
+    action_terms = [
+        term
+        for term in keywords
+        if term in {"금리", "인상", "인하", "동결", "규제", "제한", "차단", "지원", "감면", "조사", "시행", "확대", "축소"}
+    ]
+    core = []
+    for term in [*institution_terms, *keywords[:5], *numbers, *action_terms]:
+        if term and term not in core:
+            core.append(term)
+        if len(core) >= 7:
+            break
+    base = " ".join(core) or (claim.get("claim_text") or "")[:40]
+    return f"{base} 반박 정정 사실 확인"[:90]
 
 
 def generate_source_queries(
@@ -106,15 +152,15 @@ def generate_source_queries(
         keywords = _keywords_from_claim(claim)
         compact_query = " ".join(keywords[:5]) or claim.get("claim_text") or original_query
         official_query = f"site:go.kr {compact_query}".strip()
-        contradiction_base = " ".join(keywords[:4]) or compact_query
+        contradiction_query = _compact_contradiction_query(claim)
 
         query_specs = [
             ("original_query", original_query, "news_context"),
             ("claim_keyword_query", compact_query, "support"),
             ("official_query", official_query, "primary_source"),
-            ("contradiction_query", f"{contradiction_base} 반박", "contradiction"),
-            ("denial_query", f"{contradiction_base} 사실 아님", "fact_check"),
-            ("official_explanation_query", f"{contradiction_base} 금융위 해명", "update"),
+            ("contradiction_query", contradiction_query, "contradiction"),
+            ("denial_query", contradiction_query.replace("반박 정정", "해명 부인"), "fact_check"),
+            ("official_explanation_query", f"{compact_query} 공식 해명"[:90], "update"),
         ]
 
         for query_type, query, purpose in query_specs:
@@ -125,7 +171,7 @@ def generate_source_queries(
                     "claim_index": index,
                     "claim_text": claim.get("claim_text") or "",
                     "query_type": query_type,
-                    "query": query[:120],
+                    "query": query[:100],
                     "purpose": purpose,
                 }
             )
