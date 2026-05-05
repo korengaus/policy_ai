@@ -1611,6 +1611,10 @@
             · cache keys: news ${escapeHtml(data.news_cache_key || "-")}, analysis ${escapeHtml(data.analysis_cache_key || "-")}
             · history: ${escapeHtml(data.history_action || "-")} / ${escapeHtml(data.history_key || data.stable_history_key || "-")}
             · review queue: ${escapeHtml(data.review_queue_action || "-")} / ${escapeHtml(data.review_queue_key || "-")}
+            · human_review_feedback: ${escapeHtml(data.human_review_feedback || "none")}
+            · approved_boost: ${escapeHtml(String(Boolean(data.approved_boost)))}
+            · rejected_penalty: ${escapeHtml(String(Boolean(data.rejected_penalty)))}
+            · review_decision_source: ${escapeHtml(data.review_decision_source || "-")}
             · news input: ${escapeHtml(data.collection_source || "-")} / ${escapeHtml(data.news_collection_mode || "-")}
             · zero reasons: ${escapeHtml(zeroReasons)}
             · missing steps: ${escapeHtml(missing)}
@@ -2050,6 +2054,231 @@
             })
           : [],
       };
+    }
+
+    function cloneAnalysisData(data) {
+      try {
+        return JSON.parse(JSON.stringify(data || { status: "ok", results: [] }));
+      } catch (error) {
+        return { ...(data || {}), results: Array.isArray(data?.results) ? [...data.results] : [] };
+      }
+    }
+
+    function evidenceQualityLabel(score) {
+      const value = Number(score || 0);
+      if (value >= 75) return "strong";
+      if (value >= 45) return "medium";
+      return "weak";
+    }
+
+    function collectResultIdentityTokens(result) {
+      const tokens = [];
+      const addToken = (kind, value, weight) => {
+        const raw = String(value || "").trim();
+        if (!raw) return;
+        tokens.push({ key: `${kind}:${raw}`, kind, weight });
+      };
+      const addUrl = (value) => {
+        const url = canonicalHistoryUrl(value || "");
+        if (url) {
+          addToken("url", url, 4);
+          addToken("domain", historyDomain(url), 1);
+        }
+      };
+      const addTitle = (value) => {
+        const title = normalizeHistoryText(value || "");
+        if (title && title !== "untitled") addToken("title", title, 3);
+      };
+      const addSource = (value) => {
+        const source = normalizeHistoryText(value || "");
+        if (source) addToken("source", source, 1);
+      };
+
+      addTitle(result?.title || result?.claim_text || "");
+      addUrl(result?.original_url || result?.url || result?.link || "");
+      addSource(result?.source || result?.publisher || "");
+
+      const verification = result?.verification_card || {};
+      [
+        ...(Array.isArray(verification.evidence_sources) ? verification.evidence_sources : []),
+        ...(Array.isArray(result?.source_candidates) ? result.source_candidates : []),
+      ].forEach((source) => {
+        addTitle(source?.title || source?.source_title || "");
+        addUrl(source?.url || source?.source_url || "");
+        addSource(source?.publisher || source?.source_name || source?.source_type || "");
+      });
+
+      [
+        ...(Array.isArray(verification.evidence_snippets) ? verification.evidence_snippets : []),
+        ...(Array.isArray(result?.evidence_snippets) ? result.evidence_snippets : []),
+      ].forEach((snippet) => {
+        addTitle(snippet?.source_title || "");
+        addUrl(snippet?.source_url || "");
+        addSource(snippet?.publisher || "");
+      });
+
+      const unique = new Map();
+      tokens.forEach((token) => {
+        const existing = unique.get(token.key);
+        if (!existing || token.weight > existing.weight) unique.set(token.key, token);
+      });
+      return Array.from(unique.values()).sort((a, b) => a.key.localeCompare(b.key));
+    }
+
+    function reviewFeedbackMatchScore(result, query, queueItem) {
+      const currentKey = buildStableHistoryKey(query, [result]);
+      if (queueItem?.stable_history_key && queueItem.stable_history_key === currentKey) {
+        return 100;
+      }
+      const currentTokens = collectResultIdentityTokens(result);
+      const currentMap = new Map(currentTokens.map((token) => [token.key, token.weight]));
+      const storedResults = getHistoryResults(queueItem);
+      const storedTokens = storedResults.flatMap((storedResult) => collectResultIdentityTokens(storedResult));
+      let score = 0;
+      storedTokens.forEach((token) => {
+        if (currentMap.has(token.key)) {
+          score += Math.max(Number(token.weight || 0), Number(currentMap.get(token.key) || 0));
+        }
+      });
+      return score;
+    }
+
+    function findReviewFeedbackDecision(result, query) {
+      const queue = safeReadReviewQueue()
+        .filter((item) => ["approved", "rejected", "needs_more_info"].includes(item?.reviewer_status))
+        .sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
+
+      let best = null;
+      queue.forEach((item) => {
+        const score = reviewFeedbackMatchScore(result, query, item);
+        if (score >= 3 && (!best || score > best.score)) {
+          best = { item, score };
+        }
+      });
+      return best;
+    }
+
+    function collectEvidenceSnippets(result) {
+      const verification = result?.verification_card || {};
+      const snippets = Array.isArray(verification.evidence_snippets)
+        ? verification.evidence_snippets
+        : (Array.isArray(result?.evidence_snippets) ? result.evidence_snippets : []);
+      return snippets.map((snippet) => ({ ...(snippet || {}) }));
+    }
+
+    function summarizeEvidenceQuality(snippets) {
+      const summary = { strong: 0, medium: 0, weak: 0, average_evidence_quality_score: 0 };
+      let total = 0;
+      const list = Array.isArray(snippets) ? snippets : [];
+      list.forEach((snippet) => {
+        const label = snippet.evidence_quality_label || evidenceQualityLabel(snippet.evidence_quality_score);
+        if (label === "strong") summary.strong += 1;
+        else if (label === "medium") summary.medium += 1;
+        else summary.weak += 1;
+        total += Number(snippet.evidence_quality_score || 0);
+      });
+      summary.average_evidence_quality_score = list.length ? Math.round(total / list.length) : 0;
+      return summary;
+    }
+
+    function summarizeClaimEvidenceQuality(claims, snippets) {
+      const claimList = Array.isArray(claims) ? claims : [];
+      return claimList.map((claim, index) => {
+        const related = (snippets || []).filter((snippet) => Number(snippet.claim_index) === index);
+        const quality = summarizeEvidenceQuality(related);
+        const bestScore = related.reduce((best, snippet) => Math.max(best, Number(snippet.evidence_quality_score || 0)), 0);
+        return {
+          claim_index: index,
+          claim_text: claim,
+          strong_evidence_count: quality.strong,
+          medium_evidence_count: quality.medium,
+          weak_evidence_count: quality.weak,
+          best_evidence_score: bestScore,
+          evidence_quality_summary: quality,
+        };
+      });
+    }
+
+    function applyReviewDecisionToSnippets(snippets, reviewerStatus) {
+      return (snippets || []).map((snippet) => {
+        const next = { ...(snippet || {}) };
+        const currentScore = Number(next.evidence_quality_score || 0);
+        if (reviewerStatus === "approved") {
+          next.evidence_quality_score = Math.min(100, currentScore + 12);
+          next.review_feedback_note = "approved_boost";
+        } else if (reviewerStatus === "rejected") {
+          next.evidence_quality_score = Math.min(currentScore, 35);
+          next.review_feedback_note = "rejected_penalty";
+        } else {
+          next.evidence_quality_score = currentScore;
+          next.review_feedback_note = "needs_more_info_no_boost";
+        }
+        next.evidence_quality_label = evidenceQualityLabel(next.evidence_quality_score);
+        next.human_review_feedback = reviewerStatus;
+        return next;
+      });
+    }
+
+    function applyHumanReviewFeedback(responseData, query) {
+      const cloned = cloneAnalysisData(responseData);
+      cloned.results = Array.isArray(cloned.results) ? cloned.results.map((result) => {
+        const decision = findReviewFeedbackDecision(result, query);
+        if (!decision) return result;
+
+        const reviewerStatus = decision.item.reviewer_status;
+        const nextResult = { ...(result || {}) };
+        const verification = { ...(nextResult.verification_card || {}) };
+        const previousDebug = verification.debug_summary || nextResult.debug_summary || {};
+        if (
+          previousDebug.human_review_feedback === "applied"
+          && previousDebug.review_feedback_status === reviewerStatus
+        ) {
+          return nextResult;
+        }
+
+        const snippets = applyReviewDecisionToSnippets(collectEvidenceSnippets(nextResult), reviewerStatus);
+        const qualitySummary = summarizeEvidenceQuality(snippets);
+        const claims = Array.isArray(nextResult.claims)
+          ? nextResult.claims
+          : (Array.isArray(verification.claims) ? verification.claims : []);
+        const claimQuality = summarizeClaimEvidenceQuality(claims, snippets);
+        const extractionSummary = {
+          ...(nextResult.evidence_extraction_summary || verification.evidence_extraction_summary || {}),
+          evidence_quality_summary: qualitySummary,
+          total_strong_evidence: qualitySummary.strong,
+          total_medium_evidence: qualitySummary.medium,
+          total_weak_evidence: qualitySummary.weak,
+          average_evidence_quality_score: qualitySummary.average_evidence_quality_score,
+        };
+        const debug = {
+          ...previousDebug,
+          human_review_feedback: "applied",
+          approved_boost: reviewerStatus === "approved",
+          rejected_penalty: reviewerStatus === "rejected",
+          review_decision_source: "queue",
+          review_feedback_status: reviewerStatus,
+          review_feedback_key: decision.item.stable_history_key || decision.item.id || "-",
+          review_feedback_match_score: decision.score,
+          evidence_quality_summary: qualitySummary,
+          total_strong_evidence: qualitySummary.strong,
+          total_medium_evidence: qualitySummary.medium,
+          total_weak_evidence: qualitySummary.weak,
+          average_evidence_quality_score: qualitySummary.average_evidence_quality_score,
+        };
+
+        verification.evidence_snippets = snippets;
+        verification.evidence_extraction_summary = extractionSummary;
+        verification.claim_evidence_quality_summary = claimQuality;
+        verification.debug_summary = debug;
+        nextResult.evidence_snippets = snippets;
+        nextResult.evidence_extraction_summary = extractionSummary;
+        nextResult.claim_evidence_quality_summary = claimQuality;
+        nextResult.evidence_quality_summary = qualitySummary;
+        nextResult.debug_summary = debug;
+        nextResult.verification_card = verification;
+        return nextResult;
+      }) : [];
+      return cloned;
     }
 
     function getResultDebugSummary(result) {
@@ -2721,7 +2950,8 @@
         const data = await response.json();
         let renderData = data;
         if ((data.results || []).length) {
-          const historyResult = saveLocalAnalysisHistory(query, maxNews, data);
+          const feedbackData = applyHumanReviewFeedback(data, query);
+          const historyResult = saveLocalAnalysisHistory(query, maxNews, feedbackData);
           const reviewResult = upsertReviewQueue(
             query,
             maxNews,
