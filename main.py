@@ -26,6 +26,7 @@ from official_source_search import (
 )
 from source_retrieval_agent import build_source_retrieval_context
 from source_reliability_agent import evaluate_source_candidates
+from official_source_body import enrich_official_source_candidates_with_bodies
 from evidence_extraction_agent import extract_evidence_snippets
 from contradiction_agent import run_contradiction_checks
 from bias_framing_agent import analyze_bias_framing
@@ -431,6 +432,19 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
         )
         print_official_source_candidates(official_source_candidates)
 
+        official_evidence_results = fetch_official_evidence(
+            official_source_candidates,
+            max_candidates=3,
+            news_context={
+                "title": news["title"],
+                "summary": news["summary"],
+                "article_body": article_body,
+                "topic": preliminary_topic,
+                "policy_claims": policy_claims,
+            },
+        )
+        print_official_evidence_results(official_evidence_results)
+
         source_retrieval = build_source_retrieval_context(
             normalized_claims=normalized_claims,
             news=news,
@@ -440,9 +454,12 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
             official_source_candidates=official_source_candidates,
         )
         source_queries = source_retrieval.get("source_queries", [])
-        source_candidates = evaluate_source_candidates(
-            source_retrieval.get("source_candidates", [])
+        source_candidates, official_body_debug = enrich_official_source_candidates_with_bodies(
+            source_retrieval.get("source_candidates", []),
+            official_evidence_results,
+            normalized_claims,
         )
+        source_candidates = evaluate_source_candidates(source_candidates)
         evidence_extraction = extract_evidence_snippets(
             normalized_claims=normalized_claims,
             source_candidates=source_candidates,
@@ -470,19 +487,6 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
         )
         bias_framing_analysis = bias_framing_result.get("bias_framing_analysis", [])
         bias_framing_summary = bias_framing_result.get("bias_framing_summary", {})
-
-        official_evidence_results = fetch_official_evidence(
-            official_source_candidates,
-            max_candidates=3,
-            news_context={
-                "title": news["title"],
-                "summary": news["summary"],
-                "article_body": article_body,
-                "topic": preliminary_topic,
-                "policy_claims": policy_claims,
-            },
-        )
-        print_official_evidence_results(official_evidence_results)
 
         evidence_comparison = compare_news_with_official_evidence(
             news_title=news["title"],
@@ -556,6 +560,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
         debug_summary["analysis_cache_hit"] = False
         debug_summary["analysis_cache_key"] = analysis_cache_key
         debug_summary["analysis_cache_ttl_seconds"] = ANALYSIS_CACHE_TTL_SECONDS
+        debug_summary.update(official_body_debug or {})
         if verification_card.get("official_mismatch"):
             policy_confidence = dict(policy_confidence)
             policy_confidence["policy_confidence_score"] = min(

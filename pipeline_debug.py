@@ -18,6 +18,26 @@ def _news_source_count(source_candidates: list[dict]) -> int:
     )
 
 
+def _official_body_summary(source_candidates: list[dict]) -> dict:
+    official = [
+        source
+        for source in source_candidates or []
+        if source.get("source_type") in {"official_government", "public_institution"}
+    ]
+    failures = {}
+    for source in official:
+        reason = source.get("official_body_failure_reason")
+        if reason:
+            failures[reason] = failures.get(reason, 0) + 1
+    return {
+        "official_body_candidates": len(official),
+        "official_bodies_fetched": sum(1 for source in official if source.get("official_body_fetched")),
+        "official_bodies_usable": sum(1 for source in official if source.get("official_body_usable")),
+        "official_body_matches": sum(1 for source in official if source.get("official_body_match")),
+        "official_body_failures": failures,
+    }
+
+
 def _evidence_strength_summary(evidence_snippets: list[dict]) -> dict:
     snippets = evidence_snippets or []
     return {
@@ -139,6 +159,7 @@ def build_pipeline_debug_summary(
     official_mismatch = bool(verification_card.get("official_mismatch"))
     official_mismatch_reasons = verification_card.get("official_mismatch_reasons") or []
     official_detail_available = bool(verification_card.get("official_detail_available"))
+    official_body_summary = _official_body_summary(source_candidates)
     quality_summary = _official_adjusted_quality_summary(
         verification_card.get("evidence_quality_summary")
         or _evidence_quality_summary(evidence_snippets),
@@ -211,6 +232,7 @@ def build_pipeline_debug_summary(
         "official_detail_available": official_detail_available,
         "official_mismatch": official_mismatch,
         "official_mismatch_reasons": official_mismatch_reasons[:5],
+        **official_body_summary,
         "needs_human_review": needs_human_review,
         "missing_steps": missing_steps,
     }
@@ -222,6 +244,7 @@ def build_pipeline_debug_summary(
         f"evidence_strength={strength_summary} "
         f"evidence_quality={quality_summary} "
         f"official_mismatch={str(official_mismatch).lower()} "
+        f"official_body={official_body_summary} "
         f"bias_framing_ok={str(bias_framing_ok).lower()}"
     )
     return summary

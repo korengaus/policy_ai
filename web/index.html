@@ -1615,6 +1615,7 @@
             · approved_boost: ${escapeHtml(String(Boolean(data.approved_boost)))}
             · rejected_penalty: ${escapeHtml(String(Boolean(data.rejected_penalty)))}
             · review_decision_source: ${escapeHtml(data.review_decision_source || "-")}
+            · official body: candidates ${escapeHtml(data.official_body_candidates ?? 0)}, fetched ${escapeHtml(data.official_bodies_fetched ?? 0)}, usable ${escapeHtml(data.official_bodies_usable ?? 0)}, matched ${escapeHtml(data.official_body_matches ?? 0)}, failures ${escapeHtml(JSON.stringify(data.official_body_failures || {}))}
             · news input: ${escapeHtml(data.collection_source || "-")} / ${escapeHtml(data.news_collection_mode || "-")}
             · zero reasons: ${escapeHtml(zeroReasons)}
             · missing steps: ${escapeHtml(missing)}
@@ -1699,6 +1700,11 @@
               <div><span class="label">수집 방식</span><br>${escapeHtml(source.retrieval_method || "-")}</div>
               <div><span class="label">발행처</span><br>${escapeHtml(source.publisher || "-")}</div>
               <div><span class="label">본문 확보</span><br>${source.raw_text_available ? "예" : "아니오"}</div>
+              <div><span class="label">공식 본문 수집</span><br>${source.official_body_fetched ? "예" : "아니오"}</div>
+              <div><span class="label">공식 본문 길이</span><br>${escapeHtml(source.official_body_length ?? "-")}</div>
+              <div><span class="label">공식 본문 매칭</span><br>${source.official_body_match ? "예" : "아니오"}</div>
+              <div><span class="label">공식 매칭 점수</span><br>${escapeHtml(source.official_body_match_score ?? "-")}</div>
+              <div><span class="label">공식 실패 사유</span><br>${escapeHtml(source.official_body_failure_reason || "-")}</div>
               <div><span class="label">신뢰도 점수</span><br>${escapeHtml(source.reliability_score ?? "-")}</div>
               <div><span class="label">신뢰도 등급</span><br>${escapeHtml(formatReliabilityLevel(source.reliability_level))}</div>
               <div><span class="label">검증 역할</span><br>${escapeHtml(formatVerificationRole(source.verification_role))}</div>

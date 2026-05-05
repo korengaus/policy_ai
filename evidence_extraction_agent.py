@@ -310,6 +310,15 @@ def _source_metadata_text(source: dict) -> str:
     )
 
 
+def _source_body_text(source: dict) -> str:
+    return _normalize(
+        source.get("official_body_text")
+        or source.get("body_text")
+        or source.get("raw_text")
+        or ""
+    )
+
+
 def _source_metadata_snippet(claim_index: int, claim: dict, source: dict) -> dict | None:
     score, reason = _score_text_against_claim(claim, _source_metadata_text(source))
     if score < 20:
@@ -342,6 +351,51 @@ def _source_metadata_snippet(claim_index: int, claim: dict, source: dict) -> dic
         extraction_method=method,
         match_reason=reason,
     )
+
+
+def _source_body_snippets(
+    claim_index: int,
+    claim: dict,
+    source: dict,
+    max_items: int = 2,
+) -> list[dict]:
+    body_text = _source_body_text(source)
+    if not body_text:
+        return []
+
+    sentences = _split_sentences(body_text)
+    scored = sorted(
+        (
+            (*_score_text_against_claim(claim, sentence), sentence)
+            for sentence in sentences
+        ),
+        key=lambda item: (-item[0], item[2], item[1]),
+    )
+    snippets = []
+    for score, reason, sentence in scored:
+        if score < 35:
+            continue
+        evidence_type = "direct_support" if score >= 70 else "indirect_support"
+        if source.get("source_type") in {"official_government", "public_institution"} and score < 55:
+            evidence_type = "official_reference"
+        snippets.append(
+            _make_snippet(
+                claim_index=claim_index,
+                source=source,
+                evidence_text=sentence,
+                evidence_type=evidence_type,
+                relevance_score=score,
+                extraction_method="official_body_sentence_overlap",
+                match_reason=(
+                    source.get("official_body_match_reason")
+                    or reason
+                    or "official body sentence overlap"
+                ),
+            )
+        )
+        if len(snippets) >= max_items:
+            break
+    return snippets
 
 
 def extract_evidence_snippets(
@@ -396,6 +450,27 @@ def extract_evidence_snippets(
             )
             evidence_snippets.append(snippet)
             claim_snippet_ids.append(snippet["evidence_id"])
+
+        official_body_sources = [
+            source
+            for source in (source_candidates or [])
+            if source.get("claim_index") == index
+            and source.get("source_type") in {"official_government", "public_institution"}
+            and source.get("raw_text_available")
+            and _source_body_text(source)
+        ]
+        official_body_sources.sort(
+            key=lambda source: (
+                not bool(source.get("official_body_match")),
+                -(int(source.get("official_body_match_score") or 0)),
+                source.get("publisher") or "",
+                source.get("url") or "",
+            )
+        )
+        for source in official_body_sources[:2]:
+            for snippet in _source_body_snippets(index, claim, source):
+                evidence_snippets.append(snippet)
+                claim_snippet_ids.append(snippet["evidence_id"])
 
         metadata_sources = [
             source

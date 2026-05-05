@@ -1,0 +1,438 @@
+from __future__ import annotations
+
+import re
+from collections import Counter
+from urllib.parse import urlparse
+
+import requests
+from bs4 import BeautifulSoup
+
+from text_utils import decode_response_text, sanitize_text
+
+
+OFFICIAL_DOMAINS = {
+    "bok.or.kr",
+    "fsc.go.kr",
+    "fss.or.kr",
+    "molit.go.kr",
+    "moef.go.kr",
+    "mofa.go.kr",
+    "korea.kr",
+    "gov.kr",
+    "nts.go.kr",
+    "customs.go.kr",
+    "kdi.re.kr",
+    "kosis.kr",
+    "stat.go.kr",
+    "law.go.kr",
+    "epeople.go.kr",
+    "hrdkorea.or.kr",
+}
+
+OFFICIAL_NAME_HINTS = {
+    "bank of korea",
+    "financial services commission",
+    "financial supervisory service",
+    "ministry of land, infrastructure and transport",
+    "한국은행",
+    "금융위원회",
+    "금융감독원",
+    "국토교통부",
+    "기획재정부",
+    "국세청",
+}
+
+ERROR_PAGE_PATTERNS = {
+    "페이지가 없거나",
+    "페이지를 찾을 수 없습니다",
+    "요청하신 페이지를 찾을 수 없습니다",
+    "잘못된 경로",
+    "에러페이지",
+    "오류",
+    "error",
+    "not found",
+    "404",
+    "access denied",
+    "forbidden",
+}
+
+STOPWORDS = {
+    "그리고",
+    "그러나",
+    "있는",
+    "없는",
+    "대한",
+    "관련",
+    "이번",
+    "기사",
+    "뉴스",
+    "정부",
+    "정책",
+    "것으로",
+    "한다고",
+    "했다",
+    "한다",
+    "있다",
+    "없다",
+}
+
+
+def _domain(url: str) -> str:
+    try:
+        return urlparse(url or "").netloc.lower().replace("www.", "")
+    except Exception:
+        return ""
+
+
+def is_official_source(url: str = "", name: str = "") -> bool:
+    domain = _domain(url)
+    if domain.endswith(".go.kr") or domain in OFFICIAL_DOMAINS:
+        return True
+    if any(domain == item or domain.endswith("." + item) for item in OFFICIAL_DOMAINS):
+        return True
+    normalized_name = sanitize_text(name or "").lower()
+    return any(hint in normalized_name for hint in OFFICIAL_NAME_HINTS)
+
+
+def _extract_title(soup: BeautifulSoup) -> str:
+    for selector in ["h1", "h2", "h3"]:
+        element = soup.find(selector)
+        if element:
+            text = sanitize_text(element.get_text(" ", strip=True))
+            if len(text) >= 4:
+                return text
+    og_title = soup.find("meta", attrs={"property": "og:title"})
+    if og_title and og_title.get("content"):
+        return sanitize_text(og_title.get("content") or "")
+    if soup.title:
+        return sanitize_text(soup.title.get_text(" ", strip=True))
+    return ""
+
+
+def _extract_body_text(html: str) -> tuple[str, str]:
+    soup = BeautifulSoup(html or "", "html.parser")
+    for tag in soup(["script", "style", "nav", "footer", "header", "aside", "form", "noscript"]):
+        tag.decompose()
+
+    candidates = []
+    body_selectors = [
+        "[id*=content]",
+        "[class*=content]",
+        "[id*=article]",
+        "[class*=article]",
+        "[id*=view]",
+        "[class*=view]",
+        "[id*=board]",
+        "[class*=board]",
+        "[id*=press]",
+        "[class*=press]",
+        "[id*=news]",
+        "[class*=news]",
+        "[id*=body]",
+        "[class*=body]",
+        "[id*=detail]",
+        "[class*=detail]",
+        "[id*=cont]",
+        "[class*=cont]",
+        "main",
+        "article",
+    ]
+    for selector in body_selectors:
+        for element in soup.select(selector):
+            text = sanitize_text(element.get_text(" ", strip=True))
+            if len(text) >= 120:
+                candidates.append((len(text), selector, text))
+
+    if candidates:
+        _length, selector, text = max(candidates, key=lambda item: item[0])
+        return text, f"selector:{selector}"
+
+    body = soup.body or soup
+    return sanitize_text(body.get_text(" ", strip=True)), "body_text"
+
+
+def fetch_official_source_body(url: str, timeout: int = 10) -> dict:
+    result = {
+        "url": url or "",
+        "ok": False,
+        "status_code": None,
+        "body_text": "",
+        "title": "",
+        "source_type": "official_body",
+        "failure_reason": None,
+        "body_length": 0,
+        "extraction_method": None,
+    }
+    if not url:
+        result["failure_reason"] = "official_url_missing"
+        return result
+
+    try:
+        response = requests.get(
+            url,
+            timeout=timeout,
+            allow_redirects=True,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0 Safari/537.36"
+                ),
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+                "Connection": "close",
+            },
+        )
+        result["status_code"] = response.status_code
+        content_type = response.headers.get("content-type", "").lower()
+        if response.status_code >= 400:
+            result["failure_reason"] = f"http_status_{response.status_code}"
+            return result
+        if content_type and not any(marker in content_type for marker in ["html", "xml", "text"]):
+            result["failure_reason"] = "non_html_response"
+            return result
+
+        html, encoding = decode_response_text(response)
+        soup = BeautifulSoup(html, "html.parser")
+        title = _extract_title(soup)
+        body_text, method = _extract_body_text(html)
+        body_text = sanitize_text(body_text)
+        error_blob = f"{title} {body_text[:500]}".lower()
+        if any(pattern.lower() in error_blob for pattern in ERROR_PAGE_PATTERNS):
+            result.update(
+                {
+                    "title": title,
+                    "body_text": body_text[:8000],
+                    "body_length": len(body_text),
+                    "extraction_method": f"{method};encoding:{encoding}",
+                    "failure_reason": "official_error_or_not_found_page",
+                }
+            )
+            return result
+
+        result.update(
+            {
+                "ok": len(body_text) >= 300,
+                "body_text": body_text[:8000],
+                "title": title,
+                "body_length": len(body_text),
+                "extraction_method": f"{method};encoding:{encoding}",
+            }
+        )
+        if len(body_text) < 300:
+            result["failure_reason"] = "official_body_too_short"
+        return result
+    except requests.Timeout:
+        result["failure_reason"] = "official_body_timeout"
+    except requests.RequestException as error:
+        result["failure_reason"] = f"official_body_fetch_failed: {type(error).__name__}"
+    except Exception as error:
+        result["failure_reason"] = f"official_body_parse_failed: {type(error).__name__}"
+    return result
+
+
+def _tokens(text: str) -> list[str]:
+    cleaned = sanitize_text(text or "")
+    raw_tokens = re.findall(r"[\uac00-\ud7a3A-Za-z0-9.%]+", cleaned)
+    tokens = []
+    for token in raw_tokens:
+        variants = {token}
+        for suffix in ["으로", "에서", "에게", "까지", "부터", "보다", "처럼", "하고", "하며", "했다", "한다", "되는", "했다", "을", "를", "은", "는", "이", "가", "의", "와", "과", "도", "만", "로"]:
+            if token.endswith(suffix) and len(token) - len(suffix) >= 2:
+                variants.add(token[: -len(suffix)])
+        for variant in variants:
+            if len(variant) >= 2 and variant not in STOPWORDS and variant.lower() not in STOPWORDS:
+                tokens.append(variant)
+    return tokens
+
+
+def _numbers(text: str) -> set[str]:
+    return set(re.findall(r"\d+(?:\.\d+)?%?|\d{4}년|\d+월|\d+일", text or ""))
+
+
+def official_body_supports_claim(claim: dict, body_text: str) -> dict:
+    claim_text = " ".join(
+        str(claim.get(key) or "")
+        for key in [
+            "claim_text",
+            "actor",
+            "action",
+            "target",
+            "object",
+            "quantity",
+            "date_or_time",
+            "location",
+        ]
+    )
+    claim_terms = Counter(_tokens(claim_text))
+    body_terms = set(_tokens(body_text))
+    matched_terms = sorted(term for term in claim_terms if term in body_terms)
+    claim_numbers = _numbers(claim_text)
+    body_numbers = _numbers(body_text)
+    matched_numbers = sorted(claim_numbers & body_numbers)
+
+    material_terms = {
+        term
+        for term in matched_terms
+        if len(term) >= 3
+        or term in {"금리", "전세", "대출", "주택", "규제", "지원", "세금", "양도세", "물가"}
+    }
+    score = min(70, len(material_terms) * 12)
+    if matched_numbers:
+        score += min(20, len(matched_numbers) * 10)
+    for field in ["actor", "action", "target", "object"]:
+        value = sanitize_text(str(claim.get(field) or ""))
+        if value and value != "unknown" and value in body_text:
+            score += 8
+
+    score = max(0, min(100, score))
+    supports = score >= 55 and (len(material_terms) >= 3 or (len(material_terms) >= 2 and bool(matched_numbers)))
+    if supports:
+        reason = f"official body matched {len(material_terms)} material terms"
+    elif body_text:
+        reason = "official body fetched but claim overlap is insufficient"
+    else:
+        reason = "official body text unavailable"
+    return {
+        "supports": supports,
+        "match_score": score,
+        "matched_terms": matched_terms[:12],
+        "matched_numbers": matched_numbers[:8],
+        "reason": reason,
+    }
+
+
+def _official_result_for_source(source: dict, official_evidence_results: list[dict]) -> dict:
+    publisher = sanitize_text(source.get("publisher") or source.get("title") or "").lower()
+    source_url = source.get("url") or ""
+    for item in official_evidence_results or []:
+        names = " ".join(
+            [
+                str(item.get("source_name") or ""),
+                str(item.get("search_url") or ""),
+                str(item.get("selected_document_url") or ""),
+            ]
+        ).lower()
+        if publisher and publisher in names:
+            return item
+        if source_url and source_url in names:
+            return item
+    return {}
+
+
+def _looks_like_search_or_index_url(url: str) -> bool:
+    lowered = (url or "").lower()
+    return any(
+        marker in lowered
+        for marker in [
+            "search",
+            "srchtxt",
+            "query=",
+            "keyword=",
+            "kwd=",
+            "/list",
+            "listall",
+            "portal/list",
+            "service/list",
+        ]
+    )
+
+
+def enrich_official_source_candidates_with_bodies(
+    source_candidates: list[dict],
+    official_evidence_results: list[dict],
+    normalized_claims: list[dict],
+) -> tuple[list[dict], dict]:
+    claims_by_index = {
+        int(index): claim
+        for index, claim in enumerate(normalized_claims or [])
+    }
+    enriched = []
+    failures = Counter()
+    fetched = 0
+    usable = 0
+    matched = 0
+    official_count = 0
+
+    for source in source_candidates or []:
+        item = dict(source or {})
+        is_official = item.get("source_type") in {"official_government", "public_institution"} or is_official_source(
+            item.get("url") or "",
+            item.get("publisher") or item.get("title") or "",
+        )
+        if not is_official:
+            enriched.append(item)
+            continue
+
+        official_count += 1
+        official_result = _official_result_for_source(item, official_evidence_results)
+        selected_url = official_result.get("selected_document_url") or ""
+        if not selected_url and not _looks_like_search_or_index_url(item.get("url") or ""):
+            selected_url = item.get("url") or ""
+        item["url"] = selected_url
+        item["official_body_url"] = selected_url
+
+        body_text = sanitize_text(official_result.get("document_text_snippet") or "")
+        title = sanitize_text(official_result.get("document_title") or item.get("title") or "")
+        failure_reason = None
+        extraction_method = "official_crawler_document_text"
+        body_fetch_ok = len(body_text) >= 300
+
+        if not selected_url:
+            failure_reason = "official_detail_url_missing"
+        elif not body_fetch_ok:
+            fetched_body = fetch_official_source_body(selected_url)
+            title = fetched_body.get("title") or title
+            body_text = sanitize_text(fetched_body.get("body_text") or "")
+            body_fetch_ok = bool(fetched_body.get("ok"))
+            failure_reason = fetched_body.get("failure_reason")
+            extraction_method = fetched_body.get("extraction_method") or "official_body_fetch"
+
+        if body_fetch_ok:
+            fetched += 1
+            usable += 1
+        else:
+            failures[failure_reason or "official_body_fetch_failed"] += 1
+
+        claim = claims_by_index.get(int(item.get("claim_index") or 0), {})
+        match = official_body_supports_claim(claim, body_text)
+        if body_fetch_ok and match.get("supports"):
+            matched += 1
+
+        item.update(
+            {
+                "title": title or item.get("title") or "",
+                "raw_text_available": bool(body_fetch_ok),
+                "official_body_fetched": bool(body_fetch_ok),
+                "official_body_usable": bool(body_fetch_ok),
+                "official_body_text": body_text[:5000] if body_fetch_ok else "",
+                "official_body_length": len(body_text),
+                "official_body_failure_reason": None if body_fetch_ok else (failure_reason or "official_body_fetch_failed"),
+                "official_body_match": bool(body_fetch_ok and match.get("supports")),
+                "official_body_match_score": match.get("match_score", 0),
+                "official_body_matched_terms": match.get("matched_terms", []),
+                "official_body_matched_numbers": match.get("matched_numbers", []),
+                "official_body_match_reason": match.get("reason"),
+                "retrieval_method": (
+                    "official_body_verified"
+                    if body_fetch_ok and match.get("supports")
+                    else ("official_body_fetched_unmatched" if body_fetch_ok else item.get("retrieval_method"))
+                ),
+                "official_body_extraction_method": extraction_method,
+            }
+        )
+        enriched.append(item)
+
+    summary = {
+        "official_body_candidates": official_count,
+        "official_bodies_fetched": fetched,
+        "official_bodies_usable": usable,
+        "official_body_matches": matched,
+        "official_body_failures": dict(sorted(failures.items())),
+    }
+    print(
+        "[OfficialBody] "
+        f"candidates={official_count} fetched={fetched} usable={usable} "
+        f"matched={matched} failures={summary['official_body_failures']}"
+    )
+    return enriched, summary

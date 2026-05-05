@@ -5,16 +5,25 @@ VERY_HIGH_DOMAINS = [
     "go.kr",
     "korea.kr",
     "mof.go.kr",
+    "moef.go.kr",
+    "mofa.go.kr",
     "molit.go.kr",
     "fsc.go.kr",
     "fss.or.kr",
     "bok.or.kr",
     "assembly.go.kr",
     "gov.kr",
+    "nts.go.kr",
+    "customs.go.kr",
+    "stat.go.kr",
+    "law.go.kr",
+    "epeople.go.kr",
 ]
 
 HIGH_DOMAINS = [
+    "kdi.re.kr",
     "kosis.kr",
+    "hrdkorea.or.kr",
     "re.kr",
     "ac.kr",
     "or.kr",
@@ -115,6 +124,21 @@ def evaluate_source_candidate(source: dict) -> dict:
         reason += " 공식기관 후보이지만 실제 상세 문서 본문은 아직 수집되지 않았습니다."
         score = min(score, 70)
 
+    if source_type in {"official_government", "public_institution"} and enriched.get("official_body_failure_reason"):
+        flags.append(enriched.get("official_body_failure_reason"))
+
+    if source_type in {"official_government", "public_institution"} and raw_text_available:
+        if enriched.get("official_body_match"):
+            reason += " 공식기관 상세 본문을 수집했고 해당 주장과 핵심 용어가 일치합니다."
+            score = max(score, 92)
+        else:
+            flags.append("official_body_mismatch")
+            reason += " 공식기관 본문은 수집됐지만 핵심 주장과의 직접 일치가 부족합니다."
+            score = min(score, 70)
+    elif source_type in {"official_government", "public_institution"} and not raw_text_available:
+        flags.append("official_detail_not_verified")
+        score = min(score, 70)
+
     if purpose in {"contradiction", "fact_check", "update"}:
         score = max(score - 5, 0)
     if "possible_redirect" in flags and source_type not in {"official_government", "public_institution"}:
@@ -163,6 +187,12 @@ def evaluate_source_candidates(source_candidates: list[dict]) -> list[dict]:
 
 def _is_top_source_eligible(source: dict) -> bool:
     flags = set(source.get("source_risk_flags") or [])
+    if source.get("source_type") in {"official_government", "public_institution"}:
+        return bool(
+            source.get("raw_text_available")
+            and source.get("official_body_match")
+            and "official_body_mismatch" not in flags
+        )
     if "official_candidate_not_fetched" in flags or "official_detail_not_verified" in flags:
         return False
     if "no_body_text" in flags:
@@ -202,6 +232,13 @@ def summarize_source_reliability(source_candidates: list[dict]) -> dict:
         if source.get("source_type") in {"official_government", "public_institution"}
     )
     raw_text_count = sum(1 for source in candidates if source.get("raw_text_available"))
+    official_body_matches = [
+        source
+        for source in candidates
+        if source.get("source_type") in {"official_government", "public_institution"}
+        and source.get("raw_text_available")
+        and source.get("official_body_match")
+    ]
     average = round(
         sum(int(source.get("reliability_score") or 0) for source in candidates) / len(candidates)
     )
@@ -212,7 +249,8 @@ def summarize_source_reliability(source_candidates: list[dict]) -> dict:
         "official_candidate_count": official_count,
         "raw_text_available_count": raw_text_count,
         "average_reliability_score": average,
-        "official_detail_available": False,
-        "official_mismatch": not bool(eligible),
-        "official_mismatch_reasons": [] if eligible else ["no eligible fetched source for top evidence"],
+        "official_detail_available": bool(official_body_matches),
+        "official_body_match_count": len(official_body_matches),
+        "official_mismatch": not bool(official_body_matches),
+        "official_mismatch_reasons": [] if official_body_matches else ["no eligible fetched official body for top evidence"],
     }
