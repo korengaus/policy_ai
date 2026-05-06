@@ -38,6 +38,7 @@ from evidence_comparator import (
 from policy_confidence import calculate_policy_confidence, print_policy_confidence
 from policy_impact import analyze_policy_impact, print_policy_impact
 from policy_decision import make_final_decision, print_final_decision
+from policy_scoring import calibrate_final_decision
 from topic_classifier import classify_policy_topic
 from timeline import print_timeline_summary
 from verification_card import build_verification_card, print_verification_card
@@ -48,6 +49,7 @@ from text_utils import sanitize_data, sanitize_text
 REPORTS_DIR = Path("reports")
 ANALYSIS_CACHE_PATH = Path(".cache") / "analysis_result_cache.json"
 ANALYSIS_CACHE_TTL_SECONDS = 30 * 60
+ANALYSIS_CACHE_VERSION = "calibrated_scoring_v1"
 
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -84,6 +86,7 @@ def build_analysis_cache_key(query: str, max_news: int, news_results: list[dict]
         )
     )
     payload = {
+        "version": ANALYSIS_CACHE_VERSION,
         "query": _normalize_cache_text(query),
         "max_news": int(max_news or 0),
         "news": identities,
@@ -139,6 +142,7 @@ def _apply_analysis_cache_debug(
                 "analysis_cache_hit": analysis_cache_hit,
                 "analysis_cache_key": analysis_cache_key,
                 "analysis_cache_ttl_seconds": ANALYSIS_CACHE_TTL_SECONDS,
+                "analysis_cache_version": ANALYSIS_CACHE_VERSION,
                 "news_cache_hit": bool(news_collection_debug.get("news_cache_hit")),
                 "news_cache_key": news_collection_debug.get("news_cache_key"),
                 "news_cache_ttl_seconds": news_collection_debug.get("news_cache_ttl_seconds"),
@@ -194,6 +198,7 @@ def _get_cached_analysis_report(
                 "analysis_cache_hit": True,
                 "analysis_cache_key": analysis_cache_key,
                 "analysis_cache_ttl_seconds": ANALYSIS_CACHE_TTL_SECONDS,
+                "analysis_cache_version": ANALYSIS_CACHE_VERSION,
             },
             "topics_summary": topics_summary,
             "news_results": report_items,
@@ -216,6 +221,7 @@ def _store_analysis_report(
     cache = _load_analysis_cache()
     cache[analysis_cache_key] = {
         "cached_at": utc_now_iso(),
+        "version": ANALYSIS_CACHE_VERSION,
         "query": _normalize_cache_text(query),
         "max_news": int(max_news or 0),
         "news_identities": [_news_identity(news, index) for index, news in enumerate(news_results or [])],
@@ -519,7 +525,6 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
             policy_confidence=policy_confidence,
             policy_impact=policy_impact,
         )
-        print_final_decision(final_decision)
 
         verification_card = build_verification_card(
             news=news,
@@ -596,6 +601,16 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
             final_decision["decision_reasons"] = decision_reasons
             verification_card["verdict_confidence"] = policy_confidence["policy_confidence_score"]
 
+        final_decision, debug_summary = calibrate_final_decision(
+            final_decision=final_decision,
+            policy_confidence=policy_confidence,
+            policy_impact=policy_impact,
+            verification_card=verification_card,
+            source_candidates=source_candidates,
+            evidence_snippets=evidence_snippets,
+            debug_summary=debug_summary,
+        )
+        print_final_decision(final_decision)
         verification_card["debug_summary"] = debug_summary
         verification_card = sanitize_data(verification_card)
         evidence_quality_summary = verification_card.get("evidence_quality_summary") or {}

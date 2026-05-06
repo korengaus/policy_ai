@@ -1626,6 +1626,7 @@
             · review_decision_source: ${escapeHtml(data.review_decision_source || "-")}
             · official body: candidates ${escapeHtml(data.official_body_candidates ?? 0)}, fetched ${escapeHtml(data.official_bodies_fetched ?? 0)}, usable ${escapeHtml(data.official_bodies_usable ?? 0)}, matched ${escapeHtml(data.official_body_matches ?? 0)}, failures ${escapeHtml(JSON.stringify(data.official_body_failures || {}))}
             · contradiction: searched ${escapeHtml(data.contradiction_candidates_searched ?? 0)}, matched ${escapeHtml(data.contradiction_candidates_matched ?? 0)}, confirmed ${escapeHtml(data.confirmed_contradictions ?? 0)}, possible ${escapeHtml(data.possible_contradictions ?? 0)}, source ${escapeHtml(data.contradiction_verdict_source || "-")}
+            · final scoring: final ${escapeHtml(data.final_score ?? "-")}, source trust ${escapeHtml(data.source_trust_score ?? "-")}, human adj ${escapeHtml(data.human_feedback_adjustment ?? 0)}, contradiction adj ${escapeHtml(data.contradiction_adjustment ?? 0)}
             · news input: ${escapeHtml(data.collection_source || "-")} / ${escapeHtml(data.news_collection_mode || "-")}
             · zero reasons: ${escapeHtml(zeroReasons)}
             · missing steps: ${escapeHtml(missing)}
@@ -2215,6 +2216,57 @@
       });
     }
 
+    function clampScore(value) {
+      return Math.max(0, Math.min(100, Math.round(Number(value || 0))));
+    }
+
+    function recalibrateDecisionWithReviewFeedback(result, debug, qualitySummary, reviewerStatus) {
+      const decision = { ...(result.final_decision || {}) };
+      const confidence = result.policy_confidence || {};
+      const impact = result.policy_impact || {};
+      const strength = debug.evidence_strength_summary || {};
+      const totalStrength = Number(strength.strong || 0) + Number(strength.medium || 0) + Number(strength.weak || 0);
+      const weightedStrength = totalStrength
+        ? clampScore(((Number(strength.strong || 0) * 3) + (Number(strength.medium || 0) * 2) + Number(strength.weak || 0)) / (totalStrength * 3) * 100)
+        : 0;
+      const sourceTrust = clampScore(debug.source_trust_score ?? decision.source_trust_score ?? 0);
+      const contradictionAdjustment = Number(debug.contradiction_adjustment ?? decision.contradiction_adjustment ?? 0);
+      const humanAdjustment = reviewerStatus === "approved" ? 15 : (reviewerStatus === "rejected" ? -30 : -10);
+      const finalScore = clampScore(
+        Number(qualitySummary.average_evidence_quality_score || 0) * 0.35
+        + weightedStrength * 0.25
+        + sourceTrust * 0.20
+        + Number(confidence.policy_confidence_score || 0) * 0.20
+        + humanAdjustment
+        + contradictionAdjustment
+      );
+      let alert = "LOW";
+      if (reviewerStatus === "rejected") {
+        alert = String(impact.impact_level || "").toLowerCase() === "high" ? "WATCH" : "LOW";
+      } else if (
+        reviewerStatus === "approved"
+        && finalScore >= 70
+        && String(impact.impact_level || "").toLowerCase() === "high"
+      ) {
+        alert = "HIGH";
+      } else if (finalScore >= 45 || String(impact.impact_level || "").toLowerCase() === "high") {
+        alert = "WATCH";
+      }
+      decision.policy_alert_level = alert;
+      decision.final_score = finalScore;
+      decision.source_trust_score = sourceTrust;
+      decision.human_feedback_adjustment = humanAdjustment;
+      decision.contradiction_adjustment = contradictionAdjustment;
+      decision.evidence_weighted_score = weightedStrength;
+      decision.evidence_quality_score = qualitySummary.average_evidence_quality_score || 0;
+      decision.decision_reasons = [
+        ...(Array.isArray(decision.decision_reasons) ? decision.decision_reasons : []),
+        `human review feedback applied: ${reviewerStatus}`,
+        `calibrated final score ${finalScore}`,
+      ];
+      return decision;
+    }
+
     function applyReviewDecisionToSnippets(snippets, reviewerStatus) {
       return (snippets || []).map((snippet) => {
         const next = { ...(snippet || {}) };
@@ -2281,6 +2333,16 @@
           total_weak_evidence: qualitySummary.weak,
           average_evidence_quality_score: qualitySummary.average_evidence_quality_score,
         };
+        const calibratedDecision = recalibrateDecisionWithReviewFeedback(
+          nextResult,
+          debug,
+          qualitySummary,
+          reviewerStatus
+        );
+        debug.final_score = calibratedDecision.final_score;
+        debug.source_trust_score = calibratedDecision.source_trust_score;
+        debug.human_feedback_adjustment = calibratedDecision.human_feedback_adjustment;
+        debug.contradiction_adjustment = calibratedDecision.contradiction_adjustment;
 
         verification.evidence_snippets = snippets;
         verification.evidence_extraction_summary = extractionSummary;
@@ -2290,6 +2352,7 @@
         nextResult.evidence_extraction_summary = extractionSummary;
         nextResult.claim_evidence_quality_summary = claimQuality;
         nextResult.evidence_quality_summary = qualitySummary;
+        nextResult.final_decision = calibratedDecision;
         nextResult.debug_summary = debug;
         nextResult.verification_card = verification;
         return nextResult;

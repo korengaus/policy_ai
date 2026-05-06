@@ -221,6 +221,10 @@ def make_final_decision(policy_confidence: dict, policy_impact: dict) -> dict:
 def print_final_decision(final_decision: dict):
     print("\n----- Final decision -----")
     print("policy_alert_level:", final_decision.get("policy_alert_level"))
+    print("final_score:", final_decision.get("final_score"))
+    print("source_trust_score:", final_decision.get("source_trust_score"))
+    print("human_feedback_adjustment:", final_decision.get("human_feedback_adjustment"))
+    print("contradiction_adjustment:", final_decision.get("contradiction_adjustment"))
     print("market_signal:", ", ".join(final_decision.get("market_signal") or []))
     print("action_recommendation:", final_decision.get("action_recommendation"))
     print("decision_summary:", final_decision.get("decision_summary"))
