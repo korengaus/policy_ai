@@ -355,6 +355,76 @@
       line-height: 1.35;
     }
 
+    .score-explain {
+      margin-top: 6px;
+      color: #6b7280;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .takeaway-panel {
+      border: 1px solid #bfdbfe;
+      border-radius: 10px;
+      background: #eff6ff;
+      margin: 14px 0;
+      padding: 15px 16px;
+    }
+
+    .takeaway-title {
+      color: #1e3a8a;
+      font-size: 16px;
+      font-weight: 900;
+      margin-bottom: 9px;
+    }
+
+    .takeaway-list {
+      margin: 0;
+      padding-left: 18px;
+      color: #1f2937;
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    .plain-section-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin: 14px 0;
+    }
+
+    .plain-section {
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      background: #fff;
+      padding: 13px 14px;
+    }
+
+    .plain-section h4 {
+      margin: 0 0 8px;
+      color: #111827;
+      font-size: 14px;
+      font-weight: 900;
+    }
+
+    .plain-section ul {
+      margin: 0;
+      padding-left: 18px;
+      color: #374151;
+      font-size: 13px;
+      line-height: 1.58;
+    }
+
+    .user-explain {
+      border-left: 4px solid #93c5fd;
+      border-radius: 8px;
+      background: #f8fafc;
+      margin: 12px 0;
+      padding: 11px 13px;
+      color: #374151;
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
     .detail-box {
       border: 1px solid #e5e7eb;
       border-radius: 8px;
@@ -843,6 +913,7 @@
       .metrics,
       .detail-grid,
       .result-summary-grid,
+      .plain-section-grid,
       .verification-intro,
       .verification-grid {
         grid-template-columns: 1fr;
@@ -2573,6 +2644,206 @@
       showStatus("최근 분석 기록을 모두 삭제했습니다.", true);
     }
 
+    function numberValue(value, fallback = 0) {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : fallback;
+    }
+
+    function scoreTrustDescription(score) {
+      const value = numberValue(score, -1);
+      if (value >= 75) {
+        return "높음: 직접 근거와 출처 신뢰도가 충분해 판단 근거가 비교적 탄탄합니다.";
+      }
+      if (value >= 45) {
+        return "보통: 참고할 근거는 있지만 공식 확인이나 직접성이 더 필요합니다.";
+      }
+      if (value >= 0) {
+        return "낮음: 공식 상세 근거 또는 직접 매칭이 부족해 보수적으로 해석해야 합니다.";
+      }
+      return "정보 없음: 아직 점수 산정에 필요한 근거가 충분하지 않습니다.";
+    }
+
+    function evidenceQualityExplanation(quality, strength) {
+      const avg = numberValue(quality?.average_evidence_quality_score, 0);
+      const strong = numberValue(quality?.strong, 0);
+      const medium = numberValue(quality?.medium, 0);
+      const weak = numberValue(quality?.weak, 0);
+      const strongStrength = numberValue(strength?.strong, 0);
+      if (strong > 0 && avg >= 75) {
+        return "강한 근거가 확인되어 주장과 출처의 연결성이 높습니다.";
+      }
+      if (strongStrength > 0 || medium > 0 || avg >= 45) {
+        return "일부 근거는 유용하지만 공식 상세문서나 본문 직접 일치 여부를 함께 봐야 합니다.";
+      }
+      if (weak > 0) {
+        return "대부분 약한 근거라 참고용으로만 보고 추가 확인이 필요합니다.";
+      }
+      return "검증에 쓸 수 있는 근거가 아직 충분하지 않습니다.";
+    }
+
+    function officialVerificationExplanation(sourceReliabilitySummary, debugSummary) {
+      const summary = sourceReliabilitySummary || {};
+      const debug = debugSummary || {};
+      const candidates = numberValue(debug.official_body_candidates ?? debug.official_sources_count, 0);
+      const fetched = numberValue(debug.official_bodies_fetched, 0);
+      const usable = numberValue(debug.official_bodies_usable, 0);
+      const matched = numberValue(debug.official_body_matches, 0);
+      if (summary.official_detail_available || matched > 0) {
+        return "공식기관 본문이 핵심 주장과 연결되어 공식 근거로 참고할 수 있습니다.";
+      }
+      if (fetched > 0 && usable > 0) {
+        return "공식기관 본문은 수집됐지만 핵심 주장과의 직접 일치가 충분하지 않습니다.";
+      }
+      if (fetched > 0) {
+        return "공식기관 URL은 확인됐지만 본문 품질이나 길이가 검증에 충분하지 않습니다.";
+      }
+      if (candidates > 0) {
+        return "공식기관 후보는 있으나 상세 본문을 확보하지 못해 확정 근거로 쓰기 어렵습니다.";
+      }
+      return "관련 공식기관 후보를 아직 찾지 못했습니다.";
+    }
+
+    function contradictionExplanation(summary) {
+      const data = summary || {};
+      const confirmed = numberValue(data.confirmed_contradiction_count ?? data.confirmed_contradictions, 0);
+      const possible = numberValue(data.possible_contradiction_count ?? data.possible_contradictions, 0);
+      const insufficient = numberValue(data.insufficient_evidence_count, 0);
+      const officialNeed = numberValue(data.needs_official_confirmation_count, 0);
+      if (confirmed > 0) {
+        return "동일 대상·시점에 대해 상충되는 근거가 확인되어 사람의 검토가 필요합니다.";
+      }
+      if (possible > 0) {
+        return "일부 상충 가능성이 있으나 같은 시점과 대상인지 추가 확인이 필요합니다.";
+      }
+      if (insufficient > 0 || officialNeed > 0) {
+        return "반박 여부를 판단할 독립 근거가 부족해 공식 확인이 필요합니다.";
+      }
+      return "직접적인 반박 근거는 확인되지 않았습니다.";
+    }
+
+    function contradictionLabel(summary) {
+      const text = contradictionExplanation(summary);
+      if (text.includes("상충되는")) return "상충 근거 확인";
+      if (text.includes("상충 가능성")) return "상충 가능성";
+      if (text.includes("부족")) return "근거 부족";
+      return "반박 근거 없음";
+    }
+
+    function alertReasonBullets(level, decision, confidence, impact, quality, sourceReliabilitySummary, contradictionSummary, debugSummary) {
+      const finalScore = numberValue(decision?.final_score ?? confidence?.policy_confidence_score, 0);
+      const impactLevel = formatLevel(impact?.impact_level);
+      const riskLevel = formatLevel(confidence?.risk_level);
+      const bullets = [];
+      if (level === "HIGH") {
+        bullets.push(`영향도 ${impactLevel}, 위험도 ${riskLevel}이며 최종 점수 ${finalScore}점으로 높게 평가됐습니다.`);
+        bullets.push("다만 HIGH는 실제 공식 근거와 반박 여부를 함께 확인해 해석해야 합니다.");
+      } else if (level === "WATCH") {
+        bullets.push(`정책 영향 가능성은 있지만 최종 점수 ${finalScore}점 기준으로 확정 판단보다 관찰이 적절합니다.`);
+        bullets.push("공식 근거, 본문 직접 일치, 반박 가능성 중 일부가 아직 충분하지 않습니다.");
+      } else if (level === "LOW") {
+        bullets.push(`현재 근거와 영향도를 종합하면 최종 점수 ${finalScore}점으로 낮은 경고 단계입니다.`);
+        bullets.push("정책 변화로 확정하기에는 직접 근거가 약하거나 영향 범위가 제한적입니다.");
+      } else {
+        bullets.push(`현재 단계는 ${formatAlert(level)}이며 최종 점수는 ${finalScore}점입니다.`);
+      }
+      bullets.push(evidenceQualityExplanation(quality || {}, debugSummary?.evidence_strength_summary || {}));
+      bullets.push(officialVerificationExplanation(sourceReliabilitySummary, debugSummary));
+      bullets.push(contradictionExplanation(contradictionSummary));
+      return bullets;
+    }
+
+    function renderBulletList(items) {
+      const safeItems = (Array.isArray(items) ? items : []).filter(Boolean);
+      return `<ul>${safeItems.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
+    }
+
+    function policyImpactBullets(impact, decision) {
+      return [
+        `주요 영향 분야: ${formatList(impact?.affected_sectors) || "정보 없음"}`,
+        `영향 대상: ${formatList(impact?.affected_groups) || "정보 없음"}`,
+        `시장 신호: ${formatSignal(decision?.market_signal) || "정보 없음"}`,
+      ];
+    }
+
+    function consumerImpactBullets(impact) {
+      const sensitivity = numberValue(impact?.consumer_sensitivity, 0);
+      return [
+        `소비자 민감도는 ${sensitivity}점입니다.`,
+        `영향 방향은 ${formatDirection(impact?.impact_direction)}입니다.`,
+        `관련 대상: ${formatList(impact?.affected_groups) || "정보 없음"}`,
+      ];
+    }
+
+    function financialSystemBullets(impact) {
+      const market = numberValue(impact?.market_sensitivity, 0);
+      const business = numberValue(impact?.business_sensitivity, 0);
+      return [
+        `시장 민감도는 ${market}점입니다.`,
+        `기업·금융기관 민감도는 ${business}점입니다.`,
+        market >= 60
+          ? "금리, 대출, 은행, 부동산 시장과 연결될 가능성이 있어 후속 발표를 추적해야 합니다."
+          : "금융 시스템 전반의 즉각적 영향은 제한적으로 보입니다.",
+      ];
+    }
+
+    function renderKeyTakeaways(context) {
+      const bullets = alertReasonBullets(
+        context.level,
+        context.decision,
+        context.confidence,
+        context.impact,
+        context.quality,
+        context.sourceReliabilitySummary,
+        context.contradictionSummary,
+        context.debugSummary
+      ).slice(0, 4);
+      return `
+        <section class="takeaway-panel">
+          <div class="takeaway-title">Key Takeaways</div>
+          <ul class="takeaway-list">
+            ${bullets.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+          </ul>
+        </section>
+      `;
+    }
+
+    function renderUserSummarySections(context) {
+      return `
+        <div class="plain-section-grid">
+          <section class="plain-section">
+            <h4>왜 ${escapeHtml(formatAlert(context.level))}인가</h4>
+            ${renderBulletList(alertReasonBullets(
+              context.level,
+              context.decision,
+              context.confidence,
+              context.impact,
+              context.quality,
+              context.sourceReliabilitySummary,
+              context.contradictionSummary,
+              context.debugSummary
+            ).slice(0, 3))}
+          </section>
+          <section class="plain-section">
+            <h4>주요 정책 영향</h4>
+            ${renderBulletList(policyImpactBullets(context.impact, context.decision))}
+          </section>
+          <section class="plain-section">
+            <h4>소비자 영향</h4>
+            ${renderBulletList(consumerImpactBullets(context.impact))}
+          </section>
+          <section class="plain-section">
+            <h4>금융 시스템 영향</h4>
+            ${renderBulletList(financialSystemBullets(context.impact))}
+          </section>
+        </div>
+        <div class="user-explain">
+          <strong>근거 품질:</strong> ${escapeHtml(evidenceQualityExplanation(context.quality, context.strength))}
+          <br><strong>공식 출처 확인:</strong> ${escapeHtml(officialVerificationExplanation(context.sourceReliabilitySummary, context.debugSummary))}
+          <br><strong>반박/모순 확인:</strong> ${escapeHtml(contradictionExplanation(context.contradictionSummary))}
+        </div>
+      `;
+    }
+
     function renderResults(results) {
       if (!results.length) {
         metricsEl.style.display = "none";
@@ -2621,11 +2892,22 @@
         const recommendedAction = sourceReliabilitySummary.official_mismatch
           ? "추가 공식 출처 확인 필요"
           : formatRecommendation(decision.action_recommendation);
+        const finalScore = decision.final_score ?? confidence.policy_confidence_score ?? "-";
+        const sourceTrustScore = decision.source_trust_score ?? debugSummary.source_trust_score ?? sourceReliabilitySummary.average_reliability_score ?? "-";
+        const userContext = {
+          level,
+          decision,
+          confidence,
+          impact,
+          quality,
+          strength,
+          sourceReliabilitySummary,
+          contradictionSummary,
+          debugSummary,
+        };
+        const keyTakeaways = renderKeyTakeaways(userContext);
+        const userSummarySections = renderUserSummarySections(userContext);
         const verificationDetails = [
-          renderCollapsibleSection(
-            "Pipeline Debug Summary",
-            renderPipelineDebugSummary(debugSummary)
-          ),
           renderCollapsibleSection(
             "정규화된 주장",
             `${renderClaimList(claims)}${renderNormalizedClaims(normalizedClaims)}`
