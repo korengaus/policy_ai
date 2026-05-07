@@ -425,6 +425,61 @@
       line-height: 1.55;
     }
 
+    .platform-kicker {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .headline-card {
+      border-bottom: 1px solid #e5e7eb;
+      margin-bottom: 14px;
+      padding-bottom: 14px;
+    }
+
+    .headline-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      color: #64748b;
+      font-size: 13px;
+      font-weight: 700;
+      margin-top: 8px;
+    }
+
+    .news-nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 12px 0 16px;
+    }
+
+    .news-nav span {
+      border: 1px solid #dbeafe;
+      border-radius: 999px;
+      background: #f8fafc;
+      color: #1e40af;
+      padding: 7px 11px;
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .news-section-title {
+      margin: 18px 0 8px;
+      color: #111827;
+      font-size: 17px;
+      font-weight: 900;
+    }
+
+    .reader-note {
+      color: #475569;
+      font-size: 13px;
+      line-height: 1.55;
+      margin-top: 6px;
+    }
+
     .detail-box {
       border: 1px solid #e5e7eb;
       border-radius: 8px;
@@ -2871,6 +2926,205 @@
         const biasFramingSummary = verification.bias_framing_summary || result.bias_framing_summary || {};
         const debugSummary = verification.debug_summary || result.debug_summary || {};
         const level = String(decision.policy_alert_level || "WATCH").toUpperCase();
+        const title = escapeHtml(result.title || "제목 없음");
+        const url = escapeHtml(result.original_url || "#");
+        const topic = result.topic || "미분류";
+        const strength = debugSummary.evidence_strength_summary
+          || evidenceExtractionSummary.evidence_strength_summary
+          || {};
+        const quality = debugSummary.evidence_quality_summary
+          || evidenceExtractionSummary.evidence_quality_summary
+          || result.evidence_quality_summary
+          || {};
+        const topSourceTitle = sourceReliabilitySummary.top_source_title
+          || verification.evidence_sources?.[0]?.title
+          || "공식 상세 근거 부족";
+        const topSourceUrl = sourceReliabilitySummary.top_source_url
+          || verification.evidence_sources?.[0]?.url
+          || "";
+        const topSourceHtml = topSourceUrl
+          ? `<a href="${escapeHtml(topSourceUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(topSourceTitle)}</a>`
+          : escapeHtml(topSourceTitle);
+        const recommendedAction = sourceReliabilitySummary.official_mismatch
+          ? "추가 공식 출처 확인 필요"
+          : formatRecommendation(decision.action_recommendation);
+        const finalScore = decision.final_score ?? confidence.policy_confidence_score ?? "-";
+        const sourceTrustScore = decision.source_trust_score ?? debugSummary.source_trust_score ?? sourceReliabilitySummary.average_reliability_score ?? "-";
+        const userContext = {
+          level,
+          decision,
+          confidence,
+          impact,
+          quality,
+          strength,
+          sourceReliabilitySummary,
+          contradictionSummary,
+          debugSummary,
+        };
+        const verificationDetails = [
+          renderCollapsibleSection(
+            "핵심 주장과 정규화",
+            `${renderClaimList(claims)}${renderNormalizedClaims(normalizedClaims)}`
+          ),
+          renderCollapsibleSection(
+            "근거 문장",
+            renderEvidenceSnippets(claims, evidenceSnippets)
+          ),
+          renderCollapsibleSection(
+            "반박/모순 검사",
+            `${renderContradictionSummary(contradictionSummary)}${renderContradictionChecks(claims, contradictionChecks)}`
+          ),
+          renderCollapsibleSection(
+            "프레이밍/편향 검사",
+            `${renderBiasFramingSummary(biasFramingSummary)}${renderBiasFramingAnalysis(claims, biasFramingAnalysis)}`
+          ),
+          renderCollapsibleSection(
+            "출처와 공식 근거",
+            `${renderSourceReliabilitySummary(sourceReliabilitySummary)}${renderSourceCandidates(sourceCandidates)}${renderSourceQueries(sourceQueries)}`
+          ),
+          renderCollapsibleSection(
+            "근거 요약과 부족한 맥락",
+            `${renderEvidenceExtractionSummary(evidenceExtractionSummary)}${renderEvidenceSources(verification.evidence_sources)}<div class="evidence-source-meta">${escapeHtml(verification.evidence_summary || "-")}</div><div class="evidence-source-meta"><strong>부족한 맥락:</strong> ${escapeHtml(formatList(verification.missing_context))}</div><div class="evidence-source-meta">마지막 확인: ${escapeHtml(verification.last_checked_at || "-")}</div>`
+          ),
+          renderCollapsibleSection(
+            "개발자용 Pipeline Debug Summary",
+            renderPipelineDebugSummary(debugSummary)
+          ),
+        ].join("");
+
+        return `
+          <article class="result-card">
+            <div class="headline-card">
+              <div class="platform-kicker">
+                <span class="badge ${alertClass(level)}">${escapeHtml(formatAlert(level))}</span>
+                <span class="badge topic-badge">${escapeHtml(topic)}</span>
+                <span class="badge topic-badge">검증 뉴스</span>
+              </div>
+              <h2 class="result-title">
+                <a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a>
+              </h2>
+              <div class="headline-meta">
+                <span>최종 점수 ${escapeHtml(finalScore)}</span>
+                <span>신뢰도 ${escapeHtml(confidence.policy_confidence_score ?? "-")}</span>
+                <span>영향도 ${escapeHtml(formatLevel(impact.impact_level))}</span>
+                <span>위험도 ${escapeHtml(formatLevel(confidence.risk_level))}</span>
+              </div>
+            </div>
+
+            <div class="news-nav" aria-label="분석 섹션">
+              <span>핵심 요약</span>
+              <span>정책 영향</span>
+              <span>검증 근거</span>
+              <span>반박 확인</span>
+              <span>상세 보기</span>
+            </div>
+
+            ${renderKeyTakeaways(userContext)}
+
+            <div class="result-summary-grid">
+              <div class="summary-tile">
+                <span class="label">경고 단계</span>
+                <strong>${escapeHtml(formatAlert(level))}</strong>
+                <div class="score-explain">${escapeHtml(scoreTrustDescription(finalScore))}</div>
+              </div>
+              <div class="summary-tile">
+                <span class="label">권장 조치</span>
+                <strong>${escapeHtml(recommendedAction)}</strong>
+                <div class="score-explain">정책 판단 전에 확인해야 할 다음 행동입니다.</div>
+              </div>
+              <div class="summary-tile">
+                <span class="label">최고 신뢰 출처</span>
+                <strong>${topSourceHtml}</strong>
+                <div class="score-explain">출처 신뢰 ${escapeHtml(sourceTrustScore)}점 · ${escapeHtml(scoreTrustDescription(sourceTrustScore))}</div>
+              </div>
+              <div class="summary-tile">
+                <span class="label">근거 품질</span>
+                <strong>strong ${escapeHtml(quality.strong ?? 0)}, medium ${escapeHtml(quality.medium ?? 0)}, weak ${escapeHtml(quality.weak ?? 0)}</strong>
+                <div class="score-explain">${escapeHtml(evidenceQualityExplanation(quality, strength))}</div>
+              </div>
+              <div class="summary-tile">
+                <span class="label">근거 강도</span>
+                <strong>strong ${escapeHtml(strength.strong ?? 0)}, medium ${escapeHtml(strength.medium ?? 0)}, weak ${escapeHtml(strength.weak ?? 0)}</strong>
+              </div>
+              <div class="summary-tile">
+                <span class="label">시장 신호</span>
+                <strong>${escapeHtml(formatSignal(decision.market_signal))}</strong>
+              </div>
+              <div class="summary-tile">
+                <span class="label">영향 방향</span>
+                <strong>${escapeHtml(formatDirection(impact.impact_direction))}</strong>
+              </div>
+              <div class="summary-tile">
+                <span class="label">반박/모순</span>
+                <strong>${escapeHtml(contradictionLabel(contradictionSummary))}</strong>
+                <div class="score-explain">${escapeHtml(contradictionExplanation(contradictionSummary))}</div>
+              </div>
+            </div>
+
+            <div class="decision-summary">${escapeHtml(decision.decision_summary || "요약 정보가 없습니다.")}</div>
+            ${renderUserSummarySections(userContext)}
+
+            <section class="verification-card">
+              <h3>검증 카드</h3>
+              <div class="reader-note">
+                아래 정보는 AI가 수집한 뉴스, 공식 출처 후보, 근거 문장, 반박 신호를 바탕으로 만든 검증 초안입니다. 기술 세부 정보는 접힌 섹션에서 확인할 수 있습니다.
+              </div>
+              <div class="verification-intro">
+                <div class="summary-tile">
+                  <span class="label">AI 초안 판정</span>
+                  <strong>${escapeHtml(formatVerdict(verification.verdict_label))}</strong>
+                </div>
+                <div class="summary-tile">
+                  <span class="label">초안 신뢰도</span>
+                  <strong>${escapeHtml(verification.verdict_confidence ?? "-")}</strong>
+                </div>
+                <div class="summary-tile">
+                  <span class="label">리뷰 상태</span>
+                  <strong>${escapeHtml(formatReviewStatus(verification.review_status))}</strong>
+                </div>
+              </div>
+              <div class="verification-item full">
+                <span class="label">핵심 주장</span><br>
+                ${escapeHtml(verification.claim_text || "-")}
+              </div>
+              <div class="news-section-title">상세 검증 정보</div>
+              ${verificationDetails}
+            </section>
+            <div class="source-link">
+              <a class="source-button" href="${url}" target="_blank" rel="noopener noreferrer">원문 보기</a>
+            </div>
+          </article>
+        `;
+      }).join("");
+    }
+
+    function renderResultsLegacy(results) {
+      if (!results.length) {
+        metricsEl.style.display = "none";
+        clearCurrentReportContext();
+        resultsEl.innerHTML = '<div class="empty-state">분석을 실행하면 결과가 여기에 표시됩니다.</div>';
+        return;
+      }
+
+      renderMetrics(results);
+      resultsEl.innerHTML = results.map((result) => {
+        const confidence = result.policy_confidence || {};
+        const impact = result.policy_impact || {};
+        const decision = result.final_decision || {};
+        const verification = result.verification_card || result || {};
+        const claims = verification.claims || result.claims || [];
+        const normalizedClaims = verification.normalized_claims || result.normalized_claims || [];
+        const sourceQueries = verification.source_queries || result.source_queries || [];
+        const sourceCandidates = verification.source_candidates || result.source_candidates || [];
+        const sourceReliabilitySummary = verification.source_reliability_summary || {};
+        const evidenceSnippets = verification.evidence_snippets || result.evidence_snippets || [];
+        const evidenceExtractionSummary = verification.evidence_extraction_summary || {};
+        const contradictionChecks = verification.contradiction_checks || result.contradiction_checks || [];
+        const contradictionSummary = verification.contradiction_summary || result.contradiction_summary || {};
+        const biasFramingAnalysis = verification.bias_framing_analysis || result.bias_framing_analysis || [];
+        const biasFramingSummary = verification.bias_framing_summary || result.bias_framing_summary || {};
+        const debugSummary = verification.debug_summary || result.debug_summary || {};
+        const level = String(decision.policy_alert_level || "WATCH").toUpperCase();
         const title = escapeHtml(result.title);
         const url = escapeHtml(result.original_url);
         const strength = debugSummary.evidence_strength_summary
@@ -3160,6 +3414,104 @@
     }
 
     function buildReportText() {
+      const context = currentReportContext || {};
+      const results = Array.isArray(context.results) ? context.results : [];
+      const metrics = computeMetrics(results);
+      const aggregate = aggregateEvidenceSummaries(results);
+      const lines = [];
+
+      lines.push("정책 AI 분석 리포트");
+      lines.push("=".repeat(32));
+      lines.push(`검색어: ${plain(context.query)}`);
+      lines.push(`뉴스 개수: ${plain(context.maxNews || results.length, 0)}`);
+      lines.push(`분석 시간: ${plain(context.analyzedAt)}`);
+      lines.push(`최고 경고 단계: ${metrics.highest === "-" ? "-" : formatAlert(metrics.highest)}`);
+      lines.push(`평균 신뢰도: ${plain(metrics.averageConfidence, 0)}`);
+      lines.push(`고영향 뉴스 수: ${plain(metrics.highImpactCount, 0)}`);
+      lines.push(`전체 근거 강도: ${formatEvidenceCounts(aggregate.strength)}`);
+      lines.push(`전체 근거 품질: ${formatEvidenceCounts(aggregate.quality)}, avg ${plain(aggregate.quality.average_evidence_quality_score, 0)}`);
+      lines.push("");
+
+      if (!results.length) {
+        lines.push("분석 결과가 없습니다.");
+        return lines.join("\n");
+      }
+
+      results.forEach((result, index) => {
+        const confidence = result.policy_confidence || {};
+        const impact = result.policy_impact || {};
+        const decision = result.final_decision || {};
+        const verification = result.verification_card || result || {};
+        const reliability = verification.source_reliability_summary || {};
+        const debug = verification.debug_summary || result.debug_summary || {};
+        const contradiction = verification.contradiction_summary || result.contradiction_summary || {};
+        const evidence = getEvidenceSummaryForReport(result);
+        const topSource = getTopSourceForReport(result);
+        const level = String(decision.policy_alert_level || "WATCH").toUpperCase();
+        const recommendation = reliability.official_mismatch
+          ? "추가 공식 출처 확인 필요"
+          : formatRecommendation(decision.action_recommendation);
+        const contextForReport = {
+          level,
+          decision,
+          confidence,
+          impact,
+          quality: evidence.quality,
+          strength: evidence.strength,
+          sourceReliabilitySummary: reliability,
+          contradictionSummary: contradiction,
+          debugSummary: debug,
+        };
+
+        lines.push(`[${index + 1}] ${plain(result.title, "제목 없음")}`);
+        lines.push("-".repeat(32));
+        lines.push(`원문: ${plain(result.original_url)}`);
+        lines.push(`주제: ${plain(result.topic)}`);
+        lines.push(`경고 단계: ${formatAlert(level)}`);
+        lines.push(`최종 점수: ${plain(decision.final_score ?? confidence.policy_confidence_score)}`);
+        lines.push(`신뢰도 점수: ${plain(confidence.policy_confidence_score)}`);
+        lines.push(`영향도: ${formatLevel(impact.impact_level)}`);
+        lines.push(`위험도: ${formatLevel(confidence.risk_level)}`);
+        lines.push(`영향 방향: ${formatDirection(impact.impact_direction)}`);
+        lines.push(`권장 조치: ${recommendation}`);
+        lines.push(`시장 신호: ${formatSignal(decision.market_signal)}`);
+        lines.push(`최고 신뢰 출처: ${plain(topSource.title, "공식 상세 근거 부족")}${topSource.url ? ` (${topSource.url})` : ""}`);
+        lines.push("");
+        lines.push("Key Takeaways");
+        alertReasonBullets(
+          level,
+          decision,
+          confidence,
+          impact,
+          evidence.quality,
+          reliability,
+          contradiction,
+          debug
+        ).slice(0, 4).forEach((item) => lines.push(`- ${item}`));
+        lines.push("");
+        lines.push("사용자용 해석");
+        lines.push(`- 왜 ${formatAlert(level)}인가: ${alertReasonBullets(level, decision, confidence, impact, evidence.quality, reliability, contradiction, debug)[0]}`);
+        lines.push(`- 주요 정책 영향: ${policyImpactBullets(impact, decision).join(" / ")}`);
+        lines.push(`- 소비자 영향: ${consumerImpactBullets(impact).join(" / ")}`);
+        lines.push(`- 금융 시스템 영향: ${financialSystemBullets(impact).join(" / ")}`);
+        lines.push(`- 근거 품질: ${evidenceQualityExplanation(evidence.quality, evidence.strength)}`);
+        lines.push(`- 공식 출처 확인: ${officialVerificationExplanation(reliability, debug)}`);
+        lines.push(`- 반박/모순 확인: ${contradictionExplanation(contradiction)}`);
+        lines.push("");
+        lines.push(`AI 초안 판정: ${formatVerdict(verification.verdict_label)}`);
+        lines.push(`핵심 주장: ${plain(verification.claim_text)}`);
+        lines.push(`근거 요약: ${plain(verification.evidence_summary)}`);
+        lines.push(`부족한 맥락: ${plain(formatList(verification.missing_context), "정보 없음")}`);
+        lines.push(`마지막 확인 시간: ${plain(verification.last_checked_at)}`);
+        lines.push(`근거 강도: ${formatEvidenceCounts(evidence.strength)}`);
+        lines.push(`근거 품질: ${formatEvidenceCounts(evidence.quality)}, avg ${plain(evidence.quality.average_evidence_quality_score, 0)}`);
+        lines.push("");
+      });
+
+      return lines.join("\n");
+    }
+
+    function buildReportTextLegacy() {
       const context = currentReportContext || {};
       const results = Array.isArray(context.results) ? context.results : [];
       const metrics = computeMetrics(results);
