@@ -321,6 +321,9 @@ def _official_verification_summary(
                 "top_source_document_type": top.get("document_type"),
                 "top_source_relevance_score": top.get("document_relevance_score") or 0,
                 "top_source_note": "usable official detail document",
+                "selected_primary_source": top.get("document_title") or top.get("source_name"),
+                "official_source_used_in_final_scoring": True,
+                "official_mismatch_reasons": [],
             }
         )
     elif fallback_summary.get("official_detail_available"):
@@ -335,6 +338,9 @@ def _official_verification_summary(
                 "top_source_document_type": "official_body",
                 "top_source_relevance_score": fallback_summary.get("top_source_reliability_score") or 0,
                 "top_source_note": "official body matched claim",
+                "selected_primary_source": fallback_summary.get("top_source_title") or "공식기관 본문 근거",
+                "official_source_used_in_final_scoring": True,
+                "official_mismatch_reasons": [],
             }
         )
     else:
@@ -347,6 +353,8 @@ def _official_verification_summary(
                 "top_source_document_type": None,
                 "top_source_relevance_score": 0,
                 "top_source_note": "usable official detail document not found",
+                "selected_primary_source": "공식 상세 근거 부족",
+                "official_source_used_in_final_scoring": False,
             }
         )
     return summary
@@ -515,6 +523,41 @@ def _missing_context_specific(
         missing.append("일부 공식기관 검색 또는 상세문서 접근에 실패했습니다.")
     if not missing:
         missing.append("최종 공개 전 사람 검토와 원문 재확인이 필요합니다.")
+    return missing
+
+
+def _missing_context_specific(
+    official_sources: list[dict],
+    evidence_comparison: dict,
+    official_evidence_results: list[dict],
+) -> list[str]:
+    missing = []
+    if not official_sources:
+        if not official_evidence_results:
+            missing.append("공식기관 후보를 찾지 못했습니다.")
+        else:
+            has_detail_url = any(result.get("selected_document_url") for result in official_evidence_results or [])
+            has_body = any(
+                int(result.get("document_text_length") or len(str(result.get("document_text_snippet") or ""))) >= 300
+                for result in official_evidence_results or []
+            )
+            has_error = any(result.get("error") for result in official_evidence_results or [])
+            if not has_detail_url:
+                missing.append("공식기관 후보는 찾았지만, 확인 가능한 상세 문서 URL이 부족합니다.")
+            elif has_error:
+                missing.append("공식기관 URL은 확인됐지만, 실제 상세 본문 확인은 실패했습니다.")
+            elif has_body:
+                missing.append("공식기관 본문은 수집됐지만, 기사 핵심 주장과 직접 일치하지 않아 신뢰도를 낮게 반영했습니다.")
+            else:
+                missing.append("공식기관 후보는 확인됐지만, 실제 본문 또는 상세 문서 본문은 아직 수집되지 않았습니다.")
+    if evidence_comparison.get("verification_level") in {"weak_official_match", "low_confidence_match"}:
+        missing.append("공식 출처가 기사 내용과 직접 일치하지 않아 추가 확인이 필요합니다.")
+    if evidence_comparison.get("verification_level") == "excluded_non_policy_page":
+        missing.append("수집된 공식 문서가 목록, 안내, 민원 문서로 분류되어 검증 근거에서 제외했습니다.")
+    if official_sources and any(result.get("error") for result in official_evidence_results or []):
+        missing.append("일부 공식기관 검색 또는 상세문서 접근에 실패했습니다.")
+    if not missing:
+        missing.append("최종 공개 전에는 원문과 공식 발표를 다시 확인하는 것이 좋습니다.")
     return missing
 
 

@@ -1751,6 +1751,9 @@
             · rejected_penalty: ${escapeHtml(String(Boolean(data.rejected_penalty)))}
             · review_decision_source: ${escapeHtml(data.review_decision_source || "-")}
             · official body: candidates ${escapeHtml(data.official_body_candidates ?? 0)}, fetched ${escapeHtml(data.official_bodies_fetched ?? 0)}, usable ${escapeHtml(data.official_bodies_usable ?? 0)}, matched ${escapeHtml(data.official_body_matches ?? 0)}, failures ${escapeHtml(JSON.stringify(data.official_body_failures || {}))}
+            · official verification: detail pages ${escapeHtml(data.official_detail_pages_fetched_count ?? 0)}, success ${escapeHtml(data.official_body_success_count ?? 0)}, fail ${escapeHtml(data.official_body_fail_count ?? 0)}, used in scoring ${escapeHtml(String(Boolean(data.official_source_used_in_final_scoring)))}
+            · selected primary source: ${escapeHtml(data.selected_primary_source || "-")} ${data.selected_primary_source_url ? "(" + escapeHtml(data.selected_primary_source_url) + ")" : ""}
+            · mismatch reasons: ${escapeHtml(formatList(data.official_mismatch_reasons))}
             · contradiction: searched ${escapeHtml(data.contradiction_candidates_searched ?? 0)}, matched ${escapeHtml(data.contradiction_candidates_matched ?? 0)}, confirmed ${escapeHtml(data.confirmed_contradictions ?? 0)}, possible ${escapeHtml(data.possible_contradictions ?? 0)}, source ${escapeHtml(data.contradiction_verdict_source || "-")}
             · final scoring: final ${escapeHtml(data.final_score ?? "-")}, source trust ${escapeHtml(data.source_trust_score ?? "-")}, human adj ${escapeHtml(data.human_feedback_adjustment ?? 0)}, contradiction adj ${escapeHtml(data.contradiction_adjustment ?? 0)}
             · news input: ${escapeHtml(data.collection_source || "-")} / ${escapeHtml(data.news_collection_mode || "-")}

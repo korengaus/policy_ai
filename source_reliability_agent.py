@@ -1,5 +1,15 @@
 from urllib.parse import urlparse
 
+from official_metadata import (
+    OFFICIAL_AUTHORITY_DOMAINS,
+    PUBLIC_INSTITUTION_DOMAINS,
+    canonical_official_domain,
+    domain_matches,
+    is_official_domain,
+    name_implies_official,
+    official_source_type_from_identity,
+)
+
 
 VERY_HIGH_DOMAINS = [
     "go.kr",
@@ -18,7 +28,15 @@ VERY_HIGH_DOMAINS = [
     "stat.go.kr",
     "law.go.kr",
     "epeople.go.kr",
+    "mss.go.kr",
+    "msit.go.kr",
+    "kif.re.kr",
+    "hf.go.kr",
+    "khug.or.kr",
+    "lh.or.kr",
+    "hfn.go.kr",
 ]
+VERY_HIGH_DOMAINS = sorted(set(VERY_HIGH_DOMAINS) | OFFICIAL_AUTHORITY_DOMAINS)
 
 HIGH_DOMAINS = [
     "kdi.re.kr",
@@ -28,6 +46,7 @@ HIGH_DOMAINS = [
     "ac.kr",
     "or.kr",
 ]
+HIGH_DOMAINS = sorted(set(HIGH_DOMAINS) | PUBLIC_INSTITUTION_DOMAINS)
 
 NEWS_DOMAINS = [
     "yonhapnews.co.kr",
@@ -50,7 +69,7 @@ def _domain(url: str) -> str:
 
 
 def _matches_domain(domain: str, patterns: list[str]) -> bool:
-    return any(domain == pattern or domain.endswith("." + pattern) or pattern in domain for pattern in patterns)
+    return domain_matches(domain, patterns) or any(pattern in domain for pattern in patterns)
 
 
 def _level(score: int) -> str:
@@ -81,17 +100,45 @@ def _role(source_type: str, purpose: str, score: int) -> str:
     return "supporting_evidence"
 
 
+def _readable_reason(source: dict, fallback: str) -> str:
+    source_type = source.get("source_type") or ""
+    flags = set(source.get("source_risk_flags") or [])
+    if source_type in {"official_government", "public_institution"}:
+        if source.get("official_body_match"):
+            return "공식기관 상세 본문이 수집됐고 핵심 주장과 직접 일치합니다."
+        if source.get("official_body_fetched") or source.get("raw_text_available"):
+            return "공식기관 본문은 수집됐지만 기사 핵심 주장과 직접 일치하지 않아 신뢰도를 낮게 반영했습니다."
+        if "official_topic_mismatch" in flags or source.get("official_should_exclude_from_verification"):
+            return "공식 출처가 기사 내용과 직접 일치하지 않아 신뢰도를 낮게 반영했습니다."
+        if "official_search_only" in flags:
+            return "공식기관 후보는 검색/목록 페이지까지만 확인되어 상세 본문 근거로 쓰기 어렵습니다."
+        if "official_detail_missing" in flags or "official_detail_url_missing" in flags:
+            return "공식기관 후보는 찾았지만 확인 가능한 상세 문서 URL이 부족합니다."
+        if "official_pdf_only" in flags:
+            return "공식기관 자료가 PDF 중심이라 현재 본문 검증에는 제한이 있습니다."
+        return "공식기관 후보는 찾았지만 실제 상세 본문 확인은 아직 충분하지 않습니다."
+    if source_type == "search_fallback_news":
+        return "검색 fallback으로 확보한 뉴스 출처라 공식 출처보다 낮은 신뢰도로 반영했습니다."
+    if source_type == "established_news":
+        return "언론 보도 맥락 출처로 참고하되 공식 발표 여부는 별도 확인이 필요합니다."
+    return fallback or "출처 신뢰도를 명확히 판단하기 어렵습니다."
+
+
 def evaluate_source_candidate(source: dict) -> dict:
     enriched = dict(source or {})
     url = enriched.get("url") or ""
-    domain = _domain(url)
+    domain = _domain(url) or canonical_official_domain(enriched.get("publisher") or enriched.get("title") or "", url)
     source_type = enriched.get("source_type") or "unknown"
+    inferred_type = official_source_type_from_identity(enriched.get("publisher") or enriched.get("title") or "", url)
+    if inferred_type and source_type == "unknown":
+        source_type = inferred_type
+        enriched["source_type"] = source_type
     purpose = enriched.get("purpose") or ""
     retrieval_method = enriched.get("retrieval_method") or ""
     raw_text_available = bool(enriched.get("raw_text_available"))
     flags = []
 
-    if not domain:
+    if not domain and not name_implies_official(enriched.get("publisher") or enriched.get("title") or ""):
         flags.append("unknown_publisher")
     if any(token in url.lower() for token in ["redirect", "url=", "news.google.com", "search?"]):
         flags.append("possible_redirect")
@@ -148,7 +195,7 @@ def evaluate_source_candidate(source: dict) -> dict:
     enriched["reliability_level"] = _level(enriched["reliability_score"])
     enriched["verification_role"] = _role(source_type, purpose, enriched["reliability_score"])
     enriched["source_risk_flags"] = sorted(set(flags))
-    enriched["reliability_reason"] = reason
+    enriched["reliability_reason"] = _readable_reason(enriched, reason)
     return enriched
 
 
@@ -218,8 +265,15 @@ def summarize_source_reliability(source_candidates: list[dict]) -> dict:
         }
 
     eligible = [source for source in candidates if _is_top_source_eligible(source)]
+    fallback_eligible = [
+        source
+        for source in candidates
+        if source.get("source_type") in {"established_news", "search_fallback_news"}
+        and source.get("raw_text_available")
+        and "possible_redirect" not in set(source.get("source_risk_flags") or [])
+    ]
     top_source = max(
-        eligible or candidates,
+        eligible or fallback_eligible or candidates,
         key=lambda source: (
             source.get("reliability_score") or 0,
             source.get("title") or "",
@@ -239,9 +293,24 @@ def summarize_source_reliability(source_candidates: list[dict]) -> dict:
         and source.get("raw_text_available")
         and source.get("official_body_match")
     ]
+    official_failure_reasons = {}
+    for source in candidates:
+        if source.get("source_type") not in {"official_government", "public_institution"}:
+            continue
+        reason = source.get("official_body_failure_reason")
+        if reason:
+            official_failure_reasons[reason] = official_failure_reasons.get(reason, 0) + 1
     average = round(
         sum(int(source.get("reliability_score") or 0) for source in candidates) / len(candidates)
     )
+    mismatch_reasons = []
+    if not official_body_matches:
+        if official_failure_reasons:
+            mismatch_reasons.extend(
+                f"{reason}: {count}" for reason, count in sorted(official_failure_reasons.items())
+            )
+        else:
+            mismatch_reasons.append("no eligible fetched official body for top evidence")
     return {
         "top_source_title": top_source.get("title") or top_source.get("url"),
         "top_source_url": top_source.get("url"),
@@ -251,6 +320,17 @@ def summarize_source_reliability(source_candidates: list[dict]) -> dict:
         "average_reliability_score": average,
         "official_detail_available": bool(official_body_matches),
         "official_body_match_count": len(official_body_matches),
+        "official_detail_pages_fetched_count": sum(
+            1
+            for source in candidates
+            if source.get("source_type") in {"official_government", "public_institution"}
+            and source.get("official_body_fetched")
+        ),
+        "official_body_success_count": len(official_body_matches),
+        "official_body_fail_count": sum(official_failure_reasons.values()),
+        "official_failure_reasons": official_failure_reasons,
+        "selected_primary_source": top_source.get("title") or top_source.get("url"),
+        "official_source_used_in_final_scoring": bool(official_body_matches),
         "official_mismatch": not bool(official_body_matches),
-        "official_mismatch_reasons": [] if official_body_matches else ["no eligible fetched official body for top evidence"],
+        "official_mismatch_reasons": [] if official_body_matches else mismatch_reasons,
     }

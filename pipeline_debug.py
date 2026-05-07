@@ -182,6 +182,7 @@ def build_pipeline_debug_summary(
     official_mismatch = bool(verification_card.get("official_mismatch"))
     official_mismatch_reasons = verification_card.get("official_mismatch_reasons") or []
     official_detail_available = bool(verification_card.get("official_detail_available"))
+    source_reliability_summary = verification_card.get("source_reliability_summary") or {}
     official_body_summary = _official_body_summary(source_candidates)
     quality_summary = _official_adjusted_quality_summary(
         verification_card.get("evidence_quality_summary")
@@ -261,6 +262,16 @@ def build_pipeline_debug_summary(
         "official_detail_available": official_detail_available,
         "official_mismatch": official_mismatch,
         "official_mismatch_reasons": official_mismatch_reasons[:5],
+        "selected_primary_source": source_reliability_summary.get("selected_primary_source")
+        or source_reliability_summary.get("top_source_title"),
+        "selected_primary_source_url": source_reliability_summary.get("top_source_url"),
+        "official_source_used_in_final_scoring": bool(
+            source_reliability_summary.get("official_source_used_in_final_scoring")
+            or source_reliability_summary.get("official_detail_available")
+        ),
+        "official_detail_pages_fetched_count": source_reliability_summary.get("official_detail_pages_fetched_count", 0),
+        "official_body_success_count": source_reliability_summary.get("official_body_success_count", 0),
+        "official_body_fail_count": source_reliability_summary.get("official_body_fail_count", 0),
         **official_body_summary,
         "needs_human_review": needs_human_review,
         "missing_steps": missing_steps,

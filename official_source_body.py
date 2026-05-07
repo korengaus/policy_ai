@@ -8,6 +8,13 @@ import requests
 from bs4 import BeautifulSoup
 
 from text_utils import decode_response_text, sanitize_text
+from official_metadata import (
+    OFFICIAL_AUTHORITY_DOMAINS,
+    OFFICIAL_NAME_HINTS as SHARED_OFFICIAL_NAME_HINTS,
+    is_official_domain,
+    looks_like_official_search_or_index_url,
+    name_implies_official,
+)
 
 
 OFFICIAL_DOMAINS = {
@@ -27,7 +34,15 @@ OFFICIAL_DOMAINS = {
     "law.go.kr",
     "epeople.go.kr",
     "hrdkorea.or.kr",
+    "mss.go.kr",
+    "msit.go.kr",
+    "kif.re.kr",
+    "hf.go.kr",
+    "khug.or.kr",
+    "lh.or.kr",
+    "hfn.go.kr",
 }
+OFFICIAL_DOMAINS.update(OFFICIAL_AUTHORITY_DOMAINS)
 
 OFFICIAL_NAME_HINTS = {
     "bank of korea",
@@ -86,12 +101,16 @@ def _domain(url: str) -> str:
 
 def is_official_source(url: str = "", name: str = "") -> bool:
     domain = _domain(url)
-    if domain.endswith(".go.kr") or domain in OFFICIAL_DOMAINS:
+    if is_official_domain(url) or domain.endswith(".go.kr") or domain in OFFICIAL_DOMAINS:
         return True
     if any(domain == item or domain.endswith("." + item) for item in OFFICIAL_DOMAINS):
         return True
     normalized_name = sanitize_text(name or "").lower()
-    return any(hint in normalized_name for hint in OFFICIAL_NAME_HINTS)
+    return (
+        name_implies_official(normalized_name)
+        or any(hint in normalized_name for hint in OFFICIAL_NAME_HINTS)
+        or any(hint.lower() in normalized_name for hint in SHARED_OFFICIAL_NAME_HINTS)
+    )
 
 
 def _extract_title(soup: BeautifulSoup) -> str:
@@ -188,8 +207,11 @@ def fetch_official_source_body(url: str, timeout: int = 10) -> dict:
         if response.status_code >= 400:
             result["failure_reason"] = f"http_status_{response.status_code}"
             return result
+        if "pdf" in content_type or url.lower().endswith(".pdf"):
+            result["failure_reason"] = "official_pdf_only"
+            return result
         if content_type and not any(marker in content_type for marker in ["html", "xml", "text"]):
-            result["failure_reason"] = "non_html_response"
+            result["failure_reason"] = "official_page_not_fetchable"
             return result
 
         html, encoding = decode_response_text(response)
@@ -321,21 +343,7 @@ def _official_result_for_source(source: dict, official_evidence_results: list[di
 
 
 def _looks_like_search_or_index_url(url: str) -> bool:
-    lowered = (url or "").lower()
-    return any(
-        marker in lowered
-        for marker in [
-            "search",
-            "srchtxt",
-            "query=",
-            "keyword=",
-            "kwd=",
-            "/list",
-            "listall",
-            "portal/list",
-            "service/list",
-        ]
-    )
+    return looks_like_official_search_or_index_url(url)
 
 
 def enrich_official_source_candidates_with_bodies(
@@ -365,12 +373,22 @@ def enrich_official_source_candidates_with_bodies(
             continue
 
         official_count += 1
+        original_candidate_url = item.get("url") or ""
         official_result = _official_result_for_source(item, official_evidence_results)
         selected_url = official_result.get("selected_document_url") or ""
-        if not selected_url and not _looks_like_search_or_index_url(item.get("url") or ""):
-            selected_url = item.get("url") or ""
+        if not selected_url and not _looks_like_search_or_index_url(original_candidate_url):
+            selected_url = original_candidate_url
         item["url"] = selected_url
         item["official_body_url"] = selected_url
+        item["official_detail_url"] = selected_url
+        item["official_search_url"] = official_result.get("search_url") or official_result.get("official_search_url") or item.get("official_search_url") or original_candidate_url
+        item["official_document_type"] = official_result.get("document_type")
+        item["official_evidence_grade"] = official_result.get("evidence_grade")
+        item["official_document_relevance_score"] = official_result.get("document_relevance_score")
+        item["official_candidate_error"] = official_result.get("error")
+        item["official_should_exclude_from_verification"] = bool(
+            official_result.get("should_exclude_from_verification")
+        )
 
         body_text = sanitize_text(official_result.get("document_text_snippet") or "")
         title = sanitize_text(official_result.get("document_title") or item.get("title") or "")
@@ -378,8 +396,20 @@ def enrich_official_source_candidates_with_bodies(
         extraction_method = "official_crawler_document_text"
         body_fetch_ok = len(body_text) >= 300
 
-        if not selected_url:
-            failure_reason = "official_detail_url_missing"
+        if official_result.get("should_exclude_from_verification") or official_result.get("evidence_grade") == "F":
+            failure_reason = "official_topic_mismatch"
+            body_fetch_ok = False
+            body_text = ""
+        elif not selected_url:
+            if official_result:
+                failure_reason = "official_detail_missing"
+            elif _looks_like_search_or_index_url(original_candidate_url):
+                failure_reason = "official_search_only"
+            else:
+                failure_reason = "official_detail_url_missing"
+        elif _looks_like_search_or_index_url(selected_url):
+            failure_reason = "official_search_only"
+            body_fetch_ok = False
         elif not body_fetch_ok:
             fetched_body = fetch_official_source_body(selected_url)
             title = fetched_body.get("title") or title
@@ -407,7 +437,7 @@ def enrich_official_source_candidates_with_bodies(
                 "official_body_usable": bool(body_fetch_ok),
                 "official_body_text": body_text[:5000] if body_fetch_ok else "",
                 "official_body_length": len(body_text),
-                "official_body_failure_reason": None if body_fetch_ok else (failure_reason or "official_body_fetch_failed"),
+                "official_body_failure_reason": None if body_fetch_ok else (failure_reason or "official_page_not_fetchable"),
                 "official_body_match": bool(body_fetch_ok and match.get("supports")),
                 "official_body_match_score": match.get("match_score", 0),
                 "official_body_matched_terms": match.get("matched_terms", []),
