@@ -1380,7 +1380,10 @@
     </section>
 
     <section id="reportActions" class="report-actions">
-      <div class="report-actions-title">공유용 분석 리포트</div>
+      <div>
+        <div class="report-actions-title">공유용 검증 리포트</div>
+        <div class="reader-note">현재 화면의 핵심 판단과 근거 요약만 정리해 복사하거나 저장할 수 있습니다.</div>
+      </div>
       <div class="report-actions-buttons">
         <button id="copyReportBtn" class="report-copy" type="button">리포트 복사</button>
         <button id="downloadReportBtn" class="report-download" type="button">리포트 다운로드</button>
@@ -1501,27 +1504,27 @@
       "No immediate action beyond routine monitoring.": "즉각적인 대응보다는 일반 모니터링을 유지하세요.",
     };
     const VERDICT_LABELS = {
-      draft_verified: "공식근거 강함",
+      draft_verified: "임시 검증 완료",
       draft_likely_true: "사실 가능성 높음",
-      draft_unverified: "미검증",
-      draft_needs_context: "추가 맥락 필요",
-      draft_needs_official_confirmation: "공식 확인 필요",
-      draft_misleading: "오해 소지",
-      draft_disputed: "상충 근거 있음",
-      draft_outdated: "시점 확인 필요",
+      draft_unverified: "추가 검증 필요",
+      draft_needs_context: "맥락 추가 확인 필요",
+      draft_needs_official_confirmation: "공식 출처 확인 필요",
+      draft_misleading: "오해 가능성 있음",
+      draft_disputed: "상충 근거 확인 필요",
+      draft_outdated: "최신 여부 확인 필요",
     };
     const REVIEW_STATUS_LABELS = {
       ai_draft_pending_human_review: "AI 초안, 사람 검토 대기",
     };
-    VERDICT_LABELS.draft_needs_review = "사람 검토 필요";
-    VERDICT_LABELS.draft_high_risk_review = "고위험 검토 필요";
+    VERDICT_LABELS.draft_needs_review = "사람 검토 대기";
+    VERDICT_LABELS.draft_high_risk_review = "고위험 사람 검토 대기";
 
     const SOURCE_TYPE_LABELS = {
       official_government: "공식 정부기관",
       public_institution: "공공기관",
       established_news: "언론 기사",
-      search_fallback_news: "검색 fallback 기사",
-      unknown: "알 수 없음",
+      search_fallback_news: "검색 기반 뉴스",
+      unknown: "확인 필요",
     };
 
     function repairMojibake(value) {
@@ -1566,9 +1569,9 @@
 
     function formatSignal(signal) {
       if (Array.isArray(signal)) {
-        return signal.map((item) => MARKET_SIGNAL_LABELS[item] || item).join(", ");
+        return signal.map((item) => MARKET_SIGNAL_LABELS[item] || formatTechnicalLabel(item)).join(", ");
       }
-      return MARKET_SIGNAL_LABELS[signal] || signal || "-";
+      return MARKET_SIGNAL_LABELS[signal] || formatTechnicalLabel(signal);
     }
 
     function formatAlert(level) {
@@ -1588,7 +1591,7 @@
     }
 
     function formatRecommendation(value) {
-      return RECOMMENDATION_LABELS[value] || value || "-";
+      return RECOMMENDATION_LABELS[value] || formatTechnicalLabel(value);
     }
 
     function formatVerdict(value) {
@@ -1610,25 +1613,72 @@
         draft_high_risk_review: "고위험 사람 검토 대기",
         draft_needs_official_confirmation: "공식 확인 필요",
         official_detail_missing: "공식 상세 원문 부족",
+        official_detail_url_missing: "공식 상세 URL 부족",
+        official_detail_not_verified: "공식 상세 자료 미확인",
+        official_search_only: "공식 검색 결과 수준",
+        official_page_not_fetchable: "공식 페이지 수집 실패",
+        official_body_too_short: "공식 본문 분량 부족",
+        official_topic_mismatch: "공식 자료 주제 불일치",
         official_body_mismatch: "공식 본문 불일치 가능성",
+        official_body_fetch_failed: "공식 본문 수집 실패",
+        official_candidate_not_fetched: "공식 후보 문서 미수집",
         official_candidate_metadata_overlap_without_body: "공식 후보 본문 미확인",
+        official_candidate_without_body: "공식 후보 본문 미확보",
+        official_candidate_only: "공식 후보 단계",
         no_body_text: "본문 없음",
         context_only: "참고 맥락",
         official_reference: "공식 참고자료",
         direct_support: "직접 근거",
         indirect_support: "간접 근거",
+        background_context: "배경 맥락",
+        contradiction_candidate: "반박 후보",
+        insufficient_evidence: "근거 부족",
         no_match: "직접 일치 근거 없음",
+        not_enough_info: "정보 부족",
+        supports: "지지",
+        contradicts: "반박",
+        unclear: "불명확",
+        primary_evidence: "주요 근거",
+        supporting_evidence: "보조 근거",
+        not_reliable_enough: "신뢰도 부족",
+        primary_source: "1차 출처",
+        support: "보조 근거",
+        contradiction: "반박 확인",
+        fact_check: "팩트체크",
+        update: "업데이트",
+        news_context: "뉴스 맥락",
+        public_policy: "공공정책",
+        consumer_finance: "소비자 금융",
+        household_finance: "가계 금융",
+        housing: "주거",
+        real_estate: "부동산",
+        banking: "은행권",
+        banks: "은행",
+        young_adults: "청년층",
+        renters: "임차인",
+        homeowners: "주택 보유자",
+        small_business_workers: "중소기업 근로자",
+        SMEs: "중소기업",
+        public_financial_institutions: "정책금융기관",
+        investors: "투자자",
+        general_consumers: "일반 소비자",
+        loaded_terms: "수집된 핵심어",
         low: "낮음",
         medium: "보통",
         high: "높음",
+        strong: "강함",
+        weak: "약함",
         very_high: "매우 높음",
         unknown: "확인 필요",
+        null: "자료 부족",
+        undefined: "자료 부족",
       };
       if (Array.isArray(value)) {
         return value.map((item) => formatTechnicalLabel(item)).join(", ");
       }
-      const text = String(value || "");
-      return labels[text] || text.replaceAll("_", " ") || "-";
+      const text = String(value ?? "").trim();
+      if (!text || text === "null" || text === "undefined") return "자료 부족";
+      return labels[text] || text.replaceAll("_", " ") || "자료 부족";
     }
 
     function formatList(value) {
@@ -1636,6 +1686,11 @@
         return value.length ? value.map((item) => formatTechnicalLabel(item)).join(", ") : "-";
       }
       return formatTechnicalLabel(value);
+    }
+
+    function formatEvidenceSummaryLabel(summary) {
+      const data = summary || {};
+      return `강함 ${data.strong ?? 0}, 보통 ${data.medium ?? 0}, 약함 ${data.weak ?? 0}`;
     }
 
     function renderEvidenceSources(sources) {
@@ -2148,7 +2203,7 @@
           <div class="evidence-snippet">
             <div class="normalized-claim-text">claim #${index + 1}: ${escapeHtml(claim || "-")}</div>
             <div class="evidence-source-meta">
-              근거 품질: strong ${escapeHtml(strongCount)}, medium ${escapeHtml(mediumCount)}, weak ${escapeHtml(weakCount)}, best ${escapeHtml(bestScore)}
+              근거 품질: 강함 ${escapeHtml(strongCount)}, 보통 ${escapeHtml(mediumCount)}, 약함 ${escapeHtml(weakCount)}, 최고 ${escapeHtml(bestScore)}
             </div>
             ${related.length ? related.map((snippet) => {
               const sourceTitle = escapeHtml(snippet.source_title || snippet.source_url || "출처");
@@ -2312,7 +2367,7 @@
       if (!safeResults.length) {
         selectedIssueIntroEl.innerHTML = `
           <h2>선택한 이슈 검증 리포트</h2>
-          <p>관심 있는 이슈의 상세 보기를 누르거나 검색어를 입력하면 검증 리포트가 표시됩니다.</p>
+          <p>관심 있는 이슈의 상세 보기를 누르거나 검색어를 입력하면, 현재 확보 가능한 기사와 공식 자료를 기준으로 검증 리포트가 표시됩니다.</p>
         `;
         return;
       }
@@ -2330,10 +2385,10 @@
         <p><strong>${escapeHtml(result.title || "선택한 이슈")}</strong></p>
         <p>${escapeHtml(selectedIssueExplanation(result, metrics))}</p>
         <div class="selected-issue-meta">
-          <div>위험/관찰 단계<strong>${escapeHtml(formatAlert(level))}</strong></div>
-          <div>평균 신뢰도<strong>${escapeHtml(confidence.policy_confidence_score ?? metrics.averageConfidence ?? "-")}</strong></div>
-          <div>관련 근거/출처<strong>${escapeHtml(evidenceCount || sourceCount || "-")}</strong></div>
-          <div>공식 출처 상태<strong>${escapeHtml(officialStatusLabel(result))}</strong></div>
+          <div>위험/판정 단계<strong>${escapeHtml(formatAlert(level))}</strong><span class="reader-note">얼마나 조심해서 읽어야 하는지 보여줍니다.</span></div>
+          <div>평균 신뢰도<strong>${escapeHtml(confidence.policy_confidence_score ?? metrics.averageConfidence ?? "-")}</strong><span class="reader-note">수집된 근거 기준의 참고 점수입니다.</span></div>
+          <div>근거/검증처<strong>${escapeHtml(evidenceCount || sourceCount || "-")}</strong><span class="reader-note">확인에 사용된 주장·출처 수입니다.</span></div>
+          <div>공식 출처 상태<strong>${escapeHtml(officialStatusLabel(result))}</strong><span class="reader-note">관련 공식 자료가 확인됐는지 표시합니다.</span></div>
         </div>
       `;
     }
@@ -2495,7 +2550,7 @@
               <div><strong>신뢰도</strong><br>${escapeHtml(card.confidence)}</div>
               <div><strong>공식 출처</strong><br>${escapeHtml(card.officialStatus)}</div>
               <div><strong>리뷰</strong><br>${escapeHtml(card.reviewStatus)}</div>
-              <div><strong>근거 품질</strong><br>strong ${escapeHtml(quality.strong ?? 0)} / weak ${escapeHtml(quality.weak ?? 0)}</div>
+              <div><strong>근거 품질</strong><br>${escapeHtml(formatEvidenceSummaryLabel(quality))}</div>
             </div>
             <div class="topic-card-action">상세 보기</div>
           </article>
@@ -3134,7 +3189,7 @@
                 &nbsp; <span class="label">초안 상태:</span> ${escapeHtml(formatVerdict(item.review_status))}
                 <br>
                 <span class="label">evidence quality:</span>
-                strong ${escapeHtml(quality.strong ?? 0)}, medium ${escapeHtml(quality.medium ?? 0)}, weak ${escapeHtml(quality.weak ?? 0)}, avg ${escapeHtml(quality.average_evidence_quality_score ?? 0)}
+                ${escapeHtml(formatEvidenceSummaryLabel(quality))}, 평균 ${escapeHtml(quality.average_evidence_quality_score ?? 0)}
                 <br>
                 <span class="label">생성:</span> ${escapeHtml(item.created_at || "-")}
                 &nbsp; <span class="label">갱신:</span> ${escapeHtml(item.updated_at || "-")}
@@ -3241,15 +3296,15 @@
     function scoreTrustDescription(score) {
       const value = numberValue(score, -1);
       if (value >= 75) {
-        return "높음: 직접 근거와 출처 신뢰도가 충분해 판단 근거가 비교적 탄탄합니다.";
+        return "높음: 현재 확인된 근거와 출처 연결성이 비교적 탄탄합니다.";
       }
       if (value >= 45) {
-        return "보통: 참고할 근거는 있지만 공식 확인이나 직접성이 더 필요합니다.";
+        return "보통: 참고할 근거는 있으나 공식 확인이나 세부 맥락이 더 필요합니다.";
       }
       if (value >= 0) {
-        return "낮음: 공식 상세 근거 또는 직접 매칭이 부족해 보수적으로 해석해야 합니다.";
+        return "낮음: 공식 상세 근거 또는 직접 일치 근거가 부족해 보수적으로 읽어야 합니다.";
       }
-      return "정보 없음: 아직 점수 산정에 필요한 근거가 충분하지 않습니다.";
+      return "자료 부족: 점수 산정에 필요한 근거가 충분하지 않습니다.";
     }
 
     function evidenceQualityExplanation(quality, strength) {
@@ -3259,15 +3314,15 @@
       const weak = numberValue(quality?.weak, 0);
       const strongStrength = numberValue(strength?.strong, 0);
       if (strong > 0 && avg >= 75) {
-        return "강한 근거가 확인되어 주장과 출처의 연결성이 높습니다.";
+        return "주장과 출처가 잘 연결된 강한 근거가 확인됐습니다.";
       }
       if (strongStrength > 0 || medium > 0 || avg >= 45) {
-        return "일부 근거는 유용하지만 공식 상세문서나 본문 직접 일치 여부를 함께 봐야 합니다.";
+        return "일부 근거는 유용하지만, 공식 상세문서와의 직접 일치 여부를 함께 확인해야 합니다.";
       }
       if (weak > 0) {
-        return "대부분 약한 근거라 참고용으로만 보고 추가 확인이 필요합니다.";
+        return "대부분 참고용 근거이므로 추가 확인이 필요합니다.";
       }
-      return "검증에 쓸 수 있는 근거가 아직 충분하지 않습니다.";
+      return "검증에 사용할 수 있는 근거가 아직 충분하지 않습니다.";
     }
 
     function officialVerificationExplanation(sourceReliabilitySummary, debugSummary) {
@@ -3388,7 +3443,7 @@
       ).slice(0, 4);
       return `
         <section class="takeaway-panel">
-          <div class="takeaway-title">Key Takeaways</div>
+          <div class="takeaway-title">핵심 요약</div>
           <ul class="takeaway-list">
             ${bullets.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
           </ul>
@@ -3598,12 +3653,12 @@
               </div>
               <div class="summary-tile">
                 <span class="label">근거 품질</span>
-                <strong>strong ${escapeHtml(quality.strong ?? 0)}, medium ${escapeHtml(quality.medium ?? 0)}, weak ${escapeHtml(quality.weak ?? 0)}</strong>
+                <strong>${escapeHtml(formatEvidenceSummaryLabel(quality))}</strong>
                 <div class="score-explain">${escapeHtml(evidenceQualityExplanation(quality, strength))}</div>
               </div>
               <div class="summary-tile">
                 <span class="label">근거 강도</span>
-                <strong>strong ${escapeHtml(strength.strong ?? 0)}, medium ${escapeHtml(strength.medium ?? 0)}, weak ${escapeHtml(strength.weak ?? 0)}</strong>
+                <strong>${escapeHtml(formatEvidenceSummaryLabel(strength))}</strong>
               </div>
               <div class="summary-tile">
                 <span class="label">시장 신호</span>
@@ -3626,7 +3681,7 @@
             <section class="verification-card">
               <h3>AI 종합 검증 판단</h3>
               <div class="reader-note">
-                아래 정보는 AI가 수집한 뉴스, 공식 출처 후보, 근거 문장, 반박 신호를 바탕으로 만든 검증 초안입니다. 기술 세부 정보는 접힌 섹션에서 확인할 수 있습니다.
+                현재 수집된 기사와 공식 자료 기준의 검증 초안입니다. 절대적 결론이 아니라, 확인 가능한 근거를 바탕으로 한 판단입니다.
               </div>
               <div class="verification-intro">
                 <div class="summary-tile">
@@ -3647,7 +3702,7 @@
                 ${escapeHtml(verification.claim_text || "-")}
               </div>
               <div class="news-section-title">상세 검증 정보</div>
-              <div class="reader-note">주장별로 어떤 근거가 연결됐고, 반박 가능성이나 프레이밍 신호가 있는지 확인하는 영역입니다.</div>
+              <div class="reader-note">더 자세한 주장별 근거, 반박 가능성, 표현 방식 점검은 아래 고급 정보에서 펼쳐볼 수 있습니다.</div>
               ${advancedVerificationDetails}
             </section>
             <div class="source-link">
@@ -3972,7 +4027,7 @@
     }
 
     function formatEvidenceCounts(summary) {
-      return `strong ${plain(summary.strong, 0)}, medium ${plain(summary.medium, 0)}, weak ${plain(summary.weak, 0)}`;
+      return `강함 ${plain(summary.strong, 0)}, 보통 ${plain(summary.medium, 0)}, 약함 ${plain(summary.weak, 0)}`;
     }
 
     function buildReportText() {
@@ -4039,7 +4094,7 @@
         lines.push(`시장 신호: ${formatSignal(decision.market_signal)}`);
         lines.push(`최고 신뢰 출처: ${plain(topSource.title, "공식 상세 근거 부족")}${topSource.url ? ` (${topSource.url})` : ""}`);
         lines.push("");
-        lines.push("Key Takeaways");
+        lines.push("핵심 요약");
         alertReasonBullets(
           level,
           decision,
