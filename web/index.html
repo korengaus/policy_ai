@@ -4235,13 +4235,61 @@
       });
     }
 
+    function selectedResultsForExport() {
+      const context = currentReportContext || {};
+      const results = Array.isArray(context.results) ? context.results : [];
+      if (Number.isInteger(selectedResultIndex) && results[selectedResultIndex]) {
+        return [results[selectedResultIndex]];
+      }
+      return results;
+    }
+
+    function keywordSetForClaimAlignment(text) {
+      const normalized = sanitizeDisplayText(text || "").toLowerCase();
+      const matches = normalized.match(/[가-힣a-z0-9]{2,}/g) || [];
+      const stopwords = new Set([
+        "있다", "했다", "한다", "대한", "관련", "기준", "통해", "위해",
+        "지원", "정책", "검토", "추진", "발표", "정부", "기사", "뉴스",
+      ]);
+      return new Set(matches.filter((word) => !stopwords.has(word)));
+    }
+
+    function claimLooksAlignedWithResult(result, claimText) {
+      const claimWords = keywordSetForClaimAlignment(claimText);
+      if (!claimWords.size) return false;
+      const contextWords = keywordSetForClaimAlignment([
+        result?.title,
+        result?.topic,
+        result?.summary,
+        result?.final_decision?.decision_summary,
+        result?.verification_card?.evidence_summary,
+      ].filter(Boolean).join(" "));
+      let overlap = 0;
+      claimWords.forEach((word) => {
+        if (contextWords.has(word)) overlap += 1;
+      });
+      return overlap >= 2;
+    }
+
+    function exportClaimText(result) {
+      const verification = result?.verification_card || result || {};
+      const candidates = [
+        verification.claim_text,
+        Array.isArray(verification.claims) ? verification.claims[0] : "",
+        Array.isArray(result?.claims) ? result.claims[0] : "",
+      ].filter(Boolean);
+      const safeFallback = "선택한 기사에서 확인된 핵심 정책 주장만 표시할 수 있습니다.";
+      const claim = candidates.find((item) => claimLooksAlignedWithResult(result, item));
+      return claim || safeFallback;
+    }
+
     function formatEvidenceCounts(summary) {
       return `강함 ${plain(summary.strong, 0)}, 보통 ${plain(summary.medium, 0)}, 약함 ${plain(summary.weak, 0)}`;
     }
 
     function buildReportText() {
       const context = currentReportContext || {};
-      const results = Array.isArray(context.results) ? context.results : [];
+      const results = selectedResultsForExport();
       const metrics = computeMetrics(results);
       const aggregate = aggregateEvidenceSummaries(results);
       const lines = [];
@@ -4328,7 +4376,7 @@
         publicSourceNotesForReport(result).forEach((item) => lines.push(`- ${item}`));
         lines.push("");
         lines.push(`AI 초안 판정: ${formatVerdict(verification.verdict_label)}`);
-        lines.push(`핵심 주장: ${plain(verification.claim_text)}`);
+        lines.push(`핵심 주장: ${plain(exportClaimText(result))}`);
         lines.push(`근거 요약: ${plain(verification.evidence_summary)}`);
         lines.push(`부족한 맥락: ${plain(formatList(verification.missing_context), "정보 없음")}`);
         lines.push(`마지막 확인 시간: ${plain(verification.last_checked_at)}`);
