@@ -608,6 +608,12 @@
       box-shadow: 0 14px 30px rgba(37, 99, 235, 0.11);
     }
 
+    .topic-card.selected {
+      border-color: var(--blue);
+      background: #f8fbff;
+      box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.14), var(--shadow);
+    }
+
     .topic-card-top {
       display: flex;
       flex-wrap: wrap;
@@ -657,6 +663,52 @@
 
     .platform-tools {
       margin-top: 18px;
+    }
+
+    .selected-issue-intro {
+      border: 1px solid #dbeafe;
+      border-radius: 12px;
+      background: #ffffff;
+      box-shadow: var(--shadow);
+      margin: 16px 0;
+      padding: 18px;
+    }
+
+    .selected-issue-intro h2 {
+      margin: 0;
+      color: #0f172a;
+      font-size: 21px;
+      line-height: 1.3;
+    }
+
+    .selected-issue-intro p {
+      margin: 8px 0 0;
+      color: #475569;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .selected-issue-meta {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .selected-issue-meta div {
+      border: 1px solid #e5e7eb;
+      border-radius: 9px;
+      background: #f8fafc;
+      padding: 10px;
+      color: #475569;
+      font-size: 12px;
+    }
+
+    .selected-issue-meta strong {
+      display: block;
+      margin-top: 3px;
+      color: #0f172a;
+      font-size: 15px;
     }
 
     .detail-box {
@@ -1146,6 +1198,7 @@
       .controls,
       .metrics,
       .topic-card-grid,
+      .selected-issue-meta,
       .detail-grid,
       .result-summary-grid,
       .plain-section-grid,
@@ -1278,6 +1331,11 @@
       </div>
     </section>
 
+    <section id="selectedIssueIntro" class="selected-issue-intro">
+      <h2>선택한 이슈 검증 리포트</h2>
+      <p>관심 있는 이슈의 상세 보기를 누르거나 검색어를 입력하면 검증 리포트가 표시됩니다.</p>
+    </section>
+
     <section id="reportActions" class="report-actions">
       <div class="report-actions-title">공유용 분석 리포트</div>
       <div class="report-actions-buttons">
@@ -1292,7 +1350,10 @@
 
     <section class="history-card">
       <div class="history-header">
-        <h2 class="history-title">검토 큐</h2>
+        <div>
+          <h2 class="history-title">검수자용 리뷰 큐</h2>
+          <div class="reader-note">사람 검토가 필요한 AI 초안만 모아두는 내부 편집 영역입니다.</div>
+        </div>
         <select id="reviewFilter" class="review-filter" aria-label="검토 큐 필터">
           <option value="all">전체</option>
           <option value="pending">대기</option>
@@ -1338,6 +1399,7 @@
     const historyEl = document.getElementById("history");
     const reviewQueueEl = document.getElementById("reviewQueue");
     const reviewFilterEl = document.getElementById("reviewFilter");
+    const selectedIssueIntroEl = document.getElementById("selectedIssueIntro");
     const hotTopicsEl = document.getElementById("hotTopics");
     const categoryTabsEl = document.getElementById("categoryTabs");
 
@@ -1351,6 +1413,8 @@
     let currentReviewId = null;
     let currentReportContext = null;
     let activeCategory = "전체";
+    let activeTopicKey = "";
+    let selectedResultIndex = null;
     const ALERT_LABELS = {
       WATCH: "관찰",
       LOW: "낮음",
@@ -1937,7 +2001,8 @@
         : "없음";
       return `
         <div class="pipeline-debug">
-          <div class="pipeline-debug-title">Pipeline Debug Summary</div>
+          <div class="pipeline-debug-title">개발/검증용 Pipeline Debug Summary</div>
+          <div class="reader-note">일반 독자는 볼 필요 없는 내부 점검 정보입니다.</div>
           <div class="pipeline-debug-grid">
             ${renderDebugBadge("intake", data.intake_ok, data.intake_ok ? 1 : 0)}
             ${renderDebugBadge("claim extraction", data.claim_extraction_ok, data.claims_count)}
@@ -1981,11 +2046,11 @@
       `;
     }
 
-    function renderCollapsibleSection(title, body, open = false) {
+    function renderCollapsibleSection(title, body, open = false, helper = "") {
       return `
         <details class="collapsible-section" ${open ? "open" : ""}>
           <summary>${escapeHtml(title)}</summary>
-          <div class="collapsible-body">${body || ""}</div>
+          <div class="collapsible-body">${helper ? `<div class="reader-note">${escapeHtml(helper)}</div>` : ""}${body || ""}</div>
         </details>
       `;
     }
@@ -2145,9 +2210,64 @@
       reportActionsEl.style.display = safeResults.length ? "flex" : "none";
     }
 
+    function selectedIssueExplanation(result, metrics) {
+      if (!result) {
+        return "관심 있는 이슈의 상세 보기를 누르거나 검색어를 입력하면 검증 리포트가 표시됩니다.";
+      }
+      const decision = result.final_decision || {};
+      const verification = result.verification_card || result || {};
+      const debug = verification.debug_summary || result.debug_summary || {};
+      const officialStatus = officialStatusLabel(result);
+      if (officialStatus === "공식 근거 확인") {
+        return "아래 리포트는 이 이슈에 대해 수집된 기사, 공식 자료, 주장 단위 분석을 바탕으로 생성된 검증 결과입니다.";
+      }
+      if (officialStatus === "공식 출처 확인 필요" || officialStatus === "공식 본문 확인 제한") {
+        return "공식기관 후보는 확인됐지만 상세 본문 검증이 제한되어 있어, 기사 근거와 추가 확인 필요성을 함께 보여줍니다.";
+      }
+      if (Number(debug.evidence_matching_count || debug.direct_evidence_count || 0) > 0) {
+        return "공식 상세 근거가 충분하지 않은 경우에도 관련 기사와 근거 문장을 분리해 검증 초안을 제공합니다.";
+      }
+      return decision.decision_summary || "현재 확보된 요약 정보만 표시됩니다. 상세 검증은 분석 실행 후 더 풍부하게 제공됩니다.";
+    }
+
+    function renderSelectedIssueIntro(results, selectedIndex = null) {
+      if (!selectedIssueIntroEl) return;
+      const safeResults = Array.isArray(results) ? results : [];
+      if (!safeResults.length) {
+        selectedIssueIntroEl.innerHTML = `
+          <h2>선택한 이슈 검증 리포트</h2>
+          <p>관심 있는 이슈의 상세 보기를 누르거나 검색어를 입력하면 검증 리포트가 표시됩니다.</p>
+        `;
+        return;
+      }
+      const metrics = computeMetrics(safeResults);
+      const index = Number.isInteger(selectedIndex) && safeResults[selectedIndex] ? selectedIndex : 0;
+      const result = safeResults[index] || {};
+      const confidence = result.policy_confidence || {};
+      const verification = result.verification_card || result || {};
+      const debug = verification.debug_summary || result.debug_summary || {};
+      const evidenceCount = Number(debug.evidence_matching_count || debug.direct_evidence_count || debug.evidence_candidates_count || 0);
+      const sourceCount = Number(debug.official_sources_count || debug.news_sources_count || (verification.source_candidates || result.source_candidates || []).length || 0);
+      const level = String(result.final_decision?.policy_alert_level || metrics.highest || "WATCH").toUpperCase();
+      selectedIssueIntroEl.innerHTML = `
+        <h2>이 이슈는 이렇게 검증되었습니다</h2>
+        <p><strong>${escapeHtml(result.title || "선택한 이슈")}</strong></p>
+        <p>${escapeHtml(selectedIssueExplanation(result, metrics))}</p>
+        <div class="selected-issue-meta">
+          <div>위험/관찰 단계<strong>${escapeHtml(formatAlert(level))}</strong></div>
+          <div>평균 신뢰도<strong>${escapeHtml(confidence.policy_confidence_score ?? metrics.averageConfidence ?? "-")}</strong></div>
+          <div>관련 근거/출처<strong>${escapeHtml(evidenceCount || sourceCount || "-")}</strong></div>
+          <div>공식 출처 상태<strong>${escapeHtml(officialStatusLabel(result))}</strong></div>
+        </div>
+      `;
+    }
+
     function clearCurrentReportContext() {
       currentReportContext = null;
       reportActionsEl.style.display = "none";
+      activeTopicKey = "";
+      selectedResultIndex = null;
+      renderSelectedIssueIntro([]);
     }
 
     function safeReadLocalHistory() {
@@ -2235,7 +2355,11 @@
       const decision = result?.final_decision || {};
       const verification = result?.verification_card || result || {};
       const debug = verification.debug_summary || result?.debug_summary || {};
+      const keyBase = source === "history"
+        ? `${record?.id || record?.stable_history_key || "history"}:${index}`
+        : `current:${index}:${result?.original_url || result?.title || ""}`;
       return {
+        key: keyBase,
         source,
         index,
         recordId: record?.id || "",
@@ -2247,6 +2371,7 @@
         officialStatus: officialStatusLabel(result),
         reviewStatus: formatReviewStatus(verification.review_status) || "AI 초안, 사람 검토 대기",
         summary: topSummaryLine(result),
+        reason: decision.decision_summary || evidenceQualityExplanation(debug.evidence_quality_summary || {}, debug.evidence_strength_summary || {}),
         quality: debug.evidence_quality_summary || verification.evidence_quality_summary || {},
       };
     }
@@ -2279,14 +2404,17 @@
       }
       hotTopicsEl.innerHTML = cards.map((card) => {
         const quality = card.quality || {};
+        const selected = (card.key && card.key === activeTopicKey)
+          || (card.source === "current" && Number.isInteger(selectedResultIndex) && Number(card.index) === selectedResultIndex);
         return `
-          <article class="topic-card" data-topic-source="${escapeHtml(card.source)}" data-topic-index="${escapeHtml(card.index)}" data-topic-record-id="${escapeHtml(card.recordId)}">
+          <article class="topic-card ${selected ? "selected" : ""}" data-topic-key="${escapeHtml(card.key)}" data-topic-source="${escapeHtml(card.source)}" data-topic-index="${escapeHtml(card.index)}" data-topic-record-id="${escapeHtml(card.recordId)}">
             <div class="topic-card-top">
               <span class="badge ${alertClass(card.alert)}">${escapeHtml(formatAlert(card.alert))}</span>
               <span class="badge topic-badge">${escapeHtml(card.category)}</span>
             </div>
             <h3 class="topic-card-title">${escapeHtml(card.title)}</h3>
             <div class="topic-card-summary">${escapeHtml(card.summary || "핵심 요약을 준비 중입니다.")}</div>
+            <div class="reader-note">${escapeHtml(card.reason || "확보된 근거를 바탕으로 위험도와 신뢰도를 산정했습니다.")}</div>
             <div class="topic-card-meta">
               <div><strong>신뢰도</strong><br>${escapeHtml(card.confidence)}</div>
               <div><strong>공식 출처</strong><br>${escapeHtml(card.officialStatus)}</div>
@@ -2984,16 +3112,17 @@
       showStatus(`검토 상태를 ${reviewStatusLabel(reviewerStatus)}으로 변경했습니다.`, true);
     }
 
-    function loadHistoryRecord(record, message) {
+    function loadHistoryRecord(record, message, focusIndex = null) {
       const results = getHistoryResults(record);
       currentHistoryId = record?.id || null;
+      selectedResultIndex = Number.isInteger(focusIndex) ? focusIndex : null;
       setCurrentReportContext(
         record?.query || queryInput.value.trim(),
         record?.max_news || results.length,
         results,
         getHistoryAnalyzedAt(record)
       );
-      renderResults(results);
+      renderResults(results, selectedResultIndex);
       renderHistory(safeReadLocalHistory());
       if (record?.query) {
         queryInput.value = record.query;
@@ -3228,18 +3357,21 @@
       `;
     }
 
-    function renderResults(results) {
+    function renderResults(results, focusIndex = selectedResultIndex) {
       if (!results.length) {
         metricsEl.style.display = "none";
         clearCurrentReportContext();
-        resultsEl.innerHTML = '<div class="empty-state">분석을 실행하면 결과가 여기에 표시됩니다.</div>';
+        resultsEl.innerHTML = '<div class="empty-state">관심 있는 이슈의 상세 보기를 누르거나 검색어를 입력하면 검증 리포트가 표시됩니다.</div>';
         renderHotTopics();
         return;
       }
 
       renderMetrics(results);
       renderHotTopics(results);
-      resultsEl.innerHTML = results.map((result) => {
+      const hasFocus = Number.isInteger(focusIndex) && results[focusIndex];
+      const displayResults = hasFocus ? [results[focusIndex]] : results;
+      renderSelectedIssueIntro(results, hasFocus ? focusIndex : 0);
+      resultsEl.innerHTML = displayResults.map((result) => {
         const confidence = result.policy_confidence || {};
         const impact = result.policy_impact || {};
         const decision = result.final_decision || {};
@@ -3295,31 +3427,45 @@
         const verificationDetails = [
           renderCollapsibleSection(
             "핵심 주장과 정규화",
-            `${renderClaimList(claims)}${renderNormalizedClaims(normalizedClaims)}`
+            `${renderClaimList(claims)}${renderNormalizedClaims(normalizedClaims)}`,
+            false,
+            "기사에서 검증 가능한 문장을 뽑고, 주체·행동·대상 같은 구조로 정리한 정보입니다."
           ),
           renderCollapsibleSection(
             "근거 문장",
-            renderEvidenceSnippets(claims, evidenceSnippets)
+            renderEvidenceSnippets(claims, evidenceSnippets),
+            false,
+            "주장과 직접 또는 간접적으로 연결된 기사·출처 문장입니다."
           ),
           renderCollapsibleSection(
             "반박/모순 검사",
-            `${renderContradictionSummary(contradictionSummary)}${renderContradictionChecks(claims, contradictionChecks)}`
+            `${renderContradictionSummary(contradictionSummary)}${renderContradictionChecks(claims, contradictionChecks)}`,
+            false,
+            "같은 대상과 시점에 대해 상충되는 근거가 있는지 보수적으로 확인합니다."
           ),
           renderCollapsibleSection(
             "프레이밍/편향 검사",
-            `${renderBiasFramingSummary(biasFramingSummary)}${renderBiasFramingAnalysis(claims, biasFramingAnalysis)}`
+            `${renderBiasFramingSummary(biasFramingSummary)}${renderBiasFramingAnalysis(claims, biasFramingAnalysis)}`,
+            false,
+            "제목과 본문에 감정적 표현, 불확실 표현, 과장된 프레이밍이 있는지 확인합니다."
           ),
           renderCollapsibleSection(
             "출처와 공식 근거",
-            `${renderSourceReliabilitySummary(sourceReliabilitySummary)}${renderSourceCandidates(sourceCandidates)}${renderSourceQueries(sourceQueries)}`
+            `${renderSourceReliabilitySummary(sourceReliabilitySummary)}${renderSourceCandidates(sourceCandidates)}${renderSourceQueries(sourceQueries)}`,
+            false,
+            "공식기관 후보와 언론 출처가 실제 주장 검증에 얼마나 도움이 되는지 보여줍니다."
           ),
           renderCollapsibleSection(
             "근거 요약과 부족한 맥락",
-            `${renderEvidenceExtractionSummary(evidenceExtractionSummary)}${renderEvidenceSources(verification.evidence_sources)}<div class="evidence-source-meta">${escapeHtml(verification.evidence_summary || "-")}</div><div class="evidence-source-meta"><strong>부족한 맥락:</strong> ${escapeHtml(formatList(verification.missing_context))}</div><div class="evidence-source-meta">마지막 확인: ${escapeHtml(verification.last_checked_at || "-")}</div>`
+            `${renderEvidenceExtractionSummary(evidenceExtractionSummary)}${renderEvidenceSources(verification.evidence_sources)}<div class="evidence-source-meta">${escapeHtml(verification.evidence_summary || "-")}</div><div class="evidence-source-meta"><strong>부족한 맥락:</strong> ${escapeHtml(formatList(verification.missing_context))}</div><div class="evidence-source-meta">마지막 확인: ${escapeHtml(verification.last_checked_at || "-")}</div>`,
+            false,
+            "현재 리포트가 어떤 근거에 기대고 있으며, 추가 확인이 필요한 부분은 무엇인지 정리합니다."
           ),
           renderCollapsibleSection(
             "개발자용 Pipeline Debug Summary",
-            renderPipelineDebugSummary(debugSummary)
+            renderPipelineDebugSummary(debugSummary),
+            false,
+            "일반 독자는 볼 필요 없는 내부 점검 정보입니다."
           ),
         ].join("");
 
@@ -3396,7 +3542,7 @@
             ${renderUserSummarySections(userContext)}
 
             <section class="verification-card">
-              <h3>검증 카드</h3>
+              <h3>AI 종합 검증 판단</h3>
               <div class="reader-note">
                 아래 정보는 AI가 수집한 뉴스, 공식 출처 후보, 근거 문장, 반박 신호를 바탕으로 만든 검증 초안입니다. 기술 세부 정보는 접힌 섹션에서 확인할 수 있습니다.
               </div>
@@ -3419,6 +3565,7 @@
                 ${escapeHtml(verification.claim_text || "-")}
               </div>
               <div class="news-section-title">상세 검증 정보</div>
+              <div class="reader-note">주장별로 어떤 근거가 연결됐고, 반박 가능성이나 프레이밍 신호가 있는지 확인하는 영역입니다.</div>
               ${verificationDetails}
             </section>
             <div class="source-link">
@@ -3978,8 +4125,10 @@
       }
 
       hideError();
-      showStatus("정책 신호 분석 중...");
+      showStatus("관련 기사와 공식 자료를 수집하고 검증하는 중입니다...");
       setBusy(true);
+      selectedResultIndex = null;
+      activeTopicKey = "";
 
       try {
         const response = await fetch(`${API_BASE}/analyze`, {
@@ -4023,7 +4172,11 @@
         renderResults(results);
         renderHistory(safeReadLocalHistory());
         renderReviewQueue(safeReadReviewQueue());
-        showStatus("분석 완료", true);
+        if (!results.length) {
+          showStatus("검증 가능한 결과를 찾지 못했습니다. 다른 검색어로 다시 시도해 주세요.", true);
+        } else {
+          showStatus("분석 완료", true);
+        }
       } catch (error) {
         showError(`분석 실패: ${error.message}`);
         hideStatus();
@@ -4124,17 +4277,24 @@
         if (!card) return;
         const source = card.dataset.topicSource;
         const index = Number(card.dataset.topicIndex || 0);
+        activeTopicKey = card.dataset.topicKey || "";
+        selectedResultIndex = Number.isFinite(index) ? index : null;
         if (source === "history") {
           const record = safeReadLocalHistory().find((item) => item.id === card.dataset.topicRecordId);
           if (record) {
-            loadHistoryRecord(record, `"${record.query || "검증 뉴스"}" 카드를 불러왔습니다.`);
+            loadHistoryRecord(record, `"${record.query || "검증 뉴스"}" 카드를 불러왔습니다.`, selectedResultIndex);
             resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
             return;
           }
         }
         if (Array.isArray(currentReportContext?.results) && currentReportContext.results[index]) {
+          renderResults(currentReportContext.results, selectedResultIndex);
           resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
           showStatus("상세 검증 리포트로 이동했습니다.", true);
+        } else {
+          renderSelectedIssueIntro([]);
+          resultsEl.innerHTML = '<div class="empty-state">이 카드에는 아직 상세 검증 데이터가 충분하지 않습니다. 검색을 실행하면 상세 리포트가 표시됩니다.</div>';
+          resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
         }
       });
     }
