@@ -4235,6 +4235,76 @@
       });
     }
 
+    function sanitizePublicExportText(value) {
+      let text = sanitizeDisplayText(value || "");
+      const replacements = {
+        official_topic_mismatch: "공식 자료 주제 불일치",
+        official_detail_missing: "공식 상세 자료 부족",
+        official_detail_url_missing: "공식 상세 URL 부족",
+        official_candidate_not_fetched: "공식 후보 문서 미수집",
+        official_body_mismatch: "공식 본문 불일치 가능성",
+        official_candidate_metadata_overlap_without_body: "공식 후보 본문 미확인",
+        no_body_text: "본문 없음",
+        context_only: "맥락 참고용",
+        press_release: "보도자료",
+        "insufficient matched query/material concept overlap": "기사 주제와 공식 자료의 직접 일치가 부족함",
+        "unrelated general finance/foreign-affairs press release": "기사 주제와 직접 관련성이 낮은 일반 보도자료",
+      };
+      Object.entries(replacements).forEach(([raw, label]) => {
+        text = text.replaceAll(raw, label);
+      });
+      text = text.replace(/unrelated\s+general\s+finance\/foreign-affairs\s+press\s+release/gi, "기사 주제와 직접 관련성이 낮은 일반 보도자료");
+      text = text.replace(/unrelated\s+general\s+finance/gi, "기사 주제와 직접 관련성이 낮은 일반 금융 자료");
+      text = text.replace(/foreign-affairs/gi, "대외 협력 관련");
+      text = text.replace(/insufficient\s+matched\s+query\/material\s+concept\s+overlap/gi, "기사 주제와 공식 자료의 직접 일치가 부족함");
+      text = text.replace(/\bpress\s+release\b/gi, "보도자료");
+      text = text.replace(/https?:\/\/(?:www\.)?fsc\.go\.kr\/no\d+\/?\S*/gi, "금융위원회 보도자료 상세 페이지");
+      text = text.replace(/\bFSC detail press URL\b/gi, "금융위원회 보도자료 상세 페이지");
+      text = text.replace(/\bFSC detail press URL-like explanations\b/gi, "금융위원회 보도자료 상세 페이지 관련 설명");
+      text = text.replace(/금융위원회 보도자료 상세 페이지-like explanations/gi, "금융위원회 보도자료 상세 페이지 관련 설명");
+      text = text.replace(/\bdetail press URL\b/gi, "상세 보도자료 페이지");
+      text = text.replace(/\bpress URL\b/gi, "보도자료 페이지");
+      text = text.replace(/\bFSC\b/g, "금융위원회");
+      text = text.replace(/https?:\/\/\S+/gi, (url) => {
+        if (/go\.kr|gov\.kr|bok\.or\.kr|fss\.or\.kr|molit\.go\.kr|korea\.kr/i.test(url)) {
+          return "공식기관 상세 페이지";
+        }
+        return url;
+      });
+      return text || "자료 부족";
+    }
+
+    function exportLine(lines, value = "") {
+      lines.push(sanitizePublicExportText(value));
+    }
+
+    function exportTopicLabel(result, query) {
+      const primaryText = [
+        query,
+        result?.title,
+        result?.summary,
+        result?.final_decision?.decision_summary,
+        result?.verification_card?.claim_text,
+      ].filter(Boolean).join(" ");
+      const topicText = sanitizePublicExportText(result?.topic || "");
+      const allText = [
+        primaryText,
+        topicText,
+      ].filter(Boolean).join(" ");
+      const primaryHasRealEstate = /부동산|양도세|양도소득세|다주택|주택|분양|재건축|재개발|청약|토지|임대|전세사기|종부세|공시가격|세무조사/.test(primaryText);
+      const primaryHasJeonseLoan = /전세대출|버팀목|전세자금|주담대|주택담보대출/.test(primaryText);
+
+      if (/전세사기/.test(allText)) return "전세사기";
+      if (/부동산/.test(String(query || ""))) return "부동산";
+      if (primaryHasRealEstate && !primaryHasJeonseLoan) return "부동산";
+      if (/금융위|금감원|금리|은행|대출|DSR|가계부채|연체율|한국은행/.test(primaryText)) return "금융/정책";
+      if (primaryHasRealEstate) return "부동산";
+      if (/전세대출/.test(topicText) && !primaryHasJeonseLoan) return "확인 필요";
+      if (/부동산/.test(topicText)) return "부동산";
+      if (/금융|정책|금리|은행|대출/.test(topicText)) return "금융/정책";
+      return topicText && topicText !== "자료 부족" ? topicText : "확인 필요";
+    }
+
     function selectedResultsForExport() {
       const context = currentReportContext || {};
       const results = Array.isArray(context.results) ? context.results : [];
@@ -4294,16 +4364,16 @@
       const aggregate = aggregateEvidenceSummaries(results);
       const lines = [];
 
-      lines.push("정책 AI 검증 리포트");
-      lines.push("=".repeat(32));
-      lines.push(`검색어: ${plain(context.query)}`);
-      lines.push(`뉴스 개수: ${plain(context.maxNews || results.length, 0)}`);
-      lines.push(`분석 시간: ${plain(context.analyzedAt)}`);
-      lines.push(`최고 경고 단계: ${metrics.highest === "-" ? "-" : formatAlert(metrics.highest)}`);
-      lines.push(`평균 신뢰도: ${plain(metrics.averageConfidence, 0)}`);
-      lines.push(`고영향 뉴스 수: ${plain(metrics.highImpactCount, 0)}`);
-      lines.push(`전체 근거 강도: ${formatEvidenceCounts(aggregate.strength)}`);
-      lines.push(`전체 근거 품질: ${formatEvidenceCounts(aggregate.quality)}, avg ${plain(aggregate.quality.average_evidence_quality_score, 0)}`);
+      exportLine(lines, "정책 AI 검증 리포트");
+      exportLine(lines, "=".repeat(32));
+      exportLine(lines, `검색어: ${plain(context.query)}`);
+      exportLine(lines, `뉴스 개수: ${plain(context.maxNews || results.length, 0)}`);
+      exportLine(lines, `분석 시간: ${plain(context.analyzedAt)}`);
+      exportLine(lines, `최고 경고 단계: ${metrics.highest === "-" ? "-" : formatAlert(metrics.highest)}`);
+      exportLine(lines, `평균 신뢰도: ${plain(metrics.averageConfidence, 0)}`);
+      exportLine(lines, `고영향 뉴스 수: ${plain(metrics.highImpactCount, 0)}`);
+      exportLine(lines, `전체 근거 강도: ${formatEvidenceCounts(aggregate.strength)}`);
+      exportLine(lines, `전체 근거 품질: ${formatEvidenceCounts(aggregate.quality)}, 평균 ${plain(aggregate.quality.average_evidence_quality_score, 0)}`);
       lines.push("");
 
       if (!results.length) {
@@ -4337,21 +4407,21 @@
           debugSummary: debug,
         };
 
-        lines.push(`[${index + 1}] ${plain(result.title, "제목 없음")}`);
+        lines.push(`[${index + 1}] ${sanitizePublicExportText(plain(result.title, "제목 없음"))}`);
         lines.push("-".repeat(32));
-        lines.push(`원문: ${plain(result.original_url)}`);
-        lines.push(`주제: ${plain(result.topic)}`);
-        lines.push(`경고 단계: ${formatAlert(level)}`);
-        lines.push(`최종 점수: ${plain(decision.final_score ?? confidence.policy_confidence_score)}`);
-        lines.push(`신뢰도 점수: ${plain(confidence.policy_confidence_score)}`);
-        lines.push(`영향도: ${formatLevel(impact.impact_level)}`);
-        lines.push(`위험도: ${formatLevel(confidence.risk_level)}`);
-        lines.push(`영향 방향: ${formatDirection(impact.impact_direction)}`);
-        lines.push(`권장 조치: ${recommendation}`);
-        lines.push(`시장 신호: ${formatSignal(decision.market_signal)}`);
-        lines.push(`최고 신뢰 출처: ${plain(topSource.title, "공식 상세 근거 부족")}${topSource.url ? ` (${topSource.url})` : ""}`);
+        lines.push(`원문: ${sanitizePublicExportText(plain(result.original_url))}`);
+        lines.push(`주제: ${exportTopicLabel(result, context.query)}`);
+        exportLine(lines, `경고 단계: ${formatAlert(level)}`);
+        exportLine(lines, `최종 점수: ${plain(decision.final_score ?? confidence.policy_confidence_score)}`);
+        exportLine(lines, `신뢰도 점수: ${plain(confidence.policy_confidence_score)}`);
+        exportLine(lines, `영향도: ${formatLevel(impact.impact_level)}`);
+        exportLine(lines, `위험도: ${formatLevel(confidence.risk_level)}`);
+        exportLine(lines, `영향 방향: ${formatDirection(impact.impact_direction)}`);
+        lines.push(`권장 조치: ${sanitizePublicExportText(recommendation)}`);
+        lines.push(`시장 신호: ${sanitizePublicExportText(formatSignal(decision.market_signal))}`);
+        lines.push(`최고 신뢰 출처: ${sanitizePublicExportText(plain(topSource.title, "공식 상세 근거 부족"))}`);
         lines.push("");
-        lines.push("핵심 요약");
+        exportLine(lines, "핵심 요약");
         alertReasonBullets(
           level,
           decision,
@@ -4361,27 +4431,27 @@
           reliability,
           contradiction,
           debug
-        ).slice(0, 4).forEach((item) => lines.push(`- ${item}`));
+        ).slice(0, 4).forEach((item) => exportLine(lines, `- ${item}`));
         lines.push("");
-        lines.push("왜 이렇게 판단했나요?");
-        lines.push(`- 왜 ${formatAlert(level)}인가: ${alertReasonBullets(level, decision, confidence, impact, evidence.quality, reliability, contradiction, debug)[0]}`);
-        lines.push(`- 주요 정책 영향: ${policyImpactBullets(impact, decision).join(" / ")}`);
-        lines.push(`- 소비자 영향: ${consumerImpactBullets(impact).join(" / ")}`);
-        lines.push(`- 금융 시스템 영향: ${financialSystemBullets(impact).join(" / ")}`);
-        lines.push(`- 근거 품질: ${evidenceQualityExplanation(evidence.quality, evidence.strength)}`);
-        lines.push(`- 공식 출처 확인: ${officialVerificationExplanation(reliability, debug)}`);
-        lines.push(`- 반박/모순 확인: ${contradictionExplanation(contradiction)}`);
+        exportLine(lines, "왜 이렇게 판단했나요?");
+        exportLine(lines, `- 왜 ${formatAlert(level)}인가: ${alertReasonBullets(level, decision, confidence, impact, evidence.quality, reliability, contradiction, debug)[0]}`);
+        exportLine(lines, `- 주요 정책 영향: ${policyImpactBullets(impact, decision).join(" / ")}`);
+        exportLine(lines, `- 소비자 영향: ${consumerImpactBullets(impact).join(" / ")}`);
+        exportLine(lines, `- 금융 시스템 영향: ${financialSystemBullets(impact).join(" / ")}`);
+        exportLine(lines, `- 근거 품질: ${evidenceQualityExplanation(evidence.quality, evidence.strength)}`);
+        exportLine(lines, `- 공식 출처 확인: ${officialVerificationExplanation(reliability, debug)}`);
+        exportLine(lines, `- 반박/모순 확인: ${contradictionExplanation(contradiction)}`);
         lines.push("");
-        lines.push("근거와 출처 요약");
-        publicSourceNotesForReport(result).forEach((item) => lines.push(`- ${item}`));
+        exportLine(lines, "근거와 출처 요약");
+        publicSourceNotesForReport(result).forEach((item) => lines.push(`- ${sanitizePublicExportText(item)}`));
         lines.push("");
-        lines.push(`AI 초안 판정: ${formatVerdict(verification.verdict_label)}`);
-        lines.push(`핵심 주장: ${plain(exportClaimText(result))}`);
-        lines.push(`근거 요약: ${plain(verification.evidence_summary)}`);
-        lines.push(`부족한 맥락: ${plain(formatList(verification.missing_context), "정보 없음")}`);
-        lines.push(`마지막 확인 시간: ${plain(verification.last_checked_at)}`);
-        lines.push(`근거 강도: ${formatEvidenceCounts(evidence.strength)}`);
-        lines.push(`근거 품질: ${formatEvidenceCounts(evidence.quality)}, avg ${plain(evidence.quality.average_evidence_quality_score, 0)}`);
+        lines.push(`AI 초안 판정: ${sanitizePublicExportText(formatVerdict(verification.verdict_label))}`);
+        lines.push(`핵심 주장: ${sanitizePublicExportText(plain(exportClaimText(result)))}`);
+        lines.push(`근거 요약: ${sanitizePublicExportText(plain(verification.evidence_summary))}`);
+        lines.push(`부족한 맥락: ${sanitizePublicExportText(plain(formatList(verification.missing_context), "정보 없음"))}`);
+        exportLine(lines, `마지막 확인 시간: ${plain(verification.last_checked_at)}`);
+        exportLine(lines, `근거 강도: ${formatEvidenceCounts(evidence.strength)}`);
+        exportLine(lines, `근거 품질: ${formatEvidenceCounts(evidence.quality)}, 평균 ${plain(evidence.quality.average_evidence_quality_score, 0)}`);
         lines.push("");
       });
 
