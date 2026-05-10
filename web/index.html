@@ -385,6 +385,51 @@
       line-height: 1.65;
     }
 
+    .reading-guide {
+      border: 1px solid #d1fae5;
+      border-radius: 10px;
+      background: #f0fdf4;
+      margin: 14px 0;
+      padding: 15px;
+    }
+
+    .reading-guide-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .reading-guide-title {
+      color: #065f46;
+      font-size: 16px;
+      font-weight: 900;
+    }
+
+    .reading-guide-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .reading-guide-card {
+      border: 1px solid #bbf7d0;
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 11px;
+      color: #1f2937;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .reading-guide-card strong {
+      display: block;
+      margin-bottom: 5px;
+      color: #064e3b;
+      font-size: 13px;
+    }
+
     .plain-section-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1313,6 +1358,7 @@
       .detail-grid,
       .result-summary-grid,
       .plain-section-grid,
+      .reading-guide-grid,
       .verification-intro,
       .verification-grid {
         grid-template-columns: 1fr;
@@ -1647,6 +1693,7 @@
         [/Financial Supervisory Service/gi, "금융감독원"],
         [/Ministry of Land,\s*Infrastructure and Transport/gi, "국토교통부"],
         [/Ministry of Economy and Finance/gi, "기획재정부"],
+        [/Ministry of SMEs and Startups/gi, "중소벤처기업부"],
         [/Bank of Korea/gi, "한국은행"],
         [/Korea Housing\s*&\s*Urban Guarantee Corporation/gi, "주택도시보증공사(HUG)"],
         [/\bHUG\b/g, "주택도시보증공사(HUG)"],
@@ -1724,16 +1771,21 @@
         official_detail_missing: "공식 상세 원문 부족",
         official_detail_url_missing: "공식 상세 URL 부족",
         official_detail_not_verified: "공식 상세 자료 미확인",
+        official_search_url_candidate: "공식 검색 후보",
         official_search_only: "공식 검색 결과 수준",
         official_page_not_fetchable: "공식 페이지 수집 실패",
         official_body_too_short: "공식 본문 분량 부족",
         official_topic_mismatch: "공식 자료 주제 불일치",
         official_body_mismatch: "공식 본문 불일치 가능성",
         official_body_fetch_failed: "공식 본문 수집 실패",
+        official_body_fetched_unmatched: "공식 본문 직접 일치 부족",
+        official_body_verified: "공식 본문 직접 근거 확인",
         official_candidate_not_fetched: "공식 후보 문서 미수집",
         official_candidate_metadata_overlap_without_body: "공식 후보 본문 미확인",
         official_candidate_without_body: "공식 후보 본문 미확보",
         official_candidate_only: "공식 후보 단계",
+        official_document_excluded: "공식 문서 직접 근거 제외",
+        official_detail_body_missing: "공식 상세 본문 부족",
         no_body_text: "본문 없음",
         context_only: "참고 맥락",
         official_reference: "공식 참고자료",
@@ -1756,12 +1808,18 @@
         fact_check: "팩트체크",
         update: "업데이트",
         news_context: "뉴스 맥락",
+        current_news_collection: "뉴스 수집 결과",
+        article_body_sentence_overlap: "기사 본문 문장 일치",
+        official_candidate_without_body_match: "공식 후보 본문 매칭 미확인",
         public_policy: "공공정책",
         consumer_finance: "소비자 금융",
         household_finance: "가계 금융",
         housing: "주거",
         real_estate: "부동산",
         banking: "은행권",
+        SME_finance: "중소기업 금융",
+        capital_market: "자본시장",
+        social: "사회",
         banks: "은행",
         young_adults: "청년층",
         renters: "임차인",
@@ -1772,6 +1830,29 @@
         investors: "투자자",
         general_consumers: "일반 소비자",
         loaded_terms: "수집된 핵심어",
+        "loaded terms": "추출된 핵심 용어",
+        source_retrieval: "출처 탐색",
+        "source retrieval": "출처 탐색",
+        evidence_matching: "근거 매칭",
+        "evidence matching": "근거 매칭",
+        claim_extraction: "주장 추출",
+        "claim extraction": "주장 추출",
+        claim_normalization: "주장 정규화",
+        "claim normalization": "주장 정규화",
+        bias_framing: "프레이밍/편향 검사",
+        "bias/framing": "프레이밍/편향 검사",
+        human_review: "사람 검토",
+        "human review": "사람 검토",
+        strict_staff_needs_review: "사람 검토 필요",
+        needs_context: "맥락 추가 확인 필요",
+        draft_needs_context: "맥락 추가 확인 필요",
+        needs_review: "사람 검토 필요",
+        ok: "정상",
+        partial: "일부 확인",
+        missing: "없음",
+        needed: "필요",
+        "not needed": "불필요",
+        none: "없음",
         low: "낮음",
         medium: "보통",
         high: "높음",
@@ -1779,6 +1860,7 @@
         weak: "약함",
         very_high: "매우 높음",
         unknown: "확인 필요",
+        unknown_publisher: "발행처 확인 필요",
         null: "자료 부족",
         undefined: "자료 부족",
       };
@@ -1787,14 +1869,100 @@
       }
       const text = String(value ?? "").trim();
       if (!text || text === "null" || text === "undefined") return "자료 부족";
-      return labels[text] || text.replaceAll("_", " ") || "자료 부족";
+      return labels[text] || (text.includes("_") ? "추가 진단 정보" : text) || "자료 부족";
+    }
+
+    function formatDiagnosticText(value) {
+      let text = sanitizeDisplayText(value ?? "");
+      if (!text || text === "-" || text === "null" || text === "undefined") return "-";
+      const replacements = {
+        official_search_url_candidate: "공식 검색 후보",
+        official_detail_missing: "상세 공식문서 미확인",
+        official_detail_url_missing: "공식 상세 URL 부족",
+        official_detail_not_verified: "공식 상세 자료 미확인",
+        official_body_fetched_unmatched: "공식 본문 직접 일치 부족",
+        official_candidate_metadata_overlap_without_body: "공식 후보 메타데이터만 일부 일치",
+        official_candidate_not_fetched: "공식 후보 문서 미수집",
+        official_candidate_without_body: "공식 후보 본문 미확보",
+        official_body_mismatch: "공식 본문 불일치 가능성",
+        official_topic_mismatch: "공식 자료 주제 불일치",
+        official_document_excluded: "공식 문서 직접 근거 제외",
+        official_search_only: "공식 검색 결과 수준",
+        no_body_text: "본문 없음",
+        current_news_collection: "뉴스 수집 결과",
+        context_only: "참고 맥락",
+        loaded_terms: "추출된 핵심 용어",
+        "loaded terms": "추출된 핵심 용어",
+        no_match: "직접 일치 없음",
+        strict_staff_needs_review: "사람 검토 필요",
+        needs_context: "맥락 추가 확인 필요",
+        source_retrieval: "출처 탐색",
+        "source retrieval": "출처 탐색",
+        bias_framing: "프레이밍/편향 검사",
+        "bias framing": "프레이밍/편향 검사",
+        contradiction: "반박/모순 검사",
+        official_body_verified: "공식 본문 직접 근거 확인",
+        official_reference: "공식 참고자료",
+        direct_support: "직접 근거",
+        indirect_support: "간접 근거",
+        background_context: "배경 맥락",
+        not_enough_info: "정보 부족",
+        unknown_publisher: "발행처 확인 필요",
+      };
+      Object.entries(replacements).forEach(([raw, label]) => {
+        text = text.replaceAll(raw, label);
+      });
+      text = text.replace(/\bofficial body fetched but direct claim match is insufficient\b/gi, "공식 본문은 수집됐지만 핵심 주장과 직접 일치가 부족합니다");
+      text = text.replace(/\bofficial body direct match\b/gi, "공식 본문 직접 근거 확인");
+      text = text.replace(/\bofficial body text unavailable\b/gi, "공식 본문을 확인하지 못했습니다");
+      text = text.replace(/\bNo official document candidate links found on search page\.?/gi, "공식 검색 결과에서 사용할 수 있는 상세 문서 링크를 찾지 못했습니다");
+      text = text.replace(/\bofficial document topic mismatch:[^,;]+/gi, "공식 문서가 기사 핵심 주제와 직접 맞지 않습니다");
+      text = text.replace(/\bConnection aborted\.?/gi, "공식 사이트 연결이 중단됐습니다");
+      text = text.replace(/\bConnectionResetError\b/gi, "연결 초기화 오류");
+      text = text.replace(/\b404 Client Error: Not Found for url:\s*\S+/gi, "공식 페이지를 찾을 수 없습니다");
+      text = text.replace(/\b\d{3} Client Error:[^,;]+/gi, "공식 페이지 요청에 실패했습니다");
+      text = text.replace(/\('공식 사이트 연결이 중단됐습니다'[^)]*\)/g, "공식 사이트 연결이 중단됐습니다");
+      text = text.replace(/연결 초기화 오류\([^)]*\)/g, "연결 초기화 오류");
+      text = text.replace(/공식 사이트 연결이 중단됐습니다\)+/g, "공식 사이트 연결이 중단됐습니다");
+      text = text.replace(/\bNone\b/g, "");
+      text = text.replace(/\bsource retrieval\b/gi, "출처 탐색");
+      text = text.replace(/\bbias\/framing\b/gi, "프레이밍/편향 검사");
+      text = text.replace(/\bfresh news fetch\b/gi, "새 뉴스 수집");
+      text = text.replace(/\bnews cache hit\b/gi, "뉴스 캐시 사용");
+      text = text.replace(/\bfresh analysis\b/gi, "새 분석 실행");
+      text = text.replace(/\banalysis cache hit\b/gi, "분석 캐시 사용");
+      text = text.replace(/\bterms=(\d+)/gi, "핵심어 $1개");
+      text = text.replace(/\bconcepts=(\d+)/gi, "개념 $1개");
+      text = text.replace(/\bnumbers=(\d+)/gi, "수치 $1개");
+      text = text.replace(/\bstrong\b/gi, "강함");
+      text = text.replace(/\bmedium\b/gi, "보통");
+      text = text.replace(/\bweak\b/gi, "약함");
+      text = text.replace(/\bok\b/gi, "정상");
+      text = text.replace(/\bpartial\b/gi, "일부 확인");
+      text = text.replace(/\bmissing\b/gi, "없음");
+      text = text.replace(/\bno body text\b/gi, "본문 없음");
+      text = text.replace(/\bcandidate only\b/gi, "후보 단계");
+      text = text.replace(/\bpossible redirect\b/gi, "리다이렉트 가능성");
+      return text;
+    }
+
+    function formatReasonCounts(counts) {
+      if (!counts || typeof counts !== "object") return "{}";
+      const entries = Object.entries(counts);
+      if (!entries.length) return "없음";
+      return entries.map(([key, value]) => `${formatTechnicalLabel(key)} ${value}`).join(", ");
+    }
+
+    function formatReadableValue(value) {
+      const label = formatTechnicalLabel(value);
+      return label === "추가 진단 정보" ? formatDiagnosticText(value) : label;
     }
 
     function formatList(value) {
       if (Array.isArray(value)) {
-        return value.length ? value.map((item) => formatTechnicalLabel(item)).join(", ") : "-";
+        return value.length ? value.map((item) => formatReadableValue(item)).join(", ") : "-";
       }
-      return formatTechnicalLabel(value);
+      return formatReadableValue(value);
     }
 
     function formatEvidenceSummaryLabel(summary) {
@@ -1814,7 +1982,7 @@
             const sourceUrl = escapeHtml(source.url || "");
             const sourceType = escapeHtml(formatSourceType(source.source_type));
             const score = escapeHtml(source.reliability_score ?? "-");
-            const reason = escapeHtml(source.reliability_reason || "");
+            const reason = escapeHtml(formatDiagnosticText(source.reliability_reason || ""));
             const titleHtml = sourceUrl
               ? `<a href="${sourceUrl}" target="_blank" rel="noopener noreferrer">${sourceTitle}</a>`
               : sourceTitle;
@@ -1937,10 +2105,10 @@
 
     function renderSourceReliabilitySummary(summary) {
       const data = summary || {};
-      const topTitle = data.top_source_title || "-";
+      const topTitle = publicInstitutionName(data.top_source_title || "-");
       const topUrl = data.top_source_url || "";
       const mismatchReasons = Array.isArray(data.official_mismatch_reasons)
-        ? data.official_mismatch_reasons.join(", ")
+        ? formatDiagnosticText(formatList(data.official_mismatch_reasons))
         : "";
       const topHtml = topUrl
         ? `<a href="${escapeHtml(topUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(topTitle)}</a>`
@@ -2089,7 +2257,7 @@
             <span class="label">후보/매칭</span><br>${escapeHtml(data.contradiction_candidates_searched ?? 0)} / ${escapeHtml(data.contradiction_candidates_matched ?? 0)}
           </div>
           <div class="evidence-extraction-tile">
-            <span class="label">판정 근거</span><br>${escapeHtml(data.contradiction_verdict_source || "-")}
+            <span class="label">판정 근거</span><br>${escapeHtml(formatDiagnosticText(data.contradiction_verdict_source || "-"))}
           </div>
         </div>
       `;
@@ -2114,8 +2282,8 @@
               <div><span class="label">사람 검토</span><br>${check.needs_human_review ? "필요" : "불필요"}</div>
               <div><span class="label">확인 시각</span><br>${escapeHtml(check.checked_at || "-")}</div>
             </div>
-            <div class="evidence-snippet-text">${escapeHtml(check.contradiction_reason || "-")}</div>
-            ${check.missing_evidence_warning ? `<div class="evidence-source-meta">${escapeHtml(check.missing_evidence_warning)}</div>` : ""}
+            <div class="evidence-snippet-text">${escapeHtml(formatDiagnosticText(check.contradiction_reason || "-"))}</div>
+            ${check.missing_evidence_warning ? `<div class="evidence-source-meta">${escapeHtml(formatDiagnosticText(check.missing_evidence_warning))}</div>` : ""}
             ${conflicts.length ? `
               <div class="source-list">
                 ${conflicts.map((conflict) => {
@@ -2127,7 +2295,7 @@
                   return `
                     <div class="evidence-source">
                       <div class="evidence-source-title">${conflictHtml}</div>
-                      <div class="evidence-source-meta">유형: ${escapeHtml(conflict.conflict_type || "-")} · 신뢰도: ${escapeHtml(conflict.confidence || "-")}</div>
+                       <div class="evidence-source-meta">유형: ${escapeHtml(formatTechnicalLabel(conflict.conflict_type || "-"))} · 신뢰도: ${escapeHtml(formatTechnicalLabel(conflict.confidence || "-"))}</div>
                       <div class="evidence-snippet-text">${escapeHtml(conflict.evidence_text || "-")}</div>
                     </div>
                   `;
@@ -2202,18 +2370,18 @@
               <div><span class="label">감정 표현</span><br>${analysis.emotional_language_detected ? "감지됨" : "낮음"}</div>
               <div><span class="label">자극 표현</span><br>${escapeHtml(formatList(analysis.sensational_phrases))}</div>
               <div><span class="label">불확실 표현</span><br>${escapeHtml(formatList(analysis.uncertainty_language))}</div>
-              <div><span class="label">loaded terms</span><br>${escapeHtml(formatList(analysis.loaded_terms))}</div>
+              <div><span class="label">추출된 핵심 용어</span><br>${escapeHtml(formatList(analysis.loaded_terms))}</div>
             </div>
-            <div class="evidence-snippet-text">${escapeHtml(analysis.framing_reason || "-")}</div>
+            <div class="evidence-snippet-text">${escapeHtml(formatDiagnosticText(analysis.framing_reason || "-"))}</div>
           </div>
         `;
       }).join("")}</div>`;
     }
 
     function debugState(ok, count) {
-      if (ok) return { label: "ok", className: "debug-ok" };
-      if (Number(count || 0) > 0) return { label: "partial", className: "debug-partial" };
-      return { label: "missing", className: "debug-missing" };
+      if (ok) return { label: "정상", className: "debug-ok" };
+      if (Number(count || 0) > 0) return { label: "일부 확인", className: "debug-partial" };
+      return { label: "없음", className: "debug-missing" };
     }
 
     function renderDebugBadge(label, ok, count) {
@@ -2222,7 +2390,7 @@
         <div class="evidence-extraction-tile">
           <span class="label">${escapeHtml(label)}</span><br>
           <span class="debug-status ${state.className}">${state.label}</span>
-          <div class="evidence-source-meta">count: ${escapeHtml(count ?? "-")}</div>
+          <div class="evidence-source-meta">개수 ${escapeHtml(count ?? "-")}</div>
         </div>
       `;
     }
@@ -2241,46 +2409,68 @@
         : "없음";
       return `
         <div class="pipeline-debug">
-          <div class="pipeline-debug-title">개발/검증용 Pipeline Debug Summary</div>
-          <div class="reader-note">일반 독자는 볼 필요 없는 내부 점검 정보입니다.</div>
+          <div class="pipeline-debug-title">검수자용 검증 단계 요약</div>
+          <div class="reader-note">검수자가 분석 단계별 작동 여부와 공식 근거 확보 상태를 빠르게 확인하는 요약입니다.</div>
           <div class="pipeline-debug-grid">
-            ${renderDebugBadge("intake", data.intake_ok, data.intake_ok ? 1 : 0)}
-            ${renderDebugBadge("claim extraction", data.claim_extraction_ok, data.claims_count)}
-            ${renderDebugBadge("claim normalization", data.claim_normalization_ok, data.normalized_claims_count)}
-            ${renderDebugBadge("source retrieval", data.source_retrieval_ok, data.evidence_candidates_count)}
-            ${renderDebugBadge("evidence matching", data.evidence_matching_ok, data.matched_evidence_count ?? data.direct_evidence_count)}
-            ${renderDebugBadge("contradiction", data.contradiction_check_ok, data.contradiction_checks_count)}
-            ${renderDebugBadge("bias/framing", data.bias_framing_ok, data.framing_flags_count)}
+            ${renderDebugBadge("입력 수집", data.intake_ok, data.intake_ok ? 1 : 0)}
+            ${renderDebugBadge("주장 추출", data.claim_extraction_ok, data.claims_count)}
+            ${renderDebugBadge("주장 정규화", data.claim_normalization_ok, data.normalized_claims_count)}
+            ${renderDebugBadge("출처 탐색", data.source_retrieval_ok, data.evidence_candidates_count)}
+            ${renderDebugBadge("근거 매칭", data.evidence_matching_ok, data.matched_evidence_count ?? data.direct_evidence_count)}
+            ${renderDebugBadge("반박/모순 검사", data.contradiction_check_ok, data.contradiction_checks_count)}
+            ${renderDebugBadge("프레이밍/편향 검사", data.bias_framing_ok, data.framing_flags_count)}
             <div class="evidence-extraction-tile">
-              <span class="label">human review</span><br>
+              <span class="label">사람 검토</span><br>
               <span class="debug-status ${data.needs_human_review ? "debug-partial" : "debug-ok"}">
-                ${data.needs_human_review ? "needed" : "not needed"}
+                ${data.needs_human_review ? "필요" : "불필요"}
               </span>
-              <div class="evidence-source-meta">verdict: ${escapeHtml(data.overall_verdict || "-")}</div>
+              <div class="evidence-source-meta">초안 상태: ${escapeHtml(formatVerdict(data.overall_verdict || "-"))}</div>
+            </div>
+          </div>
+          <div class="pipeline-debug-grid">
+            <div class="evidence-extraction-tile">
+              <span class="label">출처 구성</span><br>
+              공식 ${escapeHtml(data.official_sources_count ?? 0)} · 뉴스 ${escapeHtml(data.news_sources_count ?? 0)}
+            </div>
+            <div class="evidence-extraction-tile">
+              <span class="label">근거 강도</span><br>
+              강함 ${escapeHtml(strength.strong ?? 0)} · 보통 ${escapeHtml(strength.medium ?? 0)} · 약함 ${escapeHtml(strength.weak ?? 0)}
+            </div>
+            <div class="evidence-extraction-tile">
+              <span class="label">근거 품질</span><br>
+              강함 ${escapeHtml(quality.strong ?? data.total_strong_evidence ?? 0)} · 보통 ${escapeHtml(quality.medium ?? data.total_medium_evidence ?? 0)} · 약함 ${escapeHtml(quality.weak ?? data.total_weak_evidence ?? 0)}
+              <div class="evidence-source-meta">평균 ${escapeHtml(quality.average_evidence_quality_score ?? data.average_evidence_quality_score ?? 0)}</div>
+            </div>
+            <div class="evidence-extraction-tile">
+              <span class="label">공식 본문 확인</span><br>
+              후보 ${escapeHtml(data.official_body_candidates ?? 0)} · 수집 ${escapeHtml(data.official_bodies_fetched ?? 0)} · 직접 매칭 ${escapeHtml(data.official_body_matches ?? 0)}
+            </div>
+            <div class="evidence-extraction-tile">
+              <span class="label">공식 검증 상태</span><br>
+              상세 ${escapeHtml(data.official_detail_pages_fetched_count ?? 0)} · 성공 ${escapeHtml(data.official_body_success_count ?? 0)} · 실패 ${escapeHtml(data.official_body_fail_count ?? 0)}
+              <div class="evidence-source-meta">최종 점수 반영 ${Boolean(data.official_source_used_in_final_scoring) ? "예" : "아니오"}</div>
+            </div>
+            <div class="evidence-extraction-tile">
+              <span class="label">반박/모순 검토</span><br>
+              후보 ${escapeHtml(data.contradiction_candidates_searched ?? 0)} · 매칭 ${escapeHtml(data.contradiction_candidates_matched ?? 0)}
+              <div class="evidence-source-meta">확인된 모순 ${escapeHtml(data.confirmed_contradictions ?? 0)} · 가능성 ${escapeHtml(data.possible_contradictions ?? 0)}</div>
+            </div>
+            <div class="evidence-extraction-tile">
+              <span class="label">사람 검토 반영</span><br>
+              ${escapeHtml(formatDiagnosticText(data.human_review_feedback || "없음"))}
+              <div class="evidence-source-meta">승인 보정 ${Boolean(data.approved_boost) ? "예" : "아니오"} · 반려 감점 ${Boolean(data.rejected_penalty) ? "예" : "아니오"}</div>
+            </div>
+            <div class="evidence-extraction-tile">
+              <span class="label">분석 입력 상태</span><br>
+              ${escapeHtml(formatDiagnosticText(newsCacheState))} · ${escapeHtml(formatDiagnosticText(analysisCacheState))}
             </div>
           </div>
           <div class="evidence-source-meta">
-            official sources: ${escapeHtml(data.official_sources_count ?? 0)}
-            · news sources: ${escapeHtml(data.news_sources_count ?? 0)}
-            · evidence strength: strong ${escapeHtml(strength.strong ?? 0)}, medium ${escapeHtml(strength.medium ?? 0)}, weak ${escapeHtml(strength.weak ?? 0)}
-            · evidence quality: strong ${escapeHtml(quality.strong ?? data.total_strong_evidence ?? 0)}, medium ${escapeHtml(quality.medium ?? data.total_medium_evidence ?? 0)}, weak ${escapeHtml(quality.weak ?? data.total_weak_evidence ?? 0)}, avg ${escapeHtml(quality.average_evidence_quality_score ?? data.average_evidence_quality_score ?? 0)}
-            · cache: ${escapeHtml(newsCacheState)}, ${escapeHtml(analysisCacheState)}
-            · cache keys: news ${escapeHtml(data.news_cache_key || "-")}, analysis ${escapeHtml(data.analysis_cache_key || "-")}
-            · history: ${escapeHtml(data.history_action || "-")} / ${escapeHtml(data.history_key || data.stable_history_key || "-")}
-            · review queue: ${escapeHtml(data.review_queue_action || "-")} / ${escapeHtml(data.review_queue_key || "-")}
-            · human_review_feedback: ${escapeHtml(data.human_review_feedback || "none")}
-            · approved_boost: ${escapeHtml(String(Boolean(data.approved_boost)))}
-            · rejected_penalty: ${escapeHtml(String(Boolean(data.rejected_penalty)))}
-            · review_decision_source: ${escapeHtml(data.review_decision_source || "-")}
-            · official body: candidates ${escapeHtml(data.official_body_candidates ?? 0)}, fetched ${escapeHtml(data.official_bodies_fetched ?? 0)}, usable ${escapeHtml(data.official_bodies_usable ?? 0)}, matched ${escapeHtml(data.official_body_matches ?? 0)}, failures ${escapeHtml(JSON.stringify(data.official_body_failures || {}))}
-            · official verification: detail pages ${escapeHtml(data.official_detail_pages_fetched_count ?? 0)}, success ${escapeHtml(data.official_body_success_count ?? 0)}, fail ${escapeHtml(data.official_body_fail_count ?? 0)}, used in scoring ${escapeHtml(String(Boolean(data.official_source_used_in_final_scoring)))}
-            · selected primary source: ${escapeHtml(data.selected_primary_source || "-")} ${data.selected_primary_source_url ? "(" + escapeHtml(data.selected_primary_source_url) + ")" : ""}
-            · mismatch reasons: ${escapeHtml(formatList(data.official_mismatch_reasons))}
-            · contradiction: searched ${escapeHtml(data.contradiction_candidates_searched ?? 0)}, matched ${escapeHtml(data.contradiction_candidates_matched ?? 0)}, confirmed ${escapeHtml(data.confirmed_contradictions ?? 0)}, possible ${escapeHtml(data.possible_contradictions ?? 0)}, source ${escapeHtml(data.contradiction_verdict_source || "-")}
-            · final scoring: final ${escapeHtml(data.final_score ?? "-")}, source trust ${escapeHtml(data.source_trust_score ?? "-")}, human adj ${escapeHtml(data.human_feedback_adjustment ?? 0)}, contradiction adj ${escapeHtml(data.contradiction_adjustment ?? 0)}
-            · news input: ${escapeHtml(data.collection_source || "-")} / ${escapeHtml(data.news_collection_mode || "-")}
-            · zero reasons: ${escapeHtml(zeroReasons)}
-            · missing steps: ${escapeHtml(missing)}
+            선택된 주요 출처: ${escapeHtml(publicInstitutionName(data.selected_primary_source || "-"))}
+            · 공식 출처 제외/불일치 사유: ${escapeHtml(formatDiagnosticText(formatList(data.official_mismatch_reasons)))}
+            · 공식 본문 실패 사유: ${escapeHtml(formatReasonCounts(data.official_body_failures || {}))}
+            · 근거 없음 사유: ${escapeHtml(formatDiagnosticText(zeroReasons))}
+            · 누락 단계: ${escapeHtml(formatDiagnosticText(missing))}
           </div>
         </div>
       `;
@@ -2328,10 +2518,10 @@
                   <div><span class="label">근거 유형</span><br>${escapeHtml(formatEvidenceType(snippet.evidence_type))}</div>
                   <div><span class="label">관련도</span><br>${escapeHtml(snippet.relevance_score ?? "-")}</div>
                   <div><span class="label">품질 점수</span><br>${escapeHtml(snippet.evidence_quality_score ?? "-")}</div>
-                  <div><span class="label">품질 등급</span><br>${escapeHtml(snippet.evidence_quality_label || "-")}</div>
+                  <div><span class="label">품질 등급</span><br>${escapeHtml(formatTechnicalLabel(snippet.evidence_quality_label || "-"))}</div>
                   <div><span class="label">주장 지지</span><br>${escapeHtml(formatSupportsClaim(snippet.supports_claim))}</div>
                   <div><span class="label">추출 신뢰도</span><br>${escapeHtml(formatExtractionConfidence(snippet.extraction_confidence))}</div>
-                  <div><span class="label">추출 방식</span><br>${escapeHtml(snippet.extraction_method || "-")}</div>
+                  <div><span class="label">추출 방식</span><br>${escapeHtml(formatDiagnosticText(snippet.extraction_method || "-"))}</div>
                 </div>
               `;
             }).join("") : '<div class="evidence-source-meta">연결된 근거가 없습니다.</div>'}
@@ -2347,7 +2537,7 @@
       }
 
       return `<div class="source-candidate-list">${list.map((source) => {
-        const title = escapeHtml(source.title || source.url || "출처 후보");
+        const title = escapeHtml(publicInstitutionName(source.title || source.url || "출처 후보"));
         const url = escapeHtml(source.url || "");
         const titleHtml = url
           ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a>`
@@ -2361,19 +2551,19 @@
               <div><span class="label">검색어</span><br>${escapeHtml(source.query_used || "-")}</div>
               <div><span class="label">목적</span><br>${escapeHtml(formatSourcePurpose(source.purpose))}</div>
               <div><span class="label">출처 유형</span><br>${escapeHtml(formatSourceType(source.source_type))}</div>
-              <div><span class="label">수집 방식</span><br>${escapeHtml(source.retrieval_method || "-")}</div>
-              <div><span class="label">발행처</span><br>${escapeHtml(source.publisher || "-")}</div>
+              <div><span class="label">수집 방식</span><br>${escapeHtml(formatDiagnosticText(source.retrieval_method || "-"))}</div>
+              <div><span class="label">발행처</span><br>${escapeHtml(publicInstitutionName(source.publisher || "-"))}</div>
               <div><span class="label">본문 확보</span><br>${source.raw_text_available ? "예" : "아니오"}</div>
               <div><span class="label">공식 본문 수집</span><br>${source.official_body_fetched ? "예" : "아니오"}</div>
               <div><span class="label">공식 본문 길이</span><br>${escapeHtml(source.official_body_length ?? "-")}</div>
               <div><span class="label">공식 본문 매칭</span><br>${source.official_body_match ? "예" : "아니오"}</div>
               <div><span class="label">공식 매칭 점수</span><br>${escapeHtml(source.official_body_match_score ?? "-")}</div>
-              <div><span class="label">공식 실패 사유</span><br>${escapeHtml(source.official_body_failure_reason || "-")}</div>
+              <div><span class="label">공식 실패 사유</span><br>${escapeHtml(formatDiagnosticText(source.official_body_failure_reason || "-"))}</div>
               <div><span class="label">신뢰도 점수</span><br>${escapeHtml(source.reliability_score ?? "-")}</div>
               <div><span class="label">신뢰도 등급</span><br>${escapeHtml(formatReliabilityLevel(source.reliability_level))}</div>
               <div><span class="label">검증 역할</span><br>${escapeHtml(formatVerificationRole(source.verification_role))}</div>
             </div>
-            <div class="evidence-source-meta">${escapeHtml(source.reliability_reason || "")}</div>
+            <div class="evidence-source-meta">${escapeHtml(formatDiagnosticText(source.reliability_reason || ""))}</div>
             <div class="risk-flags">${escapeHtml(formatList(source.source_risk_flags))}</div>
           </div>
         `;
@@ -3786,6 +3976,38 @@
       `;
     }
 
+    function renderReadingGuide(context) {
+      const officialText = officialVerificationExplanation(context.sourceReliabilitySummary, context.debugSummary);
+      const evidenceText = evidenceQualityExplanation(context.quality, context.strength);
+      const contradictionText = contradictionExplanation(context.contradictionSummary);
+      const confidenceScore = context.confidence?.policy_confidence_score ?? context.decision?.final_score ?? "-";
+      return `
+        <section class="reading-guide">
+          <div class="reading-guide-header">
+            <div class="reading-guide-title">이 리포트는 이렇게 읽으면 됩니다</div>
+          </div>
+          <div class="reading-guide-grid">
+            <div class="reading-guide-card">
+              <strong>판정 단계</strong>
+              ${escapeHtml(formatAlert(context.level))}은 현재 확보된 근거를 기준으로 얼마나 조심해서 봐야 하는지를 뜻합니다.
+            </div>
+            <div class="reading-guide-card">
+              <strong>신뢰도 점수</strong>
+              ${escapeHtml(confidenceScore)}점은 공식 자료, 기사 근거, 반박 신호를 함께 본 참고 점수입니다.
+            </div>
+            <div class="reading-guide-card">
+              <strong>공식 출처 상태</strong>
+              ${escapeHtml(officialText)}
+            </div>
+            <div class="reading-guide-card">
+              <strong>근거와 반박</strong>
+              ${escapeHtml(evidenceText)} ${escapeHtml(contradictionText)}
+            </div>
+          </div>
+        </section>
+      `;
+    }
+
     function renderUserSummarySections(context) {
       return `
         <div class="plain-section-grid">
@@ -3928,10 +4150,10 @@
             "현재 리포트가 어떤 근거에 기대고 있으며, 추가 확인이 필요한 부분은 무엇인지 정리합니다."
           ),
           renderCollapsibleSection(
-            "개발자용 Pipeline Debug Summary",
+            "검수자용 검증 단계 요약",
             renderPipelineDebugSummary(debugSummary),
             false,
-            "일반 독자는 볼 필요 없는 내부 점검 정보입니다."
+            "검수자가 분석 단계별 작동 여부와 공식 근거 확보 상태를 확인하는 요약입니다."
           ),
         ].join("");
         const advancedVerificationDetails = renderCollapsibleSection(
@@ -3969,6 +4191,7 @@
             </div>
 
             ${renderKeyTakeaways(userContext)}
+            ${renderReadingGuide(userContext)}
 
             <div class="result-summary-grid">
               <div class="summary-tile">
@@ -4451,9 +4674,19 @@
         official_detail_url_missing: "공식 상세 URL 부족",
         official_candidate_not_fetched: "공식 후보 문서 미수집",
         official_body_mismatch: "공식 본문 불일치 가능성",
+        official_body_fetched_unmatched: "공식 본문 직접 일치 부족",
+        official_search_url_candidate: "공식 검색 후보",
         official_candidate_metadata_overlap_without_body: "공식 후보 본문 미확인",
+        official_candidate_without_body: "공식 후보 본문 미확보",
+        official_document_excluded: "공식 문서 직접 근거 제외",
+        official_search_only: "공식 검색 결과 수준",
+        current_news_collection: "뉴스 수집 결과",
+        strict_staff_needs_review: "사람 검토 필요",
+        needs_context: "맥락 추가 확인 필요",
+        no_match: "직접 일치 없음",
         no_body_text: "본문 없음",
         context_only: "맥락 참고용",
+        loaded_terms: "추출된 핵심 용어",
         press_release: "보도자료",
         "insufficient matched query/material concept overlap": "기사 주제와 공식 자료의 직접 일치가 부족함",
         "unrelated general finance/foreign-affairs press release": "기사 주제와 직접 관련성이 낮은 일반 보도자료",
@@ -4465,6 +4698,17 @@
       text = text.replace(/unrelated\s+general\s+finance/gi, "기사 주제와 직접 관련성이 낮은 일반 금융 자료");
       text = text.replace(/foreign-affairs/gi, "대외 협력 관련");
       text = text.replace(/insufficient\s+matched\s+query\/material\s+concept\s+overlap/gi, "기사 주제와 공식 자료의 직접 일치가 부족함");
+      text = text.replace(/official[_\s-]*search[_\s-]*url[_\s-]*candidate/gi, "공식 검색 후보");
+      text = text.replace(/official[_\s-]*body[_\s-]*fetched[_\s-]*unmatched/gi, "공식 본문 직접 일치 부족");
+      text = text.replace(/official[_\s-]*candidate[_\s-]*metadata[_\s-]*overlap[_\s-]*without[_\s-]*body/gi, "공식 후보 메타데이터만 일부 일치");
+      text = text.replace(/current[_\s-]*news[_\s-]*collection/gi, "뉴스 수집 결과");
+      text = text.replace(/strict[_\s-]*staff[_\s-]*needs[_\s-]*review/gi, "사람 검토 필요");
+      text = text.replace(/needs[_\s-]*context/gi, "맥락 추가 확인 필요");
+      text = text.replace(/\bno[_\s-]*match\b/gi, "직접 일치 없음");
+      text = text.replace(/\bloaded\s+terms\b/gi, "추출된 핵심 용어");
+      text = text.replace(/\bsource\s+retrieval\b/gi, "출처 탐색");
+      text = text.replace(/\bbias\s+framing\b/gi, "프레이밍/편향 검사");
+      text = text.replace(/\bcontradiction\b/gi, "반박/모순 검사");
       text = text.replace(/\bpress\s+release\b/gi, "보도자료");
       text = text.replace(/https?:\/\/(?:www\.)?fsc\.go\.kr\/no\d+\/?\S*/gi, "금융위원회 보도자료 상세 페이지");
       text = text.replace(/\bFSC detail press URL\b/gi, "금융위원회 보도자료 상세 페이지");
