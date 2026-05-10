@@ -272,6 +272,11 @@ def build_pipeline_debug_summary(
         "official_detail_pages_fetched_count": source_reliability_summary.get("official_detail_pages_fetched_count", 0),
         "official_body_success_count": source_reliability_summary.get("official_body_success_count", 0),
         "official_body_fail_count": source_reliability_summary.get("official_body_fail_count", 0),
+        "top_official_detail_url": source_reliability_summary.get("top_official_detail_url") or "",
+        "top_official_detail_title": source_reliability_summary.get("top_official_detail_title") or "",
+        "official_direct_match_classification": source_reliability_summary.get("official_direct_match_classification") or "",
+        "official_direct_match_score": source_reliability_summary.get("official_direct_match_score") or 0,
+        "official_direct_match_reason": source_reliability_summary.get("official_direct_match_reason") or "",
         **official_body_summary,
         "needs_human_review": needs_human_review,
         "missing_steps": missing_steps,
@@ -290,6 +295,7 @@ def build_pipeline_debug_summary(
         f"evidence_quality={quality_summary} "
         f"official_mismatch={str(official_mismatch).lower()} "
         f"official_body={official_body_summary} "
+        f"official_direct_match_score={summary['official_direct_match_score']} "
         f"bias_framing_ok={str(bias_framing_ok).lower()}"
     )
     return summary

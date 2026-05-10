@@ -163,6 +163,32 @@ def _extract_body_text(html: str) -> tuple[str, str]:
 
     candidates = []
     body_selectors = [
+        ".view_cont",
+        ".view-content",
+        ".viewContent",
+        ".board_view",
+        ".board-view",
+        ".bbs_view",
+        ".bbs-view",
+        ".press_view",
+        ".press-view",
+        ".news_view",
+        ".news-view",
+        ".article_view",
+        ".article-view",
+        ".detail_view",
+        ".detail-view",
+        ".contents",
+        ".content_body",
+        ".content-body",
+        ".article_body",
+        ".article-body",
+        ".txt",
+        "#contents",
+        "#content",
+        "#article",
+        "#board",
+        "#view",
         "[id*=content]",
         "[class*=content]",
         "[id*=article]",
@@ -320,6 +346,9 @@ def _matched_institutions(claim_text: str, body_text: str) -> list[str]:
 
 
 def official_body_supports_claim(claim: dict, body_text: str) -> dict:
+    title_text = ""
+    if isinstance(claim, dict) and claim.get("_official_title_for_match"):
+        title_text = str(claim.get("_official_title_for_match") or "")
     claim_text = " ".join(
         str(claim.get(key) or "")
         for key in [
@@ -333,9 +362,13 @@ def official_body_supports_claim(claim: dict, body_text: str) -> dict:
             "location",
         ]
     )
+    # Backward compatible: callers may pass "title body" as body_text only.
+    combined_text = sanitize_text(body_text or "")
+    title_terms_set = set(_tokens(title_text))
+    body_terms = set(_tokens(combined_text))
     claim_terms = Counter(_tokens(claim_text))
-    body_terms = set(_tokens(body_text))
     matched_terms = sorted(term for term in claim_terms if term in body_terms)
+    matched_title_terms = sorted(term for term in claim_terms if term in title_terms_set)
     claim_numbers = _numbers(claim_text)
     body_numbers = _numbers(body_text)
     matched_numbers = sorted(claim_numbers & body_numbers)
@@ -350,13 +383,19 @@ def official_body_supports_claim(claim: dict, body_text: str) -> dict:
         if len(term) >= 3
         or term in {"금리", "전세", "대출", "주택", "규제", "지원", "세금", "양도세", "물가"}
     }
-    score = min(55, len(material_terms) * 9)
+    title_match_score = min(20, len([term for term in matched_title_terms if len(term) >= 2]) * 5)
+    body_match_score = min(35, len(material_terms) * 7)
+    entity_match_score = min(15, len(matched_institutions) * 7)
+    numeric_date_match_score = min(20, len(matched_numbers) * 10)
+    agency_match_score = 10 if matched_institutions else 0
+    concept_score = min(20, len(matched_concepts) * 10)
+    score = body_match_score + title_match_score + entity_match_score + numeric_date_match_score + concept_score
     if matched_concepts:
-        score += min(25, len(matched_concepts) * 12)
+        score += min(5, len(matched_concepts) * 2)
     if matched_numbers:
-        score += min(20, len(matched_numbers) * 10)
+        score += 0
     if matched_institutions:
-        score += min(12, len(matched_institutions) * 6)
+        score += 0
     for field in ["actor", "action", "target", "object"]:
         value = sanitize_text(str(claim.get(field) or ""))
         if value and value != "unknown" and value in body_text:
@@ -373,20 +412,33 @@ def official_body_supports_claim(claim: dict, body_text: str) -> dict:
         )
     )
     if supports:
+        if score >= 78 and (len(material_terms) >= 4 or matched_numbers or len(matched_concepts) >= 2):
+            classification = "strong_official_direct_support"
+        else:
+            classification = "medium_official_contextual_support"
         reason = (
             f"official body direct match: terms={len(material_terms)}, "
             f"concepts={len(matched_concepts)}, numbers={len(matched_numbers)}"
         )
     elif body_text:
+        classification = "weak_official_candidate_only"
         reason = (
             "official body fetched but direct claim match is insufficient "
             f"(terms={len(material_terms)}, concepts={len(matched_concepts)}, numbers={len(matched_numbers)})"
         )
     else:
+        classification = "no_usable_official_detail"
         reason = "official body text unavailable"
     return {
         "supports": supports,
         "match_score": score,
+        "title_match_score": title_match_score,
+        "body_match_score": body_match_score,
+        "entity_match_score": entity_match_score,
+        "numeric_date_match_score": numeric_date_match_score,
+        "agency_match_score": agency_match_score,
+        "final_direct_match_score": score,
+        "official_direct_match_classification": classification,
         "matched_terms": matched_terms[:12],
         "matched_numbers": matched_numbers[:8],
         "matched_concepts": matched_concepts,
@@ -495,7 +547,8 @@ def enrich_official_source_candidates_with_bodies(
         else:
             failures[failure_reason or "official_body_fetch_failed"] += 1
 
-        claim = claims_by_index.get(int(item.get("claim_index") or 0), {})
+        claim = dict(claims_by_index.get(int(item.get("claim_index") or 0), {}) or {})
+        claim["_official_title_for_match"] = title
         match = official_body_supports_claim(claim, f"{title} {body_text}")
         if body_fetch_ok and match.get("supports"):
             matched += 1
@@ -511,6 +564,13 @@ def enrich_official_source_candidates_with_bodies(
                 "official_body_failure_reason": None if body_fetch_ok else (failure_reason or "official_page_not_fetchable"),
                 "official_body_match": bool(body_fetch_ok and match.get("supports")),
                 "official_body_match_score": match.get("match_score", 0),
+                "official_title_match_score": match.get("title_match_score", 0),
+                "official_body_text_match_score": match.get("body_match_score", 0),
+                "official_entity_match_score": match.get("entity_match_score", 0),
+                "official_numeric_date_match_score": match.get("numeric_date_match_score", 0),
+                "official_agency_match_score": match.get("agency_match_score", 0),
+                "official_final_direct_match_score": match.get("final_direct_match_score", 0),
+                "official_direct_match_classification": match.get("official_direct_match_classification"),
                 "official_body_matched_terms": match.get("matched_terms", []),
                 "official_body_matched_numbers": match.get("matched_numbers", []),
                 "official_body_matched_concepts": match.get("matched_concepts", []),

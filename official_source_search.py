@@ -249,6 +249,75 @@ OFFICIAL_SOURCE_CATALOG = [
     },
 ]
 
+OFFICIAL_SOURCE_CATALOG.extend(
+    [
+        {
+            "source_name": "Fair Trade Commission",
+            "query_name": "\uacf5\uc815\uac70\ub798\uc704\uc6d0\ud68c",
+            "source_type": "central_government",
+            "reliability_score": 5,
+            "search_url_base": "https://www.ftc.go.kr/search/search.do?query=",
+            "keywords": [
+                "\uacf5\uc815\uac70\ub798\uc704\uc6d0\ud68c",
+                "\uacf5\uc815\uc704",
+                "\uac00\ub9f9",
+                "\uc81c\uc7ac",
+                "\uc870\uc0ac",
+                "\uc774\uc790",
+                "\ub300\ucd9c",
+                "\ubd88\uacf5\uc815",
+            ],
+        },
+        {
+            "source_name": "Ministry of Justice",
+            "query_name": "\ubc95\ubb34\ubd80",
+            "source_type": "central_government",
+            "reliability_score": 5,
+            "search_url_base": "https://www.moj.go.kr/search/search.jsp?query=",
+            "keywords": [
+                "\ubc95\ubb34\ubd80",
+                "\uc804\uc138\uc0ac\uae30",
+                "\uc784\ub300\ucc28",
+                "\ud53c\ud574\uc790",
+                "\uc218\uc0ac",
+                "\ucc98\ubc8c",
+                "\ubc94\uc815",
+            ],
+        },
+        {
+            "source_name": "Korean National Police Agency",
+            "query_name": "\uacbd\ucc30\uccad",
+            "source_type": "central_government",
+            "reliability_score": 5,
+            "search_url_base": "https://www.police.go.kr/search/search.do?query=",
+            "keywords": [
+                "\uacbd\ucc30\uccad",
+                "\uc804\uc138\uc0ac\uae30",
+                "\uc0ac\uae30",
+                "\uc218\uc0ac",
+                "\ud53c\ud574",
+                "\ub2e8\uc18d",
+            ],
+        },
+        {
+            "source_name": "Korea Policy Briefing",
+            "query_name": "\ub300\ud55c\ubbfc\uad6d \uc815\ucc45\ube0c\ub9ac\ud551",
+            "source_type": "central_government",
+            "reliability_score": 5,
+            "search_url_base": "https://www.korea.kr/search/searchList.do?srchKeyword=",
+            "keywords": [
+                "\uc815\ucc45\ube0c\ub9ac\ud551",
+                "\ubcf4\ub3c4\uc790\ub8cc",
+                "\uc124\uba85\uc790\ub8cc",
+                "\uc815\ucc45",
+                "\ubd80\ub3d9\uc0b0",
+                "\uae08\uc735",
+                "\uc804\uc138\uc0ac\uae30",
+            ],
+        },
+    ]
+)
+
 QUERY_STOPWORDS = {
     "\ub274\uc2a4",
     "\uae30\uc0ac",
@@ -360,6 +429,10 @@ OFFICIAL_QUERY_PREFIXES = {
     "National Tax Service": ["\uad6d\uc138\uccad"],
     "Korea Housing & Urban Guarantee Corporation": ["\uc8fc\ud0dd\ub3c4\uc2dc\ubcf4\uc99d\uacf5\uc0ac", "HUG"],
     "Korea Land & Housing Corporation": ["\ud55c\uad6d\ud1a0\uc9c0\uc8fc\ud0dd\uacf5\uc0ac", "LH"],
+    "Fair Trade Commission": ["\uacf5\uc815\uac70\ub798\uc704\uc6d0\ud68c", "\uacf5\uc815\uc704"],
+    "Ministry of Justice": ["\ubc95\ubb34\ubd80"],
+    "Korean National Police Agency": ["\uacbd\ucc30\uccad"],
+    "Korea Policy Briefing": ["\uc815\ucc45\ube0c\ub9ac\ud551", "\ub300\ud55c\ubbfc\uad6d \uc815\ucc45\ube0c\ub9ac\ud551"],
 }
 
 
@@ -381,6 +454,7 @@ def _normalize_text(*values: str | None) -> str:
 def _score_source(source: dict, text: str, topic: str) -> tuple[int, list[str]]:
     reasons = []
     score = source["reliability_score"]
+    source_name = source.get("source_name", "")
 
     for keyword in source["keywords"]:
         if keyword in text:
@@ -391,10 +465,12 @@ def _score_source(source: dict, text: str, topic: str) -> tuple[int, list[str]]:
         reasons.append(f"topic matches {source['source_name']}")
         score += 2
 
-    source_name = source.get("source_name", "")
     if "\ubd80\ub3d9\uc0b0" in text and source_name in {"Ministry of Land, Infrastructure and Transport", "Ministry of Economy and Finance"}:
         reasons.append("topic family: real estate policy")
         score += 5
+    if "\ubd80\ub3d9\uc0b0" in text and source_name in {"Korea Policy Briefing"}:
+        reasons.append("topic family: cross-government policy briefing")
+        score += 3
     if any(term in text for term in ["\uc591\ub3c4\uc138", "\uc591\ub3c4\uc18c\ub4dd\uc138", "\uc138\ubb34\uc870\uc0ac", "\ud0c8\ub8e8", "\uac00\uc0c1\uc790\uc0b0"]) and source_name == "National Tax Service":
         reasons.append("topic family: tax / real estate investigation")
         score += 6
@@ -407,6 +483,15 @@ def _score_source(source: dict, text: str, topic: str) -> tuple[int, list[str]]:
     if any(term in text for term in ["\uc804\uc138\uc0ac\uae30", "\uc804\uc138\ubcf4\uc99d"]) and source_name in {"Ministry of Land, Infrastructure and Transport", "Korea Housing & Urban Guarantee Corporation"}:
         reasons.append("topic family: jeonse fraud / guarantee")
         score += 5
+    if any(term in text for term in ["\uc804\uc138\uc0ac\uae30", "\uc804\uc138\ubcf4\uc99d", "\ud53c\ud574\uc790", "\uc218\uc0ac"]) and source_name in {"Ministry of Justice", "Korean National Police Agency", "Korea Policy Briefing"}:
+        reasons.append("topic family: jeonse fraud investigation / support")
+        score += 5
+    if any(term in text for term in ["\uac00\ub9f9", "\uacf5\uc815\uc704", "\uacf5\uc815\uac70\ub798", "\uc81c\uc7ac", "\ubd88\uacf5\uc815"]) and source_name == "Fair Trade Commission":
+        reasons.append("topic family: fair trade investigation")
+        score += 5
+    if any(term in text for term in ["\uae08\uc735\uc704", "\uae08\uc735\uc704\uc6d0\ud68c", "\uae08\uc735\ub2f9\uad6d"]) and source_name in {"Financial Services Commission", "Financial Supervisory Service", "Fair Trade Commission", "Ministry of SMEs and Startups", "Ministry of Economy and Finance", "Korea Policy Briefing"}:
+        reasons.append("agency family: financial-policy query")
+        score += 3
 
     return score, reasons
 
@@ -571,11 +656,25 @@ def _target_terms(text: str, limit: int = 3) -> list[str]:
     return found[:limit]
 
 
+def _title_phrase_terms(text: str, limit: int = 5) -> list[str]:
+    terms = []
+    for token in re.findall(r"[\uac00-\ud7a3A-Za-z0-9][\uac00-\ud7a3A-Za-z0-9.-]{1,}", text or ""):
+        token = token.strip(" -_.,'\"\u2018\u2019\u201c\u201d\u2026")
+        if len(token) < 2 or token in QUERY_STOPWORDS or token.isdigit():
+            continue
+        if token not in terms:
+            terms.append(token)
+        if len(terms) >= limit:
+            break
+    return terms
+
+
 def _build_query_variants(source: dict, news_title: str, core_policy_issue: str, topic: str) -> list[str]:
     text = _normalize_text(news_title, core_policy_issue, topic)
     terms = _pick_policy_terms(text, limit=6)
     numbers = _numbers_for_query(text, limit=2)
     targets = _target_terms(text, limit=2)
+    title_terms = _title_phrase_terms(news_title, limit=4)
     primary_terms = terms[:4]
     short_terms = terms[:3]
     entity_terms = terms[:3]
@@ -614,7 +713,24 @@ def _build_query_variants(source: dict, news_title: str, core_policy_issue: str,
             _normalize_text("\uad6d\uc138\uccad", "\uac00\uc0c1\uc790\uc0b0", "\ubd80\ub3d9\uc0b0", "\ud0c8\ub8e8"),
             _normalize_text("\uc591\ub3c4\uc138", "\ud0c8\ub8e8", "\uad6d\uc138\uccad"),
         ])
+    if source_name == "Fair Trade Commission" and any(term in text for term in ["\uacf5\uc815\uc704", "\uacf5\uc815\uac70\ub798", "\uac00\ub9f9", "\ubd88\uacf5\uc815", "\uc81c\uc7ac"]):
+        variants.extend([
+            _normalize_text("\uacf5\uc815\uc704", *title_terms[:3]),
+            _normalize_text("\uacf5\uc815\uac70\ub798\uc704\uc6d0\ud68c", *primary_terms[:3]),
+            _normalize_text("\uac00\ub9f9", "\ubd88\uacf5\uc815", "\uc81c\uc7ac"),
+        ])
+    if source_name in {"Ministry of Justice", "Korean National Police Agency"} and "\uc804\uc138\uc0ac\uae30" in text:
+        variants.extend([
+            _normalize_text(query_name, "\uc804\uc138\uc0ac\uae30", "\uc218\uc0ac", "\ud53c\ud574"),
+            _normalize_text(query_name, "\uc804\uc138\uc0ac\uae30", *title_terms[:2]),
+        ])
+    if source_name == "Korea Policy Briefing":
+        variants.extend([
+            _normalize_text("\uc815\ucc45\ube0c\ub9ac\ud551", *primary_terms[:3], *numbers[:1]),
+            _normalize_text("\ubcf4\ub3c4\uc790\ub8cc", *title_terms[:3]),
+        ])
     for prefix in prefixes[:2]:
+        variants.append(_normalize_text(prefix, *title_terms[:3], *numbers[:1]))
         variants.append(_normalize_text(prefix, *primary_terms[:3], *numbers[:1]))
         variants.append(_normalize_text(prefix, *targets[:1], *short_terms[:2]))
 

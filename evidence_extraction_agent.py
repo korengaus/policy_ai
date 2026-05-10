@@ -243,6 +243,12 @@ def _quality_score(
         score = min(score, 35)
     if "topic mismatch" in (match_reason or "").lower():
         score = min(score, 35)
+    if (
+        source.get("source_type") in {"official_government", "public_institution"}
+        and source.get("official_body_fetched")
+        and not source.get("official_body_match")
+    ):
+        score = min(score, 45)
     if source.get("source_type") == "search_fallback_news":
         score = min(score, 60)
     return max(0, min(100, score))
@@ -462,7 +468,7 @@ def extract_evidence_snippets(
         official_body_sources.sort(
             key=lambda source: (
                 not bool(source.get("official_body_match")),
-                -(int(source.get("official_body_match_score") or 0)),
+                -(int(source.get("official_final_direct_match_score") or source.get("official_body_match_score") or 0)),
                 source.get("publisher") or "",
                 source.get("url") or "",
             )

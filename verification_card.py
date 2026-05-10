@@ -324,6 +324,15 @@ def _official_verification_summary(
                 "selected_primary_source": top.get("document_title") or top.get("source_name"),
                 "official_source_used_in_final_scoring": True,
                 "official_mismatch_reasons": [],
+                "top_official_detail_url": top.get("selected_document_url") or top.get("search_url") or "",
+                "top_official_detail_title": top.get("document_title") or top.get("source_name") or "",
+                "official_direct_match_classification": (
+                    "strong_official_direct_support"
+                    if top.get("evidence_grade") in {"A", "B"} and int(top.get("document_relevance_score") or 0) >= 60
+                    else "medium_official_contextual_support"
+                ),
+                "official_direct_match_score": top.get("document_relevance_score") or 0,
+                "official_direct_match_reason": "; ".join(top.get("relevance_reasons") or []) or top.get("selected_document_reason") or "",
             }
         )
     elif fallback_summary.get("official_detail_available"):

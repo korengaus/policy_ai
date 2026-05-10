@@ -33,10 +33,14 @@ OFFICIAL_DOMAIN_QUERY_HINTS = {
     "\ud55c\uad6d\uc740\ud589": "site:bok.or.kr",
     "\ud55c\uc740": "site:bok.or.kr",
     "\uad6d\uc138\uccad": "site:nts.go.kr",
+    "\uacf5\uc815\uc704": "site:ftc.go.kr",
+    "\uacf5\uc815\uac70\ub798\uc704\uc6d0\ud68c": "site:ftc.go.kr",
+    "\ubc95\ubb34\ubd80": "site:moj.go.kr",
+    "\uacbd\ucc30\uccad": "site:police.go.kr",
     "\uc591\ub3c4\uc138": "site:nts.go.kr",
     "\uc591\ub3c4\uc18c\ub4dd\uc138": "site:nts.go.kr",
     "\uc138\ubb34\uc870\uc0ac": "site:nts.go.kr",
-    "\uc804\uc138\uc0ac\uae30": "site:molit.go.kr OR site:khug.or.kr",
+    "\uc804\uc138\uc0ac\uae30": "site:molit.go.kr OR site:khug.or.kr OR site:moj.go.kr",
     "\uc804\uc138\ubcf4\uc99d": "site:khug.or.kr",
     "\uacf5\uacf5\uc8fc\ud0dd": "site:lh.or.kr",
 }
@@ -286,7 +290,7 @@ def create_source_candidates(
         )
 
         claim_query = " ".join(_keywords_from_claim(claim)[:5]) or original_query
-        for source in (official_source_candidates or [])[:3]:
+        for source in (official_source_candidates or [])[:5]:
             source_candidates.append(
                 {
                     "source_id": _source_id(

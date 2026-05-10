@@ -440,7 +440,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
 
         official_evidence_results = fetch_official_evidence(
             official_source_candidates,
-            max_candidates=3,
+            max_candidates=5,
             news_context={
                 "title": news["title"],
                 "summary": news["summary"],

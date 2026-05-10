@@ -103,6 +103,17 @@ def _role(source_type: str, purpose: str, score: int) -> str:
 def _readable_reason(source: dict, fallback: str) -> str:
     source_type = source.get("source_type") or ""
     flags = set(source.get("source_risk_flags") or [])
+    if source_type in {"official_government", "public_institution"} and source.get("official_body_match"):
+        score = source.get("official_final_direct_match_score") or source.get("official_body_match_score") or 0
+        classification = source.get("official_direct_match_classification") or "medium_official_contextual_support"
+        if classification == "strong_official_direct_support":
+            return f"공식 상세문서가 기사 핵심 주장 일부를 직접 뒷받침합니다. 직접 매칭 점수 {score}점입니다."
+        return f"공식 상세문서가 기사와 같은 기관/정책을 다루며 보조 근거로 참고할 수 있습니다. 직접 매칭 점수 {score}점입니다."
+    if source_type in {"official_government", "public_institution"} and (
+        source.get("official_body_fetched") or source.get("raw_text_available")
+    ):
+        score = source.get("official_final_direct_match_score") or source.get("official_body_match_score") or 0
+        return f"공식 상세문서 본문은 확인했지만 기사 핵심 주장과 직접 일치하지 않습니다. 직접 매칭 점수 {score}점입니다."
     if source_type in {"official_government", "public_institution"}:
         if source.get("official_body_match"):
             return "공식기관 상세 본문이 수집됐고 핵심 주장과 직접 일치합니다."
@@ -293,6 +304,15 @@ def summarize_source_reliability(source_candidates: list[dict]) -> dict:
         and source.get("raw_text_available")
         and source.get("official_body_match")
     ]
+    top_official_body_match = max(
+        official_body_matches,
+        key=lambda source: (
+            int(source.get("official_final_direct_match_score") or source.get("official_body_match_score") or 0),
+            int(source.get("reliability_score") or 0),
+            source.get("title") or "",
+        ),
+        default={},
+    )
     official_failure_reasons = {}
     for source in candidates:
         if source.get("source_type") not in {"official_government", "public_institution"}:
@@ -333,4 +353,13 @@ def summarize_source_reliability(source_candidates: list[dict]) -> dict:
         "official_source_used_in_final_scoring": bool(official_body_matches),
         "official_mismatch": not bool(official_body_matches),
         "official_mismatch_reasons": [] if official_body_matches else mismatch_reasons,
+        "top_official_detail_url": top_official_body_match.get("official_detail_url") or top_official_body_match.get("url") or "",
+        "top_official_detail_title": top_official_body_match.get("title") or "",
+        "official_direct_match_classification": top_official_body_match.get("official_direct_match_classification") or (
+            "no_usable_official_detail" if not official_body_matches else ""
+        ),
+        "official_direct_match_score": top_official_body_match.get("official_final_direct_match_score") or top_official_body_match.get("official_body_match_score") or 0,
+        "official_direct_match_reason": top_official_body_match.get("official_body_match_reason") or (
+            "; ".join(mismatch_reasons[:2]) if mismatch_reasons else ""
+        ),
     }
