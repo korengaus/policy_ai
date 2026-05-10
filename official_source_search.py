@@ -91,6 +91,23 @@ OFFICIAL_SOURCE_CATALOG = [
         ],
     },
     {
+        "source_name": "National Tax Service",
+        "query_name": "국세청",
+        "source_type": "central_government",
+        "reliability_score": 5,
+        "search_url_base": "https://www.nts.go.kr/search/search.do?query=",
+        "keywords": [
+            "국세청",
+            "양도세",
+            "양도소득세",
+            "세무조사",
+            "탈루",
+            "가상자산",
+            "부동산",
+            "다주택자",
+        ],
+    },
+    {
         "source_name": "Ministry of SMEs and Startups",
         "query_name": "중소벤처기업부",
         "source_type": "central_government",
@@ -263,6 +280,100 @@ QUERY_STOPWORDS = {
 }
 
 
+EXTRA_SOURCE_KEYWORDS = {
+    "Financial Services Commission": [
+        "\uae08\uc735\uc704",
+        "\uae08\uc735\uc704\uc6d0\ud68c",
+        "\uc0ac\ud68c\uc5f0\ub300\uacbd\uc81c\uc870\uc9c1",
+        "\uc0ac\ud68c\uc5f0\ub300\uae08\uc735",
+        "\ud3ec\uc6a9\uae08\uc735",
+        "\uc2e0\uc6a9\ud3c9\uac00",
+        "\uc5ec\uc2e0\uc2dc\uc2a4\ud15c",
+        "\uae08\uc735\uc9c0\uc6d0",
+        "\uac00\uacc4\ubd80\ucc44",
+        "\uc815\ucc45\uae08\uc735",
+    ],
+    "National Tax Service": [
+        "\uad6d\uc138\uccad",
+        "\uc591\ub3c4\uc138",
+        "\uc591\ub3c4\uc18c\ub4dd\uc138",
+        "\uc138\ubb34\uc870\uc0ac",
+        "\ud0c8\ub8e8",
+        "\uac00\uc0c1\uc790\uc0b0",
+        "\ubd80\ub3d9\uc0b0",
+    ],
+    "Financial Supervisory Service": [
+        "\uae08\uac10\uc6d0",
+        "\uae08\uc735\uac10\ub3c5\uc6d0",
+        "\uc5f0\uccb4\uc728",
+        "\uac80\uc0ac",
+        "\uac10\ub3c5",
+        "\uc740\ud589",
+    ],
+    "Ministry of Land, Infrastructure and Transport": [
+        "\uad6d\ud1a0\uad50\ud1b5\ubd80",
+        "\uad6d\ud1a0\ubd80",
+        "\uc804\uc138\uc0ac\uae30",
+        "\uc2e4\uac70\uc8fc\uc790",
+        "\ubd80\ub3d9\uc0b0 \uc2dc\uc7a5",
+        "\uc784\ub300\ucc28",
+        "\uc804\uc138",
+    ],
+    "Ministry of Economy and Finance": [
+        "\uae30\ud68d\uc7ac\uc815\ubd80",
+        "\uae30\uc7ac\ubd80",
+        "\uad6c\uc724\ucca0",
+        "\ubd80\ub3d9\uc0b0 \uc2dc\uc7a5",
+        "\uc2e4\uac70\uc8fc\uc790",
+        "\uacbd\uc81c\uc815\ucc45",
+        "\uc138\uc81c",
+    ],
+    "Bank of Korea": [
+        "\ud55c\uad6d\uc740\ud589",
+        "\ud55c\uc740",
+        "\uae30\uc900\uae08\ub9ac",
+        "\uae08\ud1b5\uc704",
+        "\ud1b5\ud654\uc815\ucc45",
+        "\ubb3c\uac00",
+    ],
+    "Korea Housing & Urban Guarantee Corporation": [
+        "\uc8fc\ud0dd\ub3c4\uc2dc\ubcf4\uc99d\uacf5\uc0ac",
+        "HUG",
+        "\uc804\uc138\ubcf4\uc99d",
+        "\uc804\uc138\uc0ac\uae30",
+    ],
+    "Korea Land & Housing Corporation": [
+        "\ud55c\uad6d\ud1a0\uc9c0\uc8fc\ud0dd\uacf5\uc0ac",
+        "LH",
+        "\uacf5\uacf5\uc8fc\ud0dd",
+        "\uc784\ub300\uc8fc\ud0dd",
+    ],
+}
+
+
+OFFICIAL_QUERY_PREFIXES = {
+    "Financial Services Commission": ["\uae08\uc735\uc704\uc6d0\ud68c", "\uae08\uc735\uc704"],
+    "Financial Supervisory Service": ["\uae08\uc735\uac10\ub3c5\uc6d0", "\uae08\uac10\uc6d0"],
+    "Ministry of Land, Infrastructure and Transport": ["\uad6d\ud1a0\uad50\ud1b5\ubd80", "\uad6d\ud1a0\ubd80"],
+    "Ministry of Economy and Finance": ["\uae30\ud68d\uc7ac\uc815\ubd80", "\uae30\uc7ac\ubd80"],
+    "Bank of Korea": ["\ud55c\uad6d\uc740\ud589", "\ud55c\uc740"],
+    "National Tax Service": ["\uad6d\uc138\uccad"],
+    "Korea Housing & Urban Guarantee Corporation": ["\uc8fc\ud0dd\ub3c4\uc2dc\ubcf4\uc99d\uacf5\uc0ac", "HUG"],
+    "Korea Land & Housing Corporation": ["\ud55c\uad6d\ud1a0\uc9c0\uc8fc\ud0dd\uacf5\uc0ac", "LH"],
+}
+
+
+def _extend_source_catalog_keywords() -> None:
+    for source in OFFICIAL_SOURCE_CATALOG:
+        extras = EXTRA_SOURCE_KEYWORDS.get(source.get("source_name"), [])
+        for keyword in extras:
+            if keyword not in source["keywords"]:
+                source["keywords"].append(keyword)
+
+
+_extend_source_catalog_keywords()
+
+
 def _normalize_text(*values: str | None) -> str:
     return " ".join(value for value in values if value).strip()
 
@@ -279,6 +390,23 @@ def _score_source(source: dict, text: str, topic: str) -> tuple[int, list[str]]:
     if topic and any(keyword in topic for keyword in source["keywords"]):
         reasons.append(f"topic matches {source['source_name']}")
         score += 2
+
+    source_name = source.get("source_name", "")
+    if "\ubd80\ub3d9\uc0b0" in text and source_name in {"Ministry of Land, Infrastructure and Transport", "Ministry of Economy and Finance"}:
+        reasons.append("topic family: real estate policy")
+        score += 5
+    if any(term in text for term in ["\uc591\ub3c4\uc138", "\uc591\ub3c4\uc18c\ub4dd\uc138", "\uc138\ubb34\uc870\uc0ac", "\ud0c8\ub8e8", "\uac00\uc0c1\uc790\uc0b0"]) and source_name == "National Tax Service":
+        reasons.append("topic family: tax / real estate investigation")
+        score += 6
+    if any(term in text for term in ["\uae08\ub9ac", "\uae30\uc900\uae08\ub9ac", "\ud1b5\ud654\uc815\ucc45"]) and source_name == "Bank of Korea":
+        reasons.append("topic family: interest rate")
+        score += 5
+    if any(term in text for term in ["\uc804\uc138\ub300\ucd9c", "\uc8fc\ud0dd\ub2f4\ubcf4\ub300\ucd9c", "DSR", "\uac00\uacc4\ubd80\ucc44"]) and source_name in {"Financial Services Commission", "Financial Supervisory Service"}:
+        reasons.append("topic family: financial regulation")
+        score += 5
+    if any(term in text for term in ["\uc804\uc138\uc0ac\uae30", "\uc804\uc138\ubcf4\uc99d"]) and source_name in {"Ministry of Land, Infrastructure and Transport", "Korea Housing & Urban Guarantee Corporation"}:
+        reasons.append("topic family: jeonse fraud / guarantee")
+        score += 5
 
     return score, reasons
 
@@ -351,6 +479,23 @@ def _dedupe_queries(queries: list[str], max_queries: int = 3) -> list[str]:
 
 def _pick_policy_terms(text: str, limit: int = 5) -> list[str]:
     priority_terms = [
+        "\uc0ac\ud68c\uc5f0\ub300\uacbd\uc81c\uc870\uc9c1",
+        "\uc0ac\ud68c\uc5f0\ub300\uae08\uc735\ud611\uc758\ud68c",
+        "\uc0ac\ud68c\uc5f0\ub300\uae08\uc735",
+        "\ud3ec\uc6a9\uae08\uc735",
+        "\uc2e0\uc6a9\ud3c9\uac00",
+        "\uc5ec\uc2e0\uc2dc\uc2a4\ud15c",
+        "\uae08\uc735\uc9c0\uc6d0",
+        "\uc2e4\uac70\uc8fc\uc790",
+        "\ubd80\ub3d9\uc0b0 \uc2dc\uc7a5",
+        "\uacfc\uc5f4",
+        "\uc7ac\ud3b8",
+        "\uad6c\uc724\ucca0",
+        "\uc591\ub3c4\uc18c\ub4dd\uc138",
+        "\uc591\ub3c4\uc138",
+        "\uc138\ubb34\uc870\uc0ac",
+        "\ud0c8\ub8e8",
+        "\uac00\uc0c1\uc790\uc0b0",
         "\uc804\uc138\ub300\ucd9c",
         "\uc720\uc8fc\ud0dd\uc790",
         "1\uc8fc\ud0dd\uc790",
@@ -398,9 +543,39 @@ def _pick_policy_terms(text: str, limit: int = 5) -> list[str]:
     return terms
 
 
+def _numbers_for_query(text: str, limit: int = 3) -> list[str]:
+    numbers = re.findall(r"\d+(?:\.\d+)?\s*(?:%p|%|\uc870|\uc5b5|\ub9cc|\uc6d0|bp|BPS)?", text or "")
+    cleaned = []
+    for number in numbers:
+        value = re.sub(r"\s+", "", number)
+        if value and value not in cleaned:
+            cleaned.append(value)
+        if len(cleaned) >= limit:
+            break
+    return cleaned
+
+
+def _target_terms(text: str, limit: int = 3) -> list[str]:
+    targets = [
+        "\uccad\ub144",
+        "\uc2e0\ud63c\ubd80\ubd80",
+        "\uc18c\uc0c1\uacf5\uc778",
+        "\uc911\uc18c\uae30\uc5c5",
+        "\uadfc\ub85c\uc790",
+        "\uc0ac\ud68c\uc5f0\ub300\uacbd\uc81c\uc870\uc9c1",
+        "\uc2e4\uac70\uc8fc\uc790",
+        "1\uc8fc\ud0dd\uc790",
+        "\uc720\uc8fc\ud0dd\uc790",
+    ]
+    found = [term for term in targets if term in text]
+    return found[:limit]
+
+
 def _build_query_variants(source: dict, news_title: str, core_policy_issue: str, topic: str) -> list[str]:
     text = _normalize_text(news_title, core_policy_issue, topic)
     terms = _pick_policy_terms(text, limit=6)
+    numbers = _numbers_for_query(text, limit=2)
+    targets = _target_terms(text, limit=2)
     primary_terms = terms[:4]
     short_terms = terms[:3]
     entity_terms = terms[:3]
@@ -409,7 +584,9 @@ def _build_query_variants(source: dict, news_title: str, core_policy_issue: str,
     variants = []
 
     if source_name == "Financial Services Commission":
-        if "\uc804\uc138\ub300\ucd9c" in text:
+        if "\ud3ec\uc6a9\uae08\uc735" in text or "\uc2e0\uc6a9\ud3c9\uac00" in text or "\uc5ec\uc2e0\uc2dc\uc2a4\ud15c" in text:
+            variants.extend(["\uae08\uc735\uc704\uc6d0\ud68c \ud3ec\uc6a9\uae08\uc735 TF", "\ud3ec\uc6a9\uae08\uc735 \uc2e0\uc6a9\ud3c9\uac00 \uc5ec\uc2e0\uc2dc\uc2a4\ud15c", "\uae08\uc735\uc704 \ud3ec\uc6a9\uae08\uc735"])
+        elif "\uc804\uc138\ub300\ucd9c" in text:
             variants.extend(["\uc804\uc138\ub300\ucd9c \uaddc\uc81c", "\uc804\uc138\ub300\ucd9c \uaddc\uc81c\uc9c0\uc5ed", "\uae08\uc735\uc704 \uc804\uc138\ub300\ucd9c"])
         elif "\uc8fc\ud0dd\ub2f4\ubcf4\ub300\ucd9c" in text or "\uc8fc\ub2f4\ub300" in text:
             variants.extend(["\uc8fc\ud0dd\ub2f4\ubcf4\ub300\ucd9c \uae08\ub9ac", "\uc8fc\ub2f4\ub300 \uae08\ub9ac", "\uae08\uc735\uc704 \uc8fc\ud0dd\ub2f4\ubcf4\ub300\ucd9c"])
@@ -418,6 +595,28 @@ def _build_query_variants(source: dict, news_title: str, core_policy_issue: str,
             variants.extend(["\uc804\uc138\ub300\ucd9c \uae08\ub9ac", "i-ONE \uc804\uc138\ub300\ucd9c", "\uc911\uc18c\uae30\uc5c5 \uadfc\ub85c\uc790 \ub300\ucd9c"])
         elif "\uc8fc\ud0dd\ub2f4\ubcf4\ub300\ucd9c" in text or "\uc8fc\ub2f4\ub300" in text:
             variants.extend(["\uc8fc\ud0dd\ub2f4\ubcf4\ub300\ucd9c \uae08\ub9ac", "\uc911\uc18c\uae30\uc5c5 \uadfc\ub85c\uc790 \ub300\ucd9c", "i-ONE \uc8fc\ud0dd\ub2f4\ubcf4\ub300\ucd9c"])
+
+    prefixes = OFFICIAL_QUERY_PREFIXES.get(source_name, [query_name] if query_name else [])
+    if source_name == "Financial Services Commission" and "\uc0ac\ud68c\uc5f0\ub300" in text:
+        variants.extend([
+            _normalize_text("\uae08\uc735\uc704\uc6d0\ud68c", "\uc0ac\ud68c\uc5f0\ub300\uacbd\uc81c\uc870\uc9c1", *numbers, "\uacf5\uae09"),
+            _normalize_text("\uc0ac\ud68c\uc5f0\ub300\uae08\uc735\ud611\uc758\ud68c", "\uae08\uc735\uc704\uc6d0\ud68c"),
+            _normalize_text("\uc0ac\ud68c\uc5f0\ub300\uacbd\uc81c\uc870\uc9c1", "\uae08\uc735\uc9c0\uc6d0", *numbers),
+        ])
+    if source_name == "Ministry of Economy and Finance" and "\ubd80\ub3d9\uc0b0" in text:
+        variants.extend([
+            _normalize_text("\uae30\ud68d\uc7ac\uc815\ubd80", "\ubd80\ub3d9\uc0b0 \uc2dc\uc7a5", "\uc2e4\uac70\uc8fc\uc790"),
+            _normalize_text("\uad6c\uc724\ucca0", "\ubd80\ub3d9\uc0b0 \uc2dc\uc7a5", "\uacfc\uc5f4", "\uc2e4\uac70\uc8fc\uc790"),
+        ])
+    if source_name == "National Tax Service" and any(term in text for term in ["\uc591\ub3c4\uc138", "\uc591\ub3c4\uc18c\ub4dd\uc138", "\uc138\ubb34\uc870\uc0ac", "\ud0c8\ub8e8", "\uac00\uc0c1\uc790\uc0b0"]):
+        variants.extend([
+            _normalize_text("\uad6d\uc138\uccad", "\ubd80\ub3d9\uc0b0", "\uc591\ub3c4\uc18c\ub4dd\uc138", "\uc138\ubb34\uc870\uc0ac"),
+            _normalize_text("\uad6d\uc138\uccad", "\uac00\uc0c1\uc790\uc0b0", "\ubd80\ub3d9\uc0b0", "\ud0c8\ub8e8"),
+            _normalize_text("\uc591\ub3c4\uc138", "\ud0c8\ub8e8", "\uad6d\uc138\uccad"),
+        ])
+    for prefix in prefixes[:2]:
+        variants.append(_normalize_text(prefix, *primary_terms[:3], *numbers[:1]))
+        variants.append(_normalize_text(prefix, *targets[:1], *short_terms[:2]))
 
     variants.extend(
         [
@@ -470,11 +669,13 @@ def generate_official_source_candidates(
     topic: str,
     max_candidates: int = 5,
 ) -> list[dict]:
-    text = _normalize_text(news_title, core_policy_issue, topic)
+    source_text = _normalize_text(news_title, core_policy_issue)
+    topic_for_query = topic if len(_pick_policy_terms(source_text, limit=3)) < 2 else ""
+    text = _normalize_text(source_text, topic_for_query)
     candidates = []
 
     for source in OFFICIAL_SOURCE_CATALOG:
-        match_score, matched_reasons = _score_source(source, text, topic)
+        match_score, matched_reasons = _score_source(source, source_text, topic_for_query)
         if not matched_reasons and source["source_type"] not in {
             "financial_regulator",
             "central_government",
@@ -486,13 +687,13 @@ def generate_official_source_candidates(
             source=source,
             news_title=news_title,
             core_policy_issue=core_policy_issue,
-            topic=topic,
+            topic=topic_for_query,
         )
         search_query_variants = _build_query_variants(
             source=source,
             news_title=news_title,
             core_policy_issue=core_policy_issue,
-            topic=topic,
+            topic=topic_for_query,
         ) or [search_query]
         search_query = search_query_variants[0]
         official_search_url = build_official_search_url(

@@ -92,6 +92,34 @@ STOPWORDS = {
 }
 
 
+CONCEPT_GROUPS = {
+    "housing_finance": ["\uc804\uc138\ub300\ucd9c", "\uc804\uc138\uc790\uae08", "\ubc84\ud300\ubaa9", "\uc8fc\ud0dd\ub2f4\ubcf4\ub300\ucd9c", "\uc8fc\ub2f4\ub300", "\uc8fc\ud0dd\uae08\uc735"],
+    "real_estate": ["\ubd80\ub3d9\uc0b0", "\uc8fc\ud0dd", "\uc2e4\uac70\uc8fc\uc790", "\uc591\ub3c4\uc138", "\ub2e4\uc8fc\ud0dd", "\uccad\uc57d", "\uc784\ub300\ucc28"],
+    "rate_policy": ["\uae08\ub9ac", "\uae30\uc900\uae08\ub9ac", "\uc778\ud558", "\uc778\uc0c1", "\ud1b5\ud654\uc815\ucc45", "\ubb3c\uac00"],
+    "financial_regulation": ["DSR", "\uaddc\uc81c", "\uc81c\ud55c", "\uac00\uacc4\ubd80\ucc44", "\uc5f0\uccb4\uc728", "\uac10\ub3c5"],
+    "social_finance": ["\uc0ac\ud68c\uc5f0\ub300\uacbd\uc81c\uc870\uc9c1", "\uc0ac\ud68c\uc5f0\ub300\uae08\uc735", "\uc0ac\ud68c\uc5f0\ub300\uae08\uc735\ud611\uc758\ud68c", "\uae08\uc735\uc9c0\uc6d0"],
+    "jeonse_fraud": ["\uc804\uc138\uc0ac\uae30", "\uc804\uc138\ubcf4\uc99d", "\ubcf4\uc99d\uae08", "\uc784\ub300\uc778"],
+    "tax_investigation": ["\uad6d\uc138\uccad", "\uc591\ub3c4\uc138", "\uc591\ub3c4\uc18c\ub4dd\uc138", "\uc138\ubb34\uc870\uc0ac", "\ud0c8\ub8e8", "\uac00\uc0c1\uc790\uc0b0"],
+}
+
+INSTITUTION_TERMS = [
+    "\uae08\uc735\uc704",
+    "\uae08\uc735\uc704\uc6d0\ud68c",
+    "\uae08\uac10\uc6d0",
+    "\uae08\uc735\uac10\ub3c5\uc6d0",
+    "\uad6d\ud1a0\ubd80",
+    "\uad6d\ud1a0\uad50\ud1b5\ubd80",
+    "\uae30\uc7ac\ubd80",
+    "\uae30\ud68d\uc7ac\uc815\ubd80",
+    "\ud55c\uad6d\uc740\ud589",
+    "\ud55c\uc740",
+    "\uc8fc\ud0dd\ub3c4\uc2dc\ubcf4\uc99d\uacf5\uc0ac",
+    "\uad6d\uc138\uccad",
+    "HUG",
+    "LH",
+]
+
+
 def _domain(url: str) -> str:
     try:
         return urlparse(url or "").netloc.lower().replace("www.", "")
@@ -272,6 +300,25 @@ def _numbers(text: str) -> set[str]:
     return set(re.findall(r"\d+(?:\.\d+)?%?|\d{4}년|\d+월|\d+일", text or ""))
 
 
+def _concepts(text: str) -> set[str]:
+    clean_text = sanitize_text(text or "")
+    concepts = set()
+    for concept, terms in CONCEPT_GROUPS.items():
+        if any(term and term in clean_text for term in terms):
+            concepts.add(concept)
+    return concepts
+
+
+def _matched_institutions(claim_text: str, body_text: str) -> list[str]:
+    claim_clean = sanitize_text(claim_text or "")
+    body_clean = sanitize_text(body_text or "")
+    matched = []
+    for term in INSTITUTION_TERMS:
+        if term in claim_clean and term in body_clean and term not in matched:
+            matched.append(term)
+    return matched
+
+
 def official_body_supports_claim(claim: dict, body_text: str) -> dict:
     claim_text = " ".join(
         str(claim.get(key) or "")
@@ -292,6 +339,10 @@ def official_body_supports_claim(claim: dict, body_text: str) -> dict:
     claim_numbers = _numbers(claim_text)
     body_numbers = _numbers(body_text)
     matched_numbers = sorted(claim_numbers & body_numbers)
+    claim_concepts = _concepts(claim_text)
+    body_concepts = _concepts(body_text)
+    matched_concepts = sorted(claim_concepts & body_concepts)
+    matched_institutions = _matched_institutions(claim_text, body_text)
 
     material_terms = {
         term
@@ -299,20 +350,38 @@ def official_body_supports_claim(claim: dict, body_text: str) -> dict:
         if len(term) >= 3
         or term in {"금리", "전세", "대출", "주택", "규제", "지원", "세금", "양도세", "물가"}
     }
-    score = min(70, len(material_terms) * 12)
+    score = min(55, len(material_terms) * 9)
+    if matched_concepts:
+        score += min(25, len(matched_concepts) * 12)
     if matched_numbers:
         score += min(20, len(matched_numbers) * 10)
+    if matched_institutions:
+        score += min(12, len(matched_institutions) * 6)
     for field in ["actor", "action", "target", "object"]:
         value = sanitize_text(str(claim.get(field) or ""))
         if value and value != "unknown" and value in body_text:
             score += 8
 
     score = max(0, min(100, score))
-    supports = score >= 55 and (len(material_terms) >= 3 or (len(material_terms) >= 2 and bool(matched_numbers)))
+    supports = (
+        score >= 62
+        and len(matched_concepts) >= 1
+        and (
+            len(material_terms) >= 3
+            or (len(material_terms) >= 2 and bool(matched_numbers))
+            or (len(material_terms) >= 2 and bool(matched_institutions))
+        )
+    )
     if supports:
-        reason = f"official body matched {len(material_terms)} material terms"
+        reason = (
+            f"official body direct match: terms={len(material_terms)}, "
+            f"concepts={len(matched_concepts)}, numbers={len(matched_numbers)}"
+        )
     elif body_text:
-        reason = "official body fetched but claim overlap is insufficient"
+        reason = (
+            "official body fetched but direct claim match is insufficient "
+            f"(terms={len(material_terms)}, concepts={len(matched_concepts)}, numbers={len(matched_numbers)})"
+        )
     else:
         reason = "official body text unavailable"
     return {
@@ -320,6 +389,8 @@ def official_body_supports_claim(claim: dict, body_text: str) -> dict:
         "match_score": score,
         "matched_terms": matched_terms[:12],
         "matched_numbers": matched_numbers[:8],
+        "matched_concepts": matched_concepts,
+        "matched_institutions": matched_institutions[:6],
         "reason": reason,
     }
 
@@ -425,7 +496,7 @@ def enrich_official_source_candidates_with_bodies(
             failures[failure_reason or "official_body_fetch_failed"] += 1
 
         claim = claims_by_index.get(int(item.get("claim_index") or 0), {})
-        match = official_body_supports_claim(claim, body_text)
+        match = official_body_supports_claim(claim, f"{title} {body_text}")
         if body_fetch_ok and match.get("supports"):
             matched += 1
 
@@ -442,6 +513,8 @@ def enrich_official_source_candidates_with_bodies(
                 "official_body_match_score": match.get("match_score", 0),
                 "official_body_matched_terms": match.get("matched_terms", []),
                 "official_body_matched_numbers": match.get("matched_numbers", []),
+                "official_body_matched_concepts": match.get("matched_concepts", []),
+                "official_body_matched_institutions": match.get("matched_institutions", []),
                 "official_body_match_reason": match.get("reason"),
                 "retrieval_method": (
                     "official_body_verified"
