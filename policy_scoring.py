@@ -15,6 +15,9 @@ def _strength_score(strength: dict) -> int:
 def _source_trust_score(summary: dict, source_candidates: list[dict]) -> int:
     official_detail = bool(summary.get("official_detail_available"))
     official_body_matches = int(summary.get("official_body_matches") or summary.get("official_body_match_count") or 0)
+    official_resolution_direct = int(summary.get("official_resolution_direct_matches") or 0)
+    official_resolution_contextual = int(summary.get("official_resolution_contextual_matches") or 0)
+    official_resolution_top_score = int(summary.get("official_resolution_top_score") or summary.get("official_direct_match_score") or 0)
     official_usable = int(summary.get("official_bodies_usable") or 0)
     official_candidates = int(summary.get("official_body_candidates") or summary.get("official_candidate_count") or 0)
     average_reliability = int(summary.get("average_reliability_score") or 0)
@@ -34,6 +37,16 @@ def _source_trust_score(summary: dict, source_candidates: list[dict]) -> int:
         score += 12
     elif official_candidates:
         score += 5
+
+    if official_resolution_direct:
+        score += min(25, official_resolution_direct * 18)
+    elif official_resolution_contextual:
+        score += min(15, official_resolution_contextual * 10)
+
+    if official_resolution_top_score >= 75:
+        score += 10
+    elif official_resolution_top_score >= 55:
+        score += 6
 
     if fetched_official:
         score += 10

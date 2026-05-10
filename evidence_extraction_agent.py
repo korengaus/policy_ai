@@ -243,6 +243,11 @@ def _quality_score(
         score = min(score, 35)
     if "topic mismatch" in (match_reason or "").lower():
         score = min(score, 35)
+    official_classification = source.get("official_evidence_classification") or source.get("official_direct_match_classification")
+    if official_classification == "strong_official_direct_support":
+        score = max(score, 78)
+    elif official_classification == "medium_official_contextual_support":
+        score = max(score, 55)
     if (
         source.get("source_type") in {"official_government", "public_institution"}
         and source.get("official_body_fetched")
@@ -382,6 +387,11 @@ def _source_body_snippets(
         if score < 35:
             continue
         evidence_type = "direct_support" if score >= 70 else "indirect_support"
+        official_classification = source.get("official_evidence_classification") or source.get("official_direct_match_classification")
+        if official_classification == "strong_official_direct_support" and score >= 55:
+            evidence_type = "direct_support"
+        elif official_classification == "medium_official_contextual_support" and score >= 45:
+            evidence_type = "indirect_support"
         if source.get("source_type") in {"official_government", "public_institution"} and score < 55:
             evidence_type = "official_reference"
         snippets.append(
@@ -468,7 +478,7 @@ def extract_evidence_snippets(
         official_body_sources.sort(
             key=lambda source: (
                 not bool(source.get("official_body_match")),
-                -(int(source.get("official_final_direct_match_score") or source.get("official_body_match_score") or 0)),
+                -(int(source.get("official_evidence_score") or source.get("official_final_direct_match_score") or source.get("official_body_match_score") or 0)),
                 source.get("publisher") or "",
                 source.get("url") or "",
             )

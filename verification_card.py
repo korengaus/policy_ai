@@ -350,6 +350,11 @@ def _official_verification_summary(
                 "selected_primary_source": fallback_summary.get("top_source_title") or "공식기관 본문 근거",
                 "official_source_used_in_final_scoring": True,
                 "official_mismatch_reasons": [],
+                "top_official_detail_url": fallback_summary.get("top_official_detail_url") or fallback_summary.get("top_source_url") or "",
+                "top_official_detail_title": fallback_summary.get("top_official_detail_title") or fallback_summary.get("top_source_title") or "",
+                "official_direct_match_classification": fallback_summary.get("official_direct_match_classification") or "medium_official_contextual_support",
+                "official_direct_match_score": fallback_summary.get("official_direct_match_score") or fallback_summary.get("top_source_reliability_score") or 0,
+                "official_direct_match_reason": fallback_summary.get("official_direct_match_reason") or "",
             }
         )
     else:

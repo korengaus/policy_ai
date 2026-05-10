@@ -27,6 +27,7 @@ from official_source_search import (
 from source_retrieval_agent import build_source_retrieval_context
 from source_reliability_agent import evaluate_source_candidates
 from official_source_body import enrich_official_source_candidates_with_bodies
+from official_evidence_resolution import resolve_official_evidence
 from evidence_extraction_agent import extract_evidence_snippets
 from contradiction_agent import run_contradiction_checks
 from bias_framing_agent import analyze_bias_framing
@@ -465,6 +466,10 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
             official_evidence_results,
             normalized_claims,
         )
+        source_candidates, official_resolution_debug = resolve_official_evidence(
+            source_candidates,
+            normalized_claims,
+        )
         source_candidates = evaluate_source_candidates(source_candidates)
         evidence_extraction = extract_evidence_snippets(
             normalized_claims=normalized_claims,
@@ -566,6 +571,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
         debug_summary["analysis_cache_key"] = analysis_cache_key
         debug_summary["analysis_cache_ttl_seconds"] = ANALYSIS_CACHE_TTL_SECONDS
         debug_summary.update(official_body_debug or {})
+        debug_summary.update(official_resolution_debug or {})
         if verification_card.get("official_mismatch"):
             policy_confidence = dict(policy_confidence)
             policy_confidence["policy_confidence_score"] = min(

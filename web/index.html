@@ -1141,6 +1141,14 @@
       font-size: 13px;
     }
 
+    .compact-list {
+      margin: 8px 0 0;
+      padding-left: 18px;
+      color: #475569;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
     .debug-status {
       border-radius: 999px;
       display: inline-flex;
@@ -2457,6 +2465,11 @@
               <div class="evidence-source-meta">점수 ${escapeHtml(data.official_direct_match_score ?? 0)}</div>
             </div>
             <div class="evidence-extraction-tile">
+              <span class="label">공식 해소 결과</span><br>
+              직접 ${escapeHtml(data.official_resolution_direct_matches ?? 0)} · 맥락 ${escapeHtml(data.official_resolution_contextual_matches ?? 0)} · 약함 ${escapeHtml(data.official_resolution_weak_candidates ?? 0)}
+              <div class="evidence-source-meta">최고 ${escapeHtml(data.official_resolution_top_score ?? 0)}</div>
+            </div>
+            <div class="evidence-extraction-tile">
               <span class="label">반박/모순 검토</span><br>
               후보 ${escapeHtml(data.contradiction_candidates_searched ?? 0)} · 매칭 ${escapeHtml(data.contradiction_candidates_matched ?? 0)}
               <div class="evidence-source-meta">확인된 모순 ${escapeHtml(data.confirmed_contradictions ?? 0)} · 가능성 ${escapeHtml(data.possible_contradictions ?? 0)}</div>
@@ -2568,11 +2581,23 @@
               <div><span class="label">공식 매칭 점수</span><br>${escapeHtml(source.official_body_match_score ?? "-")}</div>
               <div><span class="label">공식 직접 매칭</span><br>${escapeHtml(officialDirectMatchLabel(source))}</div>
               <div><span class="label">공식 직접 점수</span><br>${escapeHtml(source.official_final_direct_match_score ?? source.official_body_match_score ?? "-")}</div>
+              <div><span class="label">URL 해소 점수</span><br>${escapeHtml(source.official_url_score ?? "-")}</div>
+              <div><span class="label">의미 매칭</span><br>${escapeHtml(source.semantic_match_score ?? "-")}</div>
+              <div><span class="label">정책 일치도</span><br>${escapeHtml(source.policy_alignment_score ?? "-")}</div>
+              <div><span class="label">공식 근거 점수</span><br>${escapeHtml(source.official_evidence_score ?? "-")}</div>
               <div><span class="label">공식 실패 사유</span><br>${escapeHtml(formatDiagnosticText(source.official_body_failure_reason || "-"))}</div>
               <div><span class="label">신뢰도 점수</span><br>${escapeHtml(source.reliability_score ?? "-")}</div>
               <div><span class="label">신뢰도 등급</span><br>${escapeHtml(formatReliabilityLevel(source.reliability_level))}</div>
               <div><span class="label">검증 역할</span><br>${escapeHtml(formatVerificationRole(source.verification_role))}</div>
             </div>
+            ${Array.isArray(source.official_matched_sentences) && source.official_matched_sentences.length ? `
+              <div class="evidence-source-meta"><strong>공식 문서 매칭 문장</strong></div>
+              <ul class="compact-list">
+                ${source.official_matched_sentences.slice(0, 2).map((match) => `
+                  <li>${escapeHtml(match.sentence || "-")} <span class="label">(${escapeHtml(match.score ?? "-")}점)</span></li>
+                `).join("")}
+              </ul>
+            ` : ""}
             <div class="evidence-source-meta">${escapeHtml(formatDiagnosticText(source.reliability_reason || ""))}</div>
             <div class="risk-flags">${escapeHtml(formatList(source.source_risk_flags))}</div>
           </div>
@@ -4840,6 +4865,24 @@
       return `강함 ${plain(summary.strong, 0)}, 보통 ${plain(summary.medium, 0)}, 약함 ${plain(summary.weak, 0)}`;
     }
 
+    function officialMatchedSentenceNotes(result) {
+      const verification = result?.verification_card || result || {};
+      const sources = verification.source_candidates || result?.source_candidates || [];
+      return (Array.isArray(sources) ? sources : [])
+        .filter((source) => {
+          const classification = source.official_evidence_classification || source.official_direct_match_classification || "";
+          return source.official_body_match
+            && ["strong_official_direct_support", "medium_official_contextual_support"].includes(classification)
+            && Array.isArray(source.official_matched_sentences);
+        })
+        .flatMap((source) => source.official_matched_sentences.slice(0, 2).map((match) => ({
+          sentence: match.sentence,
+          score: match.score,
+        })))
+        .filter((item) => item.sentence)
+        .slice(0, 3);
+    }
+
     function buildReportText() {
       const context = currentReportContext || {};
       const results = selectedResultsForExport();
@@ -4926,6 +4969,7 @@
         exportLine(lines, `- 공식 상세문서 상태: ${officialDirectMatchLabel(reliability)}`);
         exportLine(lines, `- 공식 직접 매칭 점수: ${plain(reliability.official_direct_match_score, 0)}`);
         exportLine(lines, `- 공식 매칭 사유: ${officialDirectMatchReason(reliability, debug)}`);
+        exportLine(lines, `- 공식 해소 결과: 직접 ${plain(debug.official_resolution_direct_matches, 0)}, 맥락 ${plain(debug.official_resolution_contextual_matches, 0)}, 약한 후보 ${plain(debug.official_resolution_weak_candidates, 0)}`);
         if (reliability.top_official_detail_url) {
           exportLine(lines, `- 공식 상세문서 URL: ${reliability.top_official_detail_url}`);
         }
@@ -4933,6 +4977,11 @@
           exportLine(lines, `- 공식 본문 수집 제한: ${formatReasonCounts(debug.official_body_failures)}`);
         }
         exportLine(lines, `- 반박/모순 확인: ${contradictionExplanation(contradiction)}`);
+        const officialSentences = officialMatchedSentenceNotes(result);
+        if (officialSentences.length) {
+          exportLine(lines, "- 공식 문서에서 연결된 문장:");
+          officialSentences.forEach((item) => exportLine(lines, `  · ${item.sentence} (${plain(item.score, 0)}점)`));
+        }
         lines.push("");
         exportLine(lines, "근거와 출처 요약");
         publicSourceNotesForReport(result).forEach((item) => lines.push(`- ${sanitizePublicExportText(item)}`));
