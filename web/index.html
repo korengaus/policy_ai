@@ -355,6 +355,60 @@
       line-height: 1.35;
     }
 
+    .reviewer-dashboard {
+      border: 1px solid #c7d2fe;
+      border-radius: 12px;
+      background: #f8fafc;
+      margin: 16px 0;
+      padding: 15px;
+    }
+
+    .reviewer-dashboard h3 {
+      margin: 0 0 6px;
+      color: #1e3a8a;
+      font-size: 17px;
+    }
+
+    .reviewer-dashboard-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .reviewer-status-card {
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 10px;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .reviewer-status-card strong {
+      display: block;
+      margin-top: 4px;
+      color: #111827;
+      font-size: 14px;
+    }
+
+    .reviewer-chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-top: 12px;
+    }
+
+    .reviewer-chip {
+      border: 1px solid #dbeafe;
+      border-radius: 999px;
+      background: #eff6ff;
+      color: #1e3a8a;
+      font-size: 12px;
+      font-weight: 800;
+      padding: 6px 9px;
+    }
+
     .score-explain {
       margin-top: 6px;
       color: #6b7280;
@@ -1365,6 +1419,7 @@
       .selected-issue-meta,
       .detail-grid,
       .result-summary-grid,
+      .reviewer-dashboard-grid,
       .plain-section-grid,
       .reading-guide-grid,
       .verification-intro,
@@ -4099,6 +4154,157 @@
       `;
     }
 
+    function maxSourceNumber(sources, keys) {
+      const list = Array.isArray(sources) ? sources : [];
+      return list.reduce((best, source) => {
+        const value = keys.reduce((current, key) => Math.max(current, numberValue(source?.[key], 0)), 0);
+        return Math.max(best, value);
+      }, 0);
+    }
+
+    function reviewerOfficialStatus(reliability, debug) {
+      const direct = numberValue(debug?.official_resolution_direct_matches, 0);
+      const contextual = numberValue(debug?.official_resolution_contextual_matches, 0);
+      const candidates = numberValue(debug?.official_body_candidates ?? reliability?.official_candidate_count, 0);
+      const fetched = numberValue(debug?.official_bodies_fetched ?? debug?.official_resolution_body_fetched, 0);
+      if (direct > 0) return "공식 직접 확인됨";
+      if (contextual > 0 || reliability?.official_direct_match_classification === "medium_official_contextual_support") {
+        return "공식 맥락 일부 확인";
+      }
+      if (fetched > 0) return "기사-공식문서 직접 일치 부족";
+      if (candidates > 0) return "공식 후보만 있음";
+      return "공식 본문 부족";
+    }
+
+    function reviewerDetailStatus(reliability, debug) {
+      const detailCount = numberValue(debug?.official_detail_pages_fetched_count, 0);
+      const fetched = numberValue(debug?.official_bodies_fetched ?? debug?.official_resolution_body_fetched, 0);
+      const label = officialDirectMatchLabel(reliability || debug || {});
+      if (detailCount > 0 || fetched > 0) return label;
+      if (numberValue(debug?.official_body_candidates ?? reliability?.official_candidate_count, 0) > 0) {
+        return "공식기관 후보는 찾았지만, 기사 핵심 주장과 직접 일치하는 상세 공식문서는 확인하지 못했습니다.";
+      }
+      return "공식기관 후보를 아직 찾지 못했습니다.";
+    }
+
+    function reviewerSemanticStatus(reliability, debug, sources) {
+      const semantic = maxSourceNumber(sources, ["semantic_match_score"]);
+      const policy = maxSourceNumber(sources, ["policy_alignment_score"]);
+      const directScore = numberValue(reliability?.official_direct_match_score ?? debug?.official_direct_match_score, 0);
+      const score = Math.max(semantic, policy, directScore);
+      if (score >= 75) return "의미 매칭 강함";
+      if (score >= 55) return "의미 매칭 보통";
+      if (score >= 30) return "의미 매칭 약함";
+      return "의미 매칭 근거 부족";
+    }
+
+    function reviewerUncertainty(reliability, debug, contradiction, verification) {
+      const contradictionText = contradictionExplanation(contradiction);
+      if (numberValue(contradiction?.possible_contradiction_count ?? contradiction?.possible_contradictions, 0) > 0) {
+        return "반박 가능성이 있어 같은 대상·시점인지 사람 검토가 필요합니다.";
+      }
+      if (reviewerOfficialStatus(reliability, debug).includes("직접 일치 부족")) {
+        return "공식 상세문서는 확보했지만 정책 키워드 또는 정책 대상 일치가 약합니다.";
+      }
+      if (reviewerOfficialStatus(reliability, debug).includes("후보만")) {
+        return "공식기관 후보는 찾았지만, 기사 핵심 주장과 직접 일치하는 상세 공식문서는 확인하지 못했습니다.";
+      }
+      if (reviewerOfficialStatus(reliability, debug).includes("본문 부족")) {
+        return "공식 검색 페이지는 접근했지만 비교할 상세 공식문서 본문이 부족합니다.";
+      }
+      if (String(verification?.review_status || verification?.verdict_label || "").includes("review")) {
+        return "AI 초안이므로 최종 게시 전 사람 검토가 필요합니다.";
+      }
+      return contradictionText || "현재 확보된 근거 기준으로 큰 모순 신호는 제한적입니다.";
+    }
+
+    function buildReviewerDashboardModel(result, context = {}) {
+      const verification = result?.verification_card || result || {};
+      const decision = result?.final_decision || {};
+      const confidence = result?.policy_confidence || {};
+      const reliability = verification.source_reliability_summary || {};
+      const debug = verification.debug_summary || result?.debug_summary || {};
+      const contradiction = verification.contradiction_summary || result?.contradiction_summary || {};
+      const sources = verification.source_candidates || result?.source_candidates || [];
+      const strength = context.strength || debug.evidence_strength_summary || {};
+      const quality = context.quality || debug.evidence_quality_summary || verification.evidence_quality_summary || {};
+      const finalLevel = String(decision.policy_alert_level || "WATCH").toUpperCase();
+      const officialStatus = reviewerOfficialStatus(reliability, debug);
+      const detailStatus = reviewerDetailStatus(reliability, debug);
+      const semanticStatus = reviewerSemanticStatus(reliability, debug, sources);
+      const contradictionStatus = contradictionExplanation(contradiction);
+      const needsReview = Boolean(
+        debug.needs_human_review
+        || String(verification.review_status || verification.verdict_label || "").includes("review")
+        || String(verification.verdict_label || "").includes("official_confirmation")
+      );
+      const nextAction = reliability.official_mismatch
+        ? "관련 공식 상세문서와 보도자료를 추가 확인하세요."
+        : formatRecommendation(decision.action_recommendation) || "근거 문장과 공식 출처 일치 여부를 확인하세요.";
+      const semanticScore = Math.max(
+        maxSourceNumber(sources, ["semantic_match_score"]),
+        numberValue(reliability.official_direct_match_score ?? debug.official_direct_match_score, 0)
+      );
+      const keywordScore = maxSourceNumber(sources, ["official_body_text_match_score", "official_body_match_score"]);
+      return {
+        finalJudgment: formatAlert(finalLevel),
+        draftVerdict: formatVerdict(verification.verdict_label),
+        needsReview: needsReview ? "사람 검토 필요" : "사람 검토 불필요",
+        officialStatus,
+        detailStatus,
+        semanticStatus,
+        contradictionStatus,
+        uncertainty: reviewerUncertainty(reliability, debug, contradiction, verification),
+        nextAction,
+        chips: [
+          ["공식기관 후보 수", debug.official_body_candidates ?? debug.official_sources_count ?? reliability.official_candidate_count ?? 0],
+          ["상세문서 확보 수", debug.official_detail_pages_fetched_count ?? debug.official_bodies_fetched ?? 0],
+          ["본문 매칭 점수", reliability.official_direct_match_score ?? debug.official_direct_match_score ?? 0],
+          ["의미 매칭 점수", semanticScore],
+          ["키워드 매칭 점수", keywordScore],
+          ["반박 후보 수", contradiction.contradiction_candidates_searched ?? debug.contradiction_candidates_searched ?? 0],
+          ["근거 강도", formatEvidenceSummaryLabel(strength)],
+          ["근거 품질", formatEvidenceSummaryLabel(quality)],
+          ["신뢰도 점수", confidence.policy_confidence_score ?? decision.final_score ?? "-"],
+        ],
+      };
+    }
+
+    function renderReviewerDecisionDashboard(result, context = {}) {
+      const model = buildReviewerDashboardModel(result, context);
+      const cards = [
+        ["최종 판정", model.finalJudgment],
+        ["AI 초안 판정", model.draftVerdict],
+        ["사람 검토 필요 여부", model.needsReview],
+        ["공식 근거 상태", model.officialStatus],
+        ["공식 상세문서 상태", model.detailStatus],
+        ["의미 매칭 상태", model.semanticStatus],
+        ["반박/모순 상태", model.contradictionStatus],
+        ["추천 다음 조치", model.nextAction],
+      ];
+      return `
+        <section class="reviewer-dashboard">
+          <h3>검토자 판단 대시보드</h3>
+          <div class="reader-note">검수자가 최종 판정의 근거, 공식 문서 연결 상태, 남은 불확실성을 빠르게 확인하는 요약입니다.</div>
+          <div class="reviewer-dashboard-grid">
+            ${cards.map(([label, value]) => `
+              <div class="reviewer-status-card">
+                <span class="label">${escapeHtml(label)}</span>
+                <strong>${escapeHtml(value || "-")}</strong>
+              </div>
+            `).join("")}
+          </div>
+          <div class="plain-section" style="margin-top: 12px;">
+            <h4>현재 가장 큰 불확실성</h4>
+            <div class="score-explain">${escapeHtml(model.uncertainty)}</div>
+          </div>
+          <div class="reviewer-chip-row">
+            ${model.chips.map(([label, value]) => `<span class="reviewer-chip">${escapeHtml(label)}: ${escapeHtml(value ?? "-")}</span>`).join("")}
+          </div>
+        </section>
+      `;
+    }
+
     function renderResults(results, focusIndex = selectedResultIndex) {
       if (!results.length) {
         metricsEl.style.display = "none";
@@ -4327,6 +4533,7 @@
                 <span class="label">핵심 주장</span><br>
                 ${escapeHtml(verification.claim_text || "-")}
               </div>
+              ${renderReviewerDecisionDashboard(result, userContext)}
               <div class="news-section-title">상세 검증 정보</div>
               <div class="reader-note">더 자세한 주장별 근거, 반박 가능성, 표현 방식 점검은 아래 고급 정보에서 펼쳐볼 수 있습니다.</div>
               ${advancedVerificationDetails}
@@ -4932,6 +5139,7 @@
           contradictionSummary: contradiction,
           debugSummary: debug,
         };
+        const reviewerModel = buildReviewerDashboardModel(result, contextForReport);
 
         lines.push(`[${index + 1}] ${sanitizePublicExportText(plain(result.title, "제목 없음"))}`);
         lines.push("-".repeat(32));
@@ -4946,6 +5154,17 @@
         lines.push(`권장 조치: ${sanitizePublicExportText(recommendation)}`);
         lines.push(`시장 신호: ${sanitizePublicExportText(formatSignal(decision.market_signal))}`);
         lines.push(`최고 신뢰 출처: ${publicExportTopSource(result)}`);
+        lines.push("");
+        exportLine(lines, "[검토자 판단 대시보드]");
+        exportLine(lines, `- 최종 판정: ${reviewerModel.finalJudgment}`);
+        exportLine(lines, `- AI 초안 판정: ${reviewerModel.draftVerdict}`);
+        exportLine(lines, `- 사람 검토 필요 여부: ${reviewerModel.needsReview}`);
+        exportLine(lines, `- 공식 근거 상태: ${reviewerModel.officialStatus}`);
+        exportLine(lines, `- 공식 상세문서 상태: ${reviewerModel.detailStatus}`);
+        exportLine(lines, `- 의미 매칭 상태: ${reviewerModel.semanticStatus}`);
+        exportLine(lines, `- 반박/모순 상태: ${reviewerModel.contradictionStatus}`);
+        exportLine(lines, `- 현재 가장 큰 불확실성: ${reviewerModel.uncertainty}`);
+        exportLine(lines, `- 추천 다음 조치: ${reviewerModel.nextAction}`);
         lines.push("");
         exportLine(lines, "핵심 요약");
         alertReasonBullets(
