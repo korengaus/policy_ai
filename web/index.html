@@ -3773,25 +3773,9 @@
     }
 
     function officialVerificationExplanation(sourceReliabilitySummary, debugSummary) {
-      const summary = sourceReliabilitySummary || {};
-      const debug = debugSummary || {};
-      const candidates = numberValue(debug.official_body_candidates ?? debug.official_sources_count, 0);
-      const fetched = numberValue(debug.official_bodies_fetched, 0);
-      const usable = numberValue(debug.official_bodies_usable, 0);
-      const matched = numberValue(debug.official_body_matches, 0);
-      if (summary.official_detail_available || matched > 0) {
-        return "공식기관 본문이 핵심 주장과 연결되어 공식 근거로 참고할 수 있습니다.";
-      }
-      if (fetched > 0 && usable > 0) {
-        return "공식기관 본문은 수집됐지만 핵심 주장과의 직접 일치가 충분하지 않습니다.";
-      }
-      if (fetched > 0) {
-        return "공식기관 URL은 확인됐지만 본문 품질이나 길이가 검증에 충분하지 않습니다.";
-      }
-      if (candidates > 0) {
-        return "공식기관 후보는 있으나 상세 본문을 확보하지 못해 확정 근거로 쓰기 어렵습니다.";
-      }
-      return "관련 공식기관 후보를 아직 찾지 못했습니다.";
+      return buildOfficialEvidenceNarrative(
+        buildOfficialEvidenceState(sourceReliabilitySummary || {}, debugSummary || {})
+      ).summaryBullet;
     }
 
     function officialDirectMatchLabel(sourceReliabilitySummary) {
@@ -3811,6 +3795,120 @@
         return formatDiagnosticText(summary.official_direct_match_reason);
       }
       return officialVerificationExplanation(summary, debugSummary || {});
+    }
+
+    function buildOfficialEvidenceState(sourceReliabilitySummary = {}, debugSummary = {}) {
+      const summary = sourceReliabilitySummary || {};
+      const debug = debugSummary || {};
+      const classification = String(summary.official_direct_match_classification || debug.official_direct_match_classification || "");
+      const directScore = numberValue(
+        summary.official_direct_match_score
+          ?? summary.official_final_direct_match_score
+          ?? debug.official_direct_match_score
+          ?? debug.official_final_direct_match_score,
+        0
+      );
+      const directMatches = numberValue(debug.official_resolution_direct_matches, 0);
+      const contextualMatches = numberValue(debug.official_resolution_contextual_matches, 0);
+      const weakCandidates = numberValue(debug.official_resolution_weak_candidates, 0);
+      const candidates = numberValue(debug.official_body_candidates ?? debug.official_sources_count ?? summary.official_candidate_count, 0);
+      const fetched = numberValue(debug.official_bodies_fetched ?? debug.official_resolution_body_fetched, 0);
+      const usable = numberValue(debug.official_bodies_usable, 0);
+      const matched = numberValue(debug.official_body_matches, 0);
+      const bestTitle = publicInstitutionName(summary.top_official_detail_title || summary.official_best_evidence_title || summary.top_source_title || "");
+      const bestUrl = summary.top_official_detail_url || summary.official_best_evidence_url || "";
+      const hasDetail = Boolean(summary.official_detail_available || bestUrl || fetched > 0 || usable > 0);
+      const hasDirectSupport = classification === "strong_official_direct_support"
+        || directMatches > 0
+        || matched > 0
+        || (summary.official_detail_available && directScore >= 55);
+      const hasPartialSupport = hasDirectSupport
+        || classification === "medium_official_contextual_support"
+        || contextualMatches > 0
+        || (hasDetail && directScore >= 45);
+      let officialEvidenceStatus = "not_found";
+      if (hasDirectSupport) {
+        officialEvidenceStatus = "direct_support";
+      } else if (hasPartialSupport) {
+        officialEvidenceStatus = "partial_support";
+      } else if (hasDetail) {
+        officialEvidenceStatus = "body_unmatched";
+      } else if (candidates > 0 || weakCandidates > 0) {
+        officialEvidenceStatus = "candidate_only";
+      }
+
+      const messages = {
+        direct_support: {
+          detail: "공식 상세문서가 핵심 주장을 직접 뒷받침",
+          summary: "공식기관 본문이 핵심 주장과 연결되어 공식 근거로 참고할 수 있습니다.",
+          uncertainty: "다만 직접 일치 점수, 본문 수집 범위, 반박 가능성은 사람 검토로 확인해야 합니다.",
+          sourceNote: "공식 상세문서 본문이 기사 핵심 주장과 연결되어 공식 근거로 참고할 수 있습니다.",
+          nextAction: "공식 원문과 기사 주장 간 세부 수치·대상·시점을 최종 검토하세요.",
+        },
+        partial_support: {
+          detail: "공식 상세문서가 같은 기관/정책 맥락을 일부 뒷받침",
+          summary: "공식 상세문서는 확보했지만 정책 키워드 또는 정책 대상 일치가 일부로 제한됩니다.",
+          uncertainty: "직접 확정 근거로 쓰기 전 세부 주장과 공식 문장 일치 여부를 추가 확인해야 합니다.",
+          sourceNote: "공식기관 본문이 핵심 주장과 일부 연결되어 보조 공식 근거로 참고할 수 있습니다.",
+          nextAction: "관련 공식 상세문서의 본문 문장과 기사 핵심 주장을 대조하세요.",
+        },
+        body_unmatched: {
+          detail: "공식 상세문서 본문은 확인했지만 직접 일치 부족",
+          summary: "공식 상세문서는 확보했지만 기사 핵심 주장과 직접 일치하지 않습니다.",
+          uncertainty: "공식 본문과 기사 주장 사이의 정책 대상·시점·수치 일치가 약합니다.",
+          sourceNote: "공식기관 본문은 수집됐지만 핵심 주장과의 직접 일치가 부족합니다.",
+          nextAction: "더 직접적인 공식 보도자료나 정책 설명자료를 추가 확인하세요.",
+        },
+        candidate_only: {
+          detail: "공식기관 후보는 있으나 직접 일치 약함",
+          summary: "공식기관 후보는 있으나 핵심 주장과의 직접 일치는 약합니다.",
+          uncertainty: "확인 가능한 상세 공식문서 본문이 부족합니다.",
+          sourceNote: "공식기관 후보는 찾았지만, 기사 핵심 주장과 직접 일치하는 상세 공식문서는 확인하지 못했습니다.",
+          nextAction: "관련 공식 상세문서와 보도자료를 추가 확인하세요.",
+        },
+        not_found: {
+          detail: "확인 가능한 공식 상세문서 부족",
+          summary: "관련 공식기관 후보를 아직 충분히 찾지 못했습니다.",
+          uncertainty: "공식 출처 기반 확정 근거가 부족합니다.",
+          sourceNote: "직접 일치하는 공식 상세 근거는 아직 확인되지 않았습니다.",
+          nextAction: "관련 정부·공공기관의 후속 발표를 확인하세요.",
+        },
+      };
+      const copy = messages[officialEvidenceStatus] || messages.not_found;
+      return {
+        officialEvidenceStatus,
+        officialDetailStatus: copy.detail,
+        officialDirectMatchScore: directScore,
+        officialResolutionCounts: {
+          direct: directMatches,
+          contextual: contextualMatches,
+          weak: weakCandidates,
+          candidates,
+          fetched,
+          usable,
+          matched,
+        },
+        officialLimitations: copy.uncertainty,
+        officialBestEvidenceTitle: bestTitle || "확인되지 않음",
+        officialBestEvidenceUrl: bestUrl || "",
+        officialSummaryMessage: copy.summary,
+        officialUncertaintyMessage: copy.uncertainty,
+        officialSourceSummaryNote: copy.sourceNote,
+        humanReviewReason: copy.nextAction,
+        recommendedNextAction: copy.nextAction,
+        hasSupportiveOfficialEvidence: officialEvidenceStatus === "direct_support" || officialEvidenceStatus === "partial_support",
+      };
+    }
+
+    function buildOfficialEvidenceNarrative(officialEvidenceState) {
+      const state = officialEvidenceState || buildOfficialEvidenceState();
+      return {
+        dashboardStatus: state.officialSummaryMessage,
+        summaryBullet: state.officialSummaryMessage,
+        detailedExplanation: `${state.officialSummaryMessage} ${state.officialUncertaintyMessage}`,
+        sourceSummaryNote: state.officialSourceSummaryNote,
+        recommendedNextAction: state.recommendedNextAction,
+      };
     }
 
     function publicSourceTypeLabel(source) {
@@ -3931,15 +4029,13 @@
     }
 
     function publicOfficialLimitationNote(result, sourceReliabilitySummary = {}, items = []) {
-      const hasOfficialSupporting = items.some((source) => isOfficialLikeSource(source));
-      if (hasOfficialSupporting) return "";
       const verification = result?.verification_card || result || {};
       const debug = verification.debug_summary || result?.debug_summary || {};
-      const candidates = numberValue(debug.official_body_candidates ?? debug.official_sources_count ?? sourceReliabilitySummary.official_candidate_count, 0);
-      if (candidates > 0 || sourceReliabilitySummary.official_mismatch) {
-        return "공식기관 후보는 찾았지만, 기사 핵심 주장과 직접 일치하는 상세 공식문서는 확인하지 못했습니다.";
-      }
-      return "직접 일치하는 공식 상세 근거는 아직 확인되지 않았습니다.";
+      const state = buildOfficialEvidenceState(sourceReliabilitySummary, debug);
+      const narrative = buildOfficialEvidenceNarrative(state);
+      const hasOfficialSupporting = items.some((source) => isOfficialLikeSource(source));
+      if (hasOfficialSupporting && state.hasSupportiveOfficialEvidence) return "";
+      return narrative.sourceSummaryNote;
     }
 
     function sourceDomain(url) {
@@ -4292,28 +4388,16 @@
     }
 
     function reviewerOfficialStatus(reliability, debug) {
-      const direct = numberValue(debug?.official_resolution_direct_matches, 0);
-      const contextual = numberValue(debug?.official_resolution_contextual_matches, 0);
-      const candidates = numberValue(debug?.official_body_candidates ?? reliability?.official_candidate_count, 0);
-      const fetched = numberValue(debug?.official_bodies_fetched ?? debug?.official_resolution_body_fetched, 0);
-      if (direct > 0) return "공식 직접 확인됨";
-      if (contextual > 0 || reliability?.official_direct_match_classification === "medium_official_contextual_support") {
-        return "공식 맥락 일부 확인";
-      }
-      if (fetched > 0) return "기사-공식문서 직접 일치 부족";
-      if (candidates > 0) return "공식 후보만 있음";
+      const state = buildOfficialEvidenceState(reliability, debug);
+      if (state.officialEvidenceStatus === "direct_support") return "공식 직접 확인됨";
+      if (state.officialEvidenceStatus === "partial_support") return "공식 맥락 일부 확인";
+      if (state.officialEvidenceStatus === "body_unmatched") return "기사-공식문서 직접 일치 부족";
+      if (state.officialEvidenceStatus === "candidate_only") return "공식 후보만 있음";
       return "공식 본문 부족";
     }
 
     function reviewerDetailStatus(reliability, debug) {
-      const detailCount = numberValue(debug?.official_detail_pages_fetched_count, 0);
-      const fetched = numberValue(debug?.official_bodies_fetched ?? debug?.official_resolution_body_fetched, 0);
-      const label = officialDirectMatchLabel(reliability || debug || {});
-      if (detailCount > 0 || fetched > 0) return label;
-      if (numberValue(debug?.official_body_candidates ?? reliability?.official_candidate_count, 0) > 0) {
-        return "공식기관 후보는 찾았지만, 기사 핵심 주장과 직접 일치하는 상세 공식문서는 확인하지 못했습니다.";
-      }
-      return "공식기관 후보를 아직 찾지 못했습니다.";
+      return buildOfficialEvidenceState(reliability, debug).officialDetailStatus;
     }
 
     function reviewerSemanticStatus(reliability, debug, sources) {
@@ -4328,18 +4412,13 @@
     }
 
     function reviewerUncertainty(reliability, debug, contradiction, verification) {
+      const state = buildOfficialEvidenceState(reliability, debug);
       const contradictionText = contradictionExplanation(contradiction);
       if (numberValue(contradiction?.possible_contradiction_count ?? contradiction?.possible_contradictions, 0) > 0) {
         return "반박 가능성이 있어 같은 대상·시점인지 사람 검토가 필요합니다.";
       }
-      if (reviewerOfficialStatus(reliability, debug).includes("직접 일치 부족")) {
-        return "공식 상세문서는 확보했지만 정책 키워드 또는 정책 대상 일치가 약합니다.";
-      }
-      if (reviewerOfficialStatus(reliability, debug).includes("후보만")) {
-        return "공식기관 후보는 찾았지만, 기사 핵심 주장과 직접 일치하는 상세 공식문서는 확인하지 못했습니다.";
-      }
-      if (reviewerOfficialStatus(reliability, debug).includes("본문 부족")) {
-        return "공식 검색 페이지는 접근했지만 비교할 상세 공식문서 본문이 부족합니다.";
+      if (state.officialEvidenceStatus !== "not_found") {
+        return state.officialUncertaintyMessage;
       }
       if (String(verification?.review_status || verification?.verdict_label || "").includes("review")) {
         return "AI 초안이므로 최종 게시 전 사람 검토가 필요합니다.";
@@ -4358,6 +4437,7 @@
       const strength = context.strength || debug.evidence_strength_summary || {};
       const quality = context.quality || debug.evidence_quality_summary || verification.evidence_quality_summary || {};
       const finalLevel = String(decision.policy_alert_level || "WATCH").toUpperCase();
+      const officialState = buildOfficialEvidenceState(reliability, debug);
       const officialStatus = reviewerOfficialStatus(reliability, debug);
       const detailStatus = reviewerDetailStatus(reliability, debug);
       const semanticStatus = reviewerSemanticStatus(reliability, debug, sources);
@@ -4367,9 +4447,10 @@
         || String(verification.review_status || verification.verdict_label || "").includes("review")
         || String(verification.verdict_label || "").includes("official_confirmation")
       );
-      const nextAction = reliability.official_mismatch
+      const nextAction = officialState.recommendedNextAction
+        || (reliability.official_mismatch
         ? "관련 공식 상세문서와 보도자료를 추가 확인하세요."
-        : formatRecommendation(decision.action_recommendation) || "근거 문장과 공식 출처 일치 여부를 확인하세요.";
+        : formatRecommendation(decision.action_recommendation) || "근거 문장과 공식 출처 일치 여부를 확인하세요.");
       const semanticScore = Math.max(
         maxSourceNumber(sources, ["semantic_match_score"]),
         numberValue(reliability.official_direct_match_score ?? debug.official_direct_match_score, 0)
@@ -4385,6 +4466,7 @@
         contradictionStatus,
         uncertainty: reviewerUncertainty(reliability, debug, contradiction, verification),
         nextAction,
+        officialEvidenceState: officialState,
         chips: [
           ["공식기관 후보 수", debug.official_body_candidates ?? debug.official_sources_count ?? reliability.official_candidate_count ?? 0],
           ["상세문서 확보 수", debug.official_detail_pages_fetched_count ?? debug.official_bodies_fetched ?? 0],
@@ -5011,8 +5093,12 @@
     }
 
     function publicExportOfficialLimitation(result) {
-      const { officialLimitation } = publicSourceCards(result);
-      return officialLimitation || "공식 자료 후보는 있었지만, 기사 핵심 주장과 직접 일치하지 않아 공개 근거에서는 제외했습니다.";
+      const verification = result?.verification_card || result || {};
+      const reliability = verification.source_reliability_summary || {};
+      const debug = verification.debug_summary || result?.debug_summary || {};
+      const state = buildOfficialEvidenceState(reliability, debug);
+      return buildOfficialEvidenceNarrative(state).sourceSummaryNote
+        || "공식 자료 후보는 있었지만, 기사 핵심 주장과 직접 일치하지 않아 공개 근거에서는 제외했습니다.";
     }
 
     function publicExportEvidenceSummary(result) {
