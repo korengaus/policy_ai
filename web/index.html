@@ -369,6 +369,59 @@
       font-size: 17px;
     }
 
+    .verification-summary-card {
+      border: 1px solid #bfdbfe;
+      border-radius: 12px;
+      background: #eff6ff;
+      margin: 16px 0;
+      padding: 16px;
+    }
+
+    .verification-summary-card h3 {
+      margin: 0 0 6px;
+      color: #1e3a8a;
+      font-size: 18px;
+    }
+
+    .verification-summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .verification-summary-item {
+      border: 1px solid #dbeafe;
+      border-radius: 10px;
+      background: #fff;
+      padding: 10px;
+      min-width: 0;
+    }
+
+    .verification-summary-item strong {
+      display: block;
+      margin-top: 4px;
+      color: #0f172a;
+      font-size: 14px;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+
+    .verification-summary-item.positive {
+      border-color: #86efac;
+      background: #f0fdf4;
+    }
+
+    .verification-summary-item.warning {
+      border-color: #fdba74;
+      background: #fff7ed;
+    }
+
+    .verification-summary-item.neutral {
+      border-color: #cbd5e1;
+      background: #f8fafc;
+    }
+
     .reviewer-dashboard-grid {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1457,6 +1510,7 @@
       .selected-issue-meta,
       .detail-grid,
       .result-summary-grid,
+      .verification-summary-grid,
       .reviewer-dashboard-grid,
       .plain-section-grid,
       .reading-guide-grid,
@@ -4516,6 +4570,51 @@
       `;
     }
 
+    function officialSummaryTone(officialState) {
+      const status = officialState?.officialEvidenceStatus || "not_found";
+      if (status === "direct_support") return "positive";
+      if (status === "partial_support") return "neutral";
+      return "warning";
+    }
+
+    function reviewSummaryTone(value) {
+      return String(value || "").includes("필요") ? "warning" : "positive";
+    }
+
+    function renderVerificationSummaryCard(result, context = {}) {
+      const model = buildReviewerDashboardModel(result, context);
+      const officialState = model.officialEvidenceState || buildOfficialEvidenceState();
+      const finalTone = String(model.finalJudgment || "").includes("높음")
+        ? "warning"
+        : String(model.finalJudgment || "").includes("관찰")
+          ? "warning"
+          : "neutral";
+      const items = [
+        ["최종 판정", model.finalJudgment, finalTone],
+        ["신뢰도 점수", context.confidence?.policy_confidence_score ?? context.decision?.final_score ?? "-", "neutral"],
+        ["공식 근거 상태", model.officialStatus, officialSummaryTone(officialState)],
+        ["공식 상세문서 상태", model.detailStatus, officialSummaryTone(officialState)],
+        ["의미 매칭 상태", model.semanticStatus, String(model.semanticStatus || "").includes("부족") ? "warning" : "neutral"],
+        ["반박/모순 상태", model.contradictionStatus, String(model.contradictionStatus || "").includes("가능") ? "warning" : "neutral"],
+        ["사람 검토", model.needsReview, reviewSummaryTone(model.needsReview)],
+        ["추천 다음 조치", model.nextAction, "neutral"],
+      ];
+      return `
+        <section class="verification-summary-card">
+          <h3>검증 결과 요약 카드</h3>
+          <div class="reader-note">${escapeHtml(buildOfficialEvidenceNarrative(officialState).detailedExplanation)}</div>
+          <div class="verification-summary-grid">
+            ${items.map(([label, value, tone]) => `
+              <div class="verification-summary-item ${escapeHtml(tone)}">
+                <span class="label">${escapeHtml(label)}</span>
+                <strong>${escapeHtml(value || "확인 필요")}</strong>
+              </div>
+            `).join("")}
+          </div>
+        </section>
+      `;
+    }
+
     function renderResults(results, focusIndex = selectedResultIndex) {
       if (!results.length) {
         metricsEl.style.display = "none";
@@ -4663,6 +4762,7 @@
 
             ${renderKeyTakeaways(userContext)}
             ${renderReadingGuide(userContext)}
+            ${renderVerificationSummaryCard(result, userContext)}
 
             <div class="result-summary-grid">
               <div class="summary-tile">
@@ -5362,6 +5462,16 @@
         lines.push(`권장 조치: ${sanitizePublicExportText(recommendation)}`);
         lines.push(`시장 신호: ${sanitizePublicExportText(formatSignal(decision.market_signal))}`);
         lines.push(`최고 신뢰 출처: ${publicExportTopSource(result)}`);
+        lines.push("");
+        exportLine(lines, "[검증 결과 요약 카드]");
+        exportLine(lines, `- 최종 판정: ${reviewerModel.finalJudgment}`);
+        exportLine(lines, `- 신뢰도 점수: ${plain(confidence.policy_confidence_score ?? decision.final_score, "확인되지 않음")}`);
+        exportLine(lines, `- 공식 근거 상태: ${reviewerModel.officialStatus}`);
+        exportLine(lines, `- 공식 상세문서 상태: ${reviewerModel.detailStatus}`);
+        exportLine(lines, `- 의미 매칭 상태: ${reviewerModel.semanticStatus}`);
+        exportLine(lines, `- 반박/모순 상태: ${reviewerModel.contradictionStatus}`);
+        exportLine(lines, `- 사람 검토 필요 여부: ${reviewerModel.needsReview}`);
+        exportLine(lines, `- 추천 다음 조치: ${reviewerModel.nextAction}`);
         lines.push("");
         exportLine(lines, "[검토자 판단 대시보드]");
         exportLine(lines, `- 최종 판정: ${reviewerModel.finalJudgment}`);
