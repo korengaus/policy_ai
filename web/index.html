@@ -799,6 +799,7 @@
       border-radius: 10px;
       background: #fff;
       padding: 12px;
+      min-width: 0;
     }
 
     .public-source-card-title {
@@ -810,6 +811,7 @@
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
       overflow: hidden;
+      overflow-wrap: anywhere;
     }
 
     .public-source-meta {
@@ -817,6 +819,7 @@
       font-size: 12px;
       line-height: 1.5;
       margin-top: 7px;
+      overflow-wrap: anywhere;
     }
 
     .source-support-badge {
@@ -829,6 +832,41 @@
       font-weight: 900;
       padding: 4px 8px;
       margin-top: 8px;
+    }
+
+    .source-support-badge.trace-news {
+      background: #f1f5f9;
+      color: #334155;
+    }
+
+    .source-support-badge.trace-direct {
+      background: #dcfce7;
+      color: #166534;
+    }
+
+    .source-support-badge.trace-context {
+      background: #dbeafe;
+      color: #1d4ed8;
+    }
+
+    .source-support-badge.trace-weak {
+      background: #fef3c7;
+      color: #92400e;
+    }
+
+    .source-support-badge.trace-excluded {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    .public-source-warning {
+      margin-top: 8px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: #fff7ed;
+      color: #9a3412;
+      font-size: 12px;
+      line-height: 1.45;
     }
 
     .review-tools-details {
@@ -1564,6 +1602,7 @@
       <div class="report-actions-buttons">
         <button id="copyReportBtn" class="report-copy" type="button">리포트 복사</button>
         <button id="downloadReportBtn" class="report-download" type="button">리포트 다운로드</button>
+        <button id="downloadMarkdownBtn" class="report-download" type="button">Markdown 다운로드</button>
       </div>
     </section>
 
@@ -1640,6 +1679,7 @@
     const clearHistoryBtn = document.getElementById("clearHistoryBtn");
     const copyReportBtn = document.getElementById("copyReportBtn");
     const downloadReportBtn = document.getElementById("downloadReportBtn");
+    const downloadMarkdownBtn = document.getElementById("downloadMarkdownBtn");
     const statusLine = document.getElementById("statusLine");
     const errorBox = document.getElementById("errorBox");
     const metricsEl = document.getElementById("metrics");
@@ -2619,9 +2659,12 @@
           ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a>`
           : title;
         const exclusionLabel = sourceExclusionLabel(source);
+        const trace = sourceTraceability(source);
+        const domain = sourceDomain(source.url || "");
         return `
           <div class="source-candidate">
             <div class="source-candidate-title">${titleHtml}</div>
+            <div class="source-support-badge ${escapeHtml(trace.className)}">${escapeHtml(trace.label)}</div>
             ${exclusionLabel ? `<div class="evidence-source-meta">${escapeHtml(exclusionLabel)}</div>` : ""}
             <div class="source-candidate-grid">
               <div><span class="label">검색어</span><br>${escapeHtml(source.query_used || "-")}</div>
@@ -2644,6 +2687,8 @@
               <div><span class="label">신뢰도 점수</span><br>${escapeHtml(source.reliability_score ?? "-")}</div>
               <div><span class="label">신뢰도 등급</span><br>${escapeHtml(formatReliabilityLevel(source.reliability_level))}</div>
               <div><span class="label">검증 역할</span><br>${escapeHtml(formatVerificationRole(source.verification_role))}</div>
+              <div><span class="label">도메인</span><br>${escapeHtml(domain || "URL 없음")}</div>
+              <div><span class="label">공개 표시 판단</span><br>${escapeHtml(trace.explanation)}</div>
             </div>
             ${Array.isArray(source.official_matched_sentences) && source.official_matched_sentences.length ? `
               <div class="evidence-source-meta"><strong>공식 문서 매칭 문장</strong></div>
@@ -2687,6 +2732,7 @@
       clearHistoryBtn.disabled = isBusy;
       copyReportBtn.disabled = isBusy;
       downloadReportBtn.disabled = isBusy;
+      downloadMarkdownBtn.disabled = isBusy;
       queryInput.disabled = isBusy;
       maxNewsInput.disabled = isBusy;
     }
@@ -3879,6 +3925,7 @@
         source_type: "established_news",
         evidence_type: "news_context",
         evidence_quality_label: "medium",
+        reliability_reason: "분석 대상이 된 뉴스 원문입니다.",
         source_origin: "selected_news",
       };
     }
@@ -3893,6 +3940,53 @@
         return "공식기관 후보는 찾았지만, 기사 핵심 주장과 직접 일치하는 상세 공식문서는 확인하지 못했습니다.";
       }
       return "직접 일치하는 공식 상세 근거는 아직 확인되지 않았습니다.";
+    }
+
+    function sourceDomain(url) {
+      try {
+        return new URL(url || "").hostname.replace(/^www\./, "");
+      } catch (_) {
+        return "";
+      }
+    }
+
+    function sourceSupportScore(source) {
+      const score = source?.official_evidence_score
+        ?? source?.official_final_direct_match_score
+        ?? source?.official_body_match_score
+        ?? source?.evidence_quality_score
+        ?? source?.reliability_score
+        ?? source?.relevance_score;
+      return score === undefined || score === null || score === "" ? "-" : score;
+    }
+
+    function sourceTraceability(source, reliability = {}) {
+      const exclusion = sourceExclusionLabel(source, reliability);
+      if (exclusion) {
+        return { label: "제외/불일치", className: "trace-excluded", explanation: exclusion };
+      }
+      if (source?.source_origin === "selected_news" || source?.evidence_type === "news_context") {
+        return { label: "뉴스 원문", className: "trace-news", explanation: "분석 대상이 된 원문 기사입니다." };
+      }
+      const classification = String(source?.official_evidence_classification || source?.official_direct_match_classification || "");
+      const score = numberValue(
+        source?.official_evidence_score ?? source?.official_final_direct_match_score ?? source?.official_body_match_score,
+        0
+      );
+      if (classification === "strong_official_direct_support" || (isOfficialLikeSource(source) && source?.official_body_match && score >= 75)) {
+        return { label: "공식 직접 근거", className: "trace-direct", explanation: "공식 상세문서 본문이 기사 핵심 주장과 직접 연결됩니다." };
+      }
+      if (classification === "medium_official_contextual_support" || (isOfficialLikeSource(source) && source?.official_body_match)) {
+        return { label: "공식 맥락 근거", className: "trace-context", explanation: "공식 상세문서가 같은 기관이나 정책 맥락을 일부 뒷받침합니다." };
+      }
+      if (isOfficialLikeSource(source)) {
+        return { label: "공식 약한 후보", className: "trace-weak", explanation: "공식 후보이지만 상세 본문 또는 직접 일치가 제한적입니다." };
+      }
+      return {
+        label: publicSupportLabel(source),
+        className: "trace-context",
+        explanation: publicSourceReason(source, reliability),
+      };
     }
 
     function publicSourceCards(result) {
@@ -3962,17 +4056,29 @@
           <div class="reader-note">${escapeHtml(officialLimitation || officialText)}</div>
           <div class="public-source-grid">
             ${items.map((source) => {
-              const title = publicInstitutionName(source.title || source.source_title || source.publisher || source.url || source.source_url || "출처 정보 확인 필요");
+              const trace = sourceTraceability(source, reliability);
               const url = source.url || source.source_url || "";
+              const title = publicInstitutionName(source.title || source.source_title || source.publisher || url || "출처 정보 확인 필요");
+              const org = publicInstitutionName(source.publisher || source.organization || sourceDomain(url) || "발행처 확인 필요");
+              const score = sourceSupportScore(source);
+              const reason = source.reliability_reason || source.match_reason || source.reason || trace.explanation || publicSourceReason(source, reliability);
+              const fetchWarning = isOfficialLikeSource(source) && (source.official_body_failure_reason || source.body_fetch_failure_reason || source.no_body_text || source.source_risk_flags?.includes?.("no_body_text"))
+                ? '<div class="public-source-warning">상세 원문 수집 제한: 공식 페이지 접근 또는 본문 추출에 실패했습니다.</div>'
+                : "";
               const titleHtml = url
                 ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(title)}</a>`
                 : escapeHtml(title);
               return `
                 <article class="public-source-card">
                   <div class="public-source-card-title">${titleHtml}</div>
-                  <div class="source-support-badge">${escapeHtml(publicSupportLabel(source))}</div>
+                  <div class="source-support-badge ${escapeHtml(trace.className)}">${escapeHtml(trace.label)}</div>
+                  <div class="public-source-meta">기관/도메인: ${escapeHtml(org)}</div>
                   <div class="public-source-meta">출처 유형: ${escapeHtml(publicSourceTypeLabel(source))}</div>
-                  <div class="public-source-meta">${escapeHtml(publicSourceReason(source, reliability))}</div>
+                  <div class="public-source-meta">근거 강도: ${escapeHtml(formatTechnicalLabel(source.evidence_strength || source.evidence_quality_label || source.supports_claim || "-"))}</div>
+                  <div class="public-source-meta">신뢰/관련 점수: ${escapeHtml(score)}</div>
+                  <div class="public-source-meta">링크: ${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">원문 보기</a>` : "URL 없음"}</div>
+                  <div class="public-source-meta">${escapeHtml(reason)}</div>
+                  ${fetchWarning}
                 </article>
               `;
             }).join("")}
@@ -4030,6 +4136,47 @@
       return bullets;
     }
 
+    function uniqueBullets(items, limit = 5) {
+      const seen = new Set();
+      return (Array.isArray(items) ? items : [])
+        .map((item) => sanitizeDisplayText(item))
+        .filter(Boolean)
+        .filter((item) => {
+          const key = item.replace(/\s+/g, " ").trim();
+          if (!key || seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .slice(0, limit);
+    }
+
+    function decisionReasonBullets(context, limit = 5) {
+      const base = alertReasonBullets(
+        context.level,
+        context.decision,
+        context.confidence,
+        context.impact,
+        context.quality,
+        context.sourceReliabilitySummary,
+        context.contradictionSummary,
+        context.debugSummary
+      );
+      const additions = [];
+      const officialText = officialVerificationExplanation(context.sourceReliabilitySummary, context.debugSummary);
+      if (context.level === "HIGH") {
+        additions.push("공식 근거와 기사 내용의 연결 강도가 높아 주요 위험 신호로 분류했습니다.");
+        additions.push("사람 검토가 필요한 항목은 최종 확정 전에 출처 원문과 반박 가능성을 확인해야 합니다.");
+      } else if (context.level === "WATCH") {
+        additions.push("직접 공식 근거 또는 본문 일치가 충분하지 않아 HIGH로 확정하지 않았습니다.");
+        additions.push("다음 단계는 관련 공식 상세문서와 후속 해명·정정 자료를 확인하는 것입니다.");
+      } else if (context.level === "LOW") {
+        additions.push("현재 확인된 근거만으로는 긴급한 정책 위험 신호가 크지 않습니다.");
+        additions.push("향후 공식 발표나 수치가 새로 확인되면 판단 단계가 달라질 수 있습니다.");
+      }
+      if (officialText) additions.push(officialText);
+      return uniqueBullets([...base, ...additions], limit);
+    }
+
     function renderBulletList(items) {
       const safeItems = (Array.isArray(items) ? items : []).filter(Boolean);
       return `<ul>${safeItems.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
@@ -4065,16 +4212,7 @@
     }
 
     function renderKeyTakeaways(context) {
-      const bullets = alertReasonBullets(
-        context.level,
-        context.decision,
-        context.confidence,
-        context.impact,
-        context.quality,
-        context.sourceReliabilitySummary,
-        context.contradictionSummary,
-        context.debugSummary
-      ).slice(0, 4);
+      const bullets = decisionReasonBullets(context, 4);
       return `
         <section class="takeaway-panel">
           <div class="takeaway-title">핵심 요약</div>
@@ -4122,16 +4260,7 @@
         <div class="plain-section-grid">
           <section class="plain-section">
             <h4>왜 ${escapeHtml(formatAlert(context.level))}인가</h4>
-            ${renderBulletList(alertReasonBullets(
-              context.level,
-              context.decision,
-              context.confidence,
-              context.impact,
-              context.quality,
-              context.sourceReliabilitySummary,
-              context.contradictionSummary,
-              context.debugSummary
-            ).slice(0, 3))}
+            ${renderBulletList(decisionReasonBullets(context, 3))}
           </section>
           <section class="plain-section">
             <h4>주요 정책 영향</h4>
@@ -4496,16 +4625,7 @@
             <div class="decision-summary">${escapeHtml(decision.decision_summary || "요약 정보가 없습니다.")}</div>
             <section class="plain-section">
               <h4>왜 이렇게 판단했나요?</h4>
-              ${renderBulletList(alertReasonBullets(
-                level,
-                decision,
-                confidence,
-                impact,
-                quality,
-                sourceReliabilitySummary,
-                contradictionSummary,
-                debugSummary
-              ).slice(0, 3))}
+              ${renderBulletList(decisionReasonBullets(userContext, 3))}
             </section>
             ${renderPublicSourceCards(result)}
             ${renderUserSummarySections(userContext)}
@@ -4870,10 +4990,12 @@
       const notes = items.slice(0, 3).map((source) => {
         const title = publicInstitutionName(source.title || source.source_title || source.publisher || source.url || source.source_url || "출처 정보 확인 필요");
         const type = publicSourceTypeLabel(source);
-        const support = publicSupportLabel(source);
-        const reason = publicSourceReason(source, reliability);
+        const trace = sourceTraceability(source, reliability);
+        const support = trace.label || publicSupportLabel(source);
+        const reason = source.reliability_reason || source.match_reason || trace.explanation || publicSourceReason(source, reliability);
+        const score = sourceSupportScore(source);
         const url = source.url || source.source_url || "";
-        return `${title} - ${type}, ${support}. ${reason}${url ? ` (${url})` : ""}`;
+        return `${title} - ${type}, ${support}, 점수 ${score}. ${reason}${url ? ` (${url})` : " (URL 없음)"}`;
       });
       if (officialLimitation) {
         notes.push(officialLimitation);
@@ -5167,19 +5289,10 @@
         exportLine(lines, `- 추천 다음 조치: ${reviewerModel.nextAction}`);
         lines.push("");
         exportLine(lines, "핵심 요약");
-        alertReasonBullets(
-          level,
-          decision,
-          confidence,
-          impact,
-          evidence.quality,
-          reliability,
-          contradiction,
-          debug
-        ).slice(0, 4).forEach((item) => exportLine(lines, `- ${item}`));
+        decisionReasonBullets(contextForReport, 4).forEach((item) => exportLine(lines, `- ${item}`));
         lines.push("");
         exportLine(lines, "왜 이렇게 판단했나요?");
-        exportLine(lines, `- 왜 ${formatAlert(level)}인가: ${alertReasonBullets(level, decision, confidence, impact, evidence.quality, reliability, contradiction, debug)[0]}`);
+        exportLine(lines, `- 왜 ${formatAlert(level)}인가: ${decisionReasonBullets(contextForReport, 1)[0] || "현재 수집된 근거 기준으로 판단했습니다."}`);
         exportLine(lines, `- 주요 정책 영향: ${policyImpactBullets(impact, decision).join(" / ")}`);
         exportLine(lines, `- 소비자 영향: ${consumerImpactBullets(impact).join(" / ")}`);
         exportLine(lines, `- 금융 시스템 영향: ${financialSystemBullets(impact).join(" / ")}`);
@@ -5342,6 +5455,27 @@
       }
     }
 
+    function downloadMarkdownReport() {
+      try {
+        const reportText = buildReportText();
+        const query = currentReportContext?.query || queryInput.value.trim() || "analysis";
+        const timestamp = formatTimestampForFilename(currentReportContext?.analyzedAt);
+        const filename = `policy-analysis-report-${safeFilenamePart(query)}-${timestamp}.md`;
+        const blob = new Blob([reportText], { type: "text/markdown;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        showStatus("Markdown 리포트 다운로드를 시작했습니다.", true);
+      } catch (error) {
+        showError(`Markdown 리포트 다운로드 실패: ${error.message}`);
+      }
+    }
+
     async function analyze() {
       const query = queryInput.value.trim();
       const maxNews = Number(maxNewsInput.value || 2);
@@ -5438,6 +5572,7 @@
     historyBtn.addEventListener("click", loadHistory);
     copyReportBtn.addEventListener("click", copyReport);
     downloadReportBtn.addEventListener("click", downloadReport);
+    downloadMarkdownBtn.addEventListener("click", downloadMarkdownReport);
     clearHistoryBtn.addEventListener("click", clearLocalHistory);
     reviewFilterEl.addEventListener("change", () => {
       renderReviewQueue(safeReadReviewQueue());
