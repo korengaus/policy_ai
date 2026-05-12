@@ -4789,7 +4789,9 @@
       const keywordScore = maxSourceNumber(sources, ["official_body_text_match_score", "official_body_match_score"]);
       return {
         finalJudgment: formatAlert(finalLevel),
-        draftVerdict: formatVerdict(verification.verdict_label),
+        draftVerdict: officialEvidenceInsufficientForExport(result)
+          ? "사람 검토 대기"
+          : formatVerdict(verification.verdict_label),
         needsReview: needsReview ? "사람 검토 필요" : "사람 검토 불필요",
         officialStatus,
         detailStatus,
@@ -5133,7 +5135,7 @@
               <div class="verification-intro">
                 <div class="summary-tile">
                   <span class="label">AI 초안 판정</span>
-                  <strong>${escapeHtml(formatVerdict(verification.verdict_label))}</strong>
+                  <strong>${escapeHtml(safeAiDraftVerdictForExport(result))}</strong>
                 </div>
                 <div class="summary-tile">
                   <span class="label">초안 신뢰도</span>
@@ -5305,7 +5307,7 @@
               <div class="verification-intro">
                 <div class="summary-tile">
                   <span class="label">AI 초안 판정</span>
-                  <strong>${escapeHtml(formatVerdict(verification.verdict_label))}</strong>
+                  <strong>${escapeHtml(safeAiDraftVerdictForExport(result))}</strong>
                 </div>
                 <div class="summary-tile">
                   <span class="label">초안 신뢰도</span>
@@ -5356,7 +5358,7 @@
                 </div>
                 <div class="verification-item">
                   <span class="label">AI 초안 판정</span><br>
-                  <strong>${escapeHtml(formatVerdict(verification.verdict_label))}</strong>
+                  <strong>${escapeHtml(safeAiDraftVerdictForExport(result))}</strong>
                 </div>
                 <div class="verification-item">
                   <span class="label">신뢰도</span><br>
@@ -5483,6 +5485,13 @@
 
     function publicSourceNotesForReport(result) {
       const { items, reliability, officialLimitation } = publicSourceCards(result);
+      if (officialEvidenceInsufficientForExport(result)) {
+        return [
+          "뉴스 원문은 분석 대상이지만, 공식 검증 근거로는 사용하지 않았습니다.",
+          "확인된 공식 후보는 배경 맥락 수준이며, 직접 근거로 사용하기 어렵습니다.",
+          publicExportOfficialLimitation(result),
+        ];
+      }
       if (!items.length) {
         return [officialLimitation || "표시할 수 있는 주요 출처 카드가 부족합니다."];
       }
@@ -5517,9 +5526,62 @@
         || "공식 자료 후보는 있었지만, 기사 핵심 주장과 직접 일치하지 않아 공개 근거에서는 제외했습니다.";
     }
 
+    function officialEvidenceInsufficientForExport(result) {
+      const verification = result?.verification_card || result || {};
+      const reliability = verification.source_reliability_summary || {};
+      const debug = verification.debug_summary || result?.debug_summary || {};
+      const state = buildOfficialEvidenceState(reliability, debug);
+      const directScore = numberValue(state.officialDirectMatchScore, 0);
+      const directCount = numberValue(debug.official_resolution_direct_matches, 0);
+      const contextCount = numberValue(debug.official_resolution_contextual_matches, 0);
+      const sources = [
+        ...(verification.source_candidates || result?.source_candidates || []),
+        ...(verification.evidence_sources || []),
+      ];
+      const semanticScore = sources.reduce((best, source) => Math.max(
+        best,
+        numberValue(source?.semantic_match_score, 0),
+        numberValue(source?.policy_alignment_score, 0),
+        numberValue(source?.official_evidence_score, 0),
+        numberValue(source?.official_final_direct_match_score, 0)
+      ), 0);
+      return ["body_unmatched", "candidate_only", "not_found"].includes(state.officialEvidenceStatus)
+        || directScore <= 0
+        || (directCount === 0 && contextCount === 0)
+        || semanticScore < 30;
+    }
+
+    function safeAiDraftVerdictForExport(result) {
+      if (officialEvidenceInsufficientForExport(result)) return "사람 검토 대기";
+      const verification = result?.verification_card || result || {};
+      const label = formatVerdict(verification.verdict_label);
+      if (/임시\s*검증\s*완료|검증\s*완료|공식\s*확인/i.test(label) && !hasDirectOfficialSupport(result)) {
+        return "사람 검토 대기";
+      }
+      return label || "사람 검토 대기";
+    }
+
+    function getSafeAiDraftEvidenceSummary(result) {
+      if (officialEvidenceInsufficientForExport(result)) {
+        return "공식 상세자료 후보는 확인했지만, 기사 핵심 주장과 직접 일치하는 공식 근거는 아직 충분하지 않습니다.";
+      }
+      return publicExportEvidenceSummary(result);
+    }
+
+    function getSafeAiDraftMissingContext(result) {
+      if (officialEvidenceInsufficientForExport(result)) {
+        const extra = hasContradictionConcern(result) ? " 같은 시점과 대상인지도 추가 확인이 필요합니다." : "";
+        return `더 직접적인 공식 보도자료나 정책 설명자료 확인이 필요합니다.${extra}`;
+      }
+      return publicExportMissingContext(result);
+    }
+
     function publicExportEvidenceSummary(result) {
       const verification = result?.verification_card || result || {};
       const summary = userFacingReportText(plain(verification.evidence_summary, ""), "");
+      if (officialEvidenceInsufficientForExport(result)) {
+        return "공식 상세자료 후보는 확인했지만, 기사 핵심 주장과 직접 일치하는 공식 근거는 아직 충분하지 않습니다.";
+      }
       if (!summary) {
         return publicExportOfficialLimitation(result);
       }
@@ -6028,10 +6090,10 @@
         exportLine(lines, "근거와 출처 요약");
         publicSourceNotesForReport(result).forEach((item) => lines.push(`- ${sanitizePublicExportText(item)}`));
         lines.push("");
-        lines.push(`AI 초안 판정: ${sanitizePublicExportText(formatVerdict(verification.verdict_label))}`);
+        lines.push(`AI 초안 판정: ${sanitizePublicExportText(safeAiDraftVerdictForExport(result))}`);
         lines.push(`핵심 주장: ${sanitizePublicExportText(plain(exportClaimText(result)))}`);
-        lines.push(`근거 요약: ${publicExportEvidenceSummary(result)}`);
-        lines.push(`부족한 맥락: ${publicExportMissingContext(result)}`);
+        lines.push(`근거 요약: ${getSafeAiDraftEvidenceSummary(result)}`);
+        lines.push(`부족한 맥락: ${getSafeAiDraftMissingContext(result)}`);
         exportLine(lines, `마지막 확인 시간: ${plain(verification.last_checked_at)}`);
         exportLine(lines, `근거 강도: ${formatEvidenceCounts(evidence.strength)}`);
         exportLine(lines, `근거 품질: ${formatEvidenceCounts(evidence.quality)}, 평균 ${plain(evidence.quality.average_evidence_quality_score, 0)}`);
@@ -6096,10 +6158,10 @@
         }
         lines.push(`evidence strength: ${formatEvidenceCounts(evidence.strength)}`);
         lines.push(`evidence quality: ${formatEvidenceCounts(evidence.quality)}, avg ${plain(evidence.quality.average_evidence_quality_score, 0)}`);
-        lines.push(`AI 초안 판정: ${formatVerdict(verification.verdict_label)}`);
+        lines.push(`AI 초안 판정: ${safeAiDraftVerdictForExport(result)}`);
         lines.push(`핵심 주장: ${sanitizePublicExportText(exportClaimText(result))}`);
-        lines.push(`근거 요약: ${publicExportEvidenceSummary(result)}`);
-        lines.push(`부족한 맥락: ${publicExportMissingContext(result)}`);
+        lines.push(`근거 요약: ${getSafeAiDraftEvidenceSummary(result)}`);
+        lines.push(`부족한 맥락: ${getSafeAiDraftMissingContext(result)}`);
         lines.push(`마지막 확인 시간: ${plain(verification.last_checked_at)}`);
         lines.push("");
       });
