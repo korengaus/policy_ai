@@ -6,7 +6,9 @@ from urllib.parse import urlparse
 OFFICIAL_AUTHORITY_DOMAINS = {
     "fsc.go.kr",
     "fss.or.kr",
+    "mof.go.kr",
     "molit.go.kr",
+    "moel.go.kr",
     "moef.go.kr",
     "bok.or.kr",
     "korea.kr",
@@ -22,6 +24,7 @@ OFFICIAL_AUTHORITY_DOMAINS = {
     "khug.or.kr",
     "lh.or.kr",
     "hfn.go.kr",
+    "re.or.kr",
     "nts.go.kr",
     "customs.go.kr",
     "kosis.kr",
@@ -39,6 +42,7 @@ PUBLIC_INSTITUTION_DOMAINS = {
     "khug.or.kr",
     "lh.or.kr",
     "hfn.go.kr",
+    "re.or.kr",
     "kosis.kr",
     "stat.go.kr",
 }

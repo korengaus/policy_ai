@@ -188,6 +188,18 @@ def _official_site_query(core_query: str, context_text: str) -> str:
     return f"site:go.kr {core_query}".strip()[:100]
 
 
+def _clean_title_query(article_title: str) -> str:
+    title = sanitize_text(article_title or "")
+    title = re.sub(r"\[[^\]]+\]|\([^)]+\)", " ", title)
+    title = re.sub(r"\s*[-|]\s*[^-|]{2,20}$", " ", title)
+    tokens = [
+        token
+        for token in re.findall(r"[\uac00-\ud7a3A-Za-z0-9][\uac00-\ud7a3A-Za-z0-9.%.-]{1,}", title)
+        if token not in STOPWORDS and not token.isdigit()
+    ]
+    return " ".join(tokens[:8])[:90]
+
+
 def _compact_contradiction_query(claim: dict) -> str:
     keywords = _keywords_from_claim(claim)
     numbers = _numbers_from_claim(claim)
@@ -229,12 +241,17 @@ def generate_source_queries(
                 compact_parts.append(term)
         compact_query = " ".join(compact_parts[:8]) or claim.get("claim_text") or original_query
         official_query = _official_site_query(compact_query, context_text)
+        title_query = _clean_title_query(article_title)
         contradiction_query = _compact_contradiction_query(claim)
 
         query_specs = [
             ("original_query", original_query, "news_context"),
             ("claim_keyword_query", compact_query, "support"),
             ("official_query", official_query, "primary_source"),
+            ("official_exact_title_query", _official_site_query(title_query, context_text), "primary_source"),
+            ("official_press_query", _official_site_query(f"{compact_query} 보도자료", context_text), "primary_source"),
+            ("official_explanation_material_query", _official_site_query(f"{compact_query} 설명자료 해명자료", context_text), "primary_source"),
+            ("official_notice_query", _official_site_query(f"{compact_query} 고시 공고", context_text), "primary_source"),
             ("official_title_query", _official_site_query(" ".join([original_query, article_title, *programs])[:90], context_text), "primary_source"),
             ("contradiction_query", contradiction_query, "contradiction"),
             ("denial_query", contradiction_query.replace("반박 정정", "해명 부인"), "fact_check"),

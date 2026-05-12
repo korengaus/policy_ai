@@ -416,19 +416,13 @@ def official_body_supports_claim(claim: dict, body_text: str) -> dict:
             classification = "strong_official_direct_support"
         else:
             classification = "medium_official_contextual_support"
-        reason = (
-            f"official body direct match: terms={len(material_terms)}, "
-            f"concepts={len(matched_concepts)}, numbers={len(matched_numbers)}"
-        )
+        reason = "기사 핵심 주장과 제목·수치가 직접 일치하는 공식 상세문서를 찾았습니다." if classification == "strong_official_direct_support" else "같은 기관의 관련 자료는 찾았지만, 기사 핵심 주장과 직접 일치하지는 않습니다."
     elif body_text:
         classification = "weak_official_candidate_only"
-        reason = (
-            "official body fetched but direct claim match is insufficient "
-            f"(terms={len(material_terms)}, concepts={len(matched_concepts)}, numbers={len(matched_numbers)})"
-        )
+        reason = "공식기관 후보는 있으나 제목/본문이 넓은 주제 수준에서만 겹칩니다."
     else:
         classification = "no_usable_official_detail"
-        reason = "official body text unavailable"
+        reason = "직접 확인 가능한 공식 상세문서는 찾지 못했습니다."
     return {
         "supports": supports,
         "match_score": score,

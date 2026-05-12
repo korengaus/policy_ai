@@ -669,6 +669,37 @@ def _title_phrase_terms(text: str, limit: int = 5) -> list[str]:
     return terms
 
 
+OFFICIAL_DOCUMENT_QUERY_TERMS = [
+    "보도자료",
+    "해명자료",
+    "설명자료",
+    "보도설명자료",
+    "정책브리핑",
+    "고시",
+    "공고",
+]
+
+
+def _claim_specific_query_terms(text: str, source: dict, limit: int = 6) -> list[str]:
+    terms = []
+    for item in [
+        *_pick_policy_terms(text, limit=limit),
+        *_numbers_for_query(text, limit=2),
+        *_target_terms(text, limit=2),
+    ]:
+        if item and item not in terms:
+            terms.append(item)
+        if len(terms) >= limit:
+            break
+    source_keywords = source.get("keywords") or []
+    for keyword in source_keywords:
+        if keyword in text and keyword not in terms:
+            terms.insert(0, keyword)
+        if len(terms) >= limit:
+            break
+    return terms[:limit]
+
+
 def _build_query_variants(source: dict, news_title: str, core_policy_issue: str, topic: str) -> list[str]:
     text = _normalize_text(news_title, core_policy_issue, topic)
     terms = _pick_policy_terms(text, limit=6)
@@ -696,6 +727,17 @@ def _build_query_variants(source: dict, news_title: str, core_policy_issue: str,
             variants.extend(["\uc8fc\ud0dd\ub2f4\ubcf4\ub300\ucd9c \uae08\ub9ac", "\uc911\uc18c\uae30\uc5c5 \uadfc\ub85c\uc790 \ub300\ucd9c", "i-ONE \uc8fc\ud0dd\ub2f4\ubcf4\ub300\ucd9c"])
 
     prefixes = OFFICIAL_QUERY_PREFIXES.get(source_name, [query_name] if query_name else [])
+    claim_terms = _claim_specific_query_terms(text, source, limit=6)
+    title_core = title_terms[:4]
+    for prefix in prefixes[:2]:
+        if title_core:
+            variants.append(_normalize_text(prefix, *title_core, "보도자료"))
+            variants.append(_normalize_text(prefix, *title_core, "설명자료"))
+        if claim_terms:
+            variants.append(_normalize_text(prefix, *claim_terms[:4], "보도자료"))
+            variants.append(_normalize_text(prefix, *claim_terms[:4], "정책브리핑"))
+            variants.append(_normalize_text(prefix, *claim_terms[:3], "공고"))
+
     if source_name == "Financial Services Commission" and "\uc0ac\ud68c\uc5f0\ub300" in text:
         variants.extend([
             _normalize_text("\uae08\uc735\uc704\uc6d0\ud68c", "\uc0ac\ud68c\uc5f0\ub300\uacbd\uc81c\uc870\uc9c1", *numbers, "\uacf5\uae09"),
@@ -739,6 +781,10 @@ def _build_query_variants(source: dict, news_title: str, core_policy_issue: str,
             _normalize_text(*primary_terms),
             _normalize_text(*short_terms),
             _normalize_text(query_name, *entity_terms),
+            *[
+                _normalize_text(query_name, *claim_terms[:3], doc_term)
+                for doc_term in OFFICIAL_DOCUMENT_QUERY_TERMS[:3]
+            ],
         ]
     )
 

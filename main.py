@@ -50,7 +50,7 @@ from text_utils import sanitize_data, sanitize_text
 REPORTS_DIR = Path("reports")
 ANALYSIS_CACHE_PATH = Path(".cache") / "analysis_result_cache.json"
 ANALYSIS_CACHE_TTL_SECONDS = 30 * 60
-ANALYSIS_CACHE_VERSION = "official_source_retrieval_v3"
+ANALYSIS_CACHE_VERSION = "official_source_retrieval_v4_claim_specific"
 
 
 if hasattr(sys.stdout, "reconfigure"):

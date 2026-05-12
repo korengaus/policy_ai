@@ -16,6 +16,7 @@ VERY_HIGH_DOMAINS = [
     "korea.kr",
     "mof.go.kr",
     "moef.go.kr",
+    "moel.go.kr",
     "mofa.go.kr",
     "molit.go.kr",
     "fsc.go.kr",
@@ -43,6 +44,7 @@ HIGH_DOMAINS = [
     "kosis.kr",
     "hrdkorea.or.kr",
     "re.kr",
+    "re.or.kr",
     "ac.kr",
     "or.kr",
 ]

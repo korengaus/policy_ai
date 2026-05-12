@@ -15,16 +15,29 @@ DETAIL_URL_SIGNALS = [
     "/announcement/",
     "/briefing/",
     "/report/",
+    "/reports/",
     "/board/",
     "/bbs/",
     "/notice/",
+    "/article/",
+    "/view/",
+    "/brd/",
+    "/file/",
     "/view",
     "view",
     "detail",
     "article",
     "press",
+    "pressrelease",
+    "press_release",
+    "briefing",
+    "announce",
+    "notice",
+    "document",
+    "download",
     "brd",
     "bbs",
+    ".pdf",
 ]
 
 WEAK_URL_SIGNALS = [
@@ -38,6 +51,12 @@ WEAK_URL_SIGNALS = [
     "login",
     "sitemap",
     "minwon",
+    "search.do",
+    "search.jsp",
+    "search?",
+    "srchtxt",
+    "keyword",
+    "query=",
 ]
 
 POLICY_KEYWORDS = [
@@ -239,12 +258,14 @@ def _sentence_match_score(claim: dict, sentence: str, source_title: str = "") ->
         policy_alignment_score = min(100, policy_alignment_score + 10)
 
     final_score = round(semantic_match_score * 0.45 + policy_alignment_score * 0.4 + min(100, len(material_terms) * 12) * 0.15)
-    reason = (
-        f"matched_terms={len(material_terms)}, "
-        f"policy_terms={len(policy_matches)}, "
-        f"numbers={len(matched_numbers)}, "
-        f"actions={len(action_matches)}"
-    )
+    if matched_numbers:
+        reason = "기사 핵심 주장과 공식 문서의 수치·정책 키워드가 함께 일치합니다."
+    elif len(policy_matches) >= 2 and len(material_terms) >= 3:
+        reason = "기사 핵심 주장과 공식 문서의 정책 키워드가 직접적으로 겹칩니다."
+    elif material_terms or policy_matches:
+        reason = "공식 문서와 기사 주제가 일부 겹치지만 직접 일치 여부는 추가 확인이 필요합니다."
+    else:
+        reason = "공식 문서와 기사 핵심 주장 사이의 직접 일치가 부족합니다."
     return {
         "sentence": sentence_text,
         "semantic_match_score": semantic_match_score,
@@ -270,6 +291,23 @@ def _classify_official_evidence(score: int, has_body: bool, url_status: str) -> 
     if score >= 30:
         return "weak_official_candidate_only"
     return "no_usable_official_detail"
+
+
+def _official_match_reason_ko(classification: str, score: int, best: dict, has_body: bool, url_status: str) -> str:
+    terms = len(best.get("matched_terms") or [])
+    numbers = len(best.get("matched_numbers") or [])
+    policy_terms = len(best.get("matched_policy_terms") or [])
+    if not has_body:
+        return "직접 확인 가능한 공식 상세문서는 찾지 못했습니다."
+    if url_status == "weak_or_search_page":
+        return "공식기관 후보는 있으나 제목/본문이 넓은 주제 수준에서만 겹칩니다."
+    if classification == "strong_official_direct_support":
+        return "기사 핵심 주장과 제목·수치가 직접 일치하는 공식 상세문서를 찾았습니다."
+    if classification == "medium_official_contextual_support":
+        return "같은 기관의 관련 자료는 찾았지만, 기사 핵심 주장과 직접 일치하지는 않습니다."
+    if score > 0 or terms or numbers or policy_terms:
+        return "공식기관 후보는 있으나 제목/본문이 넓은 주제 수준에서만 겹칩니다."
+    return "공식 도메인이지만 기사 주장과 다른 주제라 검증 근거에서 제외했습니다."
 
 
 def _resolve_source(source: dict, claims: list[dict]) -> dict:
@@ -301,6 +339,7 @@ def _resolve_source(source: dict, claims: list[dict]) -> dict:
         bool(body_text and len(body_text) >= 300),
         url_resolution["official_url_resolution_status"],
     )
+    has_body = bool(body_text and len(body_text) >= 300)
     body_status = "body_fetched" if body_text and len(body_text) >= 300 else "body_missing_or_short"
     if not url:
         body_status = "detail_url_missing"
@@ -328,11 +367,12 @@ def _resolve_source(source: dict, claims: list[dict]) -> dict:
                 }
                 for match in sorted(all_matches, key=lambda match: -match["official_evidence_score"])[:3]
             ],
-            "official_resolution_reason": best.get("reason")
-            or (
-                "official body missing or too short"
-                if not body_text
-                else "official body fetched but semantic match is weak"
+            "official_resolution_reason": _official_match_reason_ko(
+                classification,
+                score,
+                best,
+                has_body,
+                url_resolution["official_url_resolution_status"],
             ),
         }
     )
