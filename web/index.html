@@ -1927,6 +1927,55 @@
       return repairMojibake(value).replaceAll("\uFFFD", "").trim();
     }
 
+    const ARTICLE_NOISE_PATTERNS = [
+      /이동\s*통신망에서\s*음성\s*재생\s*시\s*데이터\s*요금이\s*발생할\s*수\s*있습니다/gi,
+      /음성\s*재생\s*시\s*데이터\s*요금/gi,
+      /동영상\s*뉴스|영상으로\s*보기|사진\s*=|무단\s*전재|재배포\s*금지|저작권자/gi,
+      /기사제보|카카오톡|네이버에서|구독|좋아요|댓글|공유|이\s*시각\s*추천뉴스|많이\s*본\s*뉴스|관련\s*뉴스|광고|\bAD\b/gi,
+      /본문\s*내용과\s*무관한\s*사이트\s*안내문/gi,
+    ];
+    const ARTICLE_NOISE_SENTENCE_PATTERNS = [
+      /이동\s*통신망|음성\s*재생|데이터\s*요금|동영상\s*뉴스|영상으로\s*보기/i,
+      /무단\s*전재|재배포\s*금지|저작권자|기사제보|카카오톡|구독|좋아요|댓글|공유/i,
+      /이\s*시각\s*추천뉴스|많이\s*본\s*뉴스|관련\s*뉴스|광고|\bAD\b|네이버에서/i,
+      /^(입력|수정)\s*\d{4}[.\-년]/,
+      /^[가-힣]{2,4}\s*기자$/,
+    ];
+    const POLICY_SIGNAL_PATTERN = /정부|국토부|금융위|공정위|경찰|검찰|법원|지자체|전세\s*사기|전세사기|사기|임대업자|대출|보증|피해자|지원|정책|법안|규제|단속|수사|기소|판결|징역|과징금|보조금|예산|금리|부동산|임대|임차|청년|금융|은행|세금|국세청|\d+(억|조|만|명|건|%|년|월|일)/;
+
+    function splitArticleSentences(text) {
+      return sanitizeDisplayText(text || "")
+        .replace(/\s+/g, " ")
+        .split(/(?<=[.!?。]|다\.|요\.|니다\.|했다\.|밝혔다\.|나섰다\.|된다\.)\s+|[\n\r]+/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+
+    function isArticleBoilerplateSentence(sentence) {
+      const text = sanitizeDisplayText(sentence || "");
+      if (!text || text.length < 8) return true;
+      if (ARTICLE_NOISE_SENTENCE_PATTERNS.some((pattern) => pattern.test(text))) return true;
+      if (!POLICY_SIGNAL_PATTERN.test(text) && text.length < 24) return true;
+      return false;
+    }
+
+    function cleanArticleTextForPolicyAnalysis(text) {
+      let cleaned = sanitizeDisplayText(text || "");
+      ARTICLE_NOISE_PATTERNS.forEach((pattern) => {
+        cleaned = cleaned.replace(pattern, " ");
+      });
+      const seen = new Set();
+      const sentences = splitArticleSentences(cleaned)
+        .filter((sentence) => !isArticleBoilerplateSentence(sentence))
+        .filter((sentence) => {
+          const key = sentence.replace(/\s+/g, " ").trim();
+          if (!key || seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      return sentences.join(" ").replace(/\s+/g, " ").trim();
+    }
+
     function publicInstitutionName(value) {
       let text = sanitizeDisplayText(value || "");
       if (!text) return text;
@@ -2115,7 +2164,7 @@
     }
 
     function formatDiagnosticText(value) {
-      let text = sanitizeDisplayText(value ?? "");
+      let text = cleanArticleTextForPolicyAnalysis(value ?? "") || sanitizeDisplayText(value ?? "");
       if (!text || text === "-" || text === "null" || text === "undefined") return "-";
       const replacements = {
         official_search_url_candidate: "공식 검색 후보",
@@ -2242,7 +2291,9 @@
     }
 
     function renderClaimList(claims) {
-      const list = Array.isArray(claims) ? claims.filter(Boolean) : [];
+      const list = (Array.isArray(claims) ? claims : [])
+        .map((claim) => cleanArticleTextForPolicyAnalysis(claim) || "")
+        .filter(Boolean);
       if (!list.length) {
         return '<div class="evidence-source-meta">표시할 핵심 주장 목록이 없습니다.</div>';
       }
@@ -2295,7 +2346,7 @@
 
       return `<div class="normalized-claims">${list.map((claim) => `
         <div class="normalized-claim">
-          <div class="normalized-claim-text">${escapeHtml(claim.claim_text || "-")}</div>
+          <div class="normalized-claim-text">${escapeHtml(cleanArticleTextForPolicyAnalysis(claim.claim_text) || "정책 주장 확인 필요")}</div>
           <div class="normalized-grid">
             <div><span class="label">주체</span><br>${escapeHtml(claim.actor || "-")}</div>
             <div><span class="label">행동</span><br>${escapeHtml(claim.action || "-")}</div>
@@ -2518,7 +2569,7 @@
         const conflicts = Array.isArray(check.conflicting_evidence) ? check.conflicting_evidence : [];
         return `
           <div class="evidence-snippet">
-            <div class="normalized-claim-text">claim #${index + 1}: ${escapeHtml(claim || check.claim_text || "-")}</div>
+            <div class="normalized-claim-text">claim #${index + 1}: ${escapeHtml(cleanArticleTextForPolicyAnalysis(claim || check.claim_text) || "정책 주장 확인 필요")}</div>
             <div class="evidence-snippet-grid">
               <div><span class="label">검사 상태</span><br>${escapeHtml(formatContradictionStatus(check.contradiction_status))}</div>
               <div><span class="label">모순 점수</span><br>${escapeHtml(check.contradiction_score ?? "-")}</div>
@@ -2604,7 +2655,7 @@
         const analysis = analyses.find((item) => Number(item.claim_index) === index) || {};
         return `
           <div class="evidence-snippet">
-            <div class="normalized-claim-text">claim #${index + 1}: ${escapeHtml(claim || analysis.claim_text || "-")}</div>
+            <div class="normalized-claim-text">claim #${index + 1}: ${escapeHtml(cleanArticleTextForPolicyAnalysis(claim || analysis.claim_text) || "정책 주장 확인 필요")}</div>
             <div class="evidence-snippet-grid">
               <div><span class="label">프레이밍 수준</span><br>${escapeHtml(formatFramingLevel(analysis.framing_level))}</div>
               <div><span class="label">프레이밍 점수</span><br>${escapeHtml(analysis.framing_score ?? "-")}</div>
@@ -3060,7 +3111,7 @@
       const decision = result?.final_decision || {};
       const debug = verification.debug_summary || result?.debug_summary || {};
       const quality = debug.evidence_quality_summary || verification.evidence_quality_summary || result?.evidence_quality_summary || {};
-      const line = decision.decision_summary || verification.evidence_summary || verification.claim_text || "";
+      const line = cleanArticleTextForPolicyAnalysis(decision.decision_summary || verification.evidence_summary || verification.claim_text || "");
       if (line) return String(line).slice(0, 115);
       return evidenceQualityExplanation(quality, debug.evidence_strength_summary || {});
     }
@@ -4439,7 +4490,7 @@
     function uniqueBullets(items, limit = 5) {
       const seen = new Set();
       return (Array.isArray(items) ? items : [])
-        .map((item) => sanitizeDisplayText(item))
+        .map((item) => cleanArticleTextForPolicyAnalysis(item) || sanitizeDisplayText(item))
         .filter(Boolean)
         .filter((item) => {
           const key = item.replace(/\s+/g, " ").trim();
@@ -4901,7 +4952,7 @@
           ),
           renderCollapsibleSection(
             "근거 요약과 부족한 맥락",
-            `${renderEvidenceExtractionSummary(evidenceExtractionSummary)}${renderEvidenceSources(verification.evidence_sources)}<div class="evidence-source-meta">${escapeHtml(verification.evidence_summary || "-")}</div><div class="evidence-source-meta"><strong>부족한 맥락:</strong> ${escapeHtml(formatList(verification.missing_context))}</div><div class="evidence-source-meta">마지막 확인: ${escapeHtml(verification.last_checked_at || "-")}</div>`,
+            `${renderEvidenceExtractionSummary(evidenceExtractionSummary)}${renderEvidenceSources(verification.evidence_sources)}<div class="evidence-source-meta">${escapeHtml(cleanArticleTextForPolicyAnalysis(verification.evidence_summary) || "-")}</div><div class="evidence-source-meta"><strong>부족한 맥락:</strong> ${escapeHtml(cleanArticleTextForPolicyAnalysis(formatList(verification.missing_context)) || "-")}</div><div class="evidence-source-meta">마지막 확인: ${escapeHtml(verification.last_checked_at || "-")}</div>`,
             false,
             "현재 리포트가 어떤 근거에 기대고 있으며, 추가 확인이 필요한 부분은 무엇인지 정리합니다."
           ),
@@ -5019,7 +5070,7 @@
               </div>
               <div class="verification-item full">
                 <span class="label">핵심 주장</span><br>
-                ${escapeHtml(verification.claim_text || "-")}
+                ${escapeHtml(cleanArticleTextForPolicyAnalysis(verification.claim_text) || "선택한 기사에서 확인된 핵심 정책 주장만 표시할 수 있습니다.")}
               </div>
               ${renderReviewerDecisionDashboard(result, userContext)}
               ${renderReviewerActionCard(result, userContext)}
@@ -5121,11 +5172,11 @@
           ),
           renderCollapsibleSection(
             "근거 요약",
-            `${renderEvidenceExtractionSummary(evidenceExtractionSummary)}${renderEvidenceSources(verification.evidence_sources)}<div class="evidence-source-meta">${escapeHtml(verification.evidence_summary || "-")}</div>`
+            `${renderEvidenceExtractionSummary(evidenceExtractionSummary)}${renderEvidenceSources(verification.evidence_sources)}<div class="evidence-source-meta">${escapeHtml(cleanArticleTextForPolicyAnalysis(verification.evidence_summary) || "-")}</div>`
           ),
           renderCollapsibleSection(
             "부족한 맥락",
-            `<div>${escapeHtml(formatList(verification.missing_context))}</div><div class="evidence-source-meta">마지막 확인 시간: ${escapeHtml(verification.last_checked_at || "-")}</div>`
+            `<div>${escapeHtml(cleanArticleTextForPolicyAnalysis(formatList(verification.missing_context)) || "-")}</div><div class="evidence-source-meta">마지막 확인 시간: ${escapeHtml(verification.last_checked_at || "-")}</div>`
           ),
         ].join("");
 
@@ -5393,7 +5444,7 @@
 
     function publicExportEvidenceSummary(result) {
       const verification = result?.verification_card || result || {};
-      const summary = plain(verification.evidence_summary, "");
+      const summary = cleanArticleTextForPolicyAnalysis(plain(verification.evidence_summary, ""));
       if (!summary) {
         return publicExportOfficialLimitation(result);
       }
@@ -5405,7 +5456,7 @@
 
     function publicExportMissingContext(result) {
       const verification = result?.verification_card || result || {};
-      const context = plain(formatList(verification.missing_context), "");
+      const context = cleanArticleTextForPolicyAnalysis(plain(formatList(verification.missing_context), ""));
       if (!context || context === "-") {
         return "추가 확인이 필요한 맥락은 현재 공개 리포트에 구체적으로 표시되지 않았습니다.";
       }
@@ -5426,7 +5477,7 @@
     }
 
     function sanitizePublicExportText(value) {
-      let text = sanitizeDisplayText(value || "");
+      let text = cleanArticleTextForPolicyAnalysis(value || "") || sanitizeDisplayText(value || "");
       const replacements = {
         official_topic_mismatch: "공식 자료 주제 불일치",
         official_detail_missing: "공식 상세 자료 부족",
@@ -5528,7 +5579,7 @@
     }
 
     function keywordSetForClaimAlignment(text) {
-      const normalized = sanitizeDisplayText(text || "").toLowerCase();
+      const normalized = cleanArticleTextForPolicyAnalysis(text || "").toLowerCase();
       const matches = normalized.match(/[가-힣a-z0-9]{2,}/g) || [];
       const stopwords = new Set([
         "있다", "했다", "한다", "대한", "관련", "기준", "통해", "위해",
@@ -5560,7 +5611,7 @@
         verification.claim_text,
         Array.isArray(verification.claims) ? verification.claims[0] : "",
         Array.isArray(result?.claims) ? result.claims[0] : "",
-      ].filter(Boolean);
+      ].map((item) => cleanArticleTextForPolicyAnalysis(item)).filter(Boolean);
       const safeFallback = "선택한 기사에서 확인된 핵심 정책 주장만 표시할 수 있습니다.";
       const claim = candidates.find((item) => claimLooksAlignedWithResult(result, item));
       return claim || safeFallback;
