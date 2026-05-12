@@ -369,6 +369,82 @@
       font-size: 17px;
     }
 
+    .reviewer-action-card {
+      border: 1px solid #fed7aa;
+      border-radius: 12px;
+      background: #fff7ed;
+      margin: 16px 0;
+      padding: 15px;
+    }
+
+    .reviewer-action-card h3 {
+      margin: 0 0 6px;
+      color: #9a3412;
+      font-size: 17px;
+    }
+
+    .reviewer-action-controls {
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .reviewer-action-card select,
+    .reviewer-action-card textarea {
+      width: 100%;
+      border: 1px solid #fdba74;
+      border-radius: 8px;
+      padding: 9px 10px;
+      color: #0f172a;
+      font: inherit;
+      background: #fff;
+      box-sizing: border-box;
+    }
+
+    .reviewer-action-card textarea {
+      min-height: 88px;
+      resize: vertical;
+    }
+
+    .reviewer-action-buttons {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+
+    .reviewer-action-buttons button {
+      min-height: 34px;
+      border: 0;
+      border-radius: 8px;
+      padding: 8px 12px;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 900;
+      cursor: pointer;
+    }
+
+    .review-save-button {
+      background: #ea580c;
+    }
+
+    .review-clear-button {
+      background: #64748b;
+    }
+
+    .review-status-badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      background: #ffedd5;
+      color: #9a3412;
+      padding: 4px 9px;
+      font-size: 12px;
+      font-weight: 900;
+      margin-left: 6px;
+    }
+
     .verification-summary-card {
       border: 1px solid #bfdbfe;
       border-radius: 12px;
@@ -1512,6 +1588,7 @@
       .result-summary-grid,
       .verification-summary-grid,
       .reviewer-dashboard-grid,
+      .reviewer-action-controls,
       .plain-section-grid,
       .reading-guide-grid,
       .verification-intro,
@@ -1724,6 +1801,7 @@
     const API_BASE = window.location.origin;
     const LOCAL_HISTORY_KEY = "policy_ai_recent_analysis";
     const REVIEW_QUEUE_KEY = "policy_ai_review_queue";
+    const REVIEW_ACTION_KEY = "policy_ai_reviewer_actions";
     const LOCAL_HISTORY_LIMIT = 5;
 
     const queryInput = document.getElementById("query");
@@ -1784,6 +1862,13 @@
       negative: "부정",
       mixed: "혼합",
       uncertain: "불확실",
+    };
+    const REVIEW_ACTION_LABELS = {
+      unreviewed: "미검토",
+      needs_official_check: "공식 확인 필요",
+      verified_watch: "관찰로 확인",
+      escalated: "상위 검토로 올림",
+      dismissed: "제외/종료",
     };
     const RECOMMENDATION_LABELS = {
       "Monitor official FSC/FSS follow-up before treating as confirmed policy.": "공식 금융당국 후속 발표를 확인하기 전까지 확정 정책으로 보지 말고 관찰하세요.",
@@ -3201,6 +3286,71 @@
       return "review-pending";
     }
 
+    function reviewerActionStatusLabel(status) {
+      return REVIEW_ACTION_LABELS[status] || REVIEW_ACTION_LABELS.unreviewed;
+    }
+
+    function safeReadReviewerActions() {
+      try {
+        const raw = localStorage.getItem(REVIEW_ACTION_KEY);
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+      } catch (error) {
+        localStorage.removeItem(REVIEW_ACTION_KEY);
+        return {};
+      }
+    }
+
+    function safeWriteReviewerActions(actions) {
+      try {
+        localStorage.setItem(REVIEW_ACTION_KEY, JSON.stringify(actions || {}));
+      } catch (error) {
+        console.warn("Failed to save reviewer actions", error);
+      }
+    }
+
+    function reviewActionKeyForResult(result, query = "") {
+      return buildStableHistoryKey(query || currentReportContext?.query || queryInput?.value || "", [result]);
+    }
+
+    function getReviewerAction(result, query = "") {
+      const key = reviewActionKeyForResult(result, query);
+      const saved = safeReadReviewerActions()[key] || {};
+      return {
+        key,
+        review_status: saved.review_status || "unreviewed",
+        reviewer_note: saved.reviewer_note || "",
+        reviewed_at: saved.reviewed_at || "",
+      };
+    }
+
+    function formatReviewerSavedAt(value) {
+      if (!value) return "없음";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "없음";
+      const pad = (num) => String(num).padStart(2, "0");
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    }
+
+    function saveReviewerActionForKey(key, status, note) {
+      if (!key) return;
+      const actions = safeReadReviewerActions();
+      actions[key] = {
+        review_status: status || "unreviewed",
+        reviewer_note: note || "",
+        reviewed_at: new Date().toISOString(),
+      };
+      safeWriteReviewerActions(actions);
+    }
+
+    function clearReviewerActionForKey(key) {
+      if (!key) return;
+      const actions = safeReadReviewerActions();
+      delete actions[key];
+      safeWriteReviewerActions(actions);
+    }
+
     function requiresHumanReview(results) {
       return (results || []).some((result) => {
         const verification = result?.verification_card || result || {};
@@ -4570,6 +4720,40 @@
       `;
     }
 
+    function renderReviewerActionCard(result, context = {}) {
+      const query = currentReportContext?.query || queryInput?.value || "";
+      const action = getReviewerAction(result, query);
+      const options = Object.entries(REVIEW_ACTION_LABELS).map(([value, label]) => `
+        <option value="${escapeHtml(value)}" ${action.review_status === value ? "selected" : ""}>${escapeHtml(label)}</option>
+      `).join("");
+      return `
+        <section class="reviewer-action-card" data-review-action-key="${escapeHtml(action.key)}">
+          <h3>검토자 액션</h3>
+          <div class="reader-note">
+            현재 검토 상태
+            <span class="review-status-badge">${escapeHtml(reviewerActionStatusLabel(action.review_status))}</span>
+            <br>마지막 저장: <span data-review-saved-at>${escapeHtml(formatReviewerSavedAt(action.reviewed_at))}</span>
+          </div>
+          <div class="reviewer-action-controls">
+            <label>
+              <span class="label">검토 상태</span>
+              <select data-review-status>
+                ${options}
+              </select>
+            </label>
+            <label>
+              <span class="label">검토 메모</span>
+              <textarea data-review-note placeholder="검토자가 확인한 공식 링크, 판단 사유, 후속 확인 사항을 적어주세요.">${escapeHtml(action.reviewer_note)}</textarea>
+            </label>
+          </div>
+          <div class="reviewer-action-buttons">
+            <button class="review-save-button" type="button" data-save-review-action="${escapeHtml(action.key)}">검토 저장</button>
+            <button class="review-clear-button" type="button" data-clear-review-action="${escapeHtml(action.key)}">검토 초기화</button>
+          </div>
+        </section>
+      `;
+    }
+
     function officialSummaryTone(officialState) {
       const status = officialState?.officialEvidenceStatus || "not_found";
       if (status === "direct_support") return "positive";
@@ -4584,6 +4768,7 @@
     function renderVerificationSummaryCard(result, context = {}) {
       const model = buildReviewerDashboardModel(result, context);
       const officialState = model.officialEvidenceState || buildOfficialEvidenceState();
+      const reviewerAction = getReviewerAction(result, currentReportContext?.query || queryInput?.value || "");
       const finalTone = String(model.finalJudgment || "").includes("높음")
         ? "warning"
         : String(model.finalJudgment || "").includes("관찰")
@@ -4597,6 +4782,7 @@
         ["의미 매칭 상태", model.semanticStatus, String(model.semanticStatus || "").includes("부족") ? "warning" : "neutral"],
         ["반박/모순 상태", model.contradictionStatus, String(model.contradictionStatus || "").includes("가능") ? "warning" : "neutral"],
         ["사람 검토", model.needsReview, reviewSummaryTone(model.needsReview)],
+        ["검토 상태", reviewerActionStatusLabel(reviewerAction.review_status), reviewSummaryTone(reviewerAction.review_status === "unreviewed" ? "필요" : "")],
         ["추천 다음 조치", model.nextAction, "neutral"],
       ];
       return `
@@ -4836,6 +5022,7 @@
                 ${escapeHtml(verification.claim_text || "-")}
               </div>
               ${renderReviewerDecisionDashboard(result, userContext)}
+              ${renderReviewerActionCard(result, userContext)}
               <div class="news-section-title">상세 검증 정보</div>
               <div class="reader-note">더 자세한 주장별 근거, 반박 가능성, 표현 방식 점검은 아래 고급 정보에서 펼쳐볼 수 있습니다.</div>
               ${advancedVerificationDetails}
@@ -5101,6 +5288,7 @@
         const selected = row.id && row.id === currentHistoryId;
         const topResult = getHistoryResults(row)[0] || {};
         const topic = exportTopicLabel(topResult, row.query || "");
+        const reviewerAction = getReviewerAction(topResult, row.query || "");
         return `
         <div class="history-row ${selected ? "selected" : ""}" data-history-id="${escapeHtml(row.id || "")}">
           <div class="history-id">#${escapeHtml(index + 1)}</div>
@@ -5121,6 +5309,8 @@
               강함 ${escapeHtml(quality.strong ?? 0)}, 보통 ${escapeHtml(quality.medium ?? 0)}, 약함 ${escapeHtml(quality.weak ?? 0)}, 평균 ${escapeHtml(quality.average_evidence_quality_score ?? 0)}
               <br>
               <span class="label">분석 시간:</span> ${escapeHtml(analyzedAt)}
+              <br>
+              <span class="review-status-badge">검토: ${escapeHtml(reviewerActionStatusLabel(reviewerAction.review_status))}</span>
             </div>
           </div>
           <div class="history-actions">
@@ -5448,6 +5638,7 @@
           debugSummary: debug,
         };
         const reviewerModel = buildReviewerDashboardModel(result, contextForReport);
+        const reviewerAction = getReviewerAction(result, context.query || "");
 
         lines.push(`[${index + 1}] ${sanitizePublicExportText(plain(result.title, "제목 없음"))}`);
         lines.push("-".repeat(32));
@@ -5483,6 +5674,11 @@
         exportLine(lines, `- 반박/모순 상태: ${reviewerModel.contradictionStatus}`);
         exportLine(lines, `- 현재 가장 큰 불확실성: ${reviewerModel.uncertainty}`);
         exportLine(lines, `- 추천 다음 조치: ${reviewerModel.nextAction}`);
+        lines.push("");
+        exportLine(lines, "[검토자 액션]");
+        exportLine(lines, `- 검토 상태: ${reviewerActionStatusLabel(reviewerAction.review_status)}`);
+        exportLine(lines, `- 검토 메모: ${sanitizePublicExportText(reviewerAction.reviewer_note || "없음")}`);
+        exportLine(lines, `- 마지막 저장: ${formatReviewerSavedAt(reviewerAction.reviewed_at)}`);
         lines.push("");
         exportLine(lines, "핵심 요약");
         decisionReasonBullets(contextForReport, 4).forEach((item) => exportLine(lines, `- ${item}`));
@@ -5770,6 +5966,29 @@
     downloadReportBtn.addEventListener("click", downloadReport);
     downloadMarkdownBtn.addEventListener("click", downloadMarkdownReport);
     clearHistoryBtn.addEventListener("click", clearLocalHistory);
+    resultsEl.addEventListener("click", (event) => {
+      const saveButton = event.target.closest("[data-save-review-action]");
+      const clearButton = event.target.closest("[data-clear-review-action]");
+      if (!saveButton && !clearButton) return;
+      const card = event.target.closest(".reviewer-action-card");
+      const key = (saveButton || clearButton).dataset.saveReviewAction
+        || (saveButton || clearButton).dataset.clearReviewAction
+        || card?.dataset.reviewActionKey;
+      if (!key) return;
+      if (clearButton) {
+        clearReviewerActionForKey(key);
+        showStatus("검토 액션을 초기화했습니다.", true);
+      } else {
+        const status = card?.querySelector("[data-review-status]")?.value || "unreviewed";
+        const note = card?.querySelector("[data-review-note]")?.value || "";
+        saveReviewerActionForKey(key, status, note);
+        showStatus("검토 액션을 저장했습니다.", true);
+      }
+      if (Array.isArray(currentReportContext?.results)) {
+        renderResults(currentReportContext.results, selectedResultIndex);
+      }
+      renderHistory(safeReadLocalHistory());
+    });
     reviewFilterEl.addEventListener("change", () => {
       renderReviewQueue(safeReadReviewQueue());
     });
