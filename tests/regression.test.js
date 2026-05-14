@@ -101,7 +101,7 @@ function createSandbox() {
   return sandbox;
 }
 
-function weakOfficialFixture({ query, title, topic, contradictionStatus }) {
+function weakOfficialFixture({ query, title, topic, contradictionStatus, bodyFetched = false }) {
   return {
     query,
     maxNews: 1,
@@ -140,6 +140,8 @@ function weakOfficialFixture({ query, title, topic, contradictionStatus }) {
             official_evidence_status: "candidate_only",
             official_detail_status: "weak_candidate_only",
             official_direct_match_score: 0,
+            official_body_fetched: bodyFetched,
+            official_body_length: bodyFetched ? 1200 : 0,
             top_source_title: "공식 상세 근거 부족",
             official_mismatch: false,
           },
@@ -147,6 +149,9 @@ function weakOfficialFixture({ query, title, topic, contradictionStatus }) {
             official_resolution_direct_matches: 0,
             official_resolution_contextual_matches: 0,
             official_resolution_weak_candidates: 0,
+            official_bodies_fetched: bodyFetched ? 1 : 0,
+            official_bodies_usable: bodyFetched ? 1 : 0,
+            official_body_failures: bodyFetched ? { official_body_fetched_unmatched: 1 } : { official_detail_missing: 1 },
             evidence_strength_summary: { strong: 0, medium: 0, weak: 2 },
             evidence_quality_summary: {
               strong: 0,
@@ -291,6 +296,7 @@ const fixtures = [
   },
   {
     kind: "weak",
+    state: "candidate_only",
     data: weakOfficialFixture({
       query: "금융위",
       title: "금융위 ELS 관련 제도 점검 보도",
@@ -300,11 +306,13 @@ const fixtures = [
   },
   {
     kind: "weak",
+    state: "body_unmatched",
     data: weakOfficialFixture({
       query: "전세사기",
       title: "전세사기 피해 지원 관련 보도",
       topic: "전세사기",
       contradictionStatus: "반박 여부를 판단할 독립 근거가 부족해 공식 확인이 필요합니다.",
+      bodyFetched: true,
     }),
   },
 ];
@@ -385,9 +393,23 @@ for (const fixtureCase of fixtures) {
       );
       assert.ok(output.includes("AI 초안 판정: 사람 검토 대기"), `${fixture.query}: AI draft should wait for human review`);
       assert.ok(!output.includes("공식 직접 확인됨"), `${fixture.query}: weak evidence should not claim direct official confirmation`);
+      if (fixtureCase.state === "candidate_only") {
+        assert.ok(
+          output.includes("공식 후보만 있음") || output.includes("공식기관 후보는 있으나 상세 본문 미확인"),
+          `${fixture.query}: candidate-only status should be explicit`
+        );
+        assert.ok(!output.includes("공식 상세문서 본문 확인, 직접 일치 부족"), `${fixture.query}: candidate-only should not claim body was checked`);
+      }
+      if (fixtureCase.state === "body_unmatched") {
+        assert.ok(output.includes("공식 상세문서 본문 확인, 직접 일치 부족"), `${fixture.query}: body-unmatched status should be explicit`);
+        assert.ok(!output.includes("상세 공식문서 미확인"), `${fixture.query}: body-unmatched should not say detail document is unconfirmed`);
+        assert.ok(!output.includes("확인 가능한 공식 상세문서 부족"), `${fixture.query}: body-unmatched should not say official detail is missing`);
+      }
     } else {
       assert.ok(output.includes("공식 상세문서가 핵심 주장을 직접 뒷받침"), `${fixture.query}: strong official evidence should be visible`);
       assert.ok(output.includes("공식 직접 매칭 점수: 78"), `${fixture.query}: strong direct match score should be exported`);
+      assert.ok(!output.includes("공식 후보만 있음"), `${fixture.query}: strong evidence should not show candidate-only status`);
+      assert.ok(!output.includes("공식기관 후보는 있으나 상세 본문 미확인"), `${fixture.query}: strong evidence should not show missing-body status`);
     }
     assert.ok(!/\bundefined\b|\bnull\b|\[object Object\]/.test(output), `${fixture.query}: broken placeholder leaked`);
   }
