@@ -1,0 +1,6 @@
+{
+  "scripts": {
+    "test": "node tests/regression.test.js",
+    "test:regression": "node tests/regression.test.js"
+  }
+}

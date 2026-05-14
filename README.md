@@ -118,6 +118,22 @@ curl "http://127.0.0.1:8000/history/1"
 
 먼저 API 서버를 실행하세요.
 
+## 회귀 테스트
+
+프론트엔드 리포트 생성과 검토자 대시보드 문구가 깨지지 않도록 네트워크를 사용하지 않는 fixture 기반 smoke test를 제공합니다.
+
+```bash
+npm test
+```
+
+`npm`이 없는 환경에서는 아래처럼 직접 실행할 수 있습니다.
+
+```bash
+node tests/regression.test.js
+```
+
+테스트는 `web/index.html`의 실제 리포트 생성 함수를 Node VM에서 로드해 실행하며, 외부 뉴스 검색/API에 의존하지 않습니다. 공식 근거가 약한 금융위/전세사기 fixture에서 TXT/Markdown export 주요 섹션이 유지되는지, 그리고 과도하게 확정적인 공식근거 문구가 새지 않는지 확인합니다.
+
 ```bash
 python -m uvicorn api_server:app --reload
 ```
