@@ -132,7 +132,11 @@ npm test
 node tests/regression.test.js
 ```
 
+Windows PowerShell에서 `npm.ps1` 실행 정책 오류가 나면 `npm.cmd test`를 사용하세요.
+
 테스트는 `web/index.html`의 실제 리포트 생성 함수를 Node VM에서 로드해 실행하며, 외부 뉴스 검색/API에 의존하지 않습니다. 공식 근거가 약한 금융위/전세사기 fixture에서 TXT/Markdown export 주요 섹션이 유지되는지, 그리고 과도하게 확정적인 공식근거 문구가 새지 않는지 확인합니다.
+
+수동 QA와 Render 캡처 기준은 [TESTING.md](TESTING.md)를 참고하세요.
 
 ```bash
 python -m uvicorn api_server:app --reload
