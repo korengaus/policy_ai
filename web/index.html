@@ -761,6 +761,32 @@
       white-space: nowrap;
     }
 
+    .hero-actions {
+      display: flex;
+      align-items: flex-end;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .methodology-link {
+      display: inline-flex;
+      align-items: center;
+      min-height: 36px;
+      border: 1px solid #bfdbfe;
+      border-radius: 999px;
+      background: #ffffff;
+      color: #1d4ed8;
+      padding: 8px 13px;
+      font-size: 13px;
+      font-weight: 900;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .methodology-link:hover {
+      background: #dbeafe;
+    }
+
     .category-tabs {
       display: flex;
       gap: 8px;
@@ -810,6 +836,80 @@
       color: var(--muted);
       font-size: 13px;
       line-height: 1.45;
+    }
+
+    .methodology-section {
+      display: grid;
+      gap: 14px;
+      margin: 16px 0;
+    }
+
+    .methodology-card {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      padding: 18px;
+    }
+
+    .methodology-card h2,
+    .methodology-card h3 {
+      margin: 0;
+      color: #111827;
+      line-height: 1.3;
+      letter-spacing: 0;
+    }
+
+    .methodology-card h2 {
+      font-size: 22px;
+    }
+
+    .methodology-card h3 {
+      font-size: 16px;
+    }
+
+    .methodology-card p,
+    .methodology-card li {
+      color: #475569;
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    .methodology-card p {
+      margin: 8px 0 0;
+    }
+
+    .methodology-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .methodology-definition {
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      background: #f8fafc;
+      padding: 13px;
+    }
+
+    .methodology-definition strong {
+      display: block;
+      color: #0f172a;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .methodology-definition span {
+      display: block;
+      margin-top: 6px;
+      color: #475569;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .methodology-list {
+      margin: 10px 0 0;
+      padding-left: 20px;
     }
 
     .topic-card-grid {
@@ -1624,6 +1724,16 @@
         flex-direction: column;
       }
 
+      .public-hero-top,
+      .hero-actions {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .methodology-grid {
+        grid-template-columns: 1fr;
+      }
+
       .page {
         padding: 20px 14px 34px;
       }
@@ -1660,7 +1770,10 @@
             근거 문장, 반박 가능성, 사람 검토 상태를 함께 보여주는 검증형 뉴스 서비스입니다.
           </p>
         </div>
-        <div class="trust-pill">AI 초안 + 공식 출처 확인</div>
+        <div class="hero-actions">
+          <div class="trust-pill">AI 초안 + 공식 출처 확인</div>
+          <a class="methodology-link" href="#methodology">검증 기준 보기</a>
+        </div>
       </div>
       <div id="categoryTabs" class="category-tabs" aria-label="뉴스 카테고리">
         <button class="category-tab active" type="button" data-category="전체">전체</button>
@@ -1772,6 +1885,102 @@
       </div>
       <div id="history">
         <div class="empty-state">아직 저장된 분석 기록이 없습니다.</div>
+      </div>
+    </section>
+
+    <section id="methodology" class="methodology-section" aria-labelledby="methodologyTitle">
+      <div class="methodology-card">
+        <div class="public-eyebrow">How We Verify</div>
+        <h2 id="methodologyTitle">검증 방법</h2>
+        <p>
+          정책 AI 뉴스 검증 플랫폼은 기사 속 정책·경제 주장을 근거 기반으로 검증 가능성을 평가합니다.
+          이 서비스는 단정적인 최종 판정자가 아니라, 공식 출처와 관련 자료를 추적해 신뢰도와 남은 불확실성을 투명하게 보여주는 도구입니다.
+        </p>
+        <p>
+          AI 결과는 사람 검토 전 초안입니다. 공식 상세문서, 의미 매칭, 반박 가능성, 시점과 대상이 충분히 확인되지 않으면
+          관찰 또는 사람 검토 필요로 표시합니다.
+        </p>
+      </div>
+
+      <div class="methodology-grid">
+        <div class="methodology-card">
+          <h3>무엇을 검증하나요?</h3>
+          <ul class="methodology-list">
+            <li>정부·공공기관의 정책 발표, 규제, 지원, 조사, 제도 변경처럼 출처와 문서로 확인 가능한 주장</li>
+            <li>금액, 비율, 대상, 시행 시점, 기관명처럼 원문 대조가 가능한 구체 정보</li>
+            <li>단순 전망, 의견, 정치적 평가, 익명 제보처럼 독립 근거가 부족한 내용은 확정 판정하지 않습니다.</li>
+          </ul>
+        </div>
+        <div class="methodology-card">
+          <h3>AI는 무엇을 하나요?</h3>
+          <ul class="methodology-list">
+            <li>기사 제목과 본문에서 검증 가능한 핵심 주장을 추출합니다.</li>
+            <li>공식기관 후보, 뉴스 원문, 관련 자료를 정리하고 출처 신뢰도와 의미 매칭을 분류합니다.</li>
+            <li>반박·모순 가능성과 위험 신호를 표시하지만 최종 사실 판정자는 아닙니다.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="methodology-card">
+        <h3>출처 우선순위</h3>
+        <ol class="methodology-list">
+          <li>법령, 고시, 공식 보도자료, 정부·공공기관 원문</li>
+          <li>공공기관 보고서, 공식 통계, 감독기관 자료</li>
+          <li>주요 언론 보도</li>
+          <li>전문기관·연구기관 자료</li>
+          <li>블로그, 커뮤니티, SNS, 익명 캡처</li>
+        </ol>
+        <p>
+          뉴스 원문은 분석 대상일 수 있지만 공식 검증 근거와는 별도로 취급합니다.
+          공식 후보가 있어도 상세 본문에서 기사 핵심 주장과 직접 연결되는 문장을 확인하기 전에는 확정 근거로 보지 않습니다.
+        </p>
+      </div>
+
+      <div class="methodology-card">
+        <h3>현재 표시되는 검증 상태의 의미</h3>
+        <div class="methodology-grid">
+          <div class="methodology-definition">
+            <strong>공식 근거 상태: 공식 후보만 있음</strong>
+            <span>공식기관 또는 관련 기관 후보는 발견했지만, 기사 핵심 주장과 직접 일치하는 공식 상세문서가 아직 확인되지 않은 상태입니다.</span>
+          </div>
+          <div class="methodology-definition">
+            <strong>공식 상세문서 상태: 공식기관 후보는 있으나 상세 본문 미확인</strong>
+            <span>공식기관 후보는 있으나, 상세 페이지 본문이나 원문 문서에서 핵심 주장과 직접 일치하는 문장을 확인하지 못한 상태입니다.</span>
+          </div>
+          <div class="methodology-definition">
+            <strong>의미 매칭 상태: 의미 매칭 근거 부족</strong>
+            <span>기사 주장과 수집된 공식·관련 자료 사이의 의미적 연결이 충분하지 않아 자동 확정 판정을 내리기 어려운 상태입니다.</span>
+          </div>
+          <div class="methodology-definition">
+            <strong>반박/모순 상태: 일부 상충 가능성이 있으나 같은 시점과 대상인지 추가 확인이 필요합니다.</strong>
+            <span>상충 가능성이 있는 자료 또는 신호가 있지만, 같은 정책, 같은 시점, 같은 대상에 대한 반박인지 사람 검토가 필요한 상태입니다.</span>
+          </div>
+          <div class="methodology-definition">
+            <strong>사람 검토 필요</strong>
+            <span>AI가 자동으로 확정하기 어려운 불확실성이 남아 있어 사람이 원문, 공식문서, 시점, 대상, 맥락을 확인해야 하는 상태입니다.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="methodology-grid">
+        <div class="methodology-card">
+          <h3>경고 단계와 신뢰도</h3>
+          <ul class="methodology-list">
+            <li><strong>낮음(LOW)</strong>: 현재 수집된 정보 기준으로 즉각적인 높은 정책 리스크 신호는 낮습니다.</li>
+            <li><strong>관찰(WATCH)</strong>: 정책 영향 가능성은 있으나 공식 근거, 맥락, 반박 가능성 등 추가 확인이 필요합니다.</li>
+            <li><strong>주의(CAUTION)·높음(HIGH)·심각(CRITICAL)</strong>: 더 강한 정책 영향 또는 위험 신호가 있을 수 있으나 최종 판단은 근거와 사람 검토가 필요합니다.</li>
+          </ul>
+          <p>신뢰도 점수는 수집된 근거의 품질, 공식 출처 연결성, 의미 매칭, 반박 가능성 등을 종합한 참고 지표입니다.</p>
+        </div>
+        <div class="methodology-card">
+          <h3>한계, 정정, 문의</h3>
+          <ul class="methodology-list">
+            <li>새로운 공식 자료가 나오면 기존 판단이 바뀔 수 있습니다.</li>
+            <li>오래된 자료는 현재 정책 상황과 다를 수 있어 업데이트 확인이 필요합니다.</li>
+            <li>오류 제보나 이의제기는 원문 URL, 공식 자료 링크, 문제 설명과 함께 전달해 주세요.</li>
+            <li>수정 시 업데이트 시간과 수정 이유를 남기는 방향으로 운영합니다.</li>
+          </ul>
+        </div>
       </div>
     </section>
 

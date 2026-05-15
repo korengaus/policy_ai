@@ -7,6 +7,20 @@ const rootDir = path.resolve(__dirname, "..");
 const htmlPath = path.join(rootDir, "web", "index.html");
 const html = fs.readFileSync(htmlPath, "utf8");
 const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
+const methodologyMatch = html.match(/<section id="methodology"[\s\S]*?<\/section>/);
+const methodologyHtml = methodologyMatch ? methodologyMatch[0] : "";
+
+assert.ok(methodologyHtml, "methodology section should render in index.html");
+assert.ok(html.includes('href="#methodology"'), "main page should link to methodology section");
+for (const label of [
+  "공식 후보만 있음",
+  "공식기관 후보는 있으나 상세 본문 미확인",
+  "의미 매칭 근거 부족",
+  "사람 검토 필요",
+]) {
+  assert.ok(methodologyHtml.includes(label), `methodology should explain "${label}"`);
+}
+assert.ok(!methodologyHtml.includes("100%"), "methodology should not promise 100% certainty");
 
 function createElementStub() {
   return {
