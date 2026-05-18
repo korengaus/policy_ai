@@ -5,7 +5,14 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from config import MAX_ARTICLE_CHARS, MAX_NEWS_RESULTS, MAX_POLICY_SENTENCES, QUERY
+from config import (
+    AI_MODEL,
+    MAX_ARTICLE_CHARS,
+    MAX_NEWS_RESULTS,
+    MAX_POLICY_SENTENCES,
+    QUERY,
+    describe_ai_config,
+)
 from news_collector import search_google_news_rss_with_meta, resolve_google_news_url
 from article_extractor import fetch_article_body
 from claim_extractor import extract_verifiable_claims
@@ -202,6 +209,7 @@ def _get_cached_analysis_report(
                 "analysis_cache_version": ANALYSIS_CACHE_VERSION,
             },
             "topics_summary": topics_summary,
+            "ai_status_summary": _summarize_ai_status_from_items(report_items),
             "news_results": report_items,
         }
     )
@@ -237,6 +245,38 @@ def build_report_path(run_started_at: str) -> Path:
     started = datetime.fromisoformat(run_started_at)
     filename = started.strftime("policy_analysis_%Y%m%d_%H%M%S.json")
     return REPORTS_DIR / filename
+
+
+def _summarize_ai_status_from_items(report_items: list[dict]) -> dict:
+    config_snapshot = describe_ai_config()
+    base = {
+        "ai_status": "unavailable",
+        "ai_status_reason": "no_results",
+        "ai_model": config_snapshot.get("ai_model"),
+        "ai_available": False,
+        "ai_api_key_present": config_snapshot.get("ai_api_key_present", False),
+    }
+    if not report_items:
+        if config_snapshot.get("ai_api_key_present"):
+            base["ai_status_reason"] = "no_news_collected"
+        else:
+            base["ai_status_reason"] = "missing_api_key"
+        return base
+
+    for item in report_items:
+        api_result = (item or {}).get("api_result") or {}
+        ai_status = api_result.get("ai_status")
+        if not ai_status:
+            continue
+        return {
+            "ai_status": ai_status,
+            "ai_status_reason": api_result.get("ai_status_reason", "unknown"),
+            "ai_model": api_result.get("ai_model") or config_snapshot.get("ai_model"),
+            "ai_available": bool(api_result.get("ai_available")),
+            "ai_api_key_present": config_snapshot.get("ai_api_key_present", False),
+        }
+
+    return base
 
 
 def build_topics_summary(memory: dict) -> dict:
@@ -376,6 +416,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
             "duplicate_count": 0,
             "news_collection_debug": news_collection_debug,
             "topics_summary": build_topics_summary(memory),
+            "ai_status_summary": _summarize_ai_status_from_items([]),
             "news_results": [],
         }
         report_path = save_run_report(report, run_started_at)
@@ -738,6 +779,10 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
                     "missing_context": verification_card.get("missing_context"),
                     "last_checked_at": verification_card.get("last_checked_at"),
                     "review_status": verification_card.get("review_status"),
+                    "ai_status": ai_result.get("ai_status", "unavailable"),
+                    "ai_status_reason": ai_result.get("ai_status_reason", "unknown"),
+                    "ai_model": ai_result.get("ai_model"),
+                    "ai_available": bool(ai_result.get("ai_available")),
                 },
             })
         )
@@ -760,6 +805,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
         "duplicate_count": duplicate_count,
         "news_collection_debug": news_collection_debug,
         "topics_summary": build_topics_summary(memory),
+        "ai_status_summary": _summarize_ai_status_from_items(report_items),
         "news_results": report_items,
     })
     _store_analysis_report(

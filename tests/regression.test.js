@@ -429,4 +429,95 @@ for (const fixtureCase of fixtures) {
   }
 }
 
-console.log(`regression smoke tests passed (${fixtures.length} fixtures, text + markdown export)`);
+// AI 보조 상태 노출 회귀 검증
+// 1. 기존 fixture는 ai_status 없음 → 보수적으로 "AI 보조 비활성 — 규칙 기반 분석만 적용"로 기본화되어야 한다.
+for (const fixtureCase of fixtures) {
+  const { text, markdown } = runFixture(fixtureCase.data);
+  for (const output of [text, markdown]) {
+    assert.ok(
+      output.includes("AI 보조 상태:"),
+      `${fixtureCase.data.query}: export should expose AI 보조 상태 line`
+    );
+    assert.ok(
+      output.includes("AI 보조 비활성 — 규칙 기반 분석만 적용"),
+      `${fixtureCase.data.query}: fixtures without ai_status should default to inactive label`
+    );
+    assert.ok(
+      !output.includes("AI 보조 활성"),
+      `${fixtureCase.data.query}: should not claim AI active when fixture has none`
+    );
+    assert.ok(
+      !output.includes("AI 보조 오류"),
+      `${fixtureCase.data.query}: should not claim AI error when fixture has none`
+    );
+  }
+}
+
+// 2. ai_status=ok 가 들어오면 활성 라벨이 노출된다.
+{
+  const activeFixture = Object.assign({}, strongOfficialFixture(), {
+    ai_status: {
+      ai_status: "ok",
+      ai_status_reason: "ok",
+      ai_model: "gpt-4o-mini",
+      ai_available: true,
+    },
+  });
+  const { text, markdown } = runFixture(activeFixture);
+  for (const output of [text, markdown]) {
+    assert.ok(output.includes("AI 보조 활성"), "active AI status should appear in export");
+    assert.ok(
+      !output.includes("AI 보조 비활성"),
+      "active AI fixture should not also include inactive label"
+    );
+    assert.ok(
+      !output.includes("AI 보조 오류"),
+      "active AI fixture should not also include error label"
+    );
+  }
+}
+
+// 3. ai_status=error 가 들어오면 보수적인 오류 라벨이 노출된다.
+//    + weak fixture와 함께도 과신 표현이 새지 않아야 한다.
+{
+  const errorFixture = Object.assign(
+    {},
+    weakOfficialFixture({
+      query: "금융위",
+      title: "금융위 ELS 관련 제도 점검 보도",
+      topic: "금융/정책",
+      contradictionStatus: "반박 여부를 판단할 독립 근거가 부족해 공식 확인이 필요합니다.",
+    }),
+    {
+      ai_status: {
+        ai_status: "error",
+        ai_status_reason: "api_call_failed",
+        ai_model: "gpt-4o-mini",
+        ai_available: false,
+      },
+    }
+  );
+  const { text, markdown } = runFixture(errorFixture);
+  for (const output of [text, markdown]) {
+    assert.ok(
+      output.includes("AI 보조 오류 — 규칙 기반 분석만 적용"),
+      "error AI status should appear with rule-based fallback note"
+    );
+    for (const phrase of overconfidentPhrases) {
+      assert.ok(
+        !output.includes(phrase),
+        `error AI fixture should not produce overconfident: ${phrase}`
+      );
+    }
+    assert.ok(
+      cautiousPhrases.some((phrase) => output.includes(phrase)),
+      "error AI fixture should still include cautious wording"
+    );
+    assert.ok(
+      !/\bundefined\b|\bnull\b|\[object Object\]/.test(output),
+      "error AI fixture should not leak placeholder"
+    );
+  }
+}
+
+console.log(`regression smoke tests passed (${fixtures.length} fixtures + 3 ai_status cases, text + markdown export)`);

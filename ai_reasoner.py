@@ -10,15 +10,89 @@ except ImportError:
 
 
 def get_openai_client():
+    """Return (client, unavailable_reason). client is None when unusable."""
     if OpenAI is None:
-        return None
+        return None, "openai_package_missing"
 
     api_key = os.getenv("OPENAI_API_KEY")
 
     if not api_key:
-        return None
+        return None, "missing_api_key"
 
-    return OpenAI(api_key=api_key)
+    return OpenAI(api_key=api_key), None
+
+
+def _unavailable_result(
+    reason: str,
+    *,
+    official_source_candidates,
+    official_evidence_results,
+    evidence_comparison,
+    fallback_message: str,
+    error_message: str | None = None,
+) -> dict:
+    return {
+        "ai_available": False,
+        "ai_status": "unavailable",
+        "ai_status_reason": reason,
+        "ai_model": AI_MODEL,
+        "error": error_message or "AI reasoning is unavailable.",
+        "fallback_message": fallback_message,
+        "official_source_needed": bool(official_source_candidates),
+        "recommended_official_sources": official_source_candidates or [],
+        "official_evidence_found": any(
+            result.get("fetched") for result in (official_evidence_results or [])
+        ),
+        "official_evidence_summary": (
+            "AI unavailable; official page fetch results were collected separately."
+        ),
+        "official_comparison_status": (
+            evidence_comparison or {}
+        ).get("comparison_status", "unclear"),
+        "official_support_score": (evidence_comparison or {}).get(
+            "semantic_support_score",
+            (evidence_comparison or {}).get("support_score", 0),
+        ),
+        "official_verification_note": (
+            "AI unavailable; using rule-based official evidence comparison only."
+        ),
+    }
+
+
+def _error_result(
+    reason: str,
+    error_message: str,
+    *,
+    official_source_candidates,
+    official_evidence_results,
+    evidence_comparison,
+) -> dict:
+    return {
+        "ai_available": False,
+        "ai_status": "error",
+        "ai_status_reason": reason,
+        "ai_model": AI_MODEL,
+        "error": error_message,
+        "fallback_message": "AI reasoning failed. Use the rule-based analysis only.",
+        "official_source_needed": bool(official_source_candidates),
+        "recommended_official_sources": official_source_candidates or [],
+        "official_evidence_found": any(
+            result.get("fetched") for result in (official_evidence_results or [])
+        ),
+        "official_evidence_summary": (
+            "AI reasoning failed; official page fetch results were collected separately."
+        ),
+        "official_comparison_status": (
+            evidence_comparison or {}
+        ).get("comparison_status", "unclear"),
+        "official_support_score": (evidence_comparison or {}).get(
+            "semantic_support_score",
+            (evidence_comparison or {}).get("support_score", 0),
+        ),
+        "official_verification_note": (
+            "AI reasoning failed; using rule-based official evidence comparison only."
+        ),
+    }
 
 
 def _format_policy_claims(policy_claims: list[dict]) -> str:
@@ -169,28 +243,28 @@ def run_ai_reasoning(
     official_evidence_results: list[dict] | None = None,
     evidence_comparison: dict | None = None,
 ) -> dict:
-    client = get_openai_client()
+    client, unavailable_reason = get_openai_client()
 
     if client is None:
-        return {
-            "ai_available": False,
-            "error": "OPENAI_API_KEY is missing or the openai package is not installed.",
-            "fallback_message": "Only rule-based analysis was performed.",
-            "official_source_needed": bool(official_source_candidates),
-            "recommended_official_sources": official_source_candidates or [],
-            "official_evidence_found": any(
-                result.get("fetched") for result in (official_evidence_results or [])
-            ),
-            "official_evidence_summary": "AI unavailable; official page fetch results were collected separately.",
-            "official_comparison_status": (
-                evidence_comparison or {}
-            ).get("comparison_status", "unclear"),
-            "official_support_score": (evidence_comparison or {}).get(
-                "semantic_support_score",
-                (evidence_comparison or {}).get("support_score", 0),
-            ),
-            "official_verification_note": "AI unavailable; using rule-based official evidence comparison only.",
-        }
+        if unavailable_reason == "openai_package_missing":
+            error_message = "openai package is not installed."
+            fallback_message = (
+                "openai package is not installed. Only rule-based analysis was performed."
+            )
+        else:
+            error_message = "OPENAI_API_KEY is missing."
+            fallback_message = (
+                "OPENAI_API_KEY is missing. Only rule-based analysis was performed."
+            )
+
+        return _unavailable_result(
+            unavailable_reason or "unknown",
+            official_source_candidates=official_source_candidates,
+            official_evidence_results=official_evidence_results,
+            evidence_comparison=evidence_comparison,
+            fallback_message=fallback_message,
+            error_message=error_message,
+        )
 
     prompt = build_ai_prompt(
         news_title=news_title,
@@ -219,6 +293,9 @@ def run_ai_reasoning(
         raw_text = response.output_text
         parsed = json.loads(raw_text)
         parsed["ai_available"] = True
+        parsed["ai_status"] = "ok"
+        parsed["ai_status_reason"] = "ok"
+        parsed["ai_model"] = AI_MODEL
         parsed.setdefault("official_source_needed", bool(official_source_candidates))
         parsed.setdefault("recommended_official_sources", official_source_candidates or [])
         parsed.setdefault(
@@ -246,23 +323,19 @@ def run_ai_reasoning(
         )
         return parsed
 
+    except json.JSONDecodeError as e:
+        return _error_result(
+            "invalid_json_response",
+            f"AI returned non-JSON response: {e}",
+            official_source_candidates=official_source_candidates,
+            official_evidence_results=official_evidence_results,
+            evidence_comparison=evidence_comparison,
+        )
     except Exception as e:
-        return {
-            "ai_available": False,
-            "error": f"AI reasoning failed: {e}",
-            "fallback_message": "AI reasoning failed. Use the rule-based analysis only.",
-            "official_source_needed": bool(official_source_candidates),
-            "recommended_official_sources": official_source_candidates or [],
-            "official_evidence_found": any(
-                result.get("fetched") for result in (official_evidence_results or [])
-            ),
-            "official_evidence_summary": "AI reasoning failed; official page fetch results were collected separately.",
-            "official_comparison_status": (
-                evidence_comparison or {}
-            ).get("comparison_status", "unclear"),
-            "official_support_score": (evidence_comparison or {}).get(
-                "semantic_support_score",
-                (evidence_comparison or {}).get("support_score", 0),
-            ),
-            "official_verification_note": "AI reasoning failed; using rule-based official evidence comparison only.",
-        }
+        return _error_result(
+            "api_call_failed",
+            f"AI reasoning failed: {e}",
+            official_source_candidates=official_source_candidates,
+            official_evidence_results=official_evidence_results,
+            evidence_comparison=evidence_comparison,
+        )

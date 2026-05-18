@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir *)",
+      "PowerShell(Get-ChildItem -Path 'C:\\\\Users\\\\user\\\\Desktop\\\\policy_ai\\\\web' -Force -Recurse | Where-Object { -not $_.PSIsContainer -or $_.PSIsContainer } | Select-Object FullName, Length | Format-Table -AutoSize)",
+      "PowerShell(Get-Item *)",
+      "Bash(git *)",
+      "Bash(node *)",
+      "Bash(python *)"
+    ]
+  }
+}

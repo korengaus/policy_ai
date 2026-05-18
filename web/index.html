@@ -308,6 +308,19 @@
     .alert-medium { background: var(--blue); }
     .alert-high { background: var(--red); }
 
+    .ai-status-badge {
+      font-weight: 700;
+    }
+    .ai-status-active { background: #15803d; }
+    .ai-status-inactive { background: #475569; }
+    .ai-status-error { background: #b45309; }
+    .ai-status-note {
+      margin-top: 6px;
+      font-size: 12px;
+      color: #475569;
+      line-height: 1.4;
+    }
+
     .result-title {
       margin: 0 0 14px;
       font-size: 19px;
@@ -2258,6 +2271,68 @@
         .replaceAll("'", "&#039;");
     }
 
+    function buildAiStatusDescriptor(rawStatus) {
+      const status = String(rawStatus || "").toLowerCase();
+      if (status === "ok") {
+        return {
+          status: "ok",
+          label: "AI 보조 활성",
+          className: "ai-status-active",
+          note: "공식 출처 우선 규칙과 AI 보조 분석이 함께 적용되었습니다.",
+        };
+      }
+      if (status === "error") {
+        return {
+          status: "error",
+          label: "AI 보조 오류 — 규칙 기반 분석만 적용",
+          className: "ai-status-error",
+          note: "AI 보조 단계에서 오류가 발생해, 이 리포트는 규칙 기반 보수 분석만 사용되었습니다.",
+        };
+      }
+      return {
+        status: "unavailable",
+        label: "AI 보조 비활성 — 규칙 기반 분석만 적용",
+        className: "ai-status-inactive",
+        note: "AI 보조 단계가 비활성 상태이므로, 이 리포트는 규칙 기반 보수 분석만 사용되었습니다.",
+      };
+    }
+
+    function getResultAiStatus(result) {
+      if (!result || typeof result !== "object") {
+        return { status: "unavailable", reason: "unknown", model: "", available: false };
+      }
+      return {
+        status: result.ai_status || "unavailable",
+        reason: result.ai_status_reason || "unknown",
+        model: result.ai_model || "",
+        available: !!result.ai_available,
+      };
+    }
+
+    function getReportAiStatus(context, results) {
+      const ctx = context || {};
+      const ctxAi = ctx.aiStatus || ctx.ai_status;
+      if (ctxAi && typeof ctxAi === "object") {
+        return {
+          status: ctxAi.ai_status || "unavailable",
+          reason: ctxAi.ai_status_reason || "unknown",
+          model: ctxAi.ai_model || "",
+          available: !!ctxAi.ai_available,
+        };
+      }
+      if (Array.isArray(results) && results.length) {
+        return getResultAiStatus(results[0]);
+      }
+      return { status: "unavailable", reason: "unknown", model: "", available: false };
+    }
+
+    function renderAiStatusBadge(result) {
+      const info = getResultAiStatus(result);
+      const desc = buildAiStatusDescriptor(info.status);
+      const title = info.reason ? `${desc.label} (${info.reason})` : desc.label;
+      return `<span class="badge ai-status-badge ${desc.className}" title="${escapeHtml(title)}">${escapeHtml(desc.label)}</span>`;
+    }
+
     function alertClass(level) {
       const normalized = String(level || "WATCH").toUpperCase();
       if (normalized === "HIGH") return "alert-high";
@@ -3209,12 +3284,13 @@
       metricsEl.style.display = "grid";
     }
 
-    function setCurrentReportContext(query, maxNews, results, analyzedAt) {
+    function setCurrentReportContext(query, maxNews, results, analyzedAt, aiStatus) {
       const safeResults = Array.isArray(results) ? results : [];
       currentReportContext = {
         query: query || queryInput.value.trim() || "-",
         maxNews: maxNews || Number(maxNewsInput.value || safeResults.length || 0),
         analyzedAt: analyzedAt || new Date().toISOString(),
+        aiStatus: aiStatus && typeof aiStatus === "object" ? aiStatus : null,
         results: safeResults,
       };
       reportActionsEl.style.display = safeResults.length ? "flex" : "none";
@@ -5345,6 +5421,7 @@
                 <span class="badge ${alertClass(level)}">${escapeHtml(formatAlert(level))}</span>
                 <span class="badge topic-badge">${escapeHtml(topic)}</span>
                 <span class="badge topic-badge">검증 뉴스</span>
+                ${renderAiStatusBadge(result)}
               </div>
               <h2 class="result-title">
                 <a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a>
@@ -5355,6 +5432,7 @@
                 <span>영향도 ${escapeHtml(formatLevel(impact.impact_level))}</span>
                 <span>위험도 ${escapeHtml(formatLevel(confidence.risk_level))}</span>
               </div>
+              <div class="ai-status-note">${escapeHtml(buildAiStatusDescriptor(getResultAiStatus(result).status).note)}</div>
             </div>
 
             <div class="news-nav" aria-label="분석 섹션">
@@ -6275,6 +6353,9 @@
       exportLine(lines, `고영향 뉴스 수: ${plain(metrics.highImpactCount, 0)}`);
       exportLine(lines, `전체 근거 강도: ${formatEvidenceCounts(aggregate.strength)}`);
       exportLine(lines, `전체 근거 품질: ${formatEvidenceCounts(aggregate.quality)}, 평균 ${plain(aggregate.quality.average_evidence_quality_score, 0)}`);
+      const reportAiStatus = getReportAiStatus(context, results);
+      const reportAiDesc = buildAiStatusDescriptor(reportAiStatus.status);
+      exportLine(lines, `AI 보조 상태: ${reportAiDesc.label}`);
       lines.push("");
 
       if (!results.length) {
@@ -6574,7 +6655,7 @@
 
     function renderAnalysisResponse(query, maxNews, renderData) {
       const results = renderData.results || [];
-      setCurrentReportContext(query, maxNews, results, new Date().toISOString());
+      setCurrentReportContext(query, maxNews, results, new Date().toISOString(), renderData.ai_status);
       renderResults(results);
       renderHistory(safeReadLocalHistory());
       renderReviewQueue(safeReadReviewQueue());

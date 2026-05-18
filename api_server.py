@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from config import describe_ai_config
 from database import get_recent_results, get_result_by_id, init_db, save_analysis_result
 from main import analyze_pipeline
 from text_utils import sanitize_data
@@ -18,10 +19,27 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("policy_ai.api")
 
 
+def _log_ai_config_startup() -> None:
+    ai_config = describe_ai_config()
+    logger.info(
+        "AI reasoning config: model=%s (from_env=%s, default=%s) api_key_present=%s",
+        ai_config.get("ai_model"),
+        ai_config.get("ai_model_from_env"),
+        ai_config.get("ai_model_default"),
+        ai_config.get("ai_api_key_present"),
+    )
+    if not ai_config.get("ai_api_key_present"):
+        logger.warning(
+            "OPENAI_API_KEY is not set; /analyze will fall back to rule-based analysis only "
+            "and report ai_status=unavailable."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
     logger.info("SQLite database initialized")
+    _log_ai_config_startup()
     yield
 
 
@@ -72,12 +90,17 @@ class AnalyzeResult(BaseModel):
     missing_context: list = []
     last_checked_at: str = ""
     review_status: str = ""
+    ai_status: str = "unavailable"
+    ai_status_reason: str = "unknown"
+    ai_model: str = ""
+    ai_available: bool = False
 
 
 class AnalyzeResponse(BaseModel):
     status: str
     results: List[AnalyzeResult]
     news_collection_debug: dict = {}
+    ai_status: dict = {}
 
 
 class HistoryResponse(BaseModel):
@@ -147,6 +170,10 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
                 missing_context=api_result.get("missing_context") or [],
                 last_checked_at=api_result.get("last_checked_at") or "",
                 review_status=api_result.get("review_status") or "",
+                ai_status=api_result.get("ai_status") or "unavailable",
+                ai_status_reason=api_result.get("ai_status_reason") or "unknown",
+                ai_model=api_result.get("ai_model") or "",
+                ai_available=bool(api_result.get("ai_available")),
             )
         )
         try:
@@ -164,10 +191,29 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
         elapsed,
     )
 
+    ai_status_summary = report.get("ai_status_summary") or {}
+    if not ai_status_summary:
+        ai_config = describe_ai_config()
+        ai_status_summary = {
+            "ai_status": "unavailable",
+            "ai_status_reason": "no_results",
+            "ai_model": ai_config.get("ai_model"),
+            "ai_available": False,
+            "ai_api_key_present": ai_config.get("ai_api_key_present", False),
+        }
+    logger.info(
+        "Analyze AI status: status=%s reason=%s model=%s available=%s",
+        ai_status_summary.get("ai_status"),
+        ai_status_summary.get("ai_status_reason"),
+        ai_status_summary.get("ai_model"),
+        ai_status_summary.get("ai_available"),
+    )
+
     return AnalyzeResponse(
         status="ok",
         results=results,
         news_collection_debug=report.get("news_collection_debug") or {},
+        ai_status=ai_status_summary,
     )
 
 
