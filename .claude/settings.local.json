@@ -6,7 +6,10 @@
       "PowerShell(Get-Item *)",
       "Bash(git *)",
       "Bash(node *)",
-      "Bash(python *)"
+      "Bash(python *)",
+      "Bash(ls C:/Users/user/Desktop/policy_ai/scripts)",
+      "Bash(ls C:/Users/user/Desktop/policy_ai/db)",
+      "Bash(ls C:/Users/user/Desktop/policy_ai/migrations)"
     ]
   }
 }

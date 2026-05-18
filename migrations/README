@@ -1,0 +1,8 @@
+Alembic migrations for the Postgres dual-write target.
+
+DATABASE_URL must be set in the environment before running migrations.
+SQLite remains the source of truth; these migrations only shape the
+Postgres mirror used by the dual-write hook.
+
+Usage:
+  alembic upgrade head

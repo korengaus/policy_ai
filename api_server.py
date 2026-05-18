@@ -11,6 +11,11 @@ from pydantic import BaseModel
 
 from config import describe_ai_config
 from database import get_recent_results, get_result_by_id, init_db, save_analysis_result
+from db.postgres import (
+    is_dual_write_enabled,
+    is_postgres_enabled,
+    postgres_dual_write,
+)
 from main import analyze_pipeline
 from text_utils import sanitize_data
 
@@ -35,11 +40,27 @@ def _log_ai_config_startup() -> None:
         )
 
 
+def _log_postgres_startup() -> None:
+    if is_dual_write_enabled():
+        logger.info(
+            "Postgres dual-write enabled (DATABASE_URL set, USE_POSTGRES_WRITE=true); "
+            "SQLite remains source of truth."
+        )
+    elif is_postgres_enabled():
+        logger.info(
+            "Postgres reachable (DATABASE_URL set) but dual-write disabled "
+            "(USE_POSTGRES_WRITE not true); SQLite-only writes."
+        )
+    else:
+        logger.info("Postgres disabled (DATABASE_URL not set); SQLite-only writes.")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
     logger.info("SQLite database initialized")
     _log_ai_config_startup()
+    _log_postgres_startup()
     yield
 
 
@@ -180,6 +201,18 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
             save_status = save_analysis_result(api_result, query=query)
             if save_status.get("duplicate"):
                 logger.info("Duplicate skipped in SQLite: %s", api_result.get("title"))
+            else:
+                try:
+                    pg_status = postgres_dual_write(api_result, query=query)
+                    if pg_status.get("attempted") and not pg_status.get("ok"):
+                        logger.warning(
+                            "Postgres dual-write failed (SQLite remains source of truth): %s",
+                            pg_status.get("error"),
+                        )
+                except Exception:
+                    logger.exception(
+                        "Postgres dual-write raised unexpectedly; SQLite remains source of truth"
+                    )
         except Exception:
             logger.exception("Failed to save analysis result to SQLite")
 
