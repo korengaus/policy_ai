@@ -41,7 +41,52 @@ def init_db():
             """
         )
         _ensure_columns(connection)
+        _ensure_jobs_table(connection)
         connection.commit()
+
+
+def _ensure_jobs_table(connection):
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS jobs (
+            id TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            query TEXT,
+            max_news INTEGER,
+            progress_percent INTEGER DEFAULT 0,
+            current_stage TEXT,
+            result_id INTEGER,
+            error_message TEXT,
+            created_at TEXT,
+            started_at TEXT,
+            completed_at TEXT,
+            pipeline_version TEXT
+        )
+        """
+    )
+    existing = {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(jobs)").fetchall()
+    }
+    desired = {
+        "query": "TEXT",
+        "max_news": "INTEGER",
+        "progress_percent": "INTEGER DEFAULT 0",
+        "current_stage": "TEXT",
+        "result_id": "INTEGER",
+        "error_message": "TEXT",
+        "created_at": "TEXT",
+        "started_at": "TEXT",
+        "completed_at": "TEXT",
+        "pipeline_version": "TEXT",
+    }
+    for column, column_type in desired.items():
+        if column not in existing:
+            connection.execute(
+                f"ALTER TABLE jobs ADD COLUMN {column} {column_type}"
+            )
+    connection.execute("CREATE INDEX IF NOT EXISTS ix_jobs_status ON jobs(status)")
+    connection.execute("CREATE INDEX IF NOT EXISTS ix_jobs_created_at ON jobs(created_at)")
 
 
 def _ensure_columns(connection):
@@ -116,6 +161,30 @@ def result_exists_by_url(original_url: str) -> bool:
         ).fetchone()
 
     return row is not None
+
+
+def get_result_id_by_url(original_url: str):
+    """Return the most recent analysis_results.id for the given URL, or None.
+
+    Used when a duplicate save is skipped but the caller still needs to link
+    a job row to the persisted result for durability after restart.
+    """
+    if not original_url:
+        return None
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT id
+            FROM analysis_results
+            WHERE original_url = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (original_url,),
+        ).fetchone()
+    if row is None:
+        return None
+    return row["id"]
 
 
 def save_analysis_result(result: dict, query: str):

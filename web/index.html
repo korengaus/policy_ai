@@ -6611,7 +6611,24 @@
       };
     }
 
-    async function requestPolicyAnalysis({ query, maxNews }) {
+    const JOB_POLL_INTERVAL_MS = 2000;
+    const JOB_MAX_POLL_ATTEMPTS = 600;
+
+    function describeJobStage(stage, percent) {
+      const label = ({
+        queued: "대기열에 등록됨",
+        running: "실행 시작",
+        pipeline_started: "검증 파이프라인 실행 중",
+        saving_result: "결과 저장 중",
+        completed: "완료",
+        failed: "실패",
+        timeout: "시간 초과",
+      })[stage] || stage || "진행 중";
+      const pct = Number.isFinite(Number(percent)) ? Number(percent) : 0;
+      return `${label} (${pct}%)`;
+    }
+
+    async function requestPolicyAnalysisLegacy({ query, maxNews }) {
       const response = await fetch(`${API_BASE}/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -6624,6 +6641,65 @@
       }
 
       return response.json();
+    }
+
+    async function requestPolicyAnalysisAsync({ query, maxNews }, onProgress) {
+      const createResp = await fetch(`${API_BASE}/jobs/analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, max_news: maxNews }),
+      });
+      if (!createResp.ok) {
+        const body = await createResp.text();
+        throw new Error(body || `HTTP ${createResp.status}`);
+      }
+      const job = await createResp.json();
+      const jobId = job.job_id;
+      if (!jobId) {
+        throw new Error("job_id not returned");
+      }
+
+      for (let attempt = 0; attempt < JOB_MAX_POLL_ATTEMPTS; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, JOB_POLL_INTERVAL_MS));
+        const statusResp = await fetch(`${API_BASE}/jobs/${encodeURIComponent(jobId)}`);
+        if (!statusResp.ok) {
+          throw new Error(`status check failed: HTTP ${statusResp.status}`);
+        }
+        const statusJson = await statusResp.json();
+        if (typeof onProgress === "function") {
+          onProgress(statusJson);
+        }
+        const jobStatus = statusJson.job_status;
+        if (jobStatus === "completed") {
+          const resultResp = await fetch(`${API_BASE}/jobs/${encodeURIComponent(jobId)}/result`);
+          if (!resultResp.ok) {
+            throw new Error(`result fetch failed: HTTP ${resultResp.status}`);
+          }
+          const resultJson = await resultResp.json();
+          if (resultJson.result) {
+            if (resultJson.result_source === "stored_result") {
+              console.info("Job result reconstructed from SQLite (cache miss).");
+            }
+            return resultJson.result;
+          }
+          throw new Error(
+            resultJson.error_message || "job completed but no result payload available"
+          );
+        }
+        if (jobStatus === "failed" || jobStatus === "timeout") {
+          throw new Error(statusJson.error_message || `job ${jobStatus}`);
+        }
+      }
+      throw new Error("job polling timed out");
+    }
+
+    async function requestPolicyAnalysis({ query, maxNews }, onProgress) {
+      try {
+        return await requestPolicyAnalysisAsync({ query, maxNews }, onProgress);
+      } catch (asyncError) {
+        console.warn("Async job flow failed, falling back to /analyze:", asyncError);
+        return requestPolicyAnalysisLegacy({ query, maxNews });
+      }
     }
 
     function stabilizeAnalysisResponseForRender(data, query, maxNews) {
@@ -6681,7 +6757,16 @@
       activeTopicKey = "";
 
       try {
-        const data = await requestPolicyAnalysis({ query, maxNews });
+        const data = await requestPolicyAnalysis(
+          { query, maxNews },
+          (statusJson) => {
+            const label = describeJobStage(
+              statusJson?.current_stage,
+              statusJson?.progress_percent,
+            );
+            showStatus(`검증 작업 진행 중 · ${label}`);
+          }
+        );
         const renderData = stabilizeAnalysisResponseForRender(data, query, maxNews);
         renderAnalysisResponse(query, maxNews, renderData);
       } catch (error) {
