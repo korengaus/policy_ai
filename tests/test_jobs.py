@@ -424,6 +424,30 @@ class ApiServerRouteTests(unittest.TestCase):
             self.assertEqual(body["status"], "ok")
             self.assertEqual(len(body["results"]), 1)
             self.assertEqual(body["results"][0]["title"], "Result for q")
+            # Phase 2 M3: /analyze must surface result_id so the frontend can
+            # rehydrate the row from /history/{result_id} without storing the
+            # full payload in localStorage.
+            self.assertIn("result_id", body["results"][0])
+            self.assertIsNotNone(body["results"][0]["result_id"])
+
+    def test_history_detail_round_trip_supports_hydration(self):
+        from fastapi.testclient import TestClient
+
+        with _TempDBScope() as scope:
+            api_server = _reload_api_server(scope)
+            client = TestClient(api_server.app)
+            analyze_resp = client.post("/analyze", json={"query": "q", "max_news": 1})
+            self.assertEqual(analyze_resp.status_code, 200)
+            result_id = analyze_resp.json()["results"][0]["result_id"]
+            self.assertIsNotNone(result_id)
+
+            detail_resp = client.get(f"/history/{result_id}")
+            self.assertEqual(detail_resp.status_code, 200)
+            detail = detail_resp.json()
+            self.assertEqual(detail["status"], "ok")
+            self.assertIsNotNone(detail["result"])
+            self.assertEqual(detail["result"]["id"], result_id)
+            self.assertEqual(detail["result"]["query"], "q")
 
     def test_invalid_request_returns_400(self):
         from fastapi.testclient import TestClient

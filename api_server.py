@@ -90,6 +90,10 @@ class AnalyzeRequest(BaseModel):
 
 
 class AnalyzeResult(BaseModel):
+    # Phase 2 M3: result_id links a per-result response payload back to the
+    # analysis_results row. The frontend persists only this id in localStorage
+    # and rehydrates the full result via GET /history/{result_id} on demand.
+    result_id: Optional[int] = None
     title: str
     original_url: str
     topic: str
@@ -168,8 +172,39 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
             continue
         api_result = sanitize_data(api_result)
 
+        # Persist first so we can attach the resulting row id to the response,
+        # which lets the frontend keep only a slim reference in localStorage
+        # and rehydrate the full result via GET /history/{result_id}.
+        result_id: Optional[int] = None
+        try:
+            save_status = save_analysis_result(api_result, query=query)
+            if save_status.get("duplicate"):
+                logger.info("Duplicate skipped in SQLite: %s", api_result.get("title"))
+                try:
+                    result_id = get_result_id_by_url(api_result.get("original_url") or "")
+                except Exception:
+                    logger.exception(
+                        "Failed to resolve existing analysis_results id for duplicate URL"
+                    )
+            else:
+                result_id = save_status.get("id")
+                try:
+                    pg_status = postgres_dual_write(api_result, query=query)
+                    if pg_status.get("attempted") and not pg_status.get("ok"):
+                        logger.warning(
+                            "Postgres dual-write failed (SQLite remains source of truth): %s",
+                            pg_status.get("error"),
+                        )
+                except Exception:
+                    logger.exception(
+                        "Postgres dual-write raised unexpectedly; SQLite remains source of truth"
+                    )
+        except Exception:
+            logger.exception("Failed to save analysis result to SQLite")
+
         results.append(
             AnalyzeResult(
+                result_id=result_id,
                 title=api_result.get("title") or "",
                 original_url=api_result.get("original_url") or "",
                 topic=api_result.get("topic") or "",
@@ -206,24 +241,6 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
                 ai_available=bool(api_result.get("ai_available")),
             )
         )
-        try:
-            save_status = save_analysis_result(api_result, query=query)
-            if save_status.get("duplicate"):
-                logger.info("Duplicate skipped in SQLite: %s", api_result.get("title"))
-            else:
-                try:
-                    pg_status = postgres_dual_write(api_result, query=query)
-                    if pg_status.get("attempted") and not pg_status.get("ok"):
-                        logger.warning(
-                            "Postgres dual-write failed (SQLite remains source of truth): %s",
-                            pg_status.get("error"),
-                        )
-                except Exception:
-                    logger.exception(
-                        "Postgres dual-write raised unexpectedly; SQLite remains source of truth"
-                    )
-        except Exception:
-            logger.exception("Failed to save analysis result to SQLite")
 
     elapsed = time.perf_counter() - started
     logger.info(
@@ -369,6 +386,7 @@ def _build_async_analyze_payload(report: dict, query: str) -> dict:
 
 def _api_result_to_dict(api_result: dict) -> dict:
     return {
+        "result_id": api_result.get("result_id"),
         "title": api_result.get("title") or "",
         "original_url": api_result.get("original_url") or "",
         "topic": api_result.get("topic") or "",
@@ -423,7 +441,11 @@ def _persist_pipeline_report(report: dict, *, query: str) -> Optional[int]:
         try:
             save_status = save_analysis_result(api_result, query=query)
             if save_status.get("saved"):
-                last_linked_id = save_status.get("id") or last_linked_id
+                saved_id = save_status.get("id")
+                last_linked_id = saved_id or last_linked_id
+                if saved_id is not None:
+                    api_result["result_id"] = saved_id
+                    item["api_result"] = api_result
                 try:
                     pg_status = postgres_dual_write(api_result, query=query)
                     if pg_status.get("attempted") and not pg_status.get("ok"):
@@ -444,6 +466,8 @@ def _persist_pipeline_report(report: dict, *, query: str) -> Optional[int]:
                     existing_id = get_result_id_by_url(api_result.get("original_url") or "")
                     if existing_id is not None:
                         last_linked_id = existing_id
+                        api_result["result_id"] = existing_id
+                        item["api_result"] = api_result
                 except Exception:
                     logger.exception(
                         "Failed to resolve existing analysis_results id for duplicate URL"
@@ -492,6 +516,7 @@ def _inflate_stored_result_row(row: dict) -> dict:
     debug_summary = verification_card if isinstance(verification_card, dict) else {}
 
     return {
+        "result_id": row.get("id"),
         "title": row.get("title") or "",
         "original_url": row.get("original_url") or "",
         "topic": row.get("topic") or "",

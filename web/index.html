@@ -2025,6 +2025,105 @@
     const REVIEW_QUEUE_KEY = "policy_ai_review_queue";
     const REVIEW_ACTION_KEY = "policy_ai_reviewer_actions";
     const LOCAL_HISTORY_LIMIT = 5;
+    const REVIEW_QUEUE_LIMIT = 20;
+
+    // Phase 2 M3: lightweight localStorage to avoid QuotaExceededError.
+    // The slim shape keeps just enough to render history rows and topic cards;
+    // full results are hydrated on demand via GET /history/{result_id}.
+    const POLICY_AI_DEBUG = (() => {
+      try {
+        return /[?&]debug=1\b/.test(window.location.search || "")
+          || ["localhost", "127.0.0.1", "0.0.0.0"].includes(window.location.hostname);
+      } catch (_) {
+        return false;
+      }
+    })();
+
+    function debugLogStorageWrite(key, serialized) {
+      if (!POLICY_AI_DEBUG) return;
+      try {
+        const bytes = serialized ? new Blob([serialized]).size : 0;
+        console.debug(`[policy-ai] localStorage write key=${key} bytes=${bytes}`);
+      } catch (_) {
+        // size logging is best-effort only
+      }
+    }
+
+    const safeStorage = {
+      get(key) {
+        try {
+          return localStorage.getItem(key);
+        } catch (error) {
+          console.warn(`safeStorage.get failed for ${key}`, error);
+          return null;
+        }
+      },
+      set(key, value, options) {
+        const serialized = typeof value === "string" ? value : JSON.stringify(value);
+        try {
+          localStorage.setItem(key, serialized);
+          debugLogStorageWrite(key, serialized);
+          return true;
+        } catch (error) {
+          const isQuota = error && (
+            error.name === "QuotaExceededError"
+            || error.code === 22
+            || error.code === 1014
+          );
+          if (!isQuota) {
+            console.warn(`safeStorage.set failed for ${key}`, error);
+            return false;
+          }
+          console.warn(`safeStorage.set quota exceeded for ${key}; attempting graceful trim`);
+          const trimmer = options && typeof options.onQuotaTrim === "function"
+            ? options.onQuotaTrim
+            : null;
+          if (trimmer) {
+            try {
+              const trimmedSerialized = trimmer(value);
+              if (typeof trimmedSerialized === "string") {
+                localStorage.setItem(key, trimmedSerialized);
+                debugLogStorageWrite(key, trimmedSerialized);
+                return true;
+              }
+            } catch (innerError) {
+              console.warn(`safeStorage.set trim attempt failed for ${key}`, innerError);
+            }
+          }
+          try {
+            localStorage.removeItem(key);
+          } catch (_) {
+            // ignore — best-effort cleanup
+          }
+          console.warn(`safeStorage.set giving up on ${key} after quota error; entry cleared`);
+          return false;
+        }
+      },
+      remove(key) {
+        try {
+          localStorage.removeItem(key);
+        } catch (error) {
+          console.warn(`safeStorage.remove failed for ${key}`, error);
+        }
+      },
+    };
+
+    function trimArrayPayload(parsedValue) {
+      const arr = Array.isArray(parsedValue) ? parsedValue : [];
+      const half = Math.max(1, Math.floor(arr.length / 2));
+      return JSON.stringify(arr.slice(0, half));
+    }
+
+    function trimMapPayload(parsedValue) {
+      const map = parsedValue && typeof parsedValue === "object" && !Array.isArray(parsedValue)
+        ? parsedValue
+        : {};
+      const keys = Object.keys(map);
+      const half = Math.max(1, Math.floor(keys.length / 2));
+      const trimmed = {};
+      keys.slice(0, half).forEach((key) => { trimmed[key] = map[key]; });
+      return JSON.stringify(trimmed);
+    }
 
     const queryInput = document.getElementById("query");
     const maxNewsInput = document.getElementById("maxNews");
@@ -3358,9 +3457,14 @@
       renderSelectedIssueIntro([]);
     }
 
+    // Phase 2 M3: in-memory cache for hydrated history records. localStorage only
+    // holds slim metadata + per-result summaries; the full payload comes back from
+    // /history/{result_id} on demand and lives here for the rest of the session.
+    const hydratedRecordCache = new Map();
+
     function safeReadLocalHistory() {
       try {
-        const raw = localStorage.getItem(LOCAL_HISTORY_KEY);
+        const raw = safeStorage.get(LOCAL_HISTORY_KEY);
         if (!raw) {
           return [];
         }
@@ -3379,17 +3483,29 @@
           };
         });
       } catch (error) {
-        localStorage.removeItem(LOCAL_HISTORY_KEY);
+        console.warn("safeReadLocalHistory parse failed; clearing storage", error);
+        safeStorage.remove(LOCAL_HISTORY_KEY);
         return [];
       }
     }
 
     function getHistoryResults(record) {
+      if (!record) return [];
+      const recordKey = record.id || record.stable_history_key;
+      if (recordKey && hydratedRecordCache.has(recordKey)) {
+        const cached = hydratedRecordCache.get(recordKey);
+        if (Array.isArray(cached?.results)) {
+          return cached.results;
+        }
+      }
       if (Array.isArray(record?.response?.results)) {
         return record.response.results;
       }
       if (Array.isArray(record?.results)) {
         return record.results;
+      }
+      if (Array.isArray(record?.summary_results)) {
+        return record.summary_results;
       }
       return [];
     }
@@ -3523,20 +3639,148 @@
       }).join("");
     }
 
+    // Phase 2 M3: project each full result down to only the fields the topic
+    // card / history row UI actually reads. Heavy nested arrays (evidence
+    // snippets, evidence sources, source candidates, contradiction checks,
+    // bias framing, claim evidence map) are dropped and rehydrated from
+    // GET /history/{result_id} when a record is opened.
+    function buildSlimResultSummary(result) {
+      const safeResult = result && typeof result === "object" ? result : {};
+      const verification = safeResult.verification_card || {};
+      const summary = verification.source_reliability_summary || {};
+      const fullDebug = verification.debug_summary || safeResult.debug_summary || {};
+      const evidenceQuality = fullDebug.evidence_quality_summary
+        || verification.evidence_quality_summary
+        || safeResult.evidence_quality_summary
+        || {};
+      const evidenceStrength = fullDebug.evidence_strength_summary
+        || verification.evidence_strength_summary
+        || {};
+      const slimDebug = {
+        needs_human_review: fullDebug.needs_human_review,
+        official_body_matches: fullDebug.official_body_matches,
+        official_body_candidates: fullDebug.official_body_candidates,
+        official_bodies_fetched: fullDebug.official_bodies_fetched,
+        official_detail_pages_fetched_count: fullDebug.official_detail_pages_fetched_count,
+        official_body_success_count: fullDebug.official_body_success_count,
+        official_body_fail_count: fullDebug.official_body_fail_count,
+        evidence_quality_summary: evidenceQuality,
+        evidence_strength_summary: evidenceStrength,
+        stable_history_key: fullDebug.stable_history_key,
+        history_key: fullDebug.history_key,
+        history_action: fullDebug.history_action,
+        review_queue_key: fullDebug.review_queue_key,
+        review_queue_action: fullDebug.review_queue_action,
+      };
+      const slimSummary = {
+        official_detail_available: summary.official_detail_available,
+        official_candidate_count: summary.official_candidate_count,
+        official_evidence_status: summary.official_evidence_status,
+        official_detail_status: summary.official_detail_status,
+      };
+      return {
+        result_id: safeResult.result_id || null,
+        title: safeResult.title || "",
+        original_url: safeResult.original_url || "",
+        topic: safeResult.topic || "",
+        claim_text: verification.claim_text || safeResult.claim_text || "",
+        verdict_label: verification.verdict_label || safeResult.verdict_label || "",
+        review_status: verification.review_status || safeResult.review_status || "",
+        evidence_summary: verification.evidence_summary || safeResult.evidence_summary || "",
+        policy_confidence: {
+          policy_confidence_score: safeResult.policy_confidence?.policy_confidence_score,
+        },
+        policy_impact: {
+          impact_level: safeResult.policy_impact?.impact_level,
+          impact_direction: safeResult.policy_impact?.impact_direction,
+        },
+        final_decision: {
+          policy_alert_level: safeResult.final_decision?.policy_alert_level,
+          market_signal: safeResult.final_decision?.market_signal,
+          decision_summary: safeResult.final_decision?.decision_summary,
+        },
+        verification_card: {
+          claim_text: verification.claim_text || "",
+          verdict_label: verification.verdict_label || "",
+          review_status: verification.review_status || "",
+          evidence_summary: verification.evidence_summary || "",
+          evidence_quality_summary: evidenceQuality,
+          source_reliability_summary: slimSummary,
+          debug_summary: slimDebug,
+        },
+        debug_summary: slimDebug,
+        evidence_quality_summary: evidenceQuality,
+        slim: true,
+      };
+    }
+
+    function buildSlimHistoryRecord(record) {
+      const safeRecord = record && typeof record === "object" ? record : {};
+      const results = getHistoryResults(safeRecord);
+      const summaryResults = results.map((result) => buildSlimResultSummary(result));
+      const firstResultId = summaryResults.find((r) => r.result_id)?.result_id || null;
+      return {
+        id: safeRecord.id,
+        stable_history_key: safeRecord.stable_history_key,
+        query: safeRecord.query || "",
+        max_news: safeRecord.max_news,
+        analyzed_at: safeRecord.analyzed_at,
+        created_at: safeRecord.created_at,
+        history_action: safeRecord.history_action,
+        result_id: safeRecord.result_id || firstResultId,
+        highest_alert: safeRecord.highest_alert,
+        average_confidence: safeRecord.average_confidence,
+        high_impact_count: safeRecord.high_impact_count,
+        results_count: safeRecord.results_count != null
+          ? safeRecord.results_count
+          : summaryResults.length,
+        evidence_strength_summary: safeRecord.evidence_strength_summary,
+        evidence_quality_summary: safeRecord.evidence_quality_summary,
+        summary_results: summaryResults,
+      };
+    }
+
+    function buildSlimReviewItem(item) {
+      const safeItem = item && typeof item === "object" ? item : {};
+      const results = getHistoryResults(safeItem);
+      const summaryResults = results.slice(0, 2).map((result) => buildSlimResultSummary(result));
+      const firstResultId = summaryResults.find((r) => r.result_id)?.result_id
+        || safeItem.result_id
+        || null;
+      return {
+        id: safeItem.id,
+        stable_history_key: safeItem.stable_history_key,
+        query: safeItem.query || "",
+        max_news: safeItem.max_news,
+        title: safeItem.title || "",
+        warning_level: safeItem.warning_level,
+        confidence_score: safeItem.confidence_score,
+        review_status: safeItem.review_status,
+        reviewer_status: safeItem.reviewer_status || "pending",
+        evidence_quality_summary: safeItem.evidence_quality_summary,
+        evidence_strength_summary: safeItem.evidence_strength_summary,
+        created_at: safeItem.created_at,
+        updated_at: safeItem.updated_at,
+        result_id: firstResultId,
+        summary_results: summaryResults,
+      };
+    }
+
     function safeWriteLocalHistory(records) {
-      try {
-        localStorage.setItem(
-          LOCAL_HISTORY_KEY,
-          JSON.stringify((records || []).slice(0, LOCAL_HISTORY_LIMIT))
-        );
-      } catch (error) {
-        console.warn("Failed to save local analysis history", error);
-      }
+      const slimmed = (records || []).slice(0, LOCAL_HISTORY_LIMIT).map(buildSlimHistoryRecord);
+      const serialized = JSON.stringify(slimmed);
+      safeStorage.set(LOCAL_HISTORY_KEY, serialized, {
+        onQuotaTrim(currentValue) {
+          // First retry: try writing only the most recent half.
+          const parsed = typeof currentValue === "string" ? JSON.parse(currentValue) : currentValue;
+          return trimArrayPayload(parsed);
+        },
+      });
     }
 
     function safeReadReviewQueue() {
       try {
-        const raw = localStorage.getItem(REVIEW_QUEUE_KEY);
+        const raw = safeStorage.get(REVIEW_QUEUE_KEY);
         if (!raw) return [];
         const parsed = JSON.parse(raw);
         if (!Array.isArray(parsed)) return [];
@@ -3552,17 +3796,21 @@
           };
         });
       } catch (error) {
-        localStorage.removeItem(REVIEW_QUEUE_KEY);
+        console.warn("safeReadReviewQueue parse failed; clearing storage", error);
+        safeStorage.remove(REVIEW_QUEUE_KEY);
         return [];
       }
     }
 
     function safeWriteReviewQueue(items) {
-      try {
-        localStorage.setItem(REVIEW_QUEUE_KEY, JSON.stringify(items || []));
-      } catch (error) {
-        console.warn("Failed to save review queue", error);
-      }
+      const slimmed = (items || []).slice(0, REVIEW_QUEUE_LIMIT).map(buildSlimReviewItem);
+      const serialized = JSON.stringify(slimmed);
+      safeStorage.set(REVIEW_QUEUE_KEY, serialized, {
+        onQuotaTrim(currentValue) {
+          const parsed = typeof currentValue === "string" ? JSON.parse(currentValue) : currentValue;
+          return trimArrayPayload(parsed);
+        },
+      });
     }
 
     function normalizeHistoryText(value) {
@@ -3671,22 +3919,25 @@
 
     function safeReadReviewerActions() {
       try {
-        const raw = localStorage.getItem(REVIEW_ACTION_KEY);
+        const raw = safeStorage.get(REVIEW_ACTION_KEY);
         if (!raw) return {};
         const parsed = JSON.parse(raw);
         return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
       } catch (error) {
-        localStorage.removeItem(REVIEW_ACTION_KEY);
+        console.warn("safeReadReviewerActions parse failed; clearing storage", error);
+        safeStorage.remove(REVIEW_ACTION_KEY);
         return {};
       }
     }
 
     function safeWriteReviewerActions(actions) {
-      try {
-        localStorage.setItem(REVIEW_ACTION_KEY, JSON.stringify(actions || {}));
-      } catch (error) {
-        console.warn("Failed to save reviewer actions", error);
-      }
+      const serialized = JSON.stringify(actions || {});
+      safeStorage.set(REVIEW_ACTION_KEY, serialized, {
+        onQuotaTrim(currentValue) {
+          const parsed = typeof currentValue === "string" ? JSON.parse(currentValue) : currentValue;
+          return trimMapPayload(parsed);
+        },
+      });
     }
 
     function reviewActionKeyForResult(result, query = "") {
@@ -4235,10 +4486,173 @@
       }).join("");
     }
 
-    function loadReviewQueueItem(item, message) {
-      const results = getHistoryResults(item);
+    // Phase 2 M3: hydrate slim record/queue entries to full results via the
+    // backend so the UI can render with the same shape it always has. Falls
+    // back gracefully to whatever lightweight summary is in localStorage so
+    // history never disappears when the network or backend is unavailable.
+    function resolveResultIdFromRecord(record) {
+      if (!record) return null;
+      if (record.result_id) return Number(record.result_id) || null;
+      const fromSummary = Array.isArray(record.summary_results)
+        ? record.summary_results.find((r) => r && r.result_id)
+        : null;
+      if (fromSummary?.result_id) return Number(fromSummary.result_id) || null;
+      const fromResults = Array.isArray(record.results)
+        ? record.results.find((r) => r && r.result_id)
+        : null;
+      if (fromResults?.result_id) return Number(fromResults.result_id) || null;
+      const fromResponse = Array.isArray(record.response?.results)
+        ? record.response.results.find((r) => r && r.result_id)
+        : null;
+      if (fromResponse?.result_id) return Number(fromResponse.result_id) || null;
+      return null;
+    }
+
+    async function hydrateRecordResults(record) {
+      if (!record) return [];
+      const cacheKey = record.id || record.stable_history_key;
+      if (cacheKey && hydratedRecordCache.has(cacheKey)) {
+        const cached = hydratedRecordCache.get(cacheKey);
+        if (Array.isArray(cached?.results) && cached.results.length) {
+          return cached.results;
+        }
+      }
+      const existing = getHistoryResults(record);
+      const alreadyFull = Array.isArray(existing) && existing.some((r) => !r?.slim);
+      if (alreadyFull) {
+        return existing;
+      }
+      const resultId = resolveResultIdFromRecord(record);
+      if (!resultId) {
+        return existing;
+      }
+      try {
+        const response = await fetch(`${API_BASE}/history/${encodeURIComponent(resultId)}`);
+        if (!response.ok) {
+          console.warn(`history hydration failed: HTTP ${response.status}`);
+          return existing;
+        }
+        const data = await response.json();
+        const row = data?.result;
+        if (!row) return existing;
+        const fullResult = mapHistoryRowToResult(row);
+        const hydrated = [fullResult];
+        if (cacheKey) {
+          hydratedRecordCache.set(cacheKey, { results: hydrated });
+        }
+        return hydrated;
+      } catch (error) {
+        console.warn("history hydration error", error);
+        return existing;
+      }
+    }
+
+    function parseMaybeJson(value) {
+      if (value == null || value === "") return null;
+      if (typeof value !== "string") return value;
+      try {
+        return JSON.parse(value);
+      } catch (_) {
+        return value;
+      }
+    }
+
+    function mapHistoryRowToResult(row) {
+      // /history/{id} returns the raw analysis_results row with JSON columns
+      // still string-encoded; inflate them to the AnalyzeResult shape the UI
+      // already knows how to render.
+      const safeRow = row && typeof row === "object" ? row : {};
+      const debug = parseMaybeJson(safeRow.debug_summary) || {};
+      const evidenceSources = parseMaybeJson(safeRow.evidence_sources) || [];
+      const sourceCandidates = parseMaybeJson(safeRow.source_candidates) || [];
+      const evidenceSnippets = parseMaybeJson(safeRow.evidence_snippets) || [];
+      const claimEvidenceMap = parseMaybeJson(safeRow.claim_evidence_map) || {};
+      const contradictionChecks = parseMaybeJson(safeRow.contradiction_checks) || [];
+      const contradictionSummary = parseMaybeJson(safeRow.contradiction_summary) || {};
+      const biasFraming = parseMaybeJson(safeRow.bias_framing_analysis) || [];
+      const biasFramingSummary = parseMaybeJson(safeRow.bias_framing_summary) || {};
+      const sourceReliabilitySummary = parseMaybeJson(safeRow.source_reliability_summary) || {};
+      const claims = parseMaybeJson(safeRow.claims) || [];
+      const normalizedClaims = parseMaybeJson(safeRow.normalized_claims) || [];
+      const sourceQueries = parseMaybeJson(safeRow.source_queries) || [];
+      const missingContext = parseMaybeJson(safeRow.missing_context) || [];
+      const marketSignal = parseMaybeJson(safeRow.market_signal);
+      const verificationCard = {
+        claim_text: safeRow.claim_text || "",
+        verdict_label: safeRow.verdict_label || "",
+        verdict_confidence: safeRow.verdict_confidence || 0,
+        evidence_sources: evidenceSources,
+        source_candidates: sourceCandidates,
+        source_queries: sourceQueries,
+        evidence_snippets: evidenceSnippets,
+        claim_evidence_map: claimEvidenceMap,
+        evidence_quality_summary: debug.evidence_quality_summary || {},
+        evidence_strength_summary: debug.evidence_strength_summary || {},
+        contradiction_checks: contradictionChecks,
+        contradiction_summary: contradictionSummary,
+        bias_framing_analysis: biasFraming,
+        bias_framing_summary: biasFramingSummary,
+        source_reliability_summary: sourceReliabilitySummary,
+        source_reliability_score: safeRow.source_reliability_score || 0,
+        source_reliability_reason: safeRow.source_reliability_reason || "",
+        evidence_summary: safeRow.evidence_summary || "",
+        missing_context: missingContext,
+        last_checked_at: safeRow.last_checked_at || "",
+        review_status: safeRow.review_status || "",
+        debug_summary: debug,
+      };
+      return {
+        result_id: safeRow.id || null,
+        title: safeRow.title || "",
+        original_url: safeRow.original_url || "",
+        topic: safeRow.topic || "",
+        claims,
+        normalized_claims: normalizedClaims,
+        source_candidates: sourceCandidates,
+        source_queries: sourceQueries,
+        evidence_snippets: evidenceSnippets,
+        claim_evidence_map: claimEvidenceMap,
+        evidence_quality_summary: debug.evidence_quality_summary || {},
+        contradiction_checks: contradictionChecks,
+        contradiction_summary: contradictionSummary,
+        bias_framing_analysis: biasFraming,
+        bias_framing_summary: biasFramingSummary,
+        debug_summary: debug,
+        policy_confidence: {
+          policy_confidence_score: safeRow.policy_confidence_score,
+          verification_strength: safeRow.verification_strength,
+          risk_level: safeRow.risk_level,
+          action_priority: safeRow.action_priority,
+        },
+        policy_impact: {
+          impact_level: safeRow.impact_level,
+          impact_direction: safeRow.impact_direction,
+          market_sensitivity: safeRow.market_sensitivity,
+          consumer_sensitivity: safeRow.consumer_sensitivity,
+          business_sensitivity: safeRow.business_sensitivity,
+        },
+        final_decision: {
+          policy_alert_level: safeRow.policy_alert_level,
+          market_signal: marketSignal,
+        },
+        verification_card: verificationCard,
+        claim_text: safeRow.claim_text || "",
+        verdict_label: safeRow.verdict_label || "",
+        verdict_confidence: safeRow.verdict_confidence || 0,
+        evidence_sources: evidenceSources,
+        source_reliability_score: safeRow.source_reliability_score || 0,
+        source_reliability_reason: safeRow.source_reliability_reason || "",
+        evidence_summary: safeRow.evidence_summary || "",
+        missing_context: missingContext,
+        last_checked_at: safeRow.last_checked_at || "",
+        review_status: safeRow.review_status || "",
+      };
+    }
+
+    async function loadReviewQueueItem(item, message) {
       currentReviewId = item?.id || null;
       currentHistoryId = item?.stable_history_key || item?.id || null;
+      const results = await hydrateRecordResults(item);
       setCurrentReportContext(
         item?.query || queryInput.value.trim(),
         item?.max_news || results.length,
@@ -4273,10 +4687,10 @@
       showStatus(`검토 상태를 ${reviewStatusLabel(reviewerStatus)}으로 변경했습니다.`, true);
     }
 
-    function loadHistoryRecord(record, message, focusIndex = null) {
-      const results = getHistoryResults(record);
+    async function loadHistoryRecord(record, message, focusIndex = null) {
       currentHistoryId = record?.id || null;
       selectedResultIndex = Number.isInteger(focusIndex) ? focusIndex : null;
+      const results = await hydrateRecordResults(record);
       setCurrentReportContext(
         record?.query || queryInput.value.trim(),
         record?.max_news || results.length,
@@ -6718,14 +7132,14 @@
         historyResult.stableHistoryKey,
         reviewResult.action
       );
-      const refreshedHistory = safeReadLocalHistory().map((item) => {
-        if (item.stable_history_key !== historyResult.stableHistoryKey) return item;
-        return {
-          ...item,
-          response: renderData,
-        };
-      });
-      safeWriteLocalHistory(refreshedHistory);
+      // Seed the in-memory hydration cache with the just-completed full payload
+      // so reopening this record in the same session doesn't trigger a refetch.
+      // localStorage itself only holds the slim shape written above.
+      if (historyResult.stableHistoryKey && Array.isArray(renderData.results)) {
+        hydratedRecordCache.set(historyResult.stableHistoryKey, {
+          results: renderData.results,
+        });
+      }
       return renderData;
     }
 
@@ -6790,7 +7204,7 @@
           showStatus("저장된 분석 기록이 없습니다.", true);
           return;
         }
-        loadHistoryRecord(records[0] || {}, "가장 최근 분석 기록을 불러왔습니다.");
+        await loadHistoryRecord(records[0] || {}, "가장 최근 분석 기록을 불러왔습니다.");
       } catch (error) {
         showError(`최근 분석 불러오기 실패: ${error.message}`);
         hideStatus();
