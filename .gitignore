@@ -6,3 +6,4 @@ reports/
 policy_memory.json
 policy_ai.db
 .cache/
+.claude/settings.local.json

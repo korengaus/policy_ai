@@ -1,0 +1,88 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      smoke_base_url:
+        description: "Optional deployed app URL to smoke test (leave empty to skip)."
+        required: false
+        default: ""
+
+# Phase 2 M4: CI runs compile + offline unit/regression suites on every push and
+# PR. Smoke testing against a live deployment is gated behind workflow_dispatch
+# so normal CI does not trigger real news crawling or external network calls.
+jobs:
+  validate:
+    name: compile + tests
+    runs-on: ubuntu-latest
+    env:
+      CI: "true"
+      PYTHONUTF8: "1"
+      # Keep Postgres dual-write disabled by default so the suite runs without
+      # any DATABASE_URL; test_postgres_dual_write.py exercises the isolation
+      # logic with mocks.
+      USE_POSTGRES_WRITE: "false"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+          # pytest is not in requirements.txt but the suites are plain
+          # unittest scripts; they run directly via `python tests/...py`.
+          # Install it anyway so contributors can swap to `pytest` locally.
+          pip install pytest
+
+      - name: Install Node dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install --no-audit --no-fund
+          fi
+
+      - name: Compile Python modules
+        run: python -m compileall api_server.py database.py job_manager.py
+
+      - name: Run async job tests
+        run: python tests/test_jobs.py
+
+      - name: Run Postgres dual-write isolation tests
+        run: python tests/test_postgres_dual_write.py
+
+      - name: Run AI reasoner status tests
+        run: python tests/test_ai_reasoner_status.py
+
+      - name: Run JS regression + localStorage tests
+        run: npm test
+
+      # Optional manual smoke test. Only fires on workflow_dispatch when the
+      # user provides a non-empty smoke_base_url. We never run this on push or
+      # pull_request because it would exercise the real pipeline (news fetch,
+      # external sites) on the target deployment.
+      - name: Smoke test deployed async job (manual only)
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.smoke_base_url != '' }}
+        run: |
+          python scripts/smoke_async_job.py \
+            --base-url "${{ github.event.inputs.smoke_base_url }}" \
+            --query "전세사기" \
+            --max-news 1
