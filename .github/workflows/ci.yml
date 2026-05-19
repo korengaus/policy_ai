@@ -72,6 +72,15 @@ jobs:
       - name: Run AI reasoner status tests
         run: python tests/test_ai_reasoner_status.py
 
+      - name: Run semantic matching tests
+        # Phase 2 M5: deterministic provider + no network. The flag remains
+        # off-by-default for the rest of the suite; the test module sets it
+        # locally via environment overrides when it needs the enabled path.
+        env:
+          SEMANTIC_MATCHING_ENABLED: "false"
+          EMBEDDING_PROVIDER: "disabled"
+        run: python tests/test_semantic_matching.py
+
       - name: Run JS regression + localStorage tests
         run: npm test
 

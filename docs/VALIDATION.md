@@ -23,11 +23,14 @@ python -m compileall api_server.py database.py job_manager.py
 python tests/test_jobs.py
 python tests/test_postgres_dual_write.py
 python tests/test_ai_reasoner_status.py
+python tests/test_semantic_matching.py
 npm test
 ```
 
 No external services required — `USE_POSTGRES_WRITE=false` keeps the dual-write
-path mocked, and the JS tests run in an isolated `vm` sandbox with no network.
+path mocked, the semantic test uses the deterministic embedding provider
+(no network, no OpenAI key), and the JS tests run in an isolated `vm` sandbox
+with no network. See `docs/SEMANTIC_MATCHING.md` for the M5 semantic flow.
 
 ## B. Manual local smoke test
 

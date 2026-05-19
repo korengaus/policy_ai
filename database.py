@@ -42,7 +42,37 @@ def init_db():
         )
         _ensure_columns(connection)
         _ensure_jobs_table(connection)
+        _ensure_embedding_cache_table(connection)
         connection.commit()
+
+
+def _ensure_embedding_cache_table(connection):
+    """Phase 2 M5: idempotent embedding cache. Safe to call repeatedly.
+
+    The cache is best-effort — a corrupted row or schema mismatch should never
+    block a pipeline run. Callers go through ``get_cached_embedding`` /
+    ``save_cached_embedding`` which swallow errors and log a warning.
+    """
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS embedding_cache (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            text_hash TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            model TEXT,
+            dimensions INTEGER,
+            vector_json TEXT NOT NULL,
+            text_preview TEXT,
+            created_at TEXT
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS ix_embedding_cache_lookup
+        ON embedding_cache(text_hash, provider, model)
+        """
+    )
 
 
 def _ensure_jobs_table(connection):
@@ -369,3 +399,115 @@ def get_result_by_id(result_id: int):
             (result_id,),
         ).fetchone()
     return _row_to_dict(row) if row else None
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 M5: embedding cache helpers
+# ---------------------------------------------------------------------------
+# These intentionally swallow exceptions and return ``None`` / ``False`` on
+# any error: the cache is a performance optimisation, not a source of truth.
+# A semantic ranking run must never fail because the cache table is locked,
+# corrupted, or missing — the worst case is a recomputed embedding.
+
+import logging as _embedding_logging  # local alias avoids top-of-file churn
+
+_embedding_logger = _embedding_logging.getLogger(__name__)
+
+
+def get_cached_embedding(text_hash: str, provider: str, model: str):
+    """Return a previously stored vector, or ``None`` if absent/unusable."""
+    if not text_hash or not provider:
+        return None
+    try:
+        with get_connection() as connection:
+            row = connection.execute(
+                """
+                SELECT vector_json, dimensions
+                FROM embedding_cache
+                WHERE text_hash = ? AND provider = ? AND model = ?
+                LIMIT 1
+                """,
+                (text_hash, provider, model or ""),
+            ).fetchone()
+    except sqlite3.Error as error:
+        _embedding_logger.warning("embedding_cache read failed: %s", error)
+        return None
+    if row is None:
+        return None
+    try:
+        vector = json.loads(row["vector_json"])
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        _embedding_logger.warning("embedding_cache row had unreadable vector: %s", error)
+        return None
+    if not isinstance(vector, list) or not all(isinstance(v, (int, float)) for v in vector):
+        return None
+    return [float(v) for v in vector]
+
+
+def save_cached_embedding(
+    text_hash: str,
+    provider: str,
+    model: str,
+    vector,
+    text_preview: str = "",
+):
+    """Persist a vector. Returns True on success, False on any failure."""
+    if not text_hash or not provider or not isinstance(vector, (list, tuple)):
+        return False
+    if not vector:
+        return False
+    try:
+        vector_json = json.dumps(list(vector), ensure_ascii=False)
+    except (TypeError, ValueError) as error:
+        _embedding_logger.warning("embedding_cache could not serialize vector: %s", error)
+        return False
+    preview = (text_preview or "")[:200]
+    created_at = datetime.now(timezone.utc).isoformat()
+    try:
+        with get_connection() as connection:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO embedding_cache (
+                    text_hash, provider, model, dimensions,
+                    vector_json, text_preview, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    text_hash,
+                    provider,
+                    model or "",
+                    len(vector),
+                    vector_json,
+                    preview,
+                    created_at,
+                ),
+            )
+            connection.commit()
+    except sqlite3.Error as error:
+        _embedding_logger.warning("embedding_cache write failed: %s", error)
+        return False
+    return True
+
+
+def embedding_cache_stats() -> dict:
+    """Optional diagnostic — total rows + per-provider counts."""
+    try:
+        with get_connection() as connection:
+            total = connection.execute(
+                "SELECT COUNT(*) AS n FROM embedding_cache"
+            ).fetchone()["n"]
+            per_provider = connection.execute(
+                """
+                SELECT provider, COUNT(*) AS n
+                FROM embedding_cache
+                GROUP BY provider
+                ORDER BY n DESC
+                """
+            ).fetchall()
+    except sqlite3.Error as error:
+        return {"available": False, "error": str(error)}
+    return {
+        "available": True,
+        "total": int(total or 0),
+        "per_provider": {row["provider"]: int(row["n"]) for row in per_provider},
+    }

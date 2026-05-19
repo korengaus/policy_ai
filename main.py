@@ -38,6 +38,7 @@ from official_evidence_resolution import resolve_official_evidence
 from evidence_extraction_agent import extract_evidence_snippets
 from contradiction_agent import run_contradiction_checks
 from bias_framing_agent import analyze_bias_framing
+from semantic_evidence_agent import compute_semantic_evidence_summary
 from official_crawler import fetch_official_evidence, print_official_evidence_results
 from evidence_comparator import (
     compare_news_with_official_evidence,
@@ -540,6 +541,19 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
         bias_framing_analysis = bias_framing_result.get("bias_framing_analysis", [])
         bias_framing_summary = bias_framing_result.get("bias_framing_summary", {})
 
+        # Phase 2 M5: optional semantic evidence matching. Strictly additive —
+        # the summary is computed read-only from existing inputs and attached
+        # to debug_summary below. It never feeds policy_confidence, verdict
+        # labels, or final_decision. When SEMANTIC_MATCHING_ENABLED is false
+        # (default) this short-circuits to an "unavailable" summary with no
+        # external calls.
+        semantic_evidence_summary = compute_semantic_evidence_summary(
+            normalized_claims=normalized_claims,
+            claim_text=(news.get("title") or "") + " " + (news.get("summary") or ""),
+            source_candidates=source_candidates,
+            evidence_snippets=evidence_snippets,
+        )
+
         evidence_comparison = compare_news_with_official_evidence(
             news_title=news["title"],
             news_summary=news["summary"],
@@ -613,6 +627,12 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
         debug_summary["analysis_cache_ttl_seconds"] = ANALYSIS_CACHE_TTL_SECONDS
         debug_summary.update(official_body_debug or {})
         debug_summary.update(official_resolution_debug or {})
+        # Phase 2 M5: attach semantic evidence summary to debug_summary. This
+        # happens AFTER verdict-shaping logic above and BEFORE the calibrator
+        # below — neither reads ``debug_summary["semantic_evidence_summary"]``,
+        # so the verdict path is not influenced. Conservative wording rules in
+        # the calibrator ("의미 매칭 근거 부족", etc.) remain authoritative.
+        debug_summary["semantic_evidence_summary"] = semantic_evidence_summary
         if verification_card.get("official_mismatch"):
             policy_confidence = dict(policy_confidence)
             policy_confidence["policy_confidence_score"] = min(
