@@ -26,6 +26,8 @@ python tests/test_ai_reasoner_status.py
 python tests/test_semantic_matching.py
 python tests/test_semantic_activation.py
 python tests/test_semantic_calibration.py
+python tests/test_semantic_fact_guardrails.py
+python tests/test_semantic_provider_comparison.py
 npm test
 ```
 
@@ -43,7 +45,13 @@ python scripts/probe_semantic_matching.py --provider deterministic --show-matche
 python scripts/probe_semantic_matching.py --provider openai --no-network --fail-on-unavailable
 python scripts/evaluate_semantic_calibration.py --provider deterministic --show-failures
 python scripts/evaluate_semantic_calibration.py --provider openai --no-network --fail-on-unavailable
+python scripts/compare_semantic_providers.py --providers deterministic,disabled --no-network --show-failures
+python scripts/compare_semantic_providers.py --providers openai --no-network
 ```
+
+See `docs/SEMANTIC_PROVIDER_COMPARISON.md` for the M5.8 driver. Live
+OpenAI comparison requires `--live-confirm-token LIVE_OPENAI_OK` plus a
+fully configured env and is intentionally **not** part of CI.
 
 ## B. Manual local smoke test
 

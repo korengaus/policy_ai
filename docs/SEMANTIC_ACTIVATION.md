@@ -141,6 +141,12 @@ This is the production default on Render. The pipeline still attaches a
   `scripts/evaluate_semantic_calibration.py` and
   `tests/fixtures/semantic_calibration_cases.json`. See
   `docs/SEMANTIC_CALIBRATION.md`.
+- **M5.8 ships a provider-comparison driver** —
+  `scripts/compare_semantic_providers.py` runs the calibration fixture
+  through multiple providers in one pass and produces an
+  activation-readiness recommendation. See
+  `docs/SEMANTIC_PROVIDER_COMPARISON.md`. Live OpenAI calls require
+  `--live-confirm-token LIVE_OPENAI_OK` and a fully configured env.
 - Tune `SEMANTIC_MIN_SCORE_FOR_SUPPORT` / `_FOR_CONTEXT` from the
   calibration distribution.
 - Decide whether to surface a small `semantic_evidence_summary` card in

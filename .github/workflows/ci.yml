@@ -136,6 +136,37 @@ jobs:
           python scripts/evaluate_semantic_calibration.py \
             --provider deterministic --max-cases 3
 
+      - name: Run semantic fact guardrail tests
+        # Phase 2 M5.7: critical-fact guardrails are pure stdlib and run
+        # entirely offline. No env config required.
+        env:
+          SEMANTIC_MATCHING_ENABLED: "false"
+          EMBEDDING_PROVIDER: "disabled"
+          OPENAI_API_KEY: ""
+        run: python tests/test_semantic_fact_guardrails.py
+
+      - name: Run semantic provider comparison tests
+        # Phase 2 M5.8: comparison + threshold tooling. Tests subprocess
+        # the comparison script with --no-network so no live OpenAI call
+        # can happen. No API key is required.
+        env:
+          SEMANTIC_MATCHING_ENABLED: "false"
+          EMBEDDING_PROVIDER: "disabled"
+          OPENAI_API_KEY: ""
+        run: python tests/test_semantic_provider_comparison.py
+
+      - name: Compare semantic providers (deterministic + disabled smoke)
+        # Run the comparison driver against the deterministic provider only,
+        # confirming the offline path. Live OpenAI comparison is intentionally
+        # not part of CI — it requires explicit operator confirmation.
+        env:
+          SEMANTIC_MATCHING_ENABLED: "false"
+          EMBEDDING_PROVIDER: "disabled"
+          OPENAI_API_KEY: ""
+        run: |
+          python scripts/compare_semantic_providers.py \
+            --providers deterministic,disabled --max-cases 3 --no-network
+
       - name: Run JS regression + localStorage tests
         run: npm test
 

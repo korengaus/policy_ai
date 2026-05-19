@@ -170,6 +170,9 @@ rollout (e.g. `max_news=1` with monitoring).
   after the calibration scorecard is clean across providers.
 - Migrate the cache to pgvector or Qdrant once volume justifies it (see
   `docs/SEMANTIC_MATCHING.md#future-path-to-pgvector--qdrant`).
+- For multi-provider comparison (deterministic vs OpenAI) and
+  activation-readiness recommendations, see
+  `docs/SEMANTIC_PROVIDER_COMPARISON.md` (M5.8).
 
 ## Validation
 
