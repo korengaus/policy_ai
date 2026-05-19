@@ -190,6 +190,16 @@ def _print_scorecard(rows: list[dict], provider, args: argparse.Namespace) -> No
         )
     )
     print(f"  support_level_distribution={scorecard['support_level_distribution']}")
+    print(
+        "  guardrails: cap_applied={cap}/{cases} critical_mismatches={cm} "
+        "raw_distribution={raw} risk_flags={flags}".format(
+            cap=scorecard.get("support_cap_applied_count", 0),
+            cases=scorecard["case_count"],
+            cm=scorecard.get("total_critical_mismatches", 0),
+            raw=scorecard.get("raw_support_level_distribution", {}),
+            flags=scorecard.get("semantic_risk_flag_counts", {}),
+        )
+    )
     print()
 
     show_only_failures = args.show_failures
@@ -199,18 +209,24 @@ def _print_scorecard(rows: list[dict], provider, args: argparse.Namespace) -> No
             continue
         summary = row["summary"]
         status_label = "PASS" if evaluation["passed"] else "FAIL"
+        raw_level = evaluation.get("raw_support_level") or evaluation["support_level"]
+        cap_marker = "*" if evaluation.get("support_cap_applied") else ""
         print(
-            "  [{status}] case={cid!r} category={cat!r} support={lvl} "
-            "score%={pct} runtime_ms={rt} chunks={ch} cache={cache} req={req}".format(
+            "  [{status}] case={cid!r} category={cat!r} support={lvl}{cap} "
+            "raw={raw} score%={pct} runtime_ms={rt} chunks={ch} cache={cache} req={req} "
+            "cm={cm}".format(
                 status=status_label,
                 cid=row["case_id"],
                 cat=row["category"],
                 lvl=evaluation["support_level"],
+                cap=cap_marker,
+                raw=raw_level,
                 pct=evaluation["best_score_percent"],
                 rt=summary.get("runtime_ms"),
                 ch=summary.get("chunk_count"),
                 cache=summary.get("cache_hits"),
                 req=summary.get("embedding_request_count"),
+                cm=evaluation.get("critical_mismatch_count", 0),
             )
         )
         print(f"     claim: {_truncate(row['claim_text'], 120)}")
@@ -218,6 +234,8 @@ def _print_scorecard(rows: list[dict], provider, args: argparse.Namespace) -> No
             print(f"     failure: {_truncate(failure, 200)}")
         if evaluation.get("risk_flags"):
             print(f"     risk_flags: {evaluation['risk_flags']}")
+        if evaluation.get("semantic_risk_flags"):
+            print(f"     guardrail_risk_flags: {evaluation['semantic_risk_flags']}")
         if args.show_matches:
             for claim_match in summary.get("claim_matches") or []:
                 for top in (claim_match.get("top_matches") or [])[:3]:
@@ -245,9 +263,12 @@ def _write_json(path: Path, rows: list[dict], provider, scorecard: dict) -> None
 def _write_csv(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = [
-        "case_id", "category", "passed", "support_level", "best_score_percent",
+        "case_id", "category", "passed", "support_level", "raw_support_level",
+        "support_cap_applied", "critical_mismatch_count",
+        "best_score_percent",
         "related_top1", "overstrong", "chunk_count", "cache_hits",
-        "embedding_request_count", "runtime_ms", "risk_flags", "failure_reasons",
+        "embedding_request_count", "runtime_ms", "risk_flags",
+        "semantic_risk_flags", "failure_reasons",
     ]
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
@@ -260,6 +281,9 @@ def _write_csv(path: Path, rows: list[dict]) -> None:
                 "category": row["category"],
                 "passed": evaluation["passed"],
                 "support_level": evaluation["support_level"],
+                "raw_support_level": evaluation.get("raw_support_level"),
+                "support_cap_applied": evaluation.get("support_cap_applied"),
+                "critical_mismatch_count": evaluation.get("critical_mismatch_count"),
                 "best_score_percent": evaluation["best_score_percent"],
                 "related_top1": evaluation.get("related_top1"),
                 "overstrong": evaluation.get("overstrong"),
@@ -268,6 +292,7 @@ def _write_csv(path: Path, rows: list[dict]) -> None:
                 "embedding_request_count": summary.get("embedding_request_count"),
                 "runtime_ms": summary.get("runtime_ms"),
                 "risk_flags": "|".join(evaluation.get("risk_flags") or []),
+                "semantic_risk_flags": "|".join(evaluation.get("semantic_risk_flags") or []),
                 "failure_reasons": " | ".join(evaluation.get("failures") or []),
             })
 
@@ -306,26 +331,50 @@ def _write_markdown(path: Path, rows: list[dict], provider, scorecard: dict) -> 
     lines.append(
         f"- support_level_distribution: `{scorecard['support_level_distribution']}`"
     )
+    lines.append(
+        f"- raw_support_level_distribution: "
+        f"`{scorecard.get('raw_support_level_distribution', {})}`"
+    )
+    lines.append(
+        f"- support_cap_applied_count: "
+        f"{scorecard.get('support_cap_applied_count', 0)}"
+    )
+    lines.append(
+        f"- total_critical_mismatches: "
+        f"{scorecard.get('total_critical_mismatches', 0)}"
+    )
+    lines.append(
+        f"- semantic_risk_flag_counts: "
+        f"`{scorecard.get('semantic_risk_flag_counts', {})}`"
+    )
     lines.append("")
     lines.append("## Cases")
     lines.append("")
     lines.append(
-        "| case_id | category | passed | support_level | best_score_% | "
-        "related_top1 | overstrong | runtime_ms | failures |"
+        "| case_id | category | passed | support_level | raw_support_level | "
+        "cap_applied | critical_mismatches | best_score_% | "
+        "related_top1 | overstrong | runtime_ms | guardrail_risk_flags | failures |"
     )
-    lines.append("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
+    lines.append(
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
+    )
     for row in rows:
         evaluation = row["evaluation"]
         summary = row["summary"]
         failures = "; ".join(evaluation.get("failures") or []) or ""
+        flags = ", ".join(evaluation.get("semantic_risk_flags") or []) or ""
         lines.append(
             f"| `{row['case_id']}` | {row['category']} | "
             f"{'PASS' if evaluation['passed'] else 'FAIL'} | "
             f"{evaluation['support_level']} | "
+            f"{evaluation.get('raw_support_level', '')} | "
+            f"{evaluation.get('support_cap_applied')} | "
+            f"{evaluation.get('critical_mismatch_count', 0)} | "
             f"{evaluation['best_score_percent']} | "
             f"{evaluation.get('related_top1')} | "
             f"{evaluation.get('overstrong')} | "
             f"{summary.get('runtime_ms')} | "
+            f"{flags} | "
             f"{failures} |"
         )
     lines.append("")

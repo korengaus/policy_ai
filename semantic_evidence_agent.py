@@ -27,6 +27,7 @@ from typing import Iterable, List, Optional, Sequence
 import config
 import semantic_chunker
 import semantic_embeddings
+import semantic_fact_guardrails
 import semantic_similarity
 
 
@@ -147,6 +148,60 @@ def _aggregate_support_level(per_claim: Iterable[dict]) -> str:
     return "unavailable"
 
 
+def _apply_guardrails_to_claim_match(
+    *,
+    claim_text: str,
+    raw_support_level: str,
+    top_matches: List[dict],
+) -> dict:
+    """Run the critical-fact guardrails against each top match for a claim.
+
+    Returns a dict describing how the claim's exposed support_level should
+    differ from the raw semantic support level. Always non-destructive: the
+    raw level is preserved on the claim_match for diagnostics, and each top
+    match gets a ``critical_fact_check`` attached.
+    """
+    aggregated_risk_flags: List[str] = []
+    aggregated_mismatches: List[dict] = []
+    tightest_cap = "strong"  # ranking: strong > contextual > weak
+
+    for match in top_matches:
+        match_text = match.get("text") or ""
+        check = semantic_fact_guardrails.compare_critical_facts(claim_text, match_text)
+        match["critical_fact_check"] = check
+        for flag in check.get("risk_flags") or []:
+            if flag not in aggregated_risk_flags:
+                aggregated_risk_flags.append(flag)
+        aggregated_mismatches.extend(check.get("mismatches") or [])
+        tightest_cap = semantic_fact_guardrails.cap_support_level(
+            tightest_cap, check.get("support_cap") or "strong"
+        )
+
+    if not top_matches:
+        # Nothing to compare; raw level (likely "unavailable") stands.
+        return {
+            "raw_support_level": raw_support_level,
+            "guardrail_adjusted_support_level": raw_support_level,
+            "semantic_risk_flags": [],
+            "critical_mismatches": [],
+            "support_cap_applied": False,
+            "support_cap_reason": "no matches to evaluate",
+        }
+
+    adjusted = semantic_fact_guardrails.cap_support_level(raw_support_level, tightest_cap)
+    cap_applied = adjusted != raw_support_level
+    return {
+        "raw_support_level": raw_support_level,
+        "guardrail_adjusted_support_level": adjusted,
+        "semantic_risk_flags": aggregated_risk_flags,
+        "critical_mismatches": aggregated_mismatches,
+        "support_cap_applied": cap_applied,
+        "support_cap_reason": (
+            f"capped to {tightest_cap} by guardrails" if cap_applied else "no cap applied"
+        ),
+    }
+
+
 def compute_semantic_evidence_summary(
     *,
     normalized_claims: Optional[Sequence] = None,
@@ -182,12 +237,21 @@ def compute_semantic_evidence_summary(
         "best_overall_score": 0.0,
         "best_overall_score_percent": 0,
         "best_support_level": "unavailable",
+        "best_raw_support_level": "unavailable",
         "claim_matches": [],
         "limitations": [],
         "errors": [],
         "cache_hits": 0,
         "embedding_request_count": 0,
         "runtime_ms": 0,
+        # Phase 2 M5.7: critical-fact guardrails. ``semantic_guardrails_enabled``
+        # is always True when this agent runs — they're deterministic, fast,
+        # and have no external dependency. The counts below summarize how
+        # often the guardrail capped the raw semantic label.
+        "semantic_guardrails_enabled": True,
+        "semantic_risk_flags": [],
+        "critical_mismatch_count": 0,
+        "support_cap_applied_count": 0,
     }
 
     def _finalize(out: dict) -> dict:
@@ -235,6 +299,11 @@ def compute_semantic_evidence_summary(
     # cache_hits per call, so non-hits == requests.
     embedding_request_count = 0
 
+    aggregated_risk_flags: List[str] = []
+    critical_mismatch_count = 0
+    support_cap_applied_count = 0
+    raw_levels_for_aggregate: List[dict] = []
+
     for claim in claims:
         ranked = semantic_similarity.rank_semantic_matches(
             claim_text=claim["claim_text"],
@@ -249,14 +318,44 @@ def compute_semantic_evidence_summary(
         embedding_request_count += max(0, call_total_embeds - per_call_cache_hits)
         if ranked.get("errors"):
             summary["errors"].extend(ranked["errors"])
+
+        raw_support_level = ranked.get("support_level") or "unavailable"
+        top_matches = ranked.get("matches") or []
+        guardrail_result = _apply_guardrails_to_claim_match(
+            claim_text=claim["claim_text"],
+            raw_support_level=raw_support_level,
+            top_matches=top_matches,
+        )
+
+        # Aggregate guardrail metrics across all claims.
+        for flag in guardrail_result["semantic_risk_flags"]:
+            if flag not in aggregated_risk_flags:
+                aggregated_risk_flags.append(flag)
+        critical_mismatch_count += len(guardrail_result["critical_mismatches"])
+        if guardrail_result["support_cap_applied"]:
+            support_cap_applied_count += 1
+
+        adjusted_level = guardrail_result["guardrail_adjusted_support_level"]
         claim_matches.append({
             "claim_index": claim["claim_index"],
             "claim_text": claim["claim_text"][:400],
             "best_score": float(ranked.get("top_score") or 0.0),
             "best_score_percent": int(ranked.get("top_score_percent") or 0),
-            "support_level": ranked.get("support_level") or "unavailable",
-            "top_matches": ranked.get("matches") or [],
+            # ``support_level`` exposes the guardrail-adjusted label so
+            # downstream consumers (calibration evaluator, UI, exports) see
+            # the conservative value by default. ``raw_support_level`` is
+            # preserved for diagnostics and threshold tuning.
+            "support_level": adjusted_level,
+            "raw_support_level": guardrail_result["raw_support_level"],
+            "guardrail_adjusted_support_level": adjusted_level,
+            "semantic_risk_flags": guardrail_result["semantic_risk_flags"],
+            "critical_mismatches": guardrail_result["critical_mismatches"],
+            "support_cap_applied": guardrail_result["support_cap_applied"],
+            "support_cap_reason": guardrail_result["support_cap_reason"],
+            "top_matches": top_matches,
         })
+        raw_levels_for_aggregate.append({"support_level": raw_support_level})
+
         if (ranked.get("top_score") or 0.0) > best_score:
             best_score = float(ranked["top_score"])
             best_percent = int(ranked.get("top_score_percent") or 0)
@@ -264,9 +363,15 @@ def compute_semantic_evidence_summary(
     summary["claim_matches"] = claim_matches
     summary["best_overall_score"] = best_score
     summary["best_overall_score_percent"] = best_percent
+    # ``best_support_level`` reflects the guardrail-adjusted view, while
+    # ``best_raw_support_level`` keeps the un-capped score visible.
     summary["best_support_level"] = _aggregate_support_level(claim_matches)
+    summary["best_raw_support_level"] = _aggregate_support_level(raw_levels_for_aggregate)
     summary["cache_hits"] = cache_hits
     summary["embedding_request_count"] = embedding_request_count
+    summary["semantic_risk_flags"] = aggregated_risk_flags
+    summary["critical_mismatch_count"] = critical_mismatch_count
+    summary["support_cap_applied_count"] = support_cap_applied_count
 
     # Hard conservative guardrail — even if semantic match is "strong", the
     # surrounding pipeline must not treat this as standalone verification.

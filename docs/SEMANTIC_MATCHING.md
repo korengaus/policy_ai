@@ -16,6 +16,11 @@ that the pipeline attaches to `debug_summary` as metadata only.
   they are not verification strength.)
 - Caches embeddings in SQLite (`embedding_cache` table) so repeat runs
   on the same text are free.
+- **(M5.7)** Runs deterministic critical-fact guardrails over each top
+  match. When the claim and the matched chunk disagree on a number, date,
+  eligibility, finality, or negation token, the exposed `support_level`
+  is capped — see `docs/SEMANTIC_FACT_GUARDRAILS.md`. The raw label is
+  preserved as `raw_support_level` for diagnostics.
 
 ## What this layer does NOT do
 

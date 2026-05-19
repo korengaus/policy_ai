@@ -89,7 +89,17 @@ def evaluate_case(summary: dict, expected: dict) -> dict:
     summary = summary or {}
 
     actual_level = str(summary.get("best_support_level") or "unavailable").lower()
+    raw_level = str(
+        summary.get("best_raw_support_level") or actual_level
+    ).lower()
     best_percent = int(summary.get("best_overall_score_percent") or 0)
+
+    # Guardrail-side telemetry (M5.7). ``semantic_risk_flags`` may already
+    # populate from the agent; we union with the fixture's own ``risk_flags``
+    # below so the evaluator output captures both expected and observed risks.
+    guardrail_risk_flags = list(summary.get("semantic_risk_flags") or [])
+    critical_mismatch_count = int(summary.get("critical_mismatch_count") or 0)
+    support_cap_applied_count = int(summary.get("support_cap_applied_count") or 0)
 
     checks: List[dict] = []
     failures: List[str] = []
@@ -154,15 +164,27 @@ def evaluate_case(summary: dict, expected: dict) -> dict:
                 f"case has no official body but agent reported {actual_level!r}"
             )
 
+    expected_risk_flags = list(expected.get("risk_flags") or [])
+    combined_risk_flags = list(expected_risk_flags)
+    for flag in guardrail_risk_flags:
+        if flag not in combined_risk_flags:
+            combined_risk_flags.append(flag)
+
     return {
         "passed": not failures,
         "checks": checks,
         "failures": failures,
         "support_level": actual_level,
+        "raw_support_level": raw_level,
         "best_score_percent": best_percent,
         "related_top1": related_top1,
         "overstrong": overstrong,
-        "risk_flags": list(expected.get("risk_flags") or []),
+        "risk_flags": combined_risk_flags,
+        "expected_risk_flags": expected_risk_flags,
+        "semantic_risk_flags": guardrail_risk_flags,
+        "critical_mismatch_count": critical_mismatch_count,
+        "support_cap_applied_count": support_cap_applied_count,
+        "support_cap_applied": support_cap_applied_count > 0,
         "category": expected.get("category") or "",
     }
 
@@ -181,6 +203,10 @@ def summarize_calibration_results(rows: Iterable[dict]) -> dict:
     cache_hits_total = 0
     embedding_requests_total = 0
     support_distribution: dict[str, int] = {}
+    raw_support_distribution: dict[str, int] = {}
+    cap_applied_count = 0
+    total_critical_mismatches = 0
+    semantic_risk_flag_counts: dict[str, int] = {}
 
     for row in rows:
         evaluation = row.get("evaluation") or {}
@@ -198,8 +224,17 @@ def summarize_calibration_results(rows: Iterable[dict]) -> dict:
             overstrong_count += 1
         level = str(evaluation.get("support_level") or "").lower() or "unknown"
         support_distribution[level] = support_distribution.get(level, 0) + 1
+        raw_level = str(
+            evaluation.get("raw_support_level") or level
+        ).lower() or "unknown"
+        raw_support_distribution[raw_level] = raw_support_distribution.get(raw_level, 0) + 1
         if level == "unavailable":
             unavailable_count += 1
+        if evaluation.get("support_cap_applied"):
+            cap_applied_count += 1
+        total_critical_mismatches += int(evaluation.get("critical_mismatch_count") or 0)
+        for flag in evaluation.get("semantic_risk_flags") or []:
+            semantic_risk_flag_counts[flag] = semantic_risk_flag_counts.get(flag, 0) + 1
         runtime_total_ms += int(summary.get("runtime_ms") or 0)
         cache_hits_total += int(summary.get("cache_hits") or 0)
         embedding_requests_total += int(summary.get("embedding_request_count") or 0)
@@ -224,4 +259,8 @@ def summarize_calibration_results(rows: Iterable[dict]) -> dict:
         "total_cache_hits": cache_hits_total,
         "total_embedding_request_count": embedding_requests_total,
         "support_level_distribution": support_distribution,
+        "raw_support_level_distribution": raw_support_distribution,
+        "support_cap_applied_count": cap_applied_count,
+        "total_critical_mismatches": total_critical_mismatches,
+        "semantic_risk_flag_counts": semantic_risk_flag_counts,
     }

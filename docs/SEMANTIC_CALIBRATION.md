@@ -120,6 +120,16 @@ Render keeps these defaults. Nothing in M5.6 modifies `render.yaml`.
   should be **0** before considering production activation. Anything
   above 0 is the prime calibration signal — those are the cases where
   semantic similarity does not equal verification.
+- **`support_cap_applied_count` / `total_critical_mismatches`** —
+  emitted by the M5.7 critical-fact guardrails. `cap_applied` counts
+  cases where the guardrail tightened the exposed `support_level`
+  below the raw cosine label; `critical_mismatches` is the absolute
+  count of disagreements detected across all top matches. See
+  `docs/SEMANTIC_FACT_GUARDRAILS.md` for the cap semantics.
+- **`raw_support_level_distribution`** — the distribution that would
+  have been exposed *without* the guardrails. Comparing it against
+  `support_level_distribution` shows how often the guardrails took
+  effect for the run.
 - **`support_level_distribution`** — informational. A heavy `weak`
   distribution on the deterministic provider is expected (the surrogate
   rarely crosses the strong threshold for non-trivial cases).
