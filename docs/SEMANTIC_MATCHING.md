@@ -58,7 +58,7 @@ takes effect (no app restart needed for tests). Defaults are safe for CI:
 | --- | --- | --- |
 | `SEMANTIC_MATCHING_ENABLED` | `false` | Master switch. False → no embedding calls, agent returns `available=false`. |
 | `EMBEDDING_PROVIDER` | `disabled` | One of `disabled`, `deterministic`, `openai`. |
-| `EMBEDDING_MODEL` | empty | OpenAI model name (e.g. `text-embedding-3-small`); ignored by other providers. |
+| `EMBEDDING_MODEL` | empty | OpenAI model name (e.g. `text-embedding-3-small`); ignored by other providers. **Required** when `EMBEDDING_PROVIDER=openai` — empty value fails closed with `available=false` (M5.5). |
 | `EMBEDDING_CACHE_ENABLED` | `true` | When false, all calls bypass the SQLite cache. |
 | `EMBEDDING_TIMEOUT_SECONDS` | `10` | Per-call timeout passed to the OpenAI client. |
 | `EMBEDDING_MAX_TEXT_CHARS` | `4000` | Hard cap on text length sent to the embedding API. |
@@ -82,6 +82,13 @@ takes effect (no app restart needed for tests). Defaults are safe for CI:
 
 ```
 SEMANTIC_MATCHING_ENABLED=true EMBEDDING_PROVIDER=deterministic python tests/test_semantic_matching.py
+```
+
+For manual observation/calibration runs, see `docs/SEMANTIC_ACTIVATION.md`
+and use:
+
+```
+python scripts/probe_semantic_matching.py --provider deterministic --show-matches
 ```
 
 The test suite uses the deterministic provider exclusively for the

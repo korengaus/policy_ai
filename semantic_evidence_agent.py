@@ -21,6 +21,7 @@ Guarantees:
 from __future__ import annotations
 
 import logging
+import time
 from typing import Iterable, List, Optional, Sequence
 
 import config
@@ -158,11 +159,15 @@ def compute_semantic_evidence_summary(
 
     Safe to call even when semantic matching is disabled — that path
     short-circuits with ``semantic_matching_available=False`` and no
-    embedding calls.
+    embedding calls. M5.5 adds runtime metadata (``runtime_ms``,
+    ``embedding_request_count``, ``provider_status``) so operators can
+    measure latency and provider state without enabling matching globally.
     """
+    started_at = time.perf_counter()
     enabled = config.semantic_matching_enabled()
     provider = provider or semantic_embeddings.get_active_provider()
     available = bool(provider.available)
+    provider_status = provider.provider_status()
 
     summary = {
         "semantic_matching_enabled": enabled,
@@ -170,6 +175,7 @@ def compute_semantic_evidence_summary(
         "provider": provider.name,
         "model": provider.model,
         "dimensions": provider.dimensions,
+        "provider_status": provider_status,
         "claim_count": 0,
         "source_count": 0,
         "chunk_count": 0,
@@ -179,22 +185,30 @@ def compute_semantic_evidence_summary(
         "claim_matches": [],
         "limitations": [],
         "errors": [],
+        "cache_hits": 0,
+        "embedding_request_count": 0,
+        "runtime_ms": 0,
     }
+
+    def _finalize(out: dict) -> dict:
+        out["runtime_ms"] = int(round((time.perf_counter() - started_at) * 1000))
+        _emit_debug_log(out)
+        return out
 
     if not enabled:
         summary["limitations"].append("semantic matching disabled via configuration")
-        return summary
+        return _finalize(summary)
     if not available:
         reason = provider.error or "embedding provider unavailable"
         summary["errors"].append(reason)
         summary["limitations"].append(reason)
-        return summary
+        return _finalize(summary)
 
     claims = _coerce_claims(normalized_claims, claim_text)
     summary["claim_count"] = len(claims)
     if not claims:
         summary["limitations"].append("no claims available for semantic matching")
-        return summary
+        return _finalize(summary)
 
     max_chunks = config.semantic_max_chunks_per_source()
     chunks, sources_used = _build_source_chunks(
@@ -209,13 +223,17 @@ def compute_semantic_evidence_summary(
         summary["limitations"].append(
             "no official body text available — semantic matching cannot evaluate this claim"
         )
-        return summary
+        return _finalize(summary)
 
     cache_enabled = config.embedding_cache_enabled()
     claim_matches: List[dict] = []
     cache_hits = 0
     best_score = 0.0
     best_percent = 0
+    # Each claim embedding is one request + one per chunk it ranks against;
+    # cache hits don't count as requests. The similarity ranker reports
+    # cache_hits per call, so non-hits == requests.
+    embedding_request_count = 0
 
     for claim in claims:
         ranked = semantic_similarity.rank_semantic_matches(
@@ -224,7 +242,11 @@ def compute_semantic_evidence_summary(
             provider=provider,
             cache_enabled=cache_enabled,
         )
-        cache_hits += int(ranked.get("cache_hits") or 0)
+        per_call_cache_hits = int(ranked.get("cache_hits") or 0)
+        cache_hits += per_call_cache_hits
+        # 1 claim embed + one per chunk in the call, minus cache hits.
+        call_total_embeds = 1 + (ranked.get("chunk_count") or 0)
+        embedding_request_count += max(0, call_total_embeds - per_call_cache_hits)
         if ranked.get("errors"):
             summary["errors"].extend(ranked["errors"])
         claim_matches.append({
@@ -244,6 +266,7 @@ def compute_semantic_evidence_summary(
     summary["best_overall_score_percent"] = best_percent
     summary["best_support_level"] = _aggregate_support_level(claim_matches)
     summary["cache_hits"] = cache_hits
+    summary["embedding_request_count"] = embedding_request_count
 
     # Hard conservative guardrail — even if semantic match is "strong", the
     # surrounding pipeline must not treat this as standalone verification.
@@ -253,4 +276,35 @@ def compute_semantic_evidence_summary(
         "semantic match strength is metadata only; rule-based verification "
         "and official body matching remain authoritative"
     )
-    return summary
+    return _finalize(summary)
+
+
+def _emit_debug_log(summary: dict) -> None:
+    """Short single-line summary at INFO level — no raw bodies, no keys.
+
+    Only fires when matching is enabled AND the provider is available, so
+    the default disabled path stays completely silent.
+    """
+    if not summary.get("semantic_matching_enabled"):
+        return
+    if not summary.get("semantic_matching_available"):
+        return
+    try:
+        logger.info(
+            "semantic matching summary: provider=%s model=%s available=%s "
+            "best_support_level=%s best_score_percent=%s claims=%s chunks=%s "
+            "cache_hits=%s embedding_requests=%s runtime_ms=%s",
+            summary.get("provider"),
+            summary.get("model") or "(unset)",
+            summary.get("semantic_matching_available"),
+            summary.get("best_support_level"),
+            summary.get("best_overall_score_percent"),
+            summary.get("claim_count"),
+            summary.get("chunk_count"),
+            summary.get("cache_hits"),
+            summary.get("embedding_request_count"),
+            summary.get("runtime_ms"),
+        )
+    except Exception:
+        # Logging must never break the pipeline.
+        logger.debug("failed to emit semantic matching debug log", exc_info=True)

@@ -35,26 +35,53 @@ _DETERMINISTIC_DIMENSIONS = 64
 
 
 class EmbeddingProvider:
-    """Base interface. Subclasses implement ``get_embedding`` and ``name``."""
+    """Base interface. Subclasses implement ``get_embedding`` and ``name``.
+
+    Subclasses set:
+        * ``available`` — True only when the provider can actually return a
+          vector for non-empty text.
+        * ``configured`` — True when all required env config is present
+          (regardless of network reachability). Distinguishes "operator
+          didn't set this up" from "we tried and it failed."
+        * ``external_calls_possible`` — True when calling ``get_embedding``
+          could result in a network request. False for disabled and
+          deterministic providers.
+        * ``reason`` — Short human-readable summary, JSON-safe.
+    """
 
     name = "base"
     model = ""
     dimensions = 0
     available = False
+    configured = False
+    external_calls_possible = False
     error: Optional[str] = None
+    reason: str = ""
 
     def get_embedding(self, text: str) -> Optional[List[float]]:  # pragma: no cover - abstract
         raise NotImplementedError
 
     def get_embeddings(self, texts: Sequence[str]) -> List[Optional[List[float]]]:
-        return [self.get_embedding(text) for text in texts]
+        """Per-text dispatch; individual failures return ``None`` in place,
+        never raise, never abort the batch."""
+        results: List[Optional[List[float]]] = []
+        for text in texts:
+            try:
+                results.append(self.get_embedding(text))
+            except Exception as error:  # defensive: subclass bugs must not break callers
+                logger.warning("embedding call raised unexpectedly: %s", error)
+                results.append(None)
+        return results
 
     def provider_status(self) -> dict:
         return {
             "provider": self.name,
             "model": self.model,
             "dimensions": self.dimensions,
-            "available": self.available,
+            "available": bool(self.available),
+            "configured": bool(self.configured),
+            "external_calls_possible": bool(self.external_calls_possible),
+            "reason": self.reason or "",
             "error": self.error,
         }
 
@@ -67,8 +94,11 @@ class DisabledEmbeddingProvider(EmbeddingProvider):
     """
 
     name = "disabled"
+    configured = False
+    external_calls_possible = False
 
     def __init__(self, reason: str = "semantic matching disabled") -> None:
+        self.reason = reason
         self.error = reason
 
     def get_embedding(self, text: str) -> Optional[List[float]]:
@@ -96,6 +126,11 @@ class DeterministicHashEmbeddingProvider(EmbeddingProvider):
     model = _DETERMINISTIC_MODEL
     dimensions = _DETERMINISTIC_DIMENSIONS
     available = True
+    configured = True
+    external_calls_possible = False
+    # Plain ASCII so the reason can be printed on Windows cp949 consoles
+    # without forcing operators to set PYTHONUTF8 first.
+    reason = "deterministic provider: no network, stable across runs"
 
     @staticmethod
     def _tokenize(text: str) -> List[str]:
@@ -135,38 +170,64 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
     """Optional real-embedding provider. Constructed lazily and only when
     SEMANTIC_MATCHING_ENABLED=true and EMBEDDING_PROVIDER=openai.
 
-    Initialization never raises — if the OpenAI SDK isn't importable, or the
-    API key is missing, the provider returns ``available=False`` and the
-    caller falls back to disabled behavior. This guarantees the app starts
-    even with the flag flipped on but the environment incomplete.
+    Initialization never raises. ``available`` is True only when every
+    requirement is satisfied:
+        * OpenAI SDK is importable
+        * ``OPENAI_API_KEY`` is set (non-empty)
+        * ``EMBEDDING_MODEL`` is set (non-empty) — M5.5 fail-closed change
+        * The SDK client constructor succeeds
+
+    ``configured`` is True when ``OPENAI_API_KEY`` AND ``EMBEDDING_MODEL`` are
+    both present (regardless of SDK reachability), so operators can tell
+    "missing setup" from "setup but couldn't initialize."
+
+    Never logs API keys or raw input text. Errors are stored on the
+    instance and exposed via ``provider_status()``.
     """
 
     name = "openai"
+    external_calls_possible = True
 
     def __init__(self) -> None:
-        self.model = config.embedding_model() or "text-embedding-3-small"
+        self.model = config.embedding_model().strip()
         self._client = None
         self.error = None
-        try:
-            from openai import OpenAI  # local import keeps app importable without the SDK
-        except Exception as import_error:  # pragma: no cover - depends on env
-            self.available = False
-            self.error = f"openai sdk import failed: {import_error}"
-            logger.warning("OpenAIEmbeddingProvider unavailable: %s", self.error)
-            return
-        api_key = os.getenv("OPENAI_API_KEY") or ""
+        api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
+        # ``configured`` is independent of import/network success.
+        self.configured = bool(api_key and self.model)
+
         if not api_key:
             self.available = False
-            self.error = "OPENAI_API_KEY missing"
+            self.reason = "OPENAI_API_KEY missing"
+            self.error = self.reason
+            return
+        if not self.model:
+            # Fail-closed when EMBEDDING_MODEL is not provided. Previously we
+            # silently defaulted to text-embedding-3-small, which made it too
+            # easy to incur cost from a half-configured environment.
+            self.available = False
+            self.reason = "EMBEDDING_MODEL missing"
+            self.error = self.reason
+            return
+        try:
+            from openai import OpenAI  # local import — keeps app importable without the SDK
+        except Exception as import_error:  # pragma: no cover - depends on env
+            self.available = False
+            self.reason = "openai sdk not importable"
+            self.error = f"{self.reason}: {import_error}"
+            logger.warning("OpenAIEmbeddingProvider unavailable: %s", self.reason)
             return
         try:
             self._client = OpenAI(api_key=api_key, timeout=config.embedding_timeout_seconds())
         except Exception as init_error:  # pragma: no cover - env-dependent
             self.available = False
-            self.error = f"openai client init failed: {init_error}"
+            self.reason = "openai client init failed"
+            self.error = f"{self.reason}: {init_error}"
+            logger.warning("OpenAI client init failed: %s", init_error)
             return
         self.available = True
-        # We can only know dimensions after the first call; leave at 0 until then.
+        self.reason = "openai client initialized; first embedding call will populate dimensions"
+        # We can only learn dimensions after the first call; leave at 0 until then.
 
     def _truncate(self, text: str) -> str:
         cap = config.embedding_max_text_chars()
@@ -179,14 +240,20 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             return None
         if not isinstance(text, str) or not text.strip():
             return None
+        truncated = self._truncate(text)
         try:
             response = self._client.embeddings.create(
                 model=self.model,
-                input=self._truncate(text),
+                input=truncated,
             )
         except Exception as call_error:  # pragma: no cover - network-dependent
-            self.error = f"embedding call failed: {call_error}"
-            logger.warning("OpenAI embedding call failed: %s", call_error)
+            # Log the exception type + short message only; never log the
+            # API key (never in scope here) or the input text.
+            self.error = f"embedding call failed: {type(call_error).__name__}"
+            logger.warning(
+                "OpenAI embedding call failed (text_len=%d, model=%s): %s",
+                len(truncated), self.model, type(call_error).__name__,
+            )
             return None
         try:
             vector = list(response.data[0].embedding)

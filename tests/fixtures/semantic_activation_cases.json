@@ -1,0 +1,58 @@
+[
+  {
+    "case_id": "housing_related_vs_unrelated",
+    "description": "정부의 전세사기 지원 발표를 두고, 관련 공식 본문과 무관한 공식 본문이 함께 들어왔을 때 관련 본문이 더 높은 점수를 받아야 한다.",
+    "claim_text": "정부가 전세사기 피해자 지원 대책을 발표했다.",
+    "sources": [
+      {
+        "source_id": "src_related",
+        "title": "전세사기 피해자 지원 대책 안내",
+        "url": "https://example.go.kr/housing-support",
+        "official_body_text": "정부는 전세사기 피해자를 대상으로 상담, 금융 지원, 법률 지원을 제공하는 대책을 발표했다. 피해자는 거주지 인근 지원 센터에서 신청할 수 있다."
+      },
+      {
+        "source_id": "src_unrelated",
+        "title": "교통 안전 캠페인 안내",
+        "url": "https://example.go.kr/traffic",
+        "official_body_text": "정부는 보행자 교통 안전을 위해 캠페인을 실시한다고 밝혔다. 횡단보도 단속과 시민 교육이 핵심이다."
+      }
+    ],
+    "expected": {
+      "related_source_should_rank_above_unrelated": true,
+      "related_source_id": "src_related",
+      "related_source_url_contains": "housing-support"
+    }
+  },
+  {
+    "case_id": "contextual_support_only",
+    "description": "주거 금융 일반 정책 본문은 전세사기 지원과 동일 주제는 아니지만 문맥상 관련성이 있다. 강한 지지로 분류되어서는 안 된다.",
+    "claim_text": "정부가 청년 전세대출 한도를 상향한다.",
+    "sources": [
+      {
+        "source_id": "src_general_housing_finance",
+        "title": "주거 금융 정책 개관",
+        "url": "https://example.go.kr/housing-finance",
+        "official_body_text": "주거 금융 정책은 청년, 신혼부부, 중장년 등 생애주기별로 다른 지원 방식을 사용한다. 구체적인 한도는 매년 조정된다."
+      }
+    ],
+    "expected": {
+      "best_support_level_should_not_be_strong": true
+    }
+  },
+  {
+    "case_id": "no_official_body",
+    "description": "공식 본문 텍스트가 비어 있을 때 의미 매칭은 unavailable로 폴백해야 한다.",
+    "claim_text": "정부가 소상공인 지원금을 확대한다.",
+    "sources": [
+      {
+        "source_id": "src_no_body",
+        "title": "후보 문서 메타만 있음",
+        "url": "https://example.go.kr/no-body",
+        "official_body_text": ""
+      }
+    ],
+    "expected": {
+      "should_be_unavailable_when_no_body": true
+    }
+  }
+]

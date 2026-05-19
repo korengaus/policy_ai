@@ -81,6 +81,38 @@ jobs:
           EMBEDDING_PROVIDER: "disabled"
         run: python tests/test_semantic_matching.py
 
+      - name: Run semantic activation tests
+        # Phase 2 M5.5: probe script + provider hardening. The activation
+        # tests subprocess-invoke scripts/probe_semantic_matching.py with the
+        # deterministic provider; no OpenAI key or network is needed.
+        env:
+          SEMANTIC_MATCHING_ENABLED: "false"
+          EMBEDDING_PROVIDER: "disabled"
+          OPENAI_API_KEY: ""
+        run: python tests/test_semantic_activation.py
+
+      - name: Probe semantic matching (deterministic dry-run)
+        # Sanity check that the probe script's deterministic path also runs
+        # cleanly inside CI. No network, no API key.
+        env:
+          SEMANTIC_MATCHING_ENABLED: "false"
+          EMBEDDING_PROVIDER: "disabled"
+        run: |
+          python scripts/probe_semantic_matching.py \
+            --provider deterministic --max-cases 2
+
+      - name: Probe semantic matching (openai no-network guard)
+        # Confirms the OpenAI path reports unavailable without making a live
+        # call when --no-network is set, regardless of env state.
+        env:
+          SEMANTIC_MATCHING_ENABLED: "false"
+          EMBEDDING_PROVIDER: "disabled"
+          OPENAI_API_KEY: ""
+        run: |
+          python scripts/probe_semantic_matching.py \
+            --provider openai --no-network --fail-on-unavailable \
+            --max-cases 1 || test $? -eq 2
+
       - name: Run JS regression + localStorage tests
         run: npm test
 
