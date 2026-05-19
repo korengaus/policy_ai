@@ -25,20 +25,24 @@ python tests/test_postgres_dual_write.py
 python tests/test_ai_reasoner_status.py
 python tests/test_semantic_matching.py
 python tests/test_semantic_activation.py
+python tests/test_semantic_calibration.py
 npm test
 ```
 
 No external services required — `USE_POSTGRES_WRITE=false` keeps the dual-write
 path mocked, the semantic tests use the deterministic embedding provider
 (no network, no OpenAI key), and the JS tests run in an isolated `vm` sandbox
-with no network. See `docs/SEMANTIC_MATCHING.md` for the M5 semantic flow and
-`docs/SEMANTIC_ACTIVATION.md` for the M5.5 probe tooling.
+with no network. See `docs/SEMANTIC_MATCHING.md` for the M5 semantic flow,
+`docs/SEMANTIC_ACTIVATION.md` for the M5.5 probe tooling, and
+`docs/SEMANTIC_CALIBRATION.md` for the M5.6 evaluator.
 
-Optional manual probe runs (not in default CI):
+Optional manual probe / evaluator runs (not in default CI):
 
 ```
 python scripts/probe_semantic_matching.py --provider deterministic --show-matches --max-cases 3
 python scripts/probe_semantic_matching.py --provider openai --no-network --fail-on-unavailable
+python scripts/evaluate_semantic_calibration.py --provider deterministic --show-failures
+python scripts/evaluate_semantic_calibration.py --provider openai --no-network --fail-on-unavailable
 ```
 
 ## B. Manual local smoke test

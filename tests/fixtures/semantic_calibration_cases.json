@@ -1,0 +1,185 @@
+[
+  {
+    "case_id": "direct_support_housing",
+    "category": "direct_support",
+    "description": "전세사기 피해자 지원 발표 주장에 대해, 동일 주제를 직접 다루는 공식 본문이 무관한 공식 본문보다 더 높게 평가되어야 한다.",
+    "claim_text": "정부가 전세사기 피해자에게 법률 상담과 금융 지원을 제공한다고 발표했다.",
+    "sources": [
+      {
+        "source_id": "src_related",
+        "title": "전세사기 피해자 지원 대책 안내",
+        "url": "https://example.go.kr/housing-support",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 전세사기 피해자에게 법률 상담과 금융 지원을 제공한다고 발표했다. 신청은 거주지 인근 지원 센터를 통해 가능하며, 자세한 내용은 안내 공고를 참고한다."
+      },
+      {
+        "source_id": "src_unrelated",
+        "title": "교통 안전 캠페인 안내",
+        "url": "https://example.go.kr/traffic-safety",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 보행자 교통 안전을 위해 횡단보도 단속과 시민 교육 캠페인을 실시한다고 밝혔다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "housing-support",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": false,
+      "risk_flags": []
+    }
+  },
+  {
+    "case_id": "contextual_only_general_housing_finance",
+    "category": "contextual_only",
+    "description": "청년 전세대출 한도 상향 주장에 대해 본문은 주거 금융 정책 일반만 다룬다. 강한 지지로 평가되어서는 안 된다.",
+    "claim_text": "정부가 청년 전세대출 한도를 5천만원 상향한다.",
+    "sources": [
+      {
+        "source_id": "src_general_housing_finance",
+        "title": "주거 금융 정책 개관",
+        "url": "https://example.go.kr/housing-finance",
+        "publisher": "Example Government",
+        "official_body_text": "주거 금융 정책은 청년, 신혼부부, 중장년 등 생애주기별로 다른 지원 방식을 사용한다. 구체적인 한도와 조건은 매년 조정된다."
+      }
+    ],
+    "expected": {
+      "expected_support_level": "any",
+      "should_rank_related_first": true,
+      "related_source_url_contains": "housing-finance",
+      "should_not_be_strong": true,
+      "risk_flags": ["specific_amount_not_in_source"]
+    }
+  },
+  {
+    "case_id": "unrelated_school_lunch",
+    "category": "unrelated",
+    "description": "주거 지원 주장에 대해 공식 본문은 학교 급식 정책을 다룬다. 강한 지지로 평가되어서는 안 된다.",
+    "claim_text": "정부가 무주택 청년에게 월세 보조금을 신설한다고 발표했다.",
+    "sources": [
+      {
+        "source_id": "src_school_lunch",
+        "title": "초중고 학교 급식 정책 안내",
+        "url": "https://example.go.kr/school-lunch",
+        "publisher": "Example Government",
+        "official_body_text": "교육부는 친환경 식자재를 활용한 학교 급식 운영 지침을 발표했다. 영양 균형과 위생 관리 강화가 주요 내용이다."
+      }
+    ],
+    "expected": {
+      "expected_support_level": "any",
+      "related_source_url_contains": "school-lunch",
+      "should_rank_related_first": true,
+      "should_not_be_strong": true,
+      "risk_flags": ["topic_mismatch"]
+    }
+  },
+  {
+    "case_id": "number_mismatch_subsidy",
+    "category": "number_mismatch",
+    "description": "주장은 100만원 지원, 공식 본문은 50만원 지원. 표면 유사도가 높을 수 있지만 직접 지지로 받아들이면 안 된다.",
+    "claim_text": "정부가 소상공인에게 1인당 100만원의 긴급 지원금을 지급한다.",
+    "sources": [
+      {
+        "source_id": "src_amount_mismatch",
+        "title": "소상공인 긴급 지원금 시행 안내",
+        "url": "https://example.go.kr/sme-emergency-aid",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 소상공인에게 1인당 50만원의 긴급 지원금을 지급한다고 발표했다. 매출 감소 요건을 충족한 사업자가 대상이다."
+      }
+    ],
+    "expected": {
+      "expected_support_level": "any",
+      "related_source_url_contains": "sme-emergency-aid",
+      "should_rank_related_first": true,
+      "should_not_be_strong": true,
+      "risk_flags": ["amount_mismatch"]
+    }
+  },
+  {
+    "case_id": "date_mismatch_pilot_vs_launch",
+    "category": "date_mismatch",
+    "description": "주장은 2026년 5월 시행, 공식 본문은 2025년 시범 운영 또는 2024년 사전 안내. 직접 지지로 받아들이면 안 된다.",
+    "claim_text": "정부가 2026년 5월부터 청년 주거 안정 지원 제도를 시행한다.",
+    "sources": [
+      {
+        "source_id": "src_pilot_2025",
+        "title": "청년 주거 안정 지원 제도 시범 운영 안내",
+        "url": "https://example.go.kr/youth-housing-pilot",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 2025년 일부 지역에서 청년 주거 안정 지원 제도의 시범 운영을 시작한다고 안내했다. 본격 시행 시점은 추후 공지될 예정이다."
+      }
+    ],
+    "expected": {
+      "expected_support_level": "any",
+      "related_source_url_contains": "youth-housing-pilot",
+      "should_rank_related_first": true,
+      "should_not_be_strong": true,
+      "risk_flags": ["date_mismatch"]
+    }
+  },
+  {
+    "case_id": "eligibility_mismatch_open_vs_conditional",
+    "category": "eligibility_mismatch",
+    "description": "주장은 누구나 신청 가능, 공식 본문은 소득과 거주 요건을 충족한 사람만 가능. 직접 지지로 받아들이면 안 된다.",
+    "claim_text": "정부의 신규 주거 지원금은 누구나 신청할 수 있다.",
+    "sources": [
+      {
+        "source_id": "src_conditional_eligibility",
+        "title": "신규 주거 지원금 신청 자격 안내",
+        "url": "https://example.go.kr/housing-aid-eligibility",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 신규 주거 지원금에 대해 가구 소득 기준과 거주 요건을 충족한 가구에 한해 신청을 받는다고 안내했다. 자세한 자격 조건은 공고문에 명시되어 있다."
+      }
+    ],
+    "expected": {
+      "expected_support_level": "any",
+      "related_source_url_contains": "housing-aid-eligibility",
+      "should_rank_related_first": true,
+      "should_not_be_strong": true,
+      "risk_flags": ["eligibility_mismatch"]
+    }
+  },
+  {
+    "case_id": "official_body_missing",
+    "category": "no_body",
+    "description": "공식 후보 메타만 있고 본문 텍스트가 없을 때 의미 매칭은 unavailable로 폴백해야 한다.",
+    "claim_text": "정부가 중소기업 R&D 지원 예산을 확대한다.",
+    "sources": [
+      {
+        "source_id": "src_no_body",
+        "title": "중소기업 R&D 지원 안내",
+        "url": "https://example.go.kr/sme-rd-no-body",
+        "publisher": "Example Government",
+        "official_body_text": ""
+      }
+    ],
+    "expected": {
+      "expected_support_level": "unavailable",
+      "should_rank_related_first": false,
+      "should_not_be_strong": true,
+      "should_be_unavailable_when_no_body": true,
+      "risk_flags": ["official_body_missing"]
+    }
+  },
+  {
+    "case_id": "contradiction_like_under_review",
+    "category": "contradiction_like",
+    "description": "주장은 정책이 확정되었다고 말하지만 공식 본문은 아직 검토 중이라고 말한다. 의미적으로는 관련되어 보일 수 있으나 지지 근거로 보면 안 된다.",
+    "claim_text": "정부가 청년 월세 보조금 지급 정책을 최종 확정했다.",
+    "sources": [
+      {
+        "source_id": "src_under_review",
+        "title": "청년 월세 보조금 정책 검토 현황",
+        "url": "https://example.go.kr/youth-rent-aid-review",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 청년 월세 보조금 지급 정책에 대해 관계 부처 협의를 진행 중이며, 시행 여부는 아직 확정되지 않았다고 밝혔다."
+      }
+    ],
+    "expected": {
+      "expected_support_level": "any",
+      "related_source_url_contains": "youth-rent-aid-review",
+      "should_rank_related_first": true,
+      "should_not_be_strong": true,
+      "risk_flags": ["status_mismatch", "not_finalized"]
+    }
+  }
+]

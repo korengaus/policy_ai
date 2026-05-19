@@ -91,6 +91,13 @@ and use:
 python scripts/probe_semantic_matching.py --provider deterministic --show-matches
 ```
 
+For a repeatable scorecard against the calibration fixtures see
+`docs/SEMANTIC_CALIBRATION.md`:
+
+```
+python scripts/evaluate_semantic_calibration.py --provider deterministic --show-failures
+```
+
 The test suite uses the deterministic provider exclusively for the
 "enabled" paths, so it runs without network or API keys. CI runs it with
 `SEMANTIC_MATCHING_ENABLED=false` to confirm the off-by-default behavior;

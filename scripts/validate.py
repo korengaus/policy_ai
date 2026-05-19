@@ -45,6 +45,7 @@ def _commands() -> List[List[str]]:
         [python, "tests/test_ai_reasoner_status.py"],
         [python, "tests/test_semantic_matching.py"],
         [python, "tests/test_semantic_activation.py"],
+        [python, "tests/test_semantic_calibration.py"],
         [npm, "test"],
     ]
 

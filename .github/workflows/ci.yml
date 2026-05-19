@@ -113,6 +113,29 @@ jobs:
             --provider openai --no-network --fail-on-unavailable \
             --max-cases 1 || test $? -eq 2
 
+      - name: Run semantic calibration tests
+        # Phase 2 M5.6: calibration helper + evaluator script tests. The
+        # evaluator runs the deterministic provider only; no network and no
+        # OpenAI key are required.
+        env:
+          SEMANTIC_MATCHING_ENABLED: "false"
+          EMBEDDING_PROVIDER: "disabled"
+          OPENAI_API_KEY: ""
+        run: python tests/test_semantic_calibration.py
+
+      - name: Evaluate semantic calibration (deterministic dry-run)
+        # Calibration evaluator smoke. Intentionally does NOT pass
+        # --fail-on-regression: the deterministic provider is known to
+        # over-score number/date/eligibility-mismatch cases, and that signal
+        # is the whole point of M5.6. Operators must inspect the scorecard
+        # before enabling real embeddings.
+        env:
+          SEMANTIC_MATCHING_ENABLED: "false"
+          EMBEDDING_PROVIDER: "disabled"
+        run: |
+          python scripts/evaluate_semantic_calibration.py \
+            --provider deterministic --max-cases 3
+
       - name: Run JS regression + localStorage tests
         run: npm test
 

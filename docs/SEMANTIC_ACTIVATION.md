@@ -137,6 +137,10 @@ This is the production default on Render. The pipeline still attaches a
 
 - Build a labeled calibration set (claim ↔ supporting passage ↔ expected
   semantic strength) and run the probe against it with both providers.
+  **M5.6 ships an initial scorecard tool** —
+  `scripts/evaluate_semantic_calibration.py` and
+  `tests/fixtures/semantic_calibration_cases.json`. See
+  `docs/SEMANTIC_CALIBRATION.md`.
 - Tune `SEMANTIC_MIN_SCORE_FOR_SUPPORT` / `_FOR_CONTEXT` from the
   calibration distribution.
 - Decide whether to surface a small `semantic_evidence_summary` card in
