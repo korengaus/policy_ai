@@ -242,6 +242,23 @@ artifacts, not part of the repo's truth.
   reviewer-only "semantic match strength" badge). **Verdict changes
   remain off-limits.**
 
+## K1. Operational runner shortcut (M7.5)
+
+For the periodic-monitoring use case, the operational runner bundles
+the canary smoke + legacy smoke + (optionally) historical evaluation
+behind a single command:
+
+```
+python scripts/run_operational_checks.py --profile render-canary \
+  --base-url https://policy-ai-q5ax.onrender.com \
+  --include-secondary-query
+```
+
+It writes a consolidated `reports/operational_check_<ts>.{json,md}`
+report (gitignored) with parsed pass / warn / fail status per step.
+See `docs/OPERATIONAL_AUTOMATION.md` for profiles and safety notes.
+The runner never modifies Render env.
+
 ## K. Validation
 
 ```

@@ -211,6 +211,18 @@ jobs:
           OPENAI_API_KEY: ""
         run: python tests/test_smoke_semantic_canary.py
 
+      - name: Run operational checks runner tests
+        # Phase 2 M7.5: operational automation runner. Tests use an
+        # injected fake subprocess runner so no real Render or OpenAI
+        # call happens in CI. The runner itself is NOT executed against
+        # Render in CI — only its argparser, profile resolution, output
+        # parsers, and orchestration logic are exercised.
+        env:
+          SEMANTIC_MATCHING_ENABLED: "false"
+          EMBEDDING_PROVIDER: "disabled"
+          OPENAI_API_KEY: ""
+        run: python tests/test_operational_checks_runner.py
+
       - name: Evaluate semantic real-claim batch (deterministic dry-run)
         # Real-claim batch evaluator smoke. Deterministic provider only,
         # --no-network to enforce offline, --max-cases 3 to keep CI fast.

@@ -32,8 +32,20 @@ python tests/test_semantic_real_claim_batch.py
 python tests/test_historical_claim_batch_builder.py
 python tests/test_semantic_canary_metrics.py
 python tests/test_smoke_semantic_canary.py
+python tests/test_operational_checks_runner.py
 npm test
 ```
+
+**Shortcut**: instead of running each test individually, use the
+operational runner's `quick` profile (M7.5):
+
+```
+python scripts/run_operational_checks.py --profile quick
+```
+
+It calls `scripts/validate.py` and writes a consolidated report under
+`reports/operational_check_<timestamp>.{json,md}` (gitignored). See
+`docs/OPERATIONAL_AUTOMATION.md` for profiles and CI guidance.
 
 No external services required — `USE_POSTGRES_WRITE=false` keeps the dual-write
 path mocked, the semantic tests use the deterministic embedding provider

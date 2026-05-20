@@ -52,6 +52,7 @@ def _commands() -> List[List[str]]:
         [python, "tests/test_historical_claim_batch_builder.py"],
         [python, "tests/test_semantic_canary_metrics.py"],
         [python, "tests/test_smoke_semantic_canary.py"],
+        [python, "tests/test_operational_checks_runner.py"],
         [npm, "test"],
     ]
 
