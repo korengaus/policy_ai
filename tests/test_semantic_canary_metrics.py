@@ -81,9 +81,36 @@ class ExtractionTests(unittest.TestCase):
         self.assertEqual(out[0]["provider"], "openai")
 
     def test_finds_summary_under_result_results(self):
-        payload = _wrap_in_result_payload(_make_summary(), _make_summary())
+        # Two summaries with distinct content (different runtimes) must
+        # both be extracted. M7.3 added content-hash dedupe — content-
+        # identical duplicates (the verification_card vs debug_summary
+        # JSON-deserialized duplicate pattern) collapse to one.
+        payload = _wrap_in_result_payload(
+            _make_summary(runtime_ms=100),
+            _make_summary(runtime_ms=200),
+        )
         out = scm.extract_semantic_summaries(payload)
         self.assertEqual(len(out), 2)
+
+    def test_content_identical_summaries_dedupe(self):
+        # The same logical summary often appears twice in JSON-deserialized
+        # result payloads (once under debug_summary, again under
+        # verification_card.debug_summary). After JSON round-trip the two
+        # dicts have different id() but identical content — they must
+        # collapse to one.
+        s = _make_summary(runtime_ms=300)
+        payload = {
+            "result": {
+                "results": [{
+                    "debug_summary": {"semantic_evidence_summary": json.loads(json.dumps(s))},
+                    "verification_card": {
+                        "debug_summary": {"semantic_evidence_summary": json.loads(json.dumps(s))},
+                    },
+                }],
+            },
+        }
+        out = scm.extract_semantic_summaries(payload)
+        self.assertEqual(len(out), 1)
 
     def test_finds_summary_under_verification_card(self):
         # Mimic the alternate shape: nested verification_card → debug_summary.
@@ -155,16 +182,87 @@ class SummarizeTests(unittest.TestCase):
         self.assertEqual(out["raw_support_distribution"], {"weak": 1})
 
     def test_cap_ratio_computed_correctly(self):
-        # 3 summaries enabled, 2 caps applied → cap_ratio = 2 / 3.
+        # 3 distinct summaries, each with claim_count=1 (single-claim).
+        # Total claims = 3, total caps = 2 → cap_ratio = 2/3. M7.3
+        # changed the denominator from semantic_enabled_count to
+        # total_claim_count when claim_count is reported.
         payload = _wrap_in_result_payload(
-            _make_summary(support_cap_applied_count=1),
-            _make_summary(support_cap_applied_count=1),
-            _make_summary(support_cap_applied_count=0),
+            _make_summary(support_cap_applied_count=1, runtime_ms=100, claim_count=1),
+            _make_summary(support_cap_applied_count=1, runtime_ms=200, claim_count=1),
+            _make_summary(support_cap_applied_count=0, runtime_ms=300, claim_count=1),
         )
         out = scm.summarize_semantic_canary(payload)
         self.assertEqual(out["semantic_enabled_count"], 3)
         self.assertEqual(out["support_cap_applied_count"], 2)
         self.assertAlmostEqual(out["cap_ratio"], 2 / 3, places=3)
+
+    def test_cap_ratio_uses_summary_basis_when_claim_count_missing(self):
+        # Legacy / minimal payload path — claim_count absent. Falls back
+        # to semantic_enabled_count as the denominator.
+        payload = _wrap_in_result_payload(
+            _make_summary(support_cap_applied_count=1, runtime_ms=100),
+            _make_summary(support_cap_applied_count=1, runtime_ms=200),
+            _make_summary(support_cap_applied_count=0, runtime_ms=300),
+        )
+        out = scm.summarize_semantic_canary(payload)
+        self.assertEqual(out["semantic_enabled_count"], 3)
+        self.assertAlmostEqual(out["cap_ratio"], 2 / 3, places=3)
+
+    def test_per_claim_overstrong_does_not_fire_when_other_claim_capped(self):
+        # The M7.3 local canary surfaced this exact failure mode in the
+        # old summary-level check: a multi-claim summary with one clean
+        # strong claim AND one different claim that was correctly capped
+        # to contextual was being flagged as overstrong. It must NOT be.
+        payload = _wrap_in_result_payload(_make_summary(
+            best_support_level="strong",
+            best_raw_support_level="strong",
+            critical_mismatch_count=2,
+            support_cap_applied_count=1,
+            semantic_risk_flags=["missing_critical_fact"],
+            claim_matches=[
+                # Claim that was correctly capped — has flags, NOT strong.
+                {
+                    "support_level": "contextual",
+                    "raw_support_level": "strong",
+                    "support_cap_applied": True,
+                    "semantic_risk_flags": ["missing_critical_fact"],
+                },
+                # Unrelated clean claim — strong with no flags.
+                {
+                    "support_level": "strong",
+                    "raw_support_level": "strong",
+                    "support_cap_applied": False,
+                    "semantic_risk_flags": [],
+                },
+            ],
+        ))
+        out = scm.summarize_semantic_canary(payload)
+        self.assertEqual(out["overstrong_like_count"], 0)
+        # support_cap_applied_count and critical_mismatch_count still
+        # surface — they're the right signal that the guardrail did its
+        # job — but they don't drive the fail classification.
+
+    def test_per_claim_overstrong_fires_when_strong_claim_has_uncapped_flags(self):
+        # The genuine M6.5-style failure mode: a strong claim with its
+        # own risk flags and NO cap applied. Must fire.
+        payload = _wrap_in_result_payload(_make_summary(
+            best_support_level="strong",
+            best_raw_support_level="strong",
+            critical_mismatch_count=1,
+            support_cap_applied_count=0,
+            semantic_risk_flags=["policy_scope_mismatch"],
+            claim_matches=[
+                {
+                    "support_level": "strong",
+                    "raw_support_level": "strong",
+                    "support_cap_applied": False,
+                    "semantic_risk_flags": ["policy_scope_mismatch"],
+                },
+            ],
+        ))
+        out = scm.summarize_semantic_canary(payload)
+        self.assertEqual(out["overstrong_like_count"], 1)
+        self.assertEqual(out["health"], "fail")
 
     def test_runtime_avg_and_p95_computed(self):
         payload = _wrap_in_result_payload(

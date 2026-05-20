@@ -37,6 +37,8 @@ the exact failure mode M6.5 surfaced and M6.6 fixed.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -106,19 +108,43 @@ def percentile(values: Sequence[float], p: float) -> float:
 # ---------------------------------------------------------------------------
 
 
+def _summary_signature(summary: dict) -> str:
+    """Content-hash dedupe key for a semantic_evidence_summary.
+
+    The same logical summary often appears twice in a JSON-deserialized
+    result payload (once under ``debug_summary.semantic_evidence_summary``,
+    again under ``verification_card.debug_summary.semantic_evidence_summary``).
+    On the server side these were the same dict; once serialized and
+    re-parsed they're two distinct objects, so ``id()`` dedupe misses
+    them. We hash a stable JSON serialization to catch content-equal
+    duplicates without depending on object identity.
+    """
+    try:
+        canonical = json.dumps(summary, sort_keys=True, ensure_ascii=False, default=str)
+    except Exception:
+        # If something in the summary isn't JSON-serializable we fall
+        # back to identity; this preserves the prior behavior rather
+        # than crashing.
+        return f"id:{id(summary)}"
+    return hashlib.sha256(canonical.encode("utf-8", errors="replace")).hexdigest()
+
+
 def extract_semantic_summaries(payload: Any, *, max_depth: int = 12) -> List[dict]:
     """Return every ``semantic_evidence_summary`` dict found anywhere in
     ``payload`` (typical sources: ``result.results[i].debug_summary``,
     ``result.results[i].verification_card.debug_summary``, or a top-level
-    ``debug_summary``). Order is depth-first. Each blob appears at most
-    once even when nested duplicates exist.
+    ``debug_summary``). Order is depth-first. Content-equal duplicates
+    (same summary referenced from multiple paths) appear at most once
+    regardless of whether they share object identity — important when
+    the payload came in over HTTP and was deserialized into separate
+    dicts per path.
 
     The walk is defensive: dicts, lists, and tuples are traversed; any
     other type is skipped. ``max_depth`` prevents pathological deeply
     nested payloads from blowing the stack.
     """
     out: List[dict] = []
-    seen: set = set()
+    seen_signatures: set = set()
 
     def _walk(node: Any, depth: int) -> None:
         if depth > max_depth or node is None:
@@ -126,11 +152,9 @@ def extract_semantic_summaries(payload: Any, *, max_depth: int = 12) -> List[dic
         if isinstance(node, dict):
             target = node.get("semantic_evidence_summary")
             if isinstance(target, dict):
-                # Deduplicate by object identity — same dict referenced
-                # from multiple paths counts once.
-                ident = id(target)
-                if ident not in seen:
-                    seen.add(ident)
+                signature = _summary_signature(target)
+                if signature not in seen_signatures:
+                    seen_signatures.add(signature)
                     out.append(target)
             for value in node.values():
                 _walk(value, depth + 1)
@@ -188,6 +212,7 @@ def summarize_semantic_canary(payload: Any) -> dict:
     risk_flag_counts: Dict[str, int] = {}
     critical_mismatch_count = 0
     support_cap_applied_count = 0
+    total_claim_count = 0
     runtime_values: List[float] = []
     cache_hits_total = 0
     embedding_request_count_total = 0
@@ -218,6 +243,7 @@ def summarize_semantic_canary(payload: Any) -> dict:
 
         critical_mismatch_count += safe_int(summary.get("critical_mismatch_count"))
         support_cap_applied_count += safe_int(summary.get("support_cap_applied_count"))
+        total_claim_count += safe_int(summary.get("claim_count"))
         runtime_ms = safe_int(summary.get("runtime_ms"))
         if runtime_ms > 0:
             runtime_values.append(float(runtime_ms))
@@ -238,21 +264,50 @@ def summarize_semantic_canary(payload: Any) -> dict:
                 if lim:
                     limitations.append(str(lim))
 
-        # Overstrong-like detection — strictly conservative.
-        adjusted = str(summary.get("best_support_level") or "").lower()
-        raw = str(summary.get("best_raw_support_level") or adjusted).lower()
-        flag_list = list(summary.get("semantic_risk_flags") or [])
-        crit_count = safe_int(summary.get("critical_mismatch_count"))
-        if adjusted == "strong" and raw == "strong" and (flag_list or crit_count > 0):
-            overstrong_like_count += 1
-            warnings.append(
-                "overstrong_like: adjusted=strong raw=strong with active risk flags or "
-                f"critical_mismatch_count={crit_count}"
-            )
+        # Overstrong-like detection — per claim when ``claim_matches`` is
+        # present, summary-level as a fallback. The per-claim check is
+        # strictly conservative: a claim is overstrong-like only when
+        # *that specific claim* (a) ended at support_level=strong, (b)
+        # had raw_support_level=strong, (c) was NOT capped by guardrails
+        # (support_cap_applied=False), AND (d) carries at least one risk
+        # flag. A summary with one clean strong claim and one different
+        # claim that was correctly capped to contextual is NOT overstrong.
+        claim_matches = summary.get("claim_matches")
+        if isinstance(claim_matches, list) and claim_matches:
+            for claim in claim_matches:
+                if not isinstance(claim, dict):
+                    continue
+                c_adj = str(claim.get("support_level") or "").lower()
+                c_raw = str(claim.get("raw_support_level") or c_adj).lower()
+                c_capped = bool(claim.get("support_cap_applied"))
+                c_flags = list(claim.get("semantic_risk_flags") or [])
+                if c_adj == "strong" and c_raw == "strong" and not c_capped and c_flags:
+                    overstrong_like_count += 1
+                    warnings.append(
+                        f"overstrong_like (per-claim): support_level=strong "
+                        f"raw=strong with uncapped risk flags {c_flags!r}"
+                    )
+        else:
+            # Legacy / minimal payload — fall back to summary-level
+            # signal. This path triggers when an old client sends just
+            # the top-level scorecard without per-claim breakdown.
+            adjusted = str(summary.get("best_support_level") or "").lower()
+            raw = str(summary.get("best_raw_support_level") or adjusted).lower()
+            flag_list = list(summary.get("semantic_risk_flags") or [])
+            crit_count = safe_int(summary.get("critical_mismatch_count"))
+            if adjusted == "strong" and raw == "strong" and (flag_list or crit_count > 0):
+                overstrong_like_count += 1
+                warnings.append(
+                    "overstrong_like (summary fallback): adjusted=strong raw=strong "
+                    f"with active risk flags or critical_mismatch_count={crit_count}"
+                )
 
+    # cap_ratio is a per-claim ratio when claim counts are available;
+    # otherwise per-summary. Both are bounded in [0, 1] for sane inputs.
     cap_ratio = 0.0
-    if support_cap_applied_count > 0 and semantic_enabled_count > 0:
-        cap_ratio = round(support_cap_applied_count / semantic_enabled_count, 3)
+    cap_basis = total_claim_count if total_claim_count > 0 else semantic_enabled_count
+    if support_cap_applied_count > 0 and cap_basis > 0:
+        cap_ratio = round(support_cap_applied_count / cap_basis, 3)
 
     runtime_ms_avg = int(round(sum(runtime_values) / len(runtime_values))) if runtime_values else 0
     runtime_ms_p95 = int(round(percentile(runtime_values, 95.0))) if runtime_values else 0
