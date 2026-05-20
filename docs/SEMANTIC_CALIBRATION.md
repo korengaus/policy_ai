@@ -250,7 +250,11 @@ rollout (e.g. `max_news=1` with monitoring).
   cases — M6.0 grew the synthetic set to 36 cases, but a labeled
   real-claim set (still synthetic in URLs / personally identifying
   details) would let the OpenAI comparison surface domain-specific
-  failure modes that a hand-authored fixture cannot.
+  failure modes that a hand-authored fixture cannot. M6.2 added a
+  separate 15-case anonymized real-claim-like batch under
+  `tests/fixtures/semantic_real_claim_batch_sample.json`; see
+  `docs/SEMANTIC_REAL_CLAIM_BATCH.md` for the dedicated evaluator and
+  the activation-gate checklist that depends on it.
 - Tune thresholds from the real-provider score distribution rather than
   the conservative defaults.
 - Consider surfacing a small "임베딩 의미 매칭" card in the UI — only

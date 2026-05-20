@@ -176,7 +176,10 @@ script:
 
 - Continue expanding the calibration set from anonymized historical
   cases — M6.0 is still synthetic-but-realistic, not labeled real-claim
-  data.
+  data. M6.2 added a separate 15-case anonymized real-claim-like batch
+  under `tests/fixtures/semantic_real_claim_batch_sample.json` with its
+  own evaluator (`scripts/evaluate_real_claim_batch.py`); see
+  `docs/SEMANTIC_REAL_CLAIM_BATCH.md` for the dedicated activation gate.
 - Tune `SEMANTIC_MIN_SCORE_FOR_SUPPORT` / `SEMANTIC_MIN_SCORE_FOR_CONTEXT`
   from the OpenAI score distribution. M5.8 deliberately leaves
   `recommended_thresholds.support` / `context` as `null` because tuning

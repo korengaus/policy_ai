@@ -167,6 +167,32 @@ jobs:
           python scripts/compare_semantic_providers.py \
             --providers deterministic,disabled --max-cases 3 --no-network
 
+      - name: Run semantic real-claim batch tests
+        # Phase 2 M6.2: anonymized real-claim-like evaluation batch. Tests
+        # subprocess the evaluator script with --no-network so no live
+        # OpenAI call can happen. No API key is required. Live OpenAI
+        # against the real-claim batch is intentionally local-only and
+        # gated behind --live-confirm-token LIVE_OPENAI_OK.
+        env:
+          SEMANTIC_MATCHING_ENABLED: "false"
+          EMBEDDING_PROVIDER: "disabled"
+          OPENAI_API_KEY: ""
+        run: python tests/test_semantic_real_claim_batch.py
+
+      - name: Evaluate semantic real-claim batch (deterministic dry-run)
+        # Real-claim batch evaluator smoke. Deterministic provider only,
+        # --no-network to enforce offline, --max-cases 3 to keep CI fast.
+        # No --fail-on-regression here for the same reason the calibration
+        # smoke skips it: the deterministic surrogate's score distribution
+        # is signal, not a regression gate.
+        env:
+          SEMANTIC_MATCHING_ENABLED: "false"
+          EMBEDDING_PROVIDER: "disabled"
+          OPENAI_API_KEY: ""
+        run: |
+          python scripts/evaluate_real_claim_batch.py \
+            --provider deterministic --no-network --max-cases 3
+
       - name: Run JS regression + localStorage tests
         run: npm test
 

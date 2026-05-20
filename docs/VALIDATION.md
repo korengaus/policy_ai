@@ -28,6 +28,7 @@ python tests/test_semantic_activation.py
 python tests/test_semantic_calibration.py
 python tests/test_semantic_fact_guardrails.py
 python tests/test_semantic_provider_comparison.py
+python tests/test_semantic_real_claim_batch.py
 npm test
 ```
 
@@ -47,11 +48,15 @@ python scripts/evaluate_semantic_calibration.py --provider deterministic --show-
 python scripts/evaluate_semantic_calibration.py --provider openai --no-network --fail-on-unavailable
 python scripts/compare_semantic_providers.py --providers deterministic,disabled --no-network --show-failures
 python scripts/compare_semantic_providers.py --providers openai --no-network
+python scripts/evaluate_real_claim_batch.py --provider deterministic --no-network --show-failures
+python scripts/evaluate_real_claim_batch.py --provider openai --no-network --fail-on-unavailable
 ```
 
-See `docs/SEMANTIC_PROVIDER_COMPARISON.md` for the M5.8 driver. Live
-OpenAI comparison requires `--live-confirm-token LIVE_OPENAI_OK` plus a
-fully configured env and is intentionally **not** part of CI.
+See `docs/SEMANTIC_PROVIDER_COMPARISON.md` for the M5.8 driver and
+`docs/SEMANTIC_REAL_CLAIM_BATCH.md` for the M6.2 real-claim evaluator.
+Live OpenAI runs against either fixture require `--live-confirm-token
+LIVE_OPENAI_OK` plus a fully configured env and are intentionally **not**
+part of CI.
 
 ## B. Manual local smoke test
 

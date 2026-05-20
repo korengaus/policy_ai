@@ -1,0 +1,332 @@
+[
+  {
+    "case_id": "real_housing_fraud_legal_finance",
+    "category": "direct_support",
+    "description": "전세사기 피해자에게 법률 상담과 금융 지원을 제공한다는 주장은 동일 사안을 다루는 공식 본문에서 직접 지지된다.",
+    "claim_text": "정부가 전세사기 피해자에게 법률 상담과 긴급 금융 지원을 제공한다.",
+    "sources": [
+      {
+        "source_id": "src_housing_fraud_direct",
+        "title": "전세사기 피해자 지원 대책 안내",
+        "url": "https://example.go.kr/housing-fraud-victim-support",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 전세사기 피해자에게 법률 상담과 긴급 금융 지원을 제공한다고 안내했다. 신청은 거주지 인근 지원 센터에서 가능하다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "housing-fraud-victim-support",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": false,
+      "risk_flags": []
+    }
+  },
+  {
+    "case_id": "real_housing_fraud_automatic_payment_claim",
+    "category": "eligibility_mismatch",
+    "description": "전세사기 피해자 전원이 자동으로 보상금을 받는다는 주장에 대해 본문은 신청과 심사를 거쳐 일부 대상에 한해 지급된다고 안내한다.",
+    "claim_text": "전세사기 피해자 전원이 자동으로 보상금을 받는다.",
+    "sources": [
+      {
+        "source_id": "src_housing_fraud_conditional",
+        "title": "전세사기 피해자 보상 신청 절차 안내",
+        "url": "https://example.go.kr/housing-fraud-victim-compensation",
+        "publisher": "Example Government",
+        "official_body_text": "전세사기 피해자 보상은 신청과 자격 심사를 거쳐 일부 대상에 한해 지급된다. 자세한 절차는 거주지 지원 센터에서 안내한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "housing-fraud-victim-compensation",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["eligibility_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_youth_rent_universal_claim",
+    "category": "eligibility_mismatch",
+    "description": "모든 청년이 월세 보조금을 신청할 수 있다는 주장에 대해 본문은 연령, 소득, 거주 요건 충족자에 한해 가능하다고 안내한다.",
+    "claim_text": "모든 청년이 월세 보조금을 신청할 수 있다.",
+    "sources": [
+      {
+        "source_id": "src_youth_rent_conditional",
+        "title": "청년 월세 보조금 신청 자격 안내",
+        "url": "https://example.molit.go.kr/youth-rent-support-eligibility",
+        "publisher": "Example Government",
+        "official_body_text": "청년 월세 보조금은 만 19~34세 청년 중 가구 소득 기준과 거주 요건을 충족한 사람에 한해 신청할 수 있다. 자세한 자격 조건은 공고문에 명시되어 있다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "youth-rent-support-eligibility",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["eligibility_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_sme_emergency_grant_amount",
+    "category": "number_mismatch",
+    "description": "소상공인 1인당 500만원 긴급 지원금 지급 주장에 대해 본문은 1인당 100만원이라고 명시한다.",
+    "claim_text": "정부가 소상공인 1인당 500만원의 긴급 지원금을 지급한다.",
+    "sources": [
+      {
+        "source_id": "src_sme_grant_mismatch",
+        "title": "소상공인 긴급 지원금 지급 안내",
+        "url": "https://example.mss.go.kr/sme-emergency-grant",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 소상공인 1인당 100만원의 긴급 지원금을 지급한다고 안내했다. 매출 감소 요건을 충족한 사업자가 대상이다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "sme-emergency-grant",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["number_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_health_insurance_general_overview",
+    "category": "contextual_only",
+    "description": "건강보험료 3% 인하 주장에 대해 본문은 건강보험 정책 일반 안내만 다룬다. 강한 지지로 평가되어서는 안 된다.",
+    "claim_text": "정부가 건강보험료를 3% 인하한다고 발표했다.",
+    "sources": [
+      {
+        "source_id": "src_health_insurance_overview",
+        "title": "건강보험 정책 개관",
+        "url": "https://example.mohw.go.kr/health-insurance-overview",
+        "publisher": "Example Government",
+        "official_body_text": "건강보험료는 매년 보건복지부의 종합 검토를 거쳐 조정된다. 구체적인 세율과 적용 시점은 입법 절차를 통해 결정된다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "health-insurance-overview",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["missing_critical_fact", "specific_amount_not_in_source"]
+    }
+  },
+  {
+    "case_id": "real_tax_cut_date_and_finality_mismatch",
+    "category": "date_mismatch",
+    "description": "2026년 5월부터 부가가치세 인하 시행 주장에 대해 본문은 2025년 검토 단계이며 시행 시점이 미정이라고 안내한다.",
+    "claim_text": "정부가 2026년 5월부터 부가가치세 인하를 시행한다고 발표했다.",
+    "sources": [
+      {
+        "source_id": "src_tax_cut_under_review",
+        "title": "부가가치세 인하 검토 진행 안내",
+        "url": "https://example.mosf.go.kr/vat-cut-review",
+        "publisher": "Example Government",
+        "official_body_text": "부가가치세 인하 방안은 2025년 정부 검토 단계이며 시행 시점은 미정이다. 입법 절차가 종료되면 공지된다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "vat-cut-review",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["date_mismatch", "finality_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_disaster_relief_partial_support",
+    "category": "partial_support",
+    "description": "호우 피해 1가구당 200만원 재난지원금 주장에 대해 본문은 제도의 존재만 확인하고 구체적 금액을 언급하지 않는다.",
+    "claim_text": "정부가 호우 피해 가구에 1가구당 200만원의 재난지원금을 지급한다.",
+    "sources": [
+      {
+        "source_id": "src_disaster_relief_program_only",
+        "title": "호우 피해 재난지원금 지급 안내",
+        "url": "https://example.mois.go.kr/disaster-relief-program",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 호우 피해 가구에 재난지원금을 지급한다고 안내했다. 구체적인 금액과 신청 절차는 시도별 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "disaster-relief-program",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["missing_critical_fact"]
+    }
+  },
+  {
+    "case_id": "real_education_local_vs_central",
+    "category": "local_vs_central_authority",
+    "description": "교육부가 전국 고등학생에게 교육비를 지원한다는 주장에 대해 본문은 일부 시도교육청의 자체 사업을 안내한다.",
+    "claim_text": "교육부가 전국 고등학생에게 교육비를 지원한다.",
+    "sources": [
+      {
+        "source_id": "src_education_local_pilot",
+        "title": "시도교육청 교육비 지원 사업 안내",
+        "url": "https://example.moe.go.kr/local-education-support",
+        "publisher": "Example Government",
+        "official_body_text": "일부 시도교육청은 자체 예산으로 교육비 지원 사업을 운영한다고 안내했다. 사업 범위는 지역별로 다르다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "local-education-support",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["actor_scope_mismatch", "local_vs_central"]
+    }
+  },
+  {
+    "case_id": "real_transport_pilot_vs_nationwide",
+    "category": "finality_mismatch",
+    "description": "노인 무료 교통 제도를 전국에서 시행한다고 최종 확정했다는 주장에 대해 본문은 일부 지역 시범 사업이며 본격 시행은 추후 공지된다고 안내한다.",
+    "claim_text": "정부가 노인 무료 교통 제도를 전국에서 시행한다고 최종 확정 발표했다.",
+    "sources": [
+      {
+        "source_id": "src_transport_pilot",
+        "title": "노인 교통 지원 시범 사업 안내",
+        "url": "https://example.molit.go.kr/senior-transit-pilot",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 일부 지역에서 노인 교통 지원 시범 사업을 운영한다고 안내했다. 본격 시행 여부는 추후 공지될 예정이다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "senior-transit-pilot",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["finality_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_childcare_universal_vs_conditional",
+    "category": "eligibility_mismatch",
+    "description": "모든 가구가 보육비 지원금을 신청할 수 있다는 주장에 대해 본문은 소득 기준과 거주 요건을 충족하는 가구에 한해 지급된다고 안내한다.",
+    "claim_text": "모든 가구가 보육비 지원금을 신청할 수 있다.",
+    "sources": [
+      {
+        "source_id": "src_childcare_conditional",
+        "title": "보육비 지원금 신청 자격 안내",
+        "url": "https://example.mohw.go.kr/childcare-subsidy-eligibility",
+        "publisher": "Example Government",
+        "official_body_text": "보육비 지원금은 가구 소득 기준과 거주 요건을 충족하는 가구에 한해 지급된다. 자세한 자격은 공고문에 명시되어 있다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "childcare-subsidy-eligibility",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["eligibility_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_finance_actor_mismatch",
+    "category": "actor_mismatch",
+    "description": "금융위원회가 청년 전세대출 한도 상향을 최종 확정했다는 주장에 대해 본문은 국토교통부의 다른 청년 주거 정책을 안내한다.",
+    "claim_text": "금융위원회가 청년 전세대출 한도 상향을 최종 확정했다.",
+    "sources": [
+      {
+        "source_id": "src_finance_actor_mismatch",
+        "title": "국토교통부 청년 주거 안정 지원 제도 안내",
+        "url": "https://example.molit.go.kr/youth-housing-stability-policy",
+        "publisher": "Example Government",
+        "official_body_text": "국토교통부는 청년 주거 안정 지원 제도를 운영한다고 안내했다. 자세한 자격은 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "youth-housing-stability-policy",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["actor_mismatch", "policy_scope_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_consumer_protection_refund_guide",
+    "category": "direct_support",
+    "description": "공정거래위원회의 온라인 쇼핑몰 환불 의무 강화 주장에 대해 본문은 동일 사안의 가이드라인 시행을 안내한다.",
+    "claim_text": "공정거래위원회가 온라인 쇼핑몰의 환불 의무를 강화한다고 발표했다.",
+    "sources": [
+      {
+        "source_id": "src_consumer_protection_refund",
+        "title": "온라인 쇼핑몰 환불 의무 강화 가이드라인 안내",
+        "url": "https://example.ftc.go.kr/online-refund-guideline",
+        "publisher": "Example Government",
+        "official_body_text": "공정거래위원회는 온라인 쇼핑몰 사업자의 환불 의무를 강화하는 가이드라인을 시행한다고 안내했다. 위반 사업자에 대한 처분 절차가 명시되어 있다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "online-refund-guideline",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": false,
+      "risk_flags": []
+    }
+  },
+  {
+    "case_id": "real_negation_fake_youth_subsidy",
+    "category": "negation_or_refutation",
+    "description": "신규 청년 보조금이 신설되었다는 주장에 대해 본문은 해당 보도가 사실이 아니며 신설 계획이 없다는 정정 안내를 담는다.",
+    "claim_text": "정부가 신규 청년 보조금을 신설했다.",
+    "sources": [
+      {
+        "source_id": "src_negation_fake_subsidy",
+        "title": "청년 보조금 신설 보도 정정 안내",
+        "url": "https://example.go.kr/youth-subsidy-refutation",
+        "publisher": "Example Government",
+        "official_body_text": "해당 청년 보조금 신설 보도는 사실이 아닙니다. 정부는 현재 신설 계획이 없다고 정정 안내합니다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "youth-subsidy-refutation",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["negation_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_negation_policy_withdrawal",
+    "category": "negation_or_refutation",
+    "description": "1주택자 종부세 폐지 시행 주장에 대해 본문은 추진 계획이 보류되었고 보도는 사실이 아니라고 안내한다.",
+    "claim_text": "정부가 1주택자 종부세 폐지를 시행한다.",
+    "sources": [
+      {
+        "source_id": "src_negation_policy_withdrawal",
+        "title": "1주택자 종부세 폐지 추진 보류 안내",
+        "url": "https://example.mosf.go.kr/property-tax-withdrawal",
+        "publisher": "Example Government",
+        "official_body_text": "1주택자 종부세 폐지 추진 계획은 보류되었으며 해당 보도는 사실이 아닙니다. 시행 시점은 정해진 바 없다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "property-tax-withdrawal",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["negation_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_budget_proposal_finality_mismatch",
+    "category": "finality_mismatch",
+    "description": "2026년 보육 지원 예산 5조원을 최종 확정했다는 주장에 대해 본문은 예산안을 국회에 제출했고 심사 후 확정 예정이라고 안내한다.",
+    "claim_text": "정부가 2026년 보육 지원 예산 5조원을 최종 확정했다.",
+    "sources": [
+      {
+        "source_id": "src_budget_proposal_finality",
+        "title": "2026년 보육 지원 예산안 국회 제출",
+        "url": "https://example.mosf.go.kr/childcare-budget-2026-proposal",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 2026년 보육 지원 예산안에 5조원을 편성해 국회에 제출했다. 시행 여부는 심사 후 결정될 예정이다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "childcare-budget-2026-proposal",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["finality_mismatch"]
+    }
+  }
+]
