@@ -154,10 +154,29 @@ Before considering a Render canary (still **not** in this milestone):
 Only when all eight clear should an operator consider a debug-only
 canary (e.g. `max_news=1`, internal-facing endpoint, no UI surface).
 
-## G. Future path
+## G. M6.0 update — expanded fixture
 
-- Build a labeled calibration set from anonymized historical cases —
-  the bundled fixture is intentionally small and synthetic.
+The bundled fixture grew from 8 seed cases to 36 in M6.0. See
+`docs/SEMANTIC_CALIBRATION.md#m60-update--expanded-real-policy-fixture`
+for the full category breakdown. M6.0 implications for the comparison
+script:
+
+- The deterministic baseline now reports a richer scorecard
+  (~10 capped cases out of 36 ≈ 28% cap ratio, well-distributed risk
+  flags) so the activation-readiness recommendation has more signal to
+  work with.
+- The next local OpenAI comparison (still gated by `RUN_LIVE_OPENAI_EVAL`)
+  runs against the broader fixture; cap-ratio, raw-vs-adjusted strong
+  distribution, and `related_top1_rate` are all expected to shift
+  compared to the M5.9 run on 8 cases.
+- The `compare_semantic_providers.py` CLI did not change. No new env
+  vars, no new flags, no live-call behavior change.
+
+## H. Future path
+
+- Continue expanding the calibration set from anonymized historical
+  cases — M6.0 is still synthetic-but-realistic, not labeled real-claim
+  data.
 - Tune `SEMANTIC_MIN_SCORE_FOR_SUPPORT` / `SEMANTIC_MIN_SCORE_FOR_CONTEXT`
   from the OpenAI score distribution. M5.8 deliberately leaves
   `recommended_thresholds.support` / `context` as `null` because tuning
@@ -168,7 +187,7 @@ canary (e.g. `max_news=1`, internal-facing endpoint, no UI surface).
 - Migrate the cache to pgvector or Qdrant once production volume
   justifies it (see `docs/SEMANTIC_MATCHING.md#future-path-to-pgvector--qdrant`).
 
-## H. Validation
+## I. Validation
 
 ```
 python tests/test_semantic_provider_comparison.py

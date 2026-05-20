@@ -1,7 +1,90 @@
-# Semantic Calibration (Phase 2 M5.6)
+# Semantic Calibration (Phase 2 M5.6 + M6.0)
 
 Calibration tooling that measures semantic matching quality against
 fixture cases **before** real embeddings are turned on in production.
+
+## M6.0 update — expanded real-policy fixture
+
+The calibration fixture (`tests/fixtures/semantic_calibration_cases.json`)
+was expanded from 8 seed cases to 36 cases spanning realistic Korean
+policy domains. The expansion is evaluation-only: nothing in M6.0 changes
+verdict logic, alters Render configuration, runs live OpenAI calls, or
+weakens the conservative wording the pipeline already uses.
+
+Why the seed fixture wasn't enough:
+
+- The M5.9 local OpenAI run showed real embeddings produce more confident
+  raw `strong` labels than the deterministic surrogate (5 raw `strong` vs
+  3 on the 8-case seed), and the guardrails capped half of them. With
+  only 8 cases — most engineered as adversarial traps — the cap ratio
+  alone was hard to interpret as a broad signal.
+- Several realistic mismatch patterns (finality-only, negation /
+  refutation, partial-support, same-topic-wrong-policy, local-vs-central,
+  actor-mismatch) were not represented at all.
+- A 30+ case set with ≥ 40% mismatch traps gives the comparison report
+  enough signal to recommend a `debug_canary_candidate` honestly (or to
+  refuse to) on the next live OpenAI evaluation.
+
+What the expansion does NOT do:
+
+- Does **not** enable semantic matching in production. Render keeps
+  `SEMANTIC_MATCHING_ENABLED=false` / `EMBEDDING_PROVIDER=disabled`.
+- Does **not** modify `render.yaml` or any production env var.
+- Does **not** change `final_decision`, `policy_confidence`, the
+  verification card, methodology wording, or export wording.
+- Does **not** add a new external dependency, embedding cache backend, or
+  background worker. pgvector / Qdrant / Redis / Celery decisions belong
+  to a later phase.
+- Does **not** introduce live OpenAI calls in CI. Live evaluation
+  remains an opt-in local action behind the `RUN_LIVE_OPENAI_EVAL`
+  operator confirmation token (see `SEMANTIC_PROVIDER_COMPARISON.md`).
+
+### Category coverage in the expanded fixture
+
+| Category | Count | What it exercises |
+| --- | --- | --- |
+| `direct_support` | 4 | Source directly supports the claim across multiple policy domains (housing-fraud relief, national health screening, disaster relief payout, dark-pattern consumer-protection regulation). |
+| `contextual_only` | 4 | Source describes the same broad program but no specific amount / date / action (housing finance overview, tax overview, labor overview, education overview). |
+| `unrelated` | 3 | Source is topically distinct from the claim (school lunch vs housing, traffic safety vs health, disaster drill vs consumer protection). |
+| `number_mismatch` | 4 | Claim and source share the unit but disagree on the value (subsidy 100 vs 50만원, loan limit 8 000 vs 3 000만원, disaster subsidy 300 vs 100만원, VAT cut 5% vs 1%). |
+| `date_mismatch` | 4 | Year and/or month disagree (pilot 2025 vs launch 2026, implementation year 2027 vs 2025 pilot, application period May vs June, 2026 launch vs 2024 review). |
+| `eligibility_mismatch` | 3 | Universal eligibility claim vs source describing restrictions (income cap, age band, household income condition). |
+| `finality_mismatch` | 3 | Claim treats the policy as final / 확정 but source is a budget proposal, pilot vs nationwide, or committee under review. |
+| `negation_or_refutation` | 2 | Source explicitly refutes the claim (`사실이 아닙니다`, 보류, 정정). |
+| `partial_support` | 2 | Source confirms the program exists but lacks the critical amount or date the claim asserts. |
+| `same_topic_wrong_policy` | 2 | Same topic words but a different policy (youth-rent voucher vs youth-jeonse loan, SME emergency aid vs SME R&D budget). |
+| `local_vs_central_authority` | 2 | Claim attributes action to central government but the source describes a local/지자체 or pilot scope. |
+| `actor_mismatch` | 1 | Claim names one ministry (금융위원회) but the source is from another (국토교통부). |
+| `no_body` | 1 | Source has metadata but empty `official_body_text` — agent must report `unavailable`. |
+| `contradiction_like` | 1 | Claim says 최종 확정; source says 검토 진행 중 / 확정되지 않 — encoded as a separate seed bucket from the M6.0 `finality_mismatch` cases for backward compatibility. |
+
+Mismatch / trap categories make up **~89%** of the fixture (everything
+except `direct_support`). The deterministic baseline still passes 36/36
+with `--fail-on-regression`, with the M5.7 guardrails actively capping
+10/36 cases (raw distribution `strong:7, contextual:7, weak:21,
+unavailable:1` → adjusted distribution `strong:1, contextual:4, weak:30,
+unavailable:1`). `overstrong_count` remains 0.
+
+### Authoring rules for new fixture cases
+
+When extending the fixture further:
+
+- Use short synthetic Korean text (1–3 sentences in `official_body_text`).
+- Use `example.<ministry>.go.kr` URLs (e.g. `example.molit.go.kr`,
+  `example.mosf.go.kr`, `example.fsc.go.kr`, `example.mois.go.kr`,
+  `example.mss.go.kr`, `example.seoul.go.kr`). Never reference real
+  individuals or copy real article text.
+- For categories that map to a guardrail flag — `number_mismatch`,
+  `date_mismatch`, `eligibility_mismatch`, `finality_mismatch`,
+  `negation_or_refutation` — the `expected.risk_flags` list must include
+  the corresponding flag name (`number_mismatch`, `date_mismatch`,
+  `eligibility_mismatch`, `finality_mismatch`, `negation_mismatch`). The
+  test suite enforces this (`FixtureShapeTests.test_mismatch_cases_declare_expected_risk_flags`).
+- Keep `case_id` values descriptive and unique
+  (`<category>_<scenario>` is the established convention). Uniqueness is
+  enforced by `test_case_ids_are_unique`.
+- At least 40% of cases must be mismatch / trap categories
+  (`test_at_least_forty_percent_are_mismatch_traps`).
 
 ## A. Purpose
 
@@ -163,7 +246,11 @@ rollout (e.g. `max_news=1` with monitoring).
 
 ## H. Future path
 
-- Build a labeled calibration set from anonymized historical cases.
+- Continue expanding the calibration fixture from anonymized historical
+  cases — M6.0 grew the synthetic set to 36 cases, but a labeled
+  real-claim set (still synthetic in URLs / personally identifying
+  details) would let the OpenAI comparison surface domain-specific
+  failure modes that a hand-authored fixture cannot.
 - Tune thresholds from the real-provider score distribution rather than
   the conservative defaults.
 - Consider surfacing a small "임베딩 의미 매칭" card in the UI — only

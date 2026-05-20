@@ -172,7 +172,44 @@ CSV adds columns `raw_support_level`, `support_cap_applied`,
 gains a per-case `cap_applied` / `critical_mismatches` /
 `guardrail_risk_flags` column block, plus a scorecard summary block.
 
-## H. How to disable
+## H. Coverage on the expanded calibration fixture (M6.0)
+
+The M6.0 calibration fixture (36 cases, see
+`docs/SEMANTIC_CALIBRATION.md`) exercises every guardrail flag in this
+module across realistic policy domains. On the deterministic provider,
+the M6.0 baseline measured:
+
+- `number_mismatch`: 4 cases — caps each to `weak` (subsidy 100 vs 50만원,
+  loan limit 8 000 vs 3 000만원, disaster subsidy 300 vs 100만원, VAT cut
+  5% vs 1%).
+- `date_mismatch`: 4 cases — caps each to `weak` (year mismatch,
+  application-period month mismatch, announce-vs-launch).
+- `eligibility_mismatch`: 3 cases — caps each to `weak` (universal vs
+  income cap, universal vs age band, universal vs household income).
+- `finality_mismatch`: 8 cases — caps each to `weak`. More cases trigger
+  this flag than the `finality_mismatch` category alone because several
+  `date_mismatch` and `local_vs_central_authority` cases naturally carry
+  a parallel finality disagreement (`시행` vs `시범 운영`, `확정` vs
+  `검토 진행 중`).
+- `negation_mismatch`: 2 cases — caps each to `weak`. Source explicitly
+  refutes the claim (`사실이 아닙니다`, 보류, 정정).
+- `missing_critical_fact`: 16 cases — caps each to `contextual`. This
+  flag is the softer "claim mentions a number / date the source body
+  never references" signal; it covers the `contextual_only`,
+  `partial_support`, and many `number_mismatch` / `date_mismatch` cases
+  where the source acknowledges the program but lacks the specific fact.
+
+Across the 36 cases the guardrails capped 10 (raw `strong:7` →
+adjusted `strong:1`). `overstrong_count` remained 0. No new guardrail
+flag was added in M6.0 — the existing flag vocabulary already covers the
+fixture honestly. Two M6.0 categories (`same_topic_wrong_policy`,
+`actor_mismatch`) do not map to a guardrail flag; the deterministic
+provider's raw score was already below the `strong` threshold for those
+cases, so no cap was needed. If a future OpenAI run shows raw `strong`
+on either of those categories, that is the signal to consider a small
+actor-mismatch or policy-scope-mismatch extractor here.
+
+## I. How to disable
 
 The guardrails run whenever the semantic evidence agent runs. They are
 deterministic, pure-stdlib, and have no external dependency, so there is
@@ -182,7 +219,7 @@ short-circuit; the new summary fields are still present but populated
 with safe defaults (`critical_mismatch_count=0`,
 `support_cap_applied_count=0`, `best_raw_support_level="unavailable"`).
 
-## I. Validation
+## J. Validation
 
 ```
 python scripts/validate.py

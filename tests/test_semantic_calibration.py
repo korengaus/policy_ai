@@ -44,8 +44,46 @@ REQUIRED_CATEGORIES = {
     "number_mismatch",
     "date_mismatch",
     "eligibility_mismatch",
+    "finality_mismatch",
+    "negation_or_refutation",
     "no_body",
     "contradiction_like",
+    "partial_support",
+    "same_topic_wrong_policy",
+    "local_vs_central_authority",
+    "actor_mismatch",
+}
+
+# Categories where the fixture intentionally embeds a critical-fact disagreement
+# the M5.7 guardrails should detect. Used by
+# ``FixtureShapeTests.test_mismatch_cases_declare_expected_risk_flags``.
+GUARDRAIL_FLAG_BY_CATEGORY = {
+    "number_mismatch": "number_mismatch",
+    "date_mismatch": "date_mismatch",
+    "eligibility_mismatch": "eligibility_mismatch",
+    "finality_mismatch": "finality_mismatch",
+    "negation_or_refutation": "negation_mismatch",
+}
+
+# Categories that count as "mismatch / trap" cases — every category except
+# direct_support is a calibration trap where the agent should NOT report a
+# strong semantic support label. M6.0 requires at least 40% of the fixture to
+# fall into one of these buckets so the scorecard exercises guardrails
+# rather than rewarding easy direct matches.
+MISMATCH_CATEGORIES = {
+    "contextual_only",
+    "unrelated",
+    "number_mismatch",
+    "date_mismatch",
+    "eligibility_mismatch",
+    "finality_mismatch",
+    "negation_or_refutation",
+    "no_body",
+    "contradiction_like",
+    "partial_support",
+    "same_topic_wrong_policy",
+    "local_vs_central_authority",
+    "actor_mismatch",
 }
 
 
@@ -92,13 +130,23 @@ class FixtureShapeTests(unittest.TestCase):
         self.assertTrue(FIXTURE_PATH.exists(), f"fixture missing: {FIXTURE_PATH}")
         cases = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
         self.assertIsInstance(cases, list)
-        self.assertGreaterEqual(len(cases), 8)
+        # M6.0 expanded fixture: 30+ cases across realistic policy domains.
+        self.assertGreaterEqual(
+            len(cases), 30,
+            msg=f"expected expanded fixture (>= 30 cases); found {len(cases)}",
+        )
 
     def test_fixture_covers_required_categories(self):
         cases = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
         seen = {case.get("category") for case in cases}
         missing = REQUIRED_CATEGORIES - seen
         self.assertFalse(missing, f"missing categories: {sorted(missing)}")
+
+    def test_case_ids_are_unique(self):
+        cases = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+        ids = [case.get("case_id") for case in cases]
+        duplicates = sorted({cid for cid in ids if ids.count(cid) > 1})
+        self.assertFalse(duplicates, f"duplicate case_ids: {duplicates}")
 
     def test_each_case_has_required_fields(self):
         cases = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
@@ -109,6 +157,43 @@ class FixtureShapeTests(unittest.TestCase):
             self.assertIn("sources", case, msg=case)
             self.assertIsInstance(case["sources"], list, msg=case)
             self.assertIn("expected", case, msg=case)
+
+    def test_at_least_forty_percent_are_mismatch_traps(self):
+        # M6.0 fixture must lean heavily on mismatch / trap cases so the
+        # scorecard actually exercises the guardrails. A fixture dominated by
+        # direct_support cases would let a sloppy provider score well without
+        # being tested against false-positive patterns.
+        cases = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+        trap_count = sum(1 for case in cases if case.get("category") in MISMATCH_CATEGORIES)
+        ratio = trap_count / len(cases) if cases else 0.0
+        self.assertGreaterEqual(
+            ratio, 0.40,
+            msg=(
+                f"only {trap_count}/{len(cases)} ({ratio:.0%}) cases fall in "
+                f"mismatch / trap categories; expected >= 40%. "
+                f"Mismatch categories considered: {sorted(MISMATCH_CATEGORIES)}"
+            ),
+        )
+
+    def test_mismatch_cases_declare_expected_risk_flags(self):
+        # For categories that map directly to a guardrail flag, the fixture's
+        # ``expected.risk_flags`` list must include the corresponding flag.
+        # This keeps the fixture self-documenting about what the guardrails
+        # should catch on that case.
+        cases = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+        for case in cases:
+            expected_flag = GUARDRAIL_FLAG_BY_CATEGORY.get(case.get("category"))
+            if not expected_flag:
+                continue
+            flags = (case.get("expected") or {}).get("risk_flags") or []
+            self.assertIn(
+                expected_flag, flags,
+                msg=(
+                    f"case {case.get('case_id')!r} "
+                    f"category={case.get('category')!r} must declare "
+                    f"risk_flag {expected_flag!r}; got {flags}"
+                ),
+            )
 
 
 class HelperClassificationTests(unittest.TestCase):
@@ -354,6 +439,26 @@ class EvaluatorScriptCLITests(unittest.TestCase):
         self.assertIn("available=False", result.stdout)
         self.assertNotIn("sk-fake-shouldnt-leak", result.stdout)
         self.assertNotIn("sk-fake-shouldnt-leak", result.stderr)
+
+    def test_deterministic_evaluator_passes_full_expanded_fixture(self):
+        # M6.0: the expanded calibration fixture must process end-to-end with
+        # ``--fail-on-regression`` on the deterministic provider. If a new
+        # case is added that the current guardrails or thresholds cannot
+        # handle, this test surfaces it before CI does. No network, no
+        # OpenAI key, no Postgres.
+        with _env(OPENAI_API_KEY=None, EMBEDDING_MODEL=None):
+            result = _run_evaluator(
+                "--provider", "deterministic",
+                "--fail-on-regression",
+            )
+        self.assertEqual(
+            result.returncode, 0,
+            msg=f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
+        self.assertIn("scorecard:", result.stdout)
+        # Confirm the full fixture ran (the scorecard line carries cases=N).
+        self.assertIn("overstrong=0", result.stdout)
+        self.assertNotIn("regressed", result.stderr)
 
     def test_fail_on_regression_returns_3_on_intentional_failure(self):
         # Build a temp fixture whose single case has an impossible expectation
