@@ -206,6 +206,303 @@ class ComparisonTests(unittest.TestCase):
         self.assertFalse(result["has_critical_mismatch"])
 
 
+class PolicyScopeMismatchTests(unittest.TestCase):
+    """Phase 2 M6.6: same-topic / different-policy-instrument mismatch.
+
+    The failure mode is real OpenAI embeddings producing high cosine for
+    surface-similar Korean policy text where claim and source use
+    different policy instruments (대출 vs 바우처, 신용보증 vs 대출,
+    인상 vs 인하, etc.). The M5.7 number/date/eligibility/finality/
+    negation guardrails do not catch this, so M6.6 adds a dedicated
+    detector that caps the support level to ``weak`` when claim and
+    source mention conflicting instruments from the same group.
+    """
+
+    def test_extracts_transfer_type_instruments(self):
+        # The longest-match rule must prefer 신용보증 over 보증.
+        out = guardrails.extract_policy_instruments(
+            "정부는 청년 전세대출 한도를 확대한다. 신용보증 한도도 확대한다."
+        )
+        self.assertIn("대출", out["transfer_type"])
+        self.assertIn("신용보증", out["transfer_type"])
+        # 보증 must NOT be reported separately when 신용보증 already
+        # covers the same span.
+        self.assertNotIn("보증", out["transfer_type"])
+
+    def test_loan_vs_voucher_fires_policy_scope_mismatch(self):
+        result = guardrails.compare_critical_facts(
+            "정부가 청년 주거 대출 한도를 확대한다.",
+            "정부는 청년 주거 바우처 시행 정책을 안내했다. "
+            "청년 주거 안정성 강화가 목적이다.",
+        )
+        self.assertIn("policy_scope_mismatch", result["risk_flags"])
+        self.assertTrue(result["has_critical_mismatch"])
+        self.assertEqual(result["support_cap"], "weak")
+
+    def test_voucher_vs_loan_fires_policy_scope_mismatch(self):
+        # Reverse direction — claim says voucher, source says loan.
+        result = guardrails.compare_critical_facts(
+            "정부가 청년 월세 바우처를 신설한다.",
+            "정부는 청년 전세대출 한도 상향 정책을 안내했다.",
+        )
+        self.assertIn("policy_scope_mismatch", result["risk_flags"])
+        self.assertEqual(result["support_cap"], "weak")
+
+    def test_loan_vs_guarantee_fires_policy_scope_mismatch(self):
+        result = guardrails.compare_critical_facts(
+            "정부가 소상공인 대출 한도를 확대한다.",
+            "정부는 소상공인 신용보증 한도를 확대한다고 안내했다.",
+        )
+        self.assertIn("policy_scope_mismatch", result["risk_flags"])
+        self.assertEqual(result["support_cap"], "weak")
+
+    def test_tax_direction_mismatch_fires(self):
+        # 인상 vs 인하 — opposite directions on the same tax adjustment
+        # group. Surface tokens overlap heavily but the policy is the
+        # opposite of what the claim says.
+        result = guardrails.compare_critical_facts(
+            "정부가 부동산세를 인상한다.",
+            "정부는 부동산세를 인하한다고 안내했다.",
+        )
+        self.assertIn("policy_scope_mismatch", result["risk_flags"])
+        self.assertEqual(result["support_cap"], "weak")
+
+    def test_exemption_vs_reduction_mismatch_fires(self):
+        # 면제 vs 감면 — claim says 100% exemption, source says partial
+        # reduction. Different instrument in the tax_adjustment group.
+        result = guardrails.compare_critical_facts(
+            "정부가 등록금을 전액 면제한다.",
+            "정부는 등록금 감면 제도를 안내했다.",
+        )
+        self.assertIn("policy_scope_mismatch", result["risk_flags"])
+        self.assertEqual(result["support_cap"], "weak")
+
+    def test_same_instrument_does_not_fire(self):
+        # Both claim and source mention the same instrument (지원금) —
+        # different amounts would be caught by number_mismatch but the
+        # policy-scope check must NOT fire.
+        result = guardrails.compare_critical_facts(
+            "정부가 소상공인에게 1인당 100만원의 지원금을 지급한다.",
+            "정부는 소상공인에게 1인당 50만원의 지원금을 지급한다고 발표했다.",
+        )
+        self.assertNotIn("policy_scope_mismatch", result["risk_flags"])
+        # number_mismatch still fires for the amount.
+        self.assertIn("number_mismatch", result["risk_flags"])
+
+    def test_direct_support_does_not_trigger_policy_scope(self):
+        # A clean direct-support match must not be capped by the new
+        # guardrail. Same instrument (신용보증) on both sides.
+        result = guardrails.compare_critical_facts(
+            "중소벤처기업부가 소상공인 신용보증 한도를 확대한다.",
+            "중소벤처기업부는 소상공인 신용보증 한도를 확대한다고 안내했다.",
+        )
+        self.assertNotIn("policy_scope_mismatch", result["risk_flags"])
+        self.assertEqual(result["support_cap"], "strong")
+        self.assertFalse(result["has_critical_mismatch"])
+
+    def test_different_groups_do_not_fire(self):
+        # Claim has a transfer_type instrument (지원금), source has a
+        # program_kind instrument (R&D 지원). Different groups — the
+        # policy-scope check is intentionally conservative and only
+        # fires within a single group.
+        result = guardrails.compare_critical_facts(
+            "정부가 소상공인 긴급 지원금을 신설한다.",
+            "정부는 소상공인 R&D 지원 예산을 확대한다고 안내했다.",
+        )
+        self.assertNotIn("policy_scope_mismatch", result["risk_flags"])
+
+    def test_m65_failing_case_now_caps_to_weak(self):
+        # Pin the M6.5 overstrong case directly so future regressions
+        # immediately reveal themselves.
+        result = guardrails.compare_critical_facts(
+            "정부가 청년 주거 대출 한도를 확대한다.",
+            "정부는 청년 주거 바우처 시행 정책을 안내했다. "
+            "청년 주거 안정성 강화가 목적이다.",
+        )
+        self.assertIn("policy_scope_mismatch", result["risk_flags"])
+        self.assertEqual(result["support_cap"], "weak")
+        # cap_support_level(raw=strong, cap=weak) -> weak. So an upstream
+        # agent that started with raw_support_level='strong' for this
+        # match would now report 'weak'.
+        self.assertEqual(
+            guardrails.cap_support_level("strong", result["support_cap"]),
+            "weak",
+        )
+
+
+class ActorScopeMismatchTests(unittest.TestCase):
+    """Phase 2 M6.6: central / national vs local-only actor mismatch."""
+
+    def test_extracts_national_and_local_authorities(self):
+        out = guardrails.extract_actor_scope_terms(
+            "정부가 전국 영유아 가구에 보육 지원금을 신설한다. "
+            "서울시도 자체적으로 지급한다."
+        )
+        self.assertIn("정부", out["national_authorities"])
+        self.assertIn("서울시", out["local_authorities"])
+        self.assertIn("전국", out["national_scope_terms"])
+        self.assertIn("자체적으로", out["local_scope_terms"])
+
+    def test_central_claim_local_source_fires(self):
+        result = guardrails.compare_critical_facts(
+            "정부가 전국 영유아 가구에 보육 지원금을 신설한다.",
+            "서울시는 시 거주 영유아 가구에 보육 지원금을 지급한다고 안내했다. "
+            "신청은 거주지 동주민센터에서 가능하다.",
+        )
+        self.assertIn("actor_scope_mismatch", result["risk_flags"])
+        self.assertIn("local_vs_central", result["risk_flags"])
+        self.assertEqual(result["support_cap"], "weak")
+
+    def test_ministry_claim_local_pilot_source_fires(self):
+        result = guardrails.compare_critical_facts(
+            "교육부가 전국 고등학생에게 교육비를 지원한다.",
+            "일부 시도교육청은 자체 예산으로 교육비 지원 사업을 운영한다고 안내했다.",
+        )
+        self.assertIn("actor_scope_mismatch", result["risk_flags"])
+        self.assertEqual(result["support_cap"], "weak")
+
+    def test_busan_local_voucher_vs_national_fires(self):
+        result = guardrails.compare_critical_facts(
+            "정부가 전국 지역화폐를 신설한다.",
+            "부산시는 시민 지역화폐를 발행한다고 안내했다.",
+        )
+        self.assertIn("actor_scope_mismatch", result["risk_flags"])
+        self.assertEqual(result["support_cap"], "weak")
+
+    def test_gyeonggi_pilot_vs_national_fires(self):
+        result = guardrails.compare_critical_facts(
+            "정부가 전국 청년 주거 지원 제도를 최종 확정 시행한다.",
+            "경기도는 청년 주거 지원 시범 사업을 자체적으로 운영한다고 안내했다.",
+        )
+        self.assertIn("actor_scope_mismatch", result["risk_flags"])
+        self.assertEqual(result["support_cap"], "weak")
+
+    def test_both_national_does_not_fire(self):
+        # Two ministries both at national level — even though they're
+        # different ministries, the actor-scope check must NOT fire
+        # (that's a separate ministry-pair mismatch problem M6.6 does
+        # not address). The cosine score on real OpenAI for these stays
+        # below the strong threshold without any extra guardrail.
+        result = guardrails.compare_critical_facts(
+            "금융위원회가 청년 전세대출 한도 상향을 최종 확정했다.",
+            "국토교통부는 청년 주거 안정 지원 제도를 운영한다고 안내했다.",
+        )
+        self.assertNotIn("actor_scope_mismatch", result["risk_flags"])
+        self.assertNotIn("local_vs_central", result["risk_flags"])
+
+    def test_local_claim_local_source_does_not_fire(self):
+        # 서울시 announces, 서울시 confirms — purely local on both
+        # sides. No mismatch.
+        result = guardrails.compare_critical_facts(
+            "서울시가 시민 지역화폐를 발행한다고 안내했다.",
+            "서울시는 시민 지역화폐를 발행한다고 안내했다. "
+            "사용처와 신청 절차는 시 공고를 참고한다.",
+        )
+        self.assertNotIn("actor_scope_mismatch", result["risk_flags"])
+
+    def test_source_mentions_both_levels_does_not_fire(self):
+        # Multi-tier policy — central government coordinates, local
+        # body executes. Source mentions both, so it is not "local
+        # only". Mismatch must NOT fire.
+        result = guardrails.compare_critical_facts(
+            "정부가 전국 청년 주거 지원 제도를 시행한다.",
+            "정부와 서울시가 함께 청년 주거 지원 제도를 운영한다고 안내했다.",
+        )
+        self.assertNotIn("actor_scope_mismatch", result["risk_flags"])
+
+    def test_direct_support_does_not_false_positive(self):
+        # The clean housing-fraud direct-support case must remain at
+        # cap=strong.
+        result = guardrails.compare_critical_facts(
+            "정부가 전세사기 피해자에게 법률 상담과 긴급 금융 지원을 제공한다.",
+            "정부는 전세사기 피해자에게 법률 상담과 긴급 금융 지원을 제공한다고 안내했다. "
+            "신청은 거주지 인근 지원 센터에서 가능하다.",
+        )
+        self.assertNotIn("actor_scope_mismatch", result["risk_flags"])
+        self.assertEqual(result["support_cap"], "strong")
+        self.assertFalse(result["has_critical_mismatch"])
+
+
+class M66AgentIntegrationTests(unittest.TestCase):
+    """Verify the semantic evidence agent surfaces the new flags."""
+
+    def test_policy_scope_mismatch_caps_agent_support_level(self):
+        # The M6.5 failing case — through the full agent pipeline.
+        with _env(SEMANTIC_MATCHING_ENABLED="true", EMBEDDING_PROVIDER="deterministic"):
+            provider = semantic_embeddings.get_active_provider()
+            summary = semantic_evidence_agent.compute_semantic_evidence_summary(
+                normalized_claims=[{
+                    "claim_text": "정부가 청년 주거 대출 한도를 확대한다.",
+                }],
+                source_candidates=[{
+                    "source_id": "src",
+                    "title": "청년 주거 바우처 시행 안내",
+                    "url": "https://example.molit.go.kr/youth-housing-voucher",
+                    "official_body_text": (
+                        "정부는 청년 주거 바우처 시행 정책을 안내했다. "
+                        "청년 주거 안정성 강화가 목적이다."
+                    ),
+                }],
+                evidence_snippets=[],
+                provider=provider,
+            )
+            self.assertTrue(summary["semantic_guardrails_enabled"])
+            # The exposed support_level must NOT be 'strong' for this
+            # same-topic-wrong-policy case.
+            self.assertNotEqual(summary["best_support_level"], "strong")
+            self.assertIn("policy_scope_mismatch", summary["semantic_risk_flags"])
+            self.assertGreaterEqual(summary["critical_mismatch_count"], 1)
+
+    def test_actor_scope_mismatch_caps_agent_support_level(self):
+        with _env(SEMANTIC_MATCHING_ENABLED="true", EMBEDDING_PROVIDER="deterministic"):
+            provider = semantic_embeddings.get_active_provider()
+            summary = semantic_evidence_agent.compute_semantic_evidence_summary(
+                normalized_claims=[{
+                    "claim_text": "정부가 전국 영유아 가구에 보육 지원금을 신설한다.",
+                }],
+                source_candidates=[{
+                    "source_id": "src",
+                    "title": "서울시 영유아 보육 지원금 안내",
+                    "url": "https://example.seoul.go.kr/seoul-infant-childcare",
+                    "official_body_text": (
+                        "서울시는 시 거주 영유아 가구에 보육 지원금을 "
+                        "지급한다고 안내했다. 신청은 거주지 동주민센터에서 가능하다."
+                    ),
+                }],
+                evidence_snippets=[],
+                provider=provider,
+            )
+            self.assertNotEqual(summary["best_support_level"], "strong")
+            self.assertIn("actor_scope_mismatch", summary["semantic_risk_flags"])
+            self.assertIn("local_vs_central", summary["semantic_risk_flags"])
+
+    def test_direct_support_remains_unaffected(self):
+        # Direct support case must keep its strong / contextual rating
+        # — the new guardrails do not over-cap aligned content.
+        with _env(SEMANTIC_MATCHING_ENABLED="true", EMBEDDING_PROVIDER="deterministic"):
+            provider = semantic_embeddings.get_active_provider()
+            summary = semantic_evidence_agent.compute_semantic_evidence_summary(
+                normalized_claims=[{
+                    "claim_text": "정부가 전세사기 피해자에게 법률 상담과 긴급 금융 지원을 제공한다.",
+                }],
+                source_candidates=[{
+                    "source_id": "src",
+                    "title": "전세사기 피해자 지원 대책 안내",
+                    "url": "https://example.go.kr/housing-fraud-victim-support",
+                    "official_body_text": (
+                        "정부는 전세사기 피해자에게 법률 상담과 긴급 금융 "
+                        "지원을 제공한다고 안내했다. 신청은 거주지 인근 "
+                        "지원 센터에서 가능하다."
+                    ),
+                }],
+                evidence_snippets=[],
+                provider=provider,
+            )
+            # No M6.6 flag should fire here.
+            self.assertNotIn("policy_scope_mismatch", summary["semantic_risk_flags"])
+            self.assertNotIn("actor_scope_mismatch", summary["semantic_risk_flags"])
+
+
 class CapHelperTests(unittest.TestCase):
     def test_cap_takes_lower_rank(self):
         self.assertEqual(guardrails.cap_support_level("strong", "weak"), "weak")

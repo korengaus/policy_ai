@@ -289,6 +289,150 @@ def extract_negation_terms(text: object) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Policy-instrument extraction (M6.6)
+# ---------------------------------------------------------------------------
+
+# Within each group the instruments are mutually exclusive policy
+# instruments. A single real policy implements ONE of them, not several.
+# When claim and source both mention an instrument from the same group
+# but the instruments differ, that is a "same topic, different policy"
+# scope mismatch — the failure mode M6.5 surfaced on
+# real_wrong_policy_housing_loan_vs_voucher (대출 vs 바우처) where the
+# OpenAI cosine was 0.87 but the policies described were different.
+#
+# Each list is ordered longest-first so substring matching for longer
+# phrases (e.g. "신용보증") wins over their shorter substrings
+# (e.g. "보증") via the ``_find_instruments_in_group`` overlap check.
+_POLICY_INSTRUMENT_GROUPS: dict = {
+    # Financial-transfer instruments. Within this group, a policy is
+    # either a loan, a voucher, a subsidy, etc. — not several at once.
+    "transfer_type": [
+        "신용보증", "대출", "바우처", "보조금", "지원금", "보증",
+    ],
+    # Tax / cost-adjustment direction. Confusing 인상 with 인하 or 면제
+    # with 감면 is exactly the failure mode this group catches.
+    "tax_adjustment": [
+        "최종 확정", "최종확정", "면제", "감면", "인하", "인상", "폐지", "신설",
+    ],
+    # Program kind. "R&D 지원" comes first so the longer phrase wins
+    # over any shorter substring.
+    "program_kind": [
+        "R&D 지원", "시범 사업", "보조 사업", "등록제", "인턴십",
+    ],
+}
+
+
+def _find_instruments_in_group(text: str, instruments: List[str]) -> List[str]:
+    """Return the instruments that appear in ``text``, with longest-match
+    semantics. If both "신용보증" and "보증" would match the same span,
+    only the longer instrument is reported. The instrument list must be
+    pre-sorted longest-first.
+    """
+    found: List[str] = []
+    matched_spans: List[tuple] = []
+    for inst in instruments:
+        idx = text.find(inst)
+        while idx >= 0:
+            # Skip if this match falls inside the span of a longer instrument
+            # we've already recorded.
+            if not any(s <= idx < e for s, e in matched_spans):
+                if inst not in found:
+                    found.append(inst)
+                matched_spans.append((idx, idx + len(inst)))
+            idx = text.find(inst, idx + 1)
+    return found
+
+
+def extract_policy_instruments(text: object) -> dict:
+    """Extract policy instruments grouped by mutually-exclusive category.
+
+    Returns a dict shape::
+
+        {
+            "transfer_type": ["대출"],
+            "tax_adjustment": [],
+            "program_kind": [],
+        }
+
+    Empty lists are preserved so callers can introspect by group without
+    KeyError. The lookup is pure-substring on the normalized text.
+    """
+    normalized = normalize_fact_text(text)
+    out: dict = {group: [] for group in _POLICY_INSTRUMENT_GROUPS}
+    if not normalized:
+        return out
+    for group, instruments in _POLICY_INSTRUMENT_GROUPS.items():
+        out[group] = _find_instruments_in_group(normalized, instruments)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Actor / authority scope extraction (M6.6)
+# ---------------------------------------------------------------------------
+
+# "정부" is included as a national authority — when read against a
+# clearly-local source ("서울시", "경기도"), it implies central government.
+# The check below never fires when the source ALSO names a national
+# authority or carries a national-scope token, so multi-tier policies
+# ("정부와 시도교육청이 함께…") don't false-positive.
+_NATIONAL_AUTHORITY_TOKENS = [
+    "중앙정부",
+    "기획재정부", "보건복지부", "교육부", "고용노동부", "국토교통부",
+    "금융위원회", "공정거래위원회", "행정안전부", "법무부",
+    "산업통상자원부", "농림축산식품부", "중소벤처기업부", "여성가족부",
+    "환경부", "통일부", "외교부", "국방부",
+    "과학기술정보통신부", "문화체육관광부",
+    "정부",
+]
+
+# Local-government authorities. Longer phrases come first so
+# ``시도교육청`` matches before ``시도``.
+_LOCAL_AUTHORITY_TOKENS = [
+    "시도교육청",
+    "서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시",
+    "대전광역시", "울산광역시", "세종특별자치시",
+    "서울시", "부산시", "대구시", "인천시", "광주시", "대전시", "울산시", "세종시",
+    "경기도", "강원특별자치도", "강원도",
+    "충청북도", "충청남도", "충북", "충남",
+    "전북특별자치도", "전라북도", "전라남도", "전북", "전남",
+    "경상북도", "경상남도", "경북", "경남",
+    "제주특별자치도", "제주도",
+    "지자체", "동주민센터",
+]
+
+_NATIONAL_SCOPE_TOKENS = [
+    "전국적으로", "전면 시행", "전면시행", "전국",
+]
+
+_LOCAL_SCOPE_TOKENS = [
+    "자체적으로", "자체 예산", "자체예산",
+    "선정 지역", "선정지역",
+    "일부 지역",
+    "시범 사업", "시범사업",
+]
+
+
+def extract_actor_scope_terms(text: object) -> dict:
+    """Pull national-authority, local-authority, and scope terms from
+    ``text``. Returns lists per category; ``has_*`` booleans are derived
+    by callers."""
+    normalized = normalize_fact_text(text)
+    if not normalized:
+        return {
+            "national_authorities": [],
+            "local_authorities": [],
+            "national_scope_terms": [],
+            "local_scope_terms": [],
+        }
+    return {
+        "national_authorities": _find_terms(normalized, _NATIONAL_AUTHORITY_TOKENS),
+        "local_authorities": _find_terms(normalized, _LOCAL_AUTHORITY_TOKENS),
+        "national_scope_terms": _find_terms(normalized, _NATIONAL_SCOPE_TOKENS),
+        "local_scope_terms": _find_terms(normalized, _LOCAL_SCOPE_TOKENS),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Aggregated extraction
 # ---------------------------------------------------------------------------
 
@@ -303,6 +447,8 @@ def extract_critical_facts(text: object) -> dict:
         "eligibility": extract_eligibility_terms(normalized),
         "finality": extract_finality_terms(normalized),
         "negation": extract_negation_terms(normalized),
+        "policy_instruments": extract_policy_instruments(normalized),
+        "actor_scope": extract_actor_scope_terms(normalized),
         "text_preview": normalized[:_TEXT_PREVIEW_LIMIT],
     }
 
@@ -513,6 +659,84 @@ def compare_critical_facts(claim_text: object, source_text: object) -> dict:
         })
         _set_cap("weak", "source_negation_present")
 
+    # --- Policy-instrument scope (M6.6) ---
+    # If claim and source both mention an instrument from the same
+    # mutually-exclusive group (e.g. transfer_type) and the instruments
+    # differ, that is a same-topic-different-policy mismatch — the
+    # exact failure mode M6.5 surfaced on the housing loan-vs-voucher
+    # case. The check is conservative: it only fires when both texts
+    # carry an instrument from the same group AND they don't overlap.
+    claim_instruments = claim_facts["policy_instruments"]
+    source_instruments = source_facts["policy_instruments"]
+    for group, claim_hits in claim_instruments.items():
+        if not claim_hits:
+            continue
+        source_hits = source_instruments.get(group) or []
+        if not source_hits:
+            continue
+        if set(claim_hits) & set(source_hits):
+            # At least one instrument matches across claim and source —
+            # not a mismatch even if other entries differ.
+            continue
+        if "policy_scope_mismatch" not in risk_flags:
+            risk_flags.append("policy_scope_mismatch")
+        mismatches.append({
+            "type": "policy_scope_mismatch",
+            "claim_value": ", ".join(claim_hits),
+            "source_value": ", ".join(source_hits),
+            "reason": (
+                f"claim describes {', '.join(claim_hits)} but source "
+                f"describes {', '.join(source_hits)} — different "
+                f"mutually-exclusive policy instruments in group {group!r}"
+            ),
+        })
+        _set_cap("weak", f"policy_scope_mismatch:{group}")
+
+    # --- Actor / authority scope (M6.6) ---
+    # Fires when claim is clearly national (national-scope token OR
+    # named central-government authority) AND source describes a
+    # local-only authority or scope without any national-authority or
+    # national-scope reference. Both "actor_scope_mismatch" and
+    # "local_vs_central" are recorded so downstream consumers can
+    # filter on either label.
+    claim_actor = claim_facts["actor_scope"]
+    source_actor = source_facts["actor_scope"]
+    claim_has_national = bool(
+        claim_actor.get("national_scope_terms")
+        or claim_actor.get("national_authorities")
+    )
+    source_has_local = bool(
+        source_actor.get("local_authorities")
+        or source_actor.get("local_scope_terms")
+    )
+    source_has_national = bool(
+        source_actor.get("national_authorities")
+        or source_actor.get("national_scope_terms")
+    )
+    if claim_has_national and source_has_local and not source_has_national:
+        if "actor_scope_mismatch" not in risk_flags:
+            risk_flags.append("actor_scope_mismatch")
+        if "local_vs_central" not in risk_flags:
+            risk_flags.append("local_vs_central")
+        claim_signal = ", ".join(
+            (claim_actor.get("national_authorities") or [])
+            + (claim_actor.get("national_scope_terms") or [])
+        ) or None
+        source_signal = ", ".join(
+            (source_actor.get("local_authorities") or [])
+            + (source_actor.get("local_scope_terms") or [])
+        ) or None
+        mismatches.append({
+            "type": "actor_scope_mismatch",
+            "claim_value": claim_signal,
+            "source_value": source_signal,
+            "reason": (
+                "claim describes a central/national scope but source "
+                "describes a local-only authority or pilot scope"
+            ),
+        })
+        _set_cap("weak", "actor_scope_mismatch")
+
     # Final shape.
     final_cap = support_cap or "strong"
     reason_str = "; ".join(cap_reasons) if cap_reasons else "no critical mismatch detected"
@@ -529,6 +753,8 @@ def compare_critical_facts(claim_text: object, source_text: object) -> dict:
                 "eligibility_mismatch",
                 "finality_mismatch",
                 "negation_mismatch",
+                "policy_scope_mismatch",
+                "actor_scope_mismatch",
             )
         ),
         "has_missing_critical_fact": "missing_critical_fact" in risk_flags,

@@ -172,6 +172,17 @@ script:
 - The `compare_semantic_providers.py` CLI did not change. No new env
   vars, no new flags, no live-call behavior change.
 
+## G3. M6.6 update — policy-scope and actor-scope guardrails
+
+The M6.5 live OpenAI run on the 72-case real-claim batch surfaced the
+first overstrong result across all OpenAI runs (same-topic / different-
+policy-instrument: `대출` vs `바우처`). **M6.6 closed that gap** by
+adding `policy_scope_mismatch` and `actor_scope_mismatch` /
+`local_vs_central` flags in `semantic_fact_guardrails.py`. The comparison
+driver inherits the new flags automatically — they appear in
+`guardrail_risk_flags` and contribute to `support_cap_applied_count` on
+both providers. No CLI change. See `docs/SEMANTIC_FACT_GUARDRAILS.md`.
+
 ## G2. M6.4 update — expanded real-claim batch (separate evaluator)
 
 A parallel real-claim batch sits in

@@ -252,19 +252,55 @@ Before considering a Render canary (still **not** in this milestone):
 Only when all eight clear should an operator consider a debug-only
 canary (e.g. `max_news=1`, internal-facing endpoint, no UI surface).
 
+## M6.5 / M6.6 update — first overstrong, guardrail closed
+
+M6.5 ran the **live OpenAI evaluation on the 72-case batch** and
+surfaced the first overstrong result across all OpenAI runs
+(M5.9 / M6.1 / M6.3 / M6.5):
+
+- `real_wrong_policy_housing_loan_vs_voucher` —
+  claim "정부가 청년 주거 **대출** 한도를 확대한다" vs source
+  "정부는 청년 주거 **바우처** 시행 정책을 안내했다" — OpenAI cosine
+  **0.87** → raw=strong → final=strong (overstrong).
+- All other 71 cases passed; `related_top1=1.000`, runtime within budget.
+- The failure mode is "same topic, different policy instrument" — no
+  number / date / eligibility / finality / negation flag fires because
+  both texts are fluent and topically aligned.
+
+**M6.6 closed the gap** by adding two deterministic flags in
+`semantic_fact_guardrails.py`:
+
+- `policy_scope_mismatch` — mutually-exclusive policy-instrument groups
+  (`transfer_type`, `tax_adjustment`, `program_kind`). Claim has one,
+  source has a different one in the same group → cap to `weak`.
+- `actor_scope_mismatch` + `local_vs_central` — claim is national,
+  source is local-only with no national reference → cap to `weak`.
+
+After M6.6, the deterministic 72-case run shows `overstrong=0`, with 4
+cases newly firing `policy_scope_mismatch` and 4 cases newly firing
+`actor_scope_mismatch`. The 9 legitimate `direct_support` final-strong
+cases are unchanged — no false-positive caps. See
+`docs/SEMANTIC_FACT_GUARDRAILS.md#h1-policy-scope-and-actor-scope-guardrails-m66`
+for details.
+
+**Next step**: re-run the live OpenAI 72-case evaluation (the M6.5 flow)
+and confirm the previously-failing case now caps to `weak` and
+`overstrong_count` is 0. Only after that clean re-run does the
+activation-gate checklist below come into play.
+
 ## H. Future path
 
 - M6.4 grew the batch from 15 to 72 cases, hitting the spec's 50–100
-  range and the preferred ~72 target. The next escalation is to replace
-  the synthetic batch with anonymized **historical claims** from
-  production logs — keep URLs / names sanitized, but use real claim
-  shapes and real official-body excerpts.
-- If a future live OpenAI run on the expanded batch (or on a historical
-  batch) surfaces raw `strong` on `actor_mismatch` /
-  `same_topic_wrong_policy` / `local_vs_central_authority` patterns,
-  extend `semantic_fact_guardrails.py` with a small, deterministic
-  actor / policy-scope extractor (M6.5 candidate). Do not ship a canary
-  before guardrails cover the failure modes the live data reveals.
+  range and the preferred ~72 target. M6.6 closed the policy-scope
+  guardrail gap surfaced by the live OpenAI run. The next escalation
+  is to replace the synthetic batch with anonymized **historical
+  claims** from production logs — keep URLs / names sanitized, but use
+  real claim shapes and real official-body excerpts.
+- If a future live OpenAI run on a historical batch surfaces a new
+  overstrong pattern (e.g. ministry-pair mismatch where both texts are
+  national but name different ministries), extend
+  `semantic_fact_guardrails.py` with another targeted extractor before
+  considering a canary.
 - Only after a clean live-OpenAI run against an anonymized historical
   batch should an operator flip `SEMANTIC_MATCHING_ENABLED=true` on
   Render — and even then, as a debug-only canary, not a user-facing
