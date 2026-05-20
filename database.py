@@ -43,6 +43,7 @@ def init_db():
         _ensure_columns(connection)
         _ensure_jobs_table(connection)
         _ensure_embedding_cache_table(connection)
+        _ensure_review_tables(connection)
         connection.commit()
 
 
@@ -487,6 +488,285 @@ def save_cached_embedding(
         _embedding_logger.warning("embedding_cache write failed: %s", error)
         return False
     return True
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 M8.0: server-backed reviewer workflow persistence.
+#
+# Two tables — review_tasks (one row per (result_id, job_id, item_index,
+# claim_text) tuple via the idempotency key) and review_decisions (one
+# row per recorded reviewer action, append-only). The verdict tables
+# (analysis_results) are NEVER mutated by anything in this section; the
+# review layer is strictly additive.
+# ---------------------------------------------------------------------------
+
+
+def _ensure_review_tables(connection):
+    """Idempotent. Safe to call repeatedly."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS review_tasks (
+            task_id TEXT PRIMARY KEY,
+            result_id TEXT,
+            job_id TEXT,
+            item_index INTEGER DEFAULT 0,
+            status TEXT NOT NULL,
+            query TEXT,
+            claim_text TEXT,
+            title TEXT,
+            url TEXT,
+            final_decision TEXT,
+            policy_confidence TEXT,
+            human_review_required INTEGER DEFAULT 1,
+            snapshot_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            idempotency_key TEXT UNIQUE
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS review_decisions (
+            decision_id TEXT PRIMARY KEY,
+            task_id TEXT NOT NULL,
+            decision TEXT NOT NULL,
+            reviewer_id TEXT,
+            comment TEXT,
+            public_note TEXT,
+            previous_status TEXT,
+            new_status TEXT,
+            created_at TEXT NOT NULL,
+            metadata_json TEXT
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_review_tasks_status ON review_tasks(status)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_review_tasks_result ON review_tasks(result_id, job_id, item_index)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_review_decisions_task ON review_decisions(task_id, created_at)"
+    )
+
+
+def init_review_tables():
+    """Public idempotent initializer. Independent of init_db() so tests
+    and the API server can call it without touching analysis_results."""
+    with get_connection() as connection:
+        _ensure_review_tables(connection)
+        connection.commit()
+
+
+def _row_to_review_task(row) -> dict:
+    """SQLite row → review_task dict. Inflates snapshot_json to a dict."""
+    if row is None:
+        return {}
+    out = {k: row[k] for k in row.keys()}
+    snapshot_raw = out.pop("snapshot_json", "")
+    try:
+        out["snapshot"] = json.loads(snapshot_raw) if snapshot_raw else {}
+    except (TypeError, ValueError):
+        out["snapshot"] = {}
+    out["human_review_required"] = bool(out.get("human_review_required", 1))
+    out["item_index"] = int(out.get("item_index") or 0)
+    return out
+
+
+def _row_to_review_decision(row) -> dict:
+    if row is None:
+        return {}
+    out = {k: row[k] for k in row.keys()}
+    metadata_raw = out.pop("metadata_json", "")
+    try:
+        out["metadata"] = json.loads(metadata_raw) if metadata_raw else {}
+    except (TypeError, ValueError):
+        out["metadata"] = {}
+    return out
+
+
+def get_review_task_by_idempotency_key(idempotency_key: str):
+    """Return the existing task for an idempotency key, or None."""
+    if not idempotency_key:
+        return None
+    with get_connection() as connection:
+        _ensure_review_tables(connection)
+        row = connection.execute(
+            "SELECT * FROM review_tasks WHERE idempotency_key = ?",
+            (idempotency_key,),
+        ).fetchone()
+    return _row_to_review_task(row) if row else None
+
+
+def create_review_task(*, task_id: str, result_id, job_id, item_index: int,
+                       status: str, query: str, claim_text: str, title: str,
+                       url: str, final_decision: str, policy_confidence: str,
+                       human_review_required: bool, snapshot: dict,
+                       idempotency_key: str, created_at: str,
+                       updated_at: str):
+    """Insert a new review task (or return the existing row when the
+    idempotency_key conflicts). Returns ``(task, was_existing)`` —
+    callers use the second value to set the API's ``idempotent`` flag
+    rather than relying on timestamp comparison (which fails when two
+    calls land within the same second-precision ``now_iso()``)."""
+    existing = get_review_task_by_idempotency_key(idempotency_key)
+    if existing:
+        return existing, True
+    snapshot_json = json.dumps(snapshot or {}, ensure_ascii=False)
+    was_existing = False
+    with get_connection() as connection:
+        _ensure_review_tables(connection)
+        try:
+            connection.execute(
+                """
+                INSERT INTO review_tasks (
+                    task_id, result_id, job_id, item_index, status,
+                    query, claim_text, title, url,
+                    final_decision, policy_confidence,
+                    human_review_required, snapshot_json,
+                    created_at, updated_at, idempotency_key
+                ) VALUES (
+                    ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?,
+                    ?, ?,
+                    ?, ?,
+                    ?, ?, ?
+                )
+                """,
+                (
+                    task_id,
+                    str(result_id) if result_id is not None else None,
+                    str(job_id) if job_id is not None else None,
+                    int(item_index or 0),
+                    status,
+                    query, claim_text, title, url,
+                    final_decision, policy_confidence,
+                    1 if human_review_required else 0,
+                    snapshot_json,
+                    created_at, updated_at, idempotency_key,
+                ),
+            )
+            connection.commit()
+        except sqlite3.IntegrityError:
+            # A concurrent writer beat us to it — fetch the canonical row.
+            existing = get_review_task_by_idempotency_key(idempotency_key)
+            if existing:
+                return existing, True
+            raise
+    return (get_review_task(task_id) or {}), was_existing
+
+
+def get_review_task(task_id: str):
+    """Return a single review_task dict, or None when not found."""
+    if not task_id:
+        return None
+    with get_connection() as connection:
+        _ensure_review_tables(connection)
+        row = connection.execute(
+            "SELECT * FROM review_tasks WHERE task_id = ?",
+            (task_id,),
+        ).fetchone()
+    return _row_to_review_task(row) if row else None
+
+
+def list_review_tasks(*, status=None, limit: int = 50, offset: int = 0) -> list:
+    """List review tasks (newest first). ``limit`` is clamped to [1, 100]
+    so a single API call cannot pull the whole table."""
+    limit = max(1, min(int(limit or 50), 100))
+    offset = max(0, int(offset or 0))
+    with get_connection() as connection:
+        _ensure_review_tables(connection)
+        if status:
+            rows = connection.execute(
+                """
+                SELECT * FROM review_tasks
+                WHERE status = ?
+                ORDER BY created_at DESC, task_id DESC
+                LIMIT ? OFFSET ?
+                """,
+                (status, limit, offset),
+            ).fetchall()
+        else:
+            rows = connection.execute(
+                """
+                SELECT * FROM review_tasks
+                ORDER BY created_at DESC, task_id DESC
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset),
+            ).fetchall()
+    return [_row_to_review_task(r) for r in rows]
+
+
+def update_review_task_status(task_id: str, *, new_status: str,
+                              updated_at: str) -> dict:
+    """Update a task's status row. Caller is responsible for
+    transition validation via review_workflow.validate_status_transition."""
+    with get_connection() as connection:
+        _ensure_review_tables(connection)
+        connection.execute(
+            "UPDATE review_tasks SET status = ?, updated_at = ? WHERE task_id = ?",
+            (new_status, updated_at, task_id),
+        )
+        connection.commit()
+    return get_review_task(task_id) or {}
+
+
+def record_review_decision(*, decision_id: str, task_id: str, decision: str,
+                           reviewer_id=None, comment=None, public_note=None,
+                           previous_status=None, new_status=None,
+                           created_at: str, metadata: dict = None) -> dict:
+    """Append a decision row. Append-only — no UPDATE / DELETE path."""
+    metadata_json = json.dumps(metadata or {}, ensure_ascii=False)
+    with get_connection() as connection:
+        _ensure_review_tables(connection)
+        connection.execute(
+            """
+            INSERT INTO review_decisions (
+                decision_id, task_id, decision, reviewer_id,
+                comment, public_note, previous_status, new_status,
+                created_at, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                decision_id, task_id, decision,
+                reviewer_id, comment, public_note,
+                previous_status, new_status,
+                created_at, metadata_json,
+            ),
+        )
+        connection.commit()
+    return get_review_decision(decision_id) or {}
+
+
+def get_review_decision(decision_id: str):
+    if not decision_id:
+        return None
+    with get_connection() as connection:
+        _ensure_review_tables(connection)
+        row = connection.execute(
+            "SELECT * FROM review_decisions WHERE decision_id = ?",
+            (decision_id,),
+        ).fetchone()
+    return _row_to_review_decision(row) if row else None
+
+
+def list_review_decisions(task_id: str) -> list:
+    if not task_id:
+        return []
+    with get_connection() as connection:
+        _ensure_review_tables(connection)
+        rows = connection.execute(
+            """
+            SELECT * FROM review_decisions
+            WHERE task_id = ?
+            ORDER BY created_at ASC, decision_id ASC
+            """,
+            (task_id,),
+        ).fetchall()
+    return [_row_to_review_decision(r) for r in rows]
 
 
 def embedding_cache_stats() -> dict:

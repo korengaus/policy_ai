@@ -5,7 +5,7 @@ import time
 from contextlib import asynccontextmanager
 from typing import List, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -13,11 +13,18 @@ from pydantic import BaseModel
 
 from config import describe_ai_config
 from database import (
+    create_review_task,
     get_recent_results,
     get_result_by_id,
     get_result_id_by_url,
+    get_review_task,
     init_db,
+    init_review_tables,
+    list_review_decisions,
+    list_review_tasks,
+    record_review_decision,
     save_analysis_result,
+    update_review_task_status,
 )
 from db.postgres import (
     is_dual_write_enabled,
@@ -26,6 +33,8 @@ from db.postgres import (
 )
 import job_manager
 from main import analyze_pipeline
+import review_auth
+import review_workflow
 from text_utils import sanitize_data
 
 
@@ -739,3 +748,284 @@ def history_detail(result_id: int) -> dict:
         raise HTTPException(status_code=404, detail="history item not found")
 
     return {"status": "ok", "result": result}
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 M8.0: server-backed reviewer workflow endpoints.
+#
+# Disabled by default — gated by ``review_auth.require_review_token`` which
+# checks the ``REVIEW_API_ENABLED`` env var + the ``X-Review-Token`` header.
+# No endpoint here mutates analysis_results, final_decision,
+# policy_confidence, verification_card, or any verdict-side field. The
+# only writes are to review_tasks / review_decisions (the new tables).
+# ---------------------------------------------------------------------------
+
+
+# Pydantic request bodies. Keep them lean — most fields are optional so
+# the reviewer client doesn't have to ship the entire payload back.
+class _ReviewTaskFromResultRequest(BaseModel):
+    result_id: Optional[str] = None
+    job_id: Optional[str] = None
+    item_index: int = 0
+    result_payload: Optional[dict] = None
+    query: Optional[str] = None
+
+
+class _ReviewDecisionRequest(BaseModel):
+    decision: str
+    reviewer_id: Optional[str] = None
+    comment: Optional[str] = None
+    public_note: Optional[str] = None
+
+
+def _require_review_token(
+    x_review_token: Optional[str] = Header(
+        default=None, alias=review_auth.REVIEW_TOKEN_HEADER,
+    ),
+) -> None:
+    """FastAPI dependency wrapping ``review_auth.check_review_request``.
+    Declared here so the endpoints can simply ``Depends(_require_review_token)``."""
+    review_auth.check_review_request(x_review_token)
+
+
+def _load_payload_for_review(
+    *, result_id: Optional[str], job_id: Optional[str],
+    explicit_payload: Optional[dict],
+) -> dict:
+    """Resolve the analysis payload we'll snapshot from.
+
+    Priority: explicit ``result_payload`` body field > job cache (when
+    ``job_id`` matches a recent in-process job) > stored history row
+    (when ``result_id`` is a valid integer). Returns ``{}`` when nothing
+    can be resolved; the caller surfaces a 400 in that case.
+    """
+    if isinstance(explicit_payload, dict) and explicit_payload:
+        return explicit_payload
+    # Try the in-process job cache first — same path /jobs/{id}/result uses.
+    if job_id:
+        cached = _JOB_REPORT_CACHE.get(str(job_id))
+        if isinstance(cached, dict) and cached:
+            return cached
+    # Fall back to the stored history row.
+    if result_id:
+        try:
+            row_id = int(result_id)
+        except (TypeError, ValueError):
+            row_id = None
+        if row_id is not None:
+            try:
+                stored = get_result_by_id(row_id)
+            except Exception:
+                stored = None
+            if isinstance(stored, dict) and stored:
+                # Wrap in the same shape /jobs/{id}/result uses so the
+                # snapshot extractor can find the news-results array.
+                return {"result": {"results": [stored]}}
+    return {}
+
+
+@app.get("/review/tasks")
+def review_list_tasks(
+    status: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    _: None = Depends(_require_review_token),
+) -> dict:
+    """List review tasks (newest first). Optional ``status`` filter.
+
+    Status filter is normalized via ``review_workflow.normalize_review_status``;
+    an unknown status returns 400 rather than silently returning all rows.
+    """
+    init_review_tables()
+    status_filter: Optional[str] = None
+    if status:
+        try:
+            status_filter = review_workflow.normalize_review_status(status)
+        except review_workflow.ReviewWorkflowError as error:
+            raise HTTPException(status_code=400, detail=str(error))
+    try:
+        rows = list_review_tasks(status=status_filter, limit=limit, offset=offset)
+    except Exception:
+        logger.exception("Failed to list review tasks")
+        raise HTTPException(status_code=500, detail="failed to list review tasks")
+    return {
+        "tasks": [review_workflow.summarize_review_task(r) for r in rows],
+        "count": len(rows),
+        "status_filter": status_filter,
+    }
+
+
+@app.get("/review/tasks/{task_id}")
+def review_task_detail(
+    task_id: str,
+    _: None = Depends(_require_review_token),
+) -> dict:
+    """Return a task plus all decisions recorded against it."""
+    init_review_tables()
+    task = get_review_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="review task not found")
+    decisions = list_review_decisions(task_id)
+    return {
+        "task": review_workflow.detail_review_task(task, decisions=decisions),
+        "decisions": decisions,
+    }
+
+
+@app.post("/review/tasks/from-result")
+def review_create_task_from_result(
+    body: _ReviewTaskFromResultRequest,
+    _: None = Depends(_require_review_token),
+) -> dict:
+    """Create (or idempotently fetch) a review task from a result payload.
+
+    The reviewer client may pass ``result_payload`` directly (the
+    full ``/jobs/{id}/result`` body, for example) OR pass
+    ``result_id`` / ``job_id`` so the server resolves the payload from
+    the existing history / in-process job cache.
+
+    The task is created with status ``pending_review`` and
+    ``human_review_required=true``. Same logical (result_id, job_id,
+    item_index, claim_text) tuple returns the same task on repeat calls.
+    """
+    init_review_tables()
+    payload = _load_payload_for_review(
+        result_id=body.result_id,
+        job_id=body.job_id,
+        explicit_payload=body.result_payload,
+    )
+    if not payload:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Could not resolve a result payload. Provide "
+                "result_payload, or a result_id / job_id that the server "
+                "can hydrate."
+            ),
+        )
+
+    snapshot = review_workflow.extract_review_snapshot_from_result(
+        payload, item_index=body.item_index or 0, query=body.query,
+    )
+    claim_text = snapshot.get("claim_text") or ""
+    if not claim_text:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not extract a claim from the payload — nothing to review.",
+        )
+
+    task_id = review_workflow.make_review_task_id(
+        result_id=body.result_id, job_id=body.job_id,
+        item_index=body.item_index or 0, claim_text=claim_text,
+    )
+    idempotency_key = review_workflow.make_idempotency_key(
+        result_id=body.result_id, job_id=body.job_id,
+        item_index=body.item_index or 0, claim_text=claim_text,
+    )
+    now = review_workflow.now_iso()
+
+    try:
+        task, was_existing = create_review_task(
+            task_id=task_id,
+            result_id=body.result_id,
+            job_id=body.job_id,
+            item_index=body.item_index or 0,
+            status=review_workflow.STATUS_PENDING_REVIEW,
+            query=snapshot.get("query") or "",
+            claim_text=claim_text,
+            title=snapshot.get("title") or "",
+            url=snapshot.get("url") or "",
+            final_decision=snapshot.get("final_decision") or "",
+            policy_confidence=snapshot.get("policy_confidence") or "",
+            human_review_required=bool(snapshot.get("human_review_required", True)),
+            snapshot=snapshot,
+            idempotency_key=idempotency_key,
+            created_at=now,
+            updated_at=now,
+        )
+    except Exception:
+        logger.exception("Failed to create review task")
+        raise HTTPException(status_code=500, detail="failed to create review task")
+
+    return {
+        "task": review_workflow.detail_review_task(task, decisions=[]),
+        "idempotent": bool(was_existing),
+    }
+
+
+@app.post("/review/tasks/{task_id}/decision")
+def review_record_decision(
+    task_id: str,
+    body: _ReviewDecisionRequest,
+    _: None = Depends(_require_review_token),
+) -> dict:
+    """Append a decision and (when the decision changes status) update
+    the task's status. Append-only — decisions cannot be deleted or
+    modified. Comment-only decisions do not change status.
+
+    Important: this endpoint never publishes anything, never mutates
+    analysis_results, and never changes the verdict / confidence /
+    verification_card the pipeline produced.
+    """
+    init_review_tables()
+    task = get_review_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="review task not found")
+
+    try:
+        decision = review_workflow.normalize_review_decision(body.decision)
+    except review_workflow.ReviewWorkflowError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+
+    current_status = task.get("status") or ""
+    try:
+        new_status = review_workflow.validate_status_transition(current_status, decision)
+    except review_workflow.ReviewWorkflowError as error:
+        # transition_not_allowed → 409 conflict; reserved/unknown → 400.
+        if error.reason == "transition_not_allowed":
+            raise HTTPException(status_code=409, detail=str(error))
+        raise HTTPException(status_code=400, detail=str(error))
+
+    now = review_workflow.now_iso()
+    decision_id = review_workflow.make_review_decision_id()
+    try:
+        record_review_decision(
+            decision_id=decision_id,
+            task_id=task_id,
+            decision=decision,
+            reviewer_id=body.reviewer_id,
+            comment=body.comment,
+            public_note=body.public_note,
+            previous_status=current_status,
+            new_status=new_status,
+            created_at=now,
+            metadata={},
+        )
+        if new_status != current_status:
+            update_review_task_status(task_id, new_status=new_status, updated_at=now)
+    except Exception:
+        logger.exception("Failed to record review decision")
+        raise HTTPException(status_code=500, detail="failed to record review decision")
+
+    updated_task = get_review_task(task_id) or task
+    decisions = list_review_decisions(task_id)
+    return {
+        "task": review_workflow.detail_review_task(updated_task, decisions=decisions),
+        "decision_id": decision_id,
+        "previous_status": current_status,
+        "new_status": new_status,
+        "status_changed": new_status != current_status,
+    }
+
+
+@app.get("/review/tasks/{task_id}/decisions")
+def review_list_decisions(
+    task_id: str,
+    _: None = Depends(_require_review_token),
+) -> dict:
+    init_review_tables()
+    task = get_review_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="review task not found")
+    decisions = list_review_decisions(task_id)
+    return {"task_id": task_id, "decisions": decisions, "count": len(decisions)}

@@ -223,6 +223,30 @@ jobs:
           OPENAI_API_KEY: ""
         run: python tests/test_operational_checks_runner.py
 
+      - name: Run reviewer workflow tests
+        # Phase 2 M8.0: pure-helpers test for the review vocabulary,
+        # status transition matrix, ID generation, and snapshot extraction.
+        # No database, no FastAPI, no network — entirely stdlib.
+        env:
+          SEMANTIC_MATCHING_ENABLED: "false"
+          EMBEDDING_PROVIDER: "disabled"
+          OPENAI_API_KEY: ""
+        run: python tests/test_review_workflow.py
+
+      - name: Run reviewer API tests
+        # Phase 2 M8.0: review API surface tests using FastAPI TestClient
+        # + a temp SQLite DB. The safety gate is enabled inside the test
+        # suite via REVIEW_API_ENABLED=true + a dummy token; the real
+        # Render env stays disabled. No live server, no live OpenAI.
+        env:
+          SEMANTIC_MATCHING_ENABLED: "false"
+          EMBEDDING_PROVIDER: "disabled"
+          OPENAI_API_KEY: ""
+          # The review-API env vars are set inside the test suite via
+          # _env() context managers; CI keeps them unset at the workflow
+          # level so other test files see the production default.
+        run: python tests/test_review_api.py
+
       - name: Evaluate semantic real-claim batch (deterministic dry-run)
         # Real-claim batch evaluator smoke. Deterministic provider only,
         # --no-network to enforce offline, --max-cases 3 to keep CI fast.
