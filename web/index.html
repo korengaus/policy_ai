@@ -1146,6 +1146,309 @@
       margin-top: 12px;
     }
 
+    .server-review-panel {
+      display: grid;
+      gap: 14px;
+    }
+
+    .server-review-token-panel {
+      border: 1px solid #fcd34d;
+      border-radius: 10px;
+      background: #fffbeb;
+      padding: 14px;
+    }
+
+    .server-review-token-panel label {
+      display: block;
+      margin-bottom: 6px;
+      color: #78350f;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .server-review-token-panel input {
+      width: 100%;
+      min-height: 38px;
+      border: 1px solid #f59e0b;
+      border-radius: 8px;
+      padding: 8px 10px;
+      background: #fff;
+      font-size: 14px;
+    }
+
+    .server-review-token-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+      flex-wrap: wrap;
+    }
+
+    .server-review-token-actions button {
+      min-height: 36px;
+      padding: 6px 14px;
+      font-size: 13px;
+    }
+
+    .server-review-token-note {
+      margin-top: 8px;
+      color: #92400e;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .server-review-status {
+      margin-top: 10px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: #fef3c7;
+      color: #78350f;
+      font-size: 13px;
+      font-weight: 700;
+      display: none;
+    }
+
+    .server-review-status.is-info {
+      display: block;
+      background: #e0f2fe;
+      color: #075985;
+    }
+
+    .server-review-status.is-success {
+      display: block;
+      background: #dcfce7;
+      color: #166534;
+    }
+
+    .server-review-status.is-error {
+      display: block;
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    .server-review-list-panel {
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
+      background: #f8fafc;
+      padding: 14px;
+    }
+
+    .server-review-list-header {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+
+    .server-review-list-header select {
+      min-height: 36px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 6px 10px;
+      background: #fff;
+      font-size: 13px;
+    }
+
+    .server-review-list-header button {
+      min-height: 36px;
+      padding: 6px 12px;
+      font-size: 13px;
+    }
+
+    .server-review-list-items {
+      display: grid;
+      gap: 8px;
+    }
+
+    .server-review-list-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px 12px;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      background: #fff;
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    .server-review-list-row:hover {
+      border-color: #2563eb;
+    }
+
+    .server-review-list-row.is-active {
+      border-color: #1d4ed8;
+      background: #eff6ff;
+    }
+
+    .server-review-list-row .row-title {
+      font-weight: 800;
+      color: #0f172a;
+      margin-bottom: 4px;
+      word-break: break-word;
+    }
+
+    .server-review-list-row .row-meta {
+      color: #475569;
+      font-size: 12px;
+    }
+
+    .server-review-status-chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .server-review-status-chip.status-pending_review {
+      background: #fef3c7;
+      color: #92400e;
+    }
+
+    .server-review-status-chip.status-needs_more_evidence {
+      background: #ffedd5;
+      color: #9a3412;
+    }
+
+    .server-review-status-chip.status-approved {
+      background: #dcfce7;
+      color: #166534;
+    }
+
+    .server-review-status-chip.status-rejected {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    .server-review-status-chip.status-unknown {
+      background: #e2e8f0;
+      color: #475569;
+    }
+
+    .server-review-detail {
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
+      background: #ffffff;
+      padding: 14px;
+    }
+
+    .server-review-detail[hidden] {
+      display: none;
+    }
+
+    .server-review-detail h3 {
+      margin: 0 0 10px;
+      font-size: 16px;
+    }
+
+    .server-review-detail-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .server-review-detail-grid > div {
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      background: #f8fafc;
+      padding: 8px 10px;
+      font-size: 12px;
+      color: #475569;
+      word-break: break-word;
+    }
+
+    .server-review-detail-grid strong {
+      display: block;
+      color: #0f172a;
+      font-size: 13px;
+      margin-bottom: 2px;
+    }
+
+    .server-review-decision-panel {
+      margin-top: 12px;
+      border: 1px solid #dbeafe;
+      border-radius: 10px;
+      background: #f8fbff;
+      padding: 12px;
+    }
+
+    .server-review-decision-panel h4,
+    .server-review-history h4 {
+      margin: 0 0 8px;
+      font-size: 14px;
+    }
+
+    .server-review-decision-panel label {
+      display: block;
+      margin-top: 8px;
+      margin-bottom: 4px;
+      font-size: 12px;
+      font-weight: 800;
+      color: #1e3a8a;
+    }
+
+    .server-review-decision-panel select,
+    .server-review-decision-panel input,
+    .server-review-decision-panel textarea {
+      width: 100%;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 6px 10px;
+      background: #fff;
+      font-size: 13px;
+      font-family: inherit;
+    }
+
+    .server-review-decision-panel textarea {
+      min-height: 50px;
+      resize: vertical;
+    }
+
+    .server-review-decision-panel button {
+      margin-top: 12px;
+      min-height: 36px;
+      padding: 6px 14px;
+      font-size: 13px;
+    }
+
+    .server-review-history {
+      margin-top: 14px;
+      padding: 12px;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      background: #f8fafc;
+    }
+
+    .server-review-history-row {
+      padding: 8px 10px;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      background: #fff;
+      margin-bottom: 6px;
+      font-size: 12px;
+      color: #334155;
+    }
+
+    .server-review-history-row .row-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      font-weight: 800;
+      color: #0f172a;
+      margin-bottom: 2px;
+    }
+
+    .server-review-history-row .row-body {
+      color: #475569;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
     .selected-issue-intro {
       border: 1px solid #dbeafe;
       border-radius: 12px;
@@ -1886,6 +2189,85 @@
           </div>
           <div id="reviewQueue">
             <div class="empty-state">검토가 필요한 분석 결과가 없습니다.</div>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <section class="history-card">
+      <details class="review-tools-details" id="serverReviewDetails">
+        <summary>서버 검수 큐 (관리자 전용)</summary>
+        <div class="review-tools-body">
+          <div class="reader-note">
+            서버 백엔드의 리뷰 API에 연결된 내부 검수 도구입니다. 토큰을 보유한 운영자만 사용할 수 있으며,
+            검증 판정 로직과 공개 화면에는 영향을 주지 않습니다. 이 화면에서 발행되는 결과는 없습니다.
+          </div>
+          <div class="server-review-panel">
+            <div class="server-review-token-panel">
+              <label for="serverReviewToken">리뷰 API 토큰 (X-Review-Token)</label>
+              <input
+                id="serverReviewToken"
+                type="password"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="로컬/운영용 리뷰 토큰을 붙여넣으세요"
+              >
+              <div class="server-review-token-actions">
+                <button id="serverReviewTokenSaveBtn" class="primary" type="button">토큰 적용</button>
+                <button id="serverReviewTokenClearBtn" class="secondary" type="button">토큰 해제</button>
+              </div>
+              <div class="server-review-token-note">
+                토큰은 브라우저 세션 저장소에만 보관되며 서버 호출 시 X-Review-Token 헤더로만 전송됩니다.
+                코드, 로그, URL에는 포함되지 않습니다.
+              </div>
+              <div id="serverReviewStatus" class="server-review-status" role="status" aria-live="polite"></div>
+            </div>
+
+            <div class="server-review-list-panel">
+              <div class="server-review-list-header">
+                <select id="serverReviewStatusFilter" aria-label="서버 검수 상태 필터">
+                  <option value="">전체</option>
+                  <option value="pending_review">pending_review (대기)</option>
+                  <option value="needs_more_evidence">needs_more_evidence (근거 보강 필요)</option>
+                  <option value="approved">approved (승인됨)</option>
+                  <option value="rejected">rejected (반려됨)</option>
+                </select>
+                <button id="serverReviewRefreshBtn" class="secondary" type="button">큐 새로고침</button>
+              </div>
+              <div id="serverReviewList" class="server-review-list-items">
+                <div class="empty-state">토큰을 적용하면 서버 검수 큐를 불러옵니다.</div>
+              </div>
+            </div>
+
+            <div id="serverReviewDetail" class="server-review-detail" hidden>
+              <h3>선택한 검수 작업</h3>
+              <div id="serverReviewDetailBody"></div>
+
+              <div class="server-review-decision-panel">
+                <h4>판정 기록 추가</h4>
+                <label for="serverReviewDecisionType">판정 유형</label>
+                <select id="serverReviewDecisionType">
+                  <option value="approve">approve (승인)</option>
+                  <option value="reject">reject (반려)</option>
+                  <option value="needs_more_evidence">needs_more_evidence (근거 보강 필요)</option>
+                  <option value="comment">comment (코멘트만 기록)</option>
+                </select>
+                <label for="serverReviewReviewerId">리뷰어 식별자 (선택)</label>
+                <input id="serverReviewReviewerId" type="text" autocomplete="off" placeholder="예: local_reviewer">
+                <label for="serverReviewComment">코멘트 (선택)</label>
+                <textarea id="serverReviewComment" rows="2"></textarea>
+                <label for="serverReviewPublicNote">공개 메모 (선택, 발행 안 함)</label>
+                <textarea id="serverReviewPublicNote" rows="2"></textarea>
+                <button id="serverReviewSubmitDecisionBtn" class="primary" type="button">판정 기록</button>
+              </div>
+
+              <div class="server-review-history">
+                <h4>판정 이력</h4>
+                <div id="serverReviewHistory">
+                  <div class="empty-state">선택한 작업의 판정 이력이 없습니다.</div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </details>
@@ -7328,9 +7710,417 @@
         }
       });
     }
+    // ---- Phase 2 M8.1: server-backed reviewer UI ---------------------------
+    // Wires the existing FastAPI /review/* endpoints to a token-gated admin
+    // panel. Safety contract:
+    //   * token is held only in sessionStorage and the X-Review-Token header,
+    //     never logged, never written to localStorage or any committed file
+    //   * UI never mutates analysis_results / final_decision / policy_confidence
+    //   * UI surfaces a deterministic message when REVIEW_API_ENABLED is off
+    //   * No publish/correction path is exposed
+    const SERVER_REVIEW_TOKEN_STORAGE_KEY = "policy_ai_server_review_token";
+    const SERVER_REVIEW_STATUS_LABELS = {
+      pending_review: "대기 (pending_review)",
+      needs_more_evidence: "근거 보강 필요 (needs_more_evidence)",
+      approved: "승인됨 (approved)",
+      rejected: "반려됨 (rejected)",
+      published: "발행됨 (예약)",
+      corrected: "정정됨 (예약)",
+    };
+    const SERVER_REVIEW_API_DISABLED_MESSAGE =
+      "리뷰 API가 비활성화되어 있습니다. 로컬/운영 환경에서 REVIEW_API_ENABLED 설정이 필요합니다.";
+    const SERVER_REVIEW_API_FORBIDDEN_MESSAGE =
+      "X-Review-Token이 누락되었거나 일치하지 않습니다. 토큰을 다시 확인해 주세요.";
+
+    let serverReviewSelectedTaskId = null;
+    let serverReviewLastList = [];
+
+    function serverReviewGetToken() {
+      try {
+        return (window.sessionStorage && sessionStorage.getItem(SERVER_REVIEW_TOKEN_STORAGE_KEY)) || "";
+      } catch (_) {
+        return "";
+      }
+    }
+
+    function serverReviewSetToken(value) {
+      try {
+        if (!window.sessionStorage) return false;
+        if (value) {
+          sessionStorage.setItem(SERVER_REVIEW_TOKEN_STORAGE_KEY, value);
+        } else {
+          sessionStorage.removeItem(SERVER_REVIEW_TOKEN_STORAGE_KEY);
+        }
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function serverReviewFormatErrorMessage(status, detail) {
+      if (status === 503) {
+        return SERVER_REVIEW_API_DISABLED_MESSAGE;
+      }
+      if (status === 403) {
+        return SERVER_REVIEW_API_FORBIDDEN_MESSAGE;
+      }
+      if (status === 404) {
+        return "요청한 검수 작업을 찾을 수 없습니다.";
+      }
+      if (status === 409) {
+        return "현재 상태에서는 이 판정을 적용할 수 없습니다.";
+      }
+      if (status === 400) {
+        return "요청 형식이 올바르지 않습니다.";
+      }
+      if (status === 0) {
+        return "네트워크 오류로 서버에 연결할 수 없습니다.";
+      }
+      return `서버 리뷰 API 호출에 실패했습니다 (HTTP ${status || "?"})`;
+    }
+
+    function serverReviewFormatStatusLabel(status) {
+      const key = String(status || "").trim();
+      return SERVER_REVIEW_STATUS_LABELS[key] || (key || "(없음)");
+    }
+
+    function serverReviewSetStatusBanner(kind, message) {
+      const el = document.getElementById("serverReviewStatus");
+      if (!el) return;
+      el.classList.remove("is-info", "is-success", "is-error");
+      if (!message) {
+        el.style.display = "none";
+        el.textContent = "";
+        return;
+      }
+      if (kind === "success") el.classList.add("is-success");
+      else if (kind === "error") el.classList.add("is-error");
+      else el.classList.add("is-info");
+      el.style.display = "block";
+      el.textContent = message;
+    }
+
+    async function serverReviewFetch(path, options) {
+      const opts = options || {};
+      const token = serverReviewGetToken();
+      if (!token) {
+        return { ok: false, status: 0, reason: "no_token", body: null };
+      }
+      const headers = Object.assign(
+        { "Content-Type": "application/json" },
+        opts.headers || {},
+        { "X-Review-Token": token },
+      );
+      const init = { method: opts.method || "GET", headers };
+      if (opts.body != null) {
+        init.body = typeof opts.body === "string" ? opts.body : JSON.stringify(opts.body);
+      }
+      let resp;
+      try {
+        resp = await fetch(`${API_BASE}${path}`, init);
+      } catch (err) {
+        return { ok: false, status: 0, body: null, reason: "network" };
+      }
+      let body = null;
+      try {
+        body = await resp.json();
+      } catch (_) {
+        body = null;
+      }
+      return { ok: resp.ok, status: resp.status, body };
+    }
+
+    function serverReviewClearDetail() {
+      serverReviewSelectedTaskId = null;
+      const detail = document.getElementById("serverReviewDetail");
+      if (detail) detail.hidden = true;
+      const body = document.getElementById("serverReviewDetailBody");
+      if (body) body.innerHTML = "";
+      const history = document.getElementById("serverReviewHistory");
+      if (history) {
+        history.innerHTML = '<div class="empty-state">선택한 작업의 판정 이력이 없습니다.</div>';
+      }
+    }
+
+    function serverReviewRenderEmpty(message) {
+      const list = document.getElementById("serverReviewList");
+      if (!list) return;
+      const safe = escapeHtml(message || "조건에 맞는 검수 작업이 없습니다.");
+      list.innerHTML = `<div class="empty-state">${safe}</div>`;
+    }
+
+    function serverReviewRenderList(tasks) {
+      const list = document.getElementById("serverReviewList");
+      if (!list) return;
+      serverReviewLastList = Array.isArray(tasks) ? tasks : [];
+      if (!serverReviewLastList.length) {
+        serverReviewRenderEmpty();
+        return;
+      }
+      const rows = serverReviewLastList.map((task) => {
+        const id = String(task.task_id || "");
+        const statusKey = String(task.status || "unknown");
+        const statusLabel = serverReviewFormatStatusLabel(statusKey);
+        const chipClass = `server-review-status-chip status-${escapeHtml(statusKey)}`;
+        const title = escapeHtml(task.title || task.query || "(제목 없음)");
+        const claim = escapeHtml(task.claim_text || "");
+        const verdict = escapeHtml(task.final_decision || "");
+        const conf = escapeHtml(task.policy_confidence || "");
+        const updated = escapeHtml(task.updated_at || task.created_at || "");
+        const isActive = serverReviewSelectedTaskId === id ? " is-active" : "";
+        return `
+          <div class="server-review-list-row${isActive}" data-server-review-task-id="${escapeHtml(id)}" role="button" tabindex="0">
+            <div>
+              <div class="row-title">${title}</div>
+              <div class="row-meta">주장: ${claim || "(없음)"}</div>
+              <div class="row-meta">초안 판정: ${verdict || "(없음)"} · 신뢰: ${conf || "(없음)"}</div>
+              <div class="row-meta">업데이트: ${updated || "(없음)"}</div>
+            </div>
+            <span class="${chipClass}">${escapeHtml(statusLabel)}</span>
+          </div>
+        `;
+      }).join("");
+      list.innerHTML = rows;
+    }
+
+    function serverReviewRenderDetail(task, decisions) {
+      const detail = document.getElementById("serverReviewDetail");
+      const body = document.getElementById("serverReviewDetailBody");
+      if (!detail || !body) return;
+      detail.hidden = false;
+      const statusKey = String(task.status || "unknown");
+      const chipClass = `server-review-status-chip status-${escapeHtml(statusKey)}`;
+      const statusLabel = serverReviewFormatStatusLabel(statusKey);
+      body.innerHTML = `
+        <div class="server-review-detail-grid">
+          <div><strong>작업 ID</strong>${escapeHtml(task.task_id || "")}</div>
+          <div><strong>현재 상태</strong><span class="${chipClass}">${escapeHtml(statusLabel)}</span></div>
+          <div><strong>검색어</strong>${escapeHtml(task.query || "(없음)")}</div>
+          <div><strong>인덱스</strong>${escapeHtml(String(task.item_index ?? 0))}</div>
+          <div style="grid-column: 1 / -1;"><strong>제목</strong>${escapeHtml(task.title || "(없음)")}</div>
+          <div style="grid-column: 1 / -1;"><strong>핵심 주장</strong>${escapeHtml(task.claim_text || "(없음)")}</div>
+          <div><strong>초안 판정</strong>${escapeHtml(task.final_decision || "(없음)")}</div>
+          <div><strong>신뢰도 라벨</strong>${escapeHtml(task.policy_confidence || "(없음)")}</div>
+          <div><strong>원문 URL</strong>${task.url ? `<a href="${escapeHtml(task.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(task.url)}</a>` : "(없음)"}</div>
+          <div><strong>사람 검토 필요</strong>${task.human_review_required ? "예" : "아니오"}</div>
+          <div><strong>생성</strong>${escapeHtml(task.created_at || "(없음)")}</div>
+          <div><strong>업데이트</strong>${escapeHtml(task.updated_at || "(없음)")}</div>
+        </div>
+      `;
+      serverReviewRenderHistory(decisions);
+    }
+
+    function serverReviewRenderHistory(decisions) {
+      const el = document.getElementById("serverReviewHistory");
+      if (!el) return;
+      const items = Array.isArray(decisions) ? decisions : [];
+      if (!items.length) {
+        el.innerHTML = '<div class="empty-state">선택한 작업의 판정 이력이 없습니다.</div>';
+        return;
+      }
+      el.innerHTML = items.map((d) => {
+        const decision = escapeHtml(d.decision || "");
+        const prev = escapeHtml(d.previous_status || "");
+        const next = escapeHtml(d.new_status || "");
+        const reviewer = escapeHtml(d.reviewer_id || "");
+        const comment = escapeHtml(d.comment || "");
+        const note = escapeHtml(d.public_note || "");
+        const when = escapeHtml(d.created_at || "");
+        return `
+          <div class="server-review-history-row">
+            <div class="row-head">
+              <span>${decision} · ${prev || "(이전 상태 없음)"} → ${next || "(상태 변경 없음)"}</span>
+              <span>${when}</span>
+            </div>
+            <div class="row-body">${reviewer ? `리뷰어: ${reviewer}\n` : ""}${comment ? `코멘트: ${comment}\n` : ""}${note ? `공개 메모: ${note}` : ""}</div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    async function serverReviewLoadList() {
+      const list = document.getElementById("serverReviewList");
+      if (!list) return;
+      const token = serverReviewGetToken();
+      if (!token) {
+        serverReviewSetStatusBanner("info", "토큰을 적용하면 서버 검수 큐를 불러옵니다.");
+        serverReviewRenderEmpty("토큰을 적용하면 서버 검수 큐를 불러옵니다.");
+        serverReviewClearDetail();
+        return;
+      }
+      const filterEl = document.getElementById("serverReviewStatusFilter");
+      const status = filterEl && filterEl.value ? filterEl.value : "";
+      serverReviewSetStatusBanner("info", "서버 검수 큐를 불러오는 중...");
+      list.innerHTML = '<div class="empty-state">서버 검수 큐를 불러오는 중...</div>';
+      const path = status
+        ? `/review/tasks?status=${encodeURIComponent(status)}`
+        : "/review/tasks";
+      const result = await serverReviewFetch(path);
+      if (!result.ok) {
+        const message = serverReviewFormatErrorMessage(result.status);
+        serverReviewSetStatusBanner("error", message);
+        serverReviewRenderEmpty(message);
+        return;
+      }
+      const tasks = (result.body && Array.isArray(result.body.tasks)) ? result.body.tasks : [];
+      serverReviewRenderList(tasks);
+      const count = (result.body && typeof result.body.count === "number") ? result.body.count : tasks.length;
+      serverReviewSetStatusBanner(
+        "success",
+        `서버 검수 큐 ${count}건 (필터: ${status || "전체"})`,
+      );
+    }
+
+    async function serverReviewLoadDetail(taskId) {
+      const id = String(taskId || "").trim();
+      if (!id) return;
+      const token = serverReviewGetToken();
+      if (!token) {
+        serverReviewSetStatusBanner("error", "토큰이 없습니다. 먼저 토큰을 적용해 주세요.");
+        return;
+      }
+      serverReviewSelectedTaskId = id;
+      // Reflect selection in the list immediately.
+      serverReviewRenderList(serverReviewLastList);
+      const result = await serverReviewFetch(`/review/tasks/${encodeURIComponent(id)}`);
+      if (!result.ok) {
+        const message = serverReviewFormatErrorMessage(result.status);
+        serverReviewSetStatusBanner("error", message);
+        return;
+      }
+      const task = (result.body && result.body.task) || {};
+      const decisions = (result.body && Array.isArray(result.body.decisions))
+        ? result.body.decisions
+        : (Array.isArray(task.decisions) ? task.decisions : []);
+      serverReviewRenderDetail(task, decisions);
+      serverReviewSetStatusBanner("success", `작업 ${id} 상세를 불러왔습니다.`);
+    }
+
+    async function serverReviewSubmitDecision() {
+      const id = serverReviewSelectedTaskId;
+      if (!id) {
+        serverReviewSetStatusBanner("error", "먼저 검수 작업을 선택해 주세요.");
+        return;
+      }
+      const typeEl = document.getElementById("serverReviewDecisionType");
+      const reviewerEl = document.getElementById("serverReviewReviewerId");
+      const commentEl = document.getElementById("serverReviewComment");
+      const publicNoteEl = document.getElementById("serverReviewPublicNote");
+      const decision = (typeEl && typeEl.value) || "comment";
+      const body = {
+        decision,
+        reviewer_id: (reviewerEl && reviewerEl.value) ? reviewerEl.value.trim() : null,
+        comment: (commentEl && commentEl.value) ? commentEl.value : null,
+        public_note: (publicNoteEl && publicNoteEl.value) ? publicNoteEl.value : null,
+      };
+      const result = await serverReviewFetch(
+        `/review/tasks/${encodeURIComponent(id)}/decision`,
+        { method: "POST", body },
+      );
+      if (!result.ok) {
+        const message = serverReviewFormatErrorMessage(result.status);
+        serverReviewSetStatusBanner("error", message);
+        return;
+      }
+      if (commentEl) commentEl.value = "";
+      if (publicNoteEl) publicNoteEl.value = "";
+      serverReviewSetStatusBanner(
+        "success",
+        result.body && result.body.status_changed
+          ? `판정 기록 완료: ${result.body.previous_status} → ${result.body.new_status}`
+          : "판정 기록을 추가했습니다 (상태 변경 없음).",
+      );
+      const task = (result.body && result.body.task) || {};
+      const decisions = Array.isArray(task.decisions) ? task.decisions : [];
+      serverReviewRenderDetail(task, decisions);
+      // Refresh list so the row's status chip reflects the new state.
+      await serverReviewLoadList();
+    }
+
+    function serverReviewBindEvents() {
+      const saveBtn = document.getElementById("serverReviewTokenSaveBtn");
+      const clearBtn = document.getElementById("serverReviewTokenClearBtn");
+      const tokenInput = document.getElementById("serverReviewToken");
+      const refreshBtn = document.getElementById("serverReviewRefreshBtn");
+      const filterEl = document.getElementById("serverReviewStatusFilter");
+      const listEl = document.getElementById("serverReviewList");
+      const submitBtn = document.getElementById("serverReviewSubmitDecisionBtn");
+      if (!saveBtn || !clearBtn || !tokenInput || !refreshBtn || !filterEl || !listEl || !submitBtn) {
+        return;
+      }
+      saveBtn.addEventListener("click", async () => {
+        const value = (tokenInput.value || "").trim();
+        if (!value) {
+          serverReviewSetStatusBanner("error", "토큰 값을 입력해 주세요.");
+          return;
+        }
+        const ok = serverReviewSetToken(value);
+        // Clear the visible input so the token is not left on-screen.
+        tokenInput.value = "";
+        if (!ok) {
+          serverReviewSetStatusBanner("error", "이 브라우저에서는 세션 저장소를 사용할 수 없습니다.");
+          return;
+        }
+        serverReviewSetStatusBanner("success", "토큰을 적용했습니다. 큐를 불러옵니다...");
+        await serverReviewLoadList();
+      });
+      clearBtn.addEventListener("click", () => {
+        serverReviewSetToken("");
+        tokenInput.value = "";
+        serverReviewClearDetail();
+        serverReviewRenderEmpty("토큰을 적용하면 서버 검수 큐를 불러옵니다.");
+        serverReviewSetStatusBanner("info", "토큰을 해제했습니다.");
+      });
+      refreshBtn.addEventListener("click", () => {
+        serverReviewLoadList();
+      });
+      filterEl.addEventListener("change", () => {
+        serverReviewLoadList();
+      });
+      listEl.addEventListener("click", (event) => {
+        const row = event.target.closest("[data-server-review-task-id]");
+        if (!row) return;
+        const taskId = row.getAttribute("data-server-review-task-id");
+        if (!taskId) return;
+        serverReviewLoadDetail(taskId);
+      });
+      listEl.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        const row = event.target.closest("[data-server-review-task-id]");
+        if (!row) return;
+        event.preventDefault();
+        const taskId = row.getAttribute("data-server-review-task-id");
+        if (!taskId) return;
+        serverReviewLoadDetail(taskId);
+      });
+      submitBtn.addEventListener("click", () => {
+        serverReviewSubmitDecision();
+      });
+      if (serverReviewGetToken()) {
+        serverReviewSetStatusBanner("info", "저장된 세션 토큰을 사용합니다.");
+        serverReviewLoadList();
+      } else {
+        serverReviewSetStatusBanner(
+          "info",
+          "로컬/운영용 리뷰 토큰을 입력하면 서버 검수 큐가 표시됩니다.",
+        );
+      }
+    }
+
+    // Expose pure helpers for JS regression tests (no network, no I/O).
+    if (typeof window !== "undefined") {
+      window.__serverReviewHelpers = {
+        formatErrorMessage: serverReviewFormatErrorMessage,
+        formatStatusLabel: serverReviewFormatStatusLabel,
+        disabledMessage: SERVER_REVIEW_API_DISABLED_MESSAGE,
+        forbiddenMessage: SERVER_REVIEW_API_FORBIDDEN_MESSAGE,
+      };
+    }
+
     renderHistory(safeReadLocalHistory());
     renderReviewQueue(safeReadReviewQueue());
     renderHotTopics();
+    serverReviewBindEvents();
   </script>
 </body>
 </html>
