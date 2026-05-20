@@ -210,6 +210,13 @@ except `unknown_historical` and clean direct-support patterns. The
 fixture's expected `support_level` is always `any` — the builder does
 not invent ground-truth labels.
 
+> **M7.2 update — debug-canary tooling**: a dedicated canary plan and
+> monitoring helpers live in `docs/SEMANTIC_DEBUG_CANARY.md`. They build
+> on this builder's output by running the live `/jobs/analyze` flow and
+> measuring runtime semantic metrics with
+> `semantic_canary_metrics.summarize_semantic_canary`. The canary
+> tooling does **not** enable anything on Render — it only measures.
+
 ## J. Activation gate (cumulative with prior milestones)
 
 Before any Render debug canary:

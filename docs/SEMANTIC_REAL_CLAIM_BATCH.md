@@ -306,7 +306,11 @@ activation-gate checklist below come into play.
 - Only after a clean live-OpenAI run against an anonymized historical
   batch should an operator flip `SEMANTIC_MATCHING_ENABLED=true` on
   Render — and even then, as a debug-only canary, not a user-facing
-  rollout.
+  rollout. **M7.2 adds the canary plan + monitoring tooling
+  (`docs/SEMANTIC_DEBUG_CANARY.md`,
+  `scripts/smoke_semantic_canary.py`, `semantic_canary_metrics.py`).**
+  Activation itself remains an explicit operator decision and is not
+  done by any script.
 
 ## I. Validation
 

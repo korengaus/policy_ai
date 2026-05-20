@@ -190,6 +190,27 @@ jobs:
           OPENAI_API_KEY: ""
         run: python tests/test_historical_claim_batch_builder.py
 
+      - name: Run semantic canary metrics tests
+        # Phase 2 M7.2: pure-stdlib canary monitoring helper. Tests run
+        # against synthetic payload dicts — no live server, no OpenAI,
+        # no Render. Verdict isolation pinned by VerdictIsolationTests.
+        env:
+          SEMANTIC_MATCHING_ENABLED: "false"
+          EMBEDDING_PROVIDER: "disabled"
+          OPENAI_API_KEY: ""
+        run: python tests/test_semantic_canary_metrics.py
+
+      - name: Run smoke_semantic_canary script tests
+        # Phase 2 M7.2: smoke script + env checker. Tests run --help and
+        # subprocess the env-checker against synthetic env overrides; no
+        # live server is started, no OpenAI key is required. Live canary
+        # runs are intentionally NOT part of CI.
+        env:
+          SEMANTIC_MATCHING_ENABLED: "false"
+          EMBEDDING_PROVIDER: "disabled"
+          OPENAI_API_KEY: ""
+        run: python tests/test_smoke_semantic_canary.py
+
       - name: Evaluate semantic real-claim batch (deterministic dry-run)
         # Real-claim batch evaluator smoke. Deterministic provider only,
         # --no-network to enforce offline, --max-cases 3 to keep CI fast.
