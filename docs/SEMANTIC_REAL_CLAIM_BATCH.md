@@ -292,10 +292,12 @@ activation-gate checklist below come into play.
 
 - M6.4 grew the batch from 15 to 72 cases, hitting the spec's 50–100
   range and the preferred ~72 target. M6.6 closed the policy-scope
-  guardrail gap surfaced by the live OpenAI run. The next escalation
-  is to replace the synthetic batch with anonymized **historical
-  claims** from production logs — keep URLs / names sanitized, but use
-  real claim shapes and real official-body excerpts.
+  guardrail gap surfaced by the live OpenAI run. **M7.0 added a
+  historical claim batch builder** (`scripts/build_historical_claim_batch.py`)
+  that scans local `reports/policy_analysis_*.json` and the SQLite
+  `analysis_results` table to assemble an anonymized batch from real
+  analysis runs — see `docs/HISTORICAL_CLAIM_BATCH.md`. Generated
+  batches are gitignored and never committed.
 - If a future live OpenAI run on a historical batch surfaces a new
   overstrong pattern (e.g. ministry-pair mismatch where both texts are
   national but name different ministries), extend

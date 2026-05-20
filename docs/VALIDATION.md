@@ -29,6 +29,7 @@ python tests/test_semantic_calibration.py
 python tests/test_semantic_fact_guardrails.py
 python tests/test_semantic_provider_comparison.py
 python tests/test_semantic_real_claim_batch.py
+python tests/test_historical_claim_batch_builder.py
 npm test
 ```
 

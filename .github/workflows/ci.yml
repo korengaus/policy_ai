@@ -179,6 +179,17 @@ jobs:
           OPENAI_API_KEY: ""
         run: python tests/test_semantic_real_claim_batch.py
 
+      - name: Run historical claim batch builder tests
+        # Phase 2 M7.0: anonymized historical claim batch builder. Tests
+        # subprocess the builder script with synthetic policy_analysis
+        # fixtures under tempdirs — no real reports/, no real SQLite, no
+        # network, no OpenAI key.
+        env:
+          SEMANTIC_MATCHING_ENABLED: "false"
+          EMBEDDING_PROVIDER: "disabled"
+          OPENAI_API_KEY: ""
+        run: python tests/test_historical_claim_batch_builder.py
+
       - name: Evaluate semantic real-claim batch (deterministic dry-run)
         # Real-claim batch evaluator smoke. Deterministic provider only,
         # --no-network to enforce offline, --max-cases 3 to keep CI fast.
