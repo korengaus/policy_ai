@@ -172,6 +172,21 @@ script:
 - The `compare_semantic_providers.py` CLI did not change. No new env
   vars, no new flags, no live-call behavior change.
 
+## G2. M6.4 update — expanded real-claim batch (separate evaluator)
+
+A parallel real-claim batch sits in
+`tests/fixtures/semantic_real_claim_batch_sample.json` with its own
+evaluator (`scripts/evaluate_real_claim_batch.py`). M6.2 introduced it
+at 15 cases; M6.4 expanded it to **72 cases** across 12 categories. See
+`docs/SEMANTIC_REAL_CLAIM_BATCH.md` for the full category and domain
+breakdown. The comparison driver
+(`scripts/compare_semantic_providers.py`) is **not** updated to point at
+the real-claim batch by default — operators run the real-claim
+evaluator separately when they want a real-claim-shaped scorecard, and
+the comparison driver continues to use the synthetic calibration
+fixture as its default `--case-file`. Both drivers can target either
+fixture via `--case-file`.
+
 ## H. Future path
 
 - Continue expanding the calibration set from anonymized historical

@@ -1,12 +1,49 @@
-# Semantic Real-Claim Evaluation Batch (Phase 2 M6.2)
+# Semantic Real-Claim Evaluation Batch (Phase 2 M6.2 + M6.4)
 
-A small, local-only evaluation batch of anonymized real-claim-like Korean
-policy / news scenarios. It exists to bridge the gap between the
-synthetic calibration fixture (M6.0, 36 cases) and a production canary:
-**before** any Render activation, the operator should be able to run
-deterministic + live OpenAI evaluation against scenarios that resemble
-real user queries, not just the engineered traps from the calibration
-fixture.
+A local-only evaluation batch of anonymized real-claim-like Korean policy
+/ news scenarios. It exists to bridge the gap between the synthetic
+calibration fixture (M6.0, 36 cases) and a production canary: **before**
+any Render activation, the operator should be able to run deterministic +
+live OpenAI evaluation against scenarios that resemble real user
+queries, not just the engineered traps from the calibration fixture.
+
+## M6.4 update — expanded historical-style real-claim batch
+
+The batch was expanded from 15 cases (M6.2) to **72 cases** (M6.4)
+spanning 12 categories and 14+ policy domains. The expansion is
+evaluation-only: nothing in M6.4 changes verdict logic, alters Render
+configuration, runs live OpenAI calls, or weakens the conservative
+wording the pipeline already uses.
+
+Why the 15-case batch wasn't enough:
+
+- M6.3 live OpenAI on the 15-case batch showed clean results
+  (`overstrong=0`, `top1=1.000`, actor/scope cases below the strong
+  threshold) — but with only 15 cases, the activation-readiness signal
+  was too narrow to detect uncommon failure modes like
+  `same_topic_wrong_policy`, `actor_mismatch`, or partial support across
+  multiple domains.
+- The expanded batch (target 50–100; landed on 72) carries at least
+  5 cases per guardrail-mapped category and at least 8 cases combined
+  across the highest-risk scope-mismatch categories (`actor_mismatch`,
+  `local_vs_central_authority`, `same_topic_wrong_policy`). That gives
+  the next OpenAI run enough signal to detect a raw-`strong` false
+  positive on those categories if one appears.
+
+What the expansion does NOT do:
+
+- Does **not** enable semantic matching in production. Render keeps
+  `SEMANTIC_MATCHING_ENABLED=false` / `EMBEDDING_PROVIDER=disabled`.
+- Does **not** modify `render.yaml` or any production env var.
+- Does **not** change `final_decision`, `policy_confidence`, the
+  verification card, methodology wording, or export wording.
+- Does **not** add a new external dependency, embedding cache backend,
+  or background worker. pgvector / Qdrant / Redis / Celery decisions
+  belong to a later phase.
+- Does **not** introduce live OpenAI calls in CI. Live evaluation
+  remains an opt-in local action behind the `RUN_LIVE_OPENAI_EVAL`
+  operator confirmation token + `--live-confirm-token LIVE_OPENAI_OK`
+  CLI gate.
 
 ## A. Purpose
 
@@ -41,29 +78,47 @@ fixture.
 
 The bundled fixture
 (`tests/fixtures/semantic_real_claim_batch_sample.json`) contains
-**15 anonymized real-claim-like cases** across the following categories
-and policy domains:
+**72 anonymized real-claim-like cases** across the following category
+distribution (M6.4):
 
-| case_id | category | domain |
+| category | count | description |
 | --- | --- | --- |
-| `real_housing_fraud_legal_finance` | direct_support | 전세사기 / housing fraud |
-| `real_housing_fraud_automatic_payment_claim` | eligibility_mismatch | 전세사기 / housing fraud |
-| `real_youth_rent_universal_claim` | eligibility_mismatch | 청년 월세 / youth rent |
-| `real_sme_emergency_grant_amount` | number_mismatch | 소상공인 지원 / small-business aid |
-| `real_health_insurance_general_overview` | contextual_only | 건강보험 / health insurance |
-| `real_tax_cut_date_and_finality_mismatch` | date_mismatch | 세금 감면 / tax cut |
-| `real_disaster_relief_partial_support` | partial_support | 재난지원금 / disaster relief |
-| `real_education_local_vs_central` | local_vs_central_authority | 교육비 지원 / education |
-| `real_transport_pilot_vs_nationwide` | finality_mismatch | 교통비 지원 / transport |
-| `real_childcare_universal_vs_conditional` | eligibility_mismatch | 보육 / childcare |
-| `real_finance_actor_mismatch` | actor_mismatch | 금융 / 대출 |
-| `real_consumer_protection_refund_guide` | direct_support | 소비자 보호 / consumer protection |
-| `real_negation_fake_youth_subsidy` | negation_or_refutation | 청년 보조금 정정 보도 |
-| `real_negation_policy_withdrawal` | negation_or_refutation | 종부세 추진 보류 |
-| `real_budget_proposal_finality_mismatch` | finality_mismatch | 예산안 국회 제출 |
+| `direct_support` | 13 | Source directly supports the claim across 13 policy domains (housing fraud, childcare, education, SME, labor, energy, agriculture, health, voucher, legal aid, transport, consumer protection). |
+| `eligibility_mismatch` | 8 | Claim asserts universal eligibility (`누구나`, `모든 청년`, `모든 국민`, `모든 가구`); source describes age / income / residence restrictions. |
+| `number_mismatch` | 8 | Claim and source share the unit but disagree on the value (만원 / 억원 / %). |
+| `date_mismatch` | 7 | Claim and source disagree on year, month, or application period. |
+| `finality_mismatch` | 7 | Claim treats policy as final (`확정`, `시행`); source is budget proposal / pilot / under review / under negotiation. |
+| `negation_or_refutation` | 6 | Source explicitly refutes (`사실이 아닙니다`, `보류`, `정정`). |
+| `partial_support` | 6 | Source confirms program exists but lacks the critical amount / date / eligibility the claim asserts. |
+| `same_topic_wrong_policy` | 6 | Same topic words, different policy (voucher vs loan, grant vs R&D, rate vs screening, loan vs guarantee, employment vs internship). |
+| `local_vs_central_authority` | 4 | Claim attributes action to central government; source is Seoul / Busan / Gyeonggi / 시도교육청 scope. |
+| `actor_mismatch` | 3 | Claim names one ministry; source is from a different ministry on a different but topically related policy. |
+| `no_body` | 2 | Source has metadata but empty `official_body_text` — agent must report `unavailable`. |
+| `contextual_only` | 2 | Source describes the broad program but no specific amount / date / action. |
+| **total** | **72** | |
 
-Mismatch / trap categories make up **13/15 = 87%** of the batch (every
-category except `direct_support`).
+Mismatch / trap categories make up **59/72 = 82%** of the batch
+(everything except `direct_support`). The combined
+actor / local-vs-central / same-topic-wrong-policy floor is satisfied at
+**13** cases — well above the M6.4 minimum of 8 combined.
+
+Per-category minimums enforced by `tests/test_semantic_real_claim_batch.py`:
+
+- `direct_support` ≥ 10
+- `number_mismatch` ≥ 6
+- `date_mismatch` ≥ 5
+- `eligibility_mismatch` ≥ 6
+- `finality_mismatch` ≥ 6
+- `negation_or_refutation` ≥ 5
+- `partial_support` ≥ 5
+- `same_topic_wrong_policy` ≥ 5
+- `no_body` ≥ 2
+- combined `actor_mismatch + local_vs_central_authority + same_topic_wrong_policy` ≥ 8
+
+Domain coverage spans 전세사기, 청년 월세, 소상공인 지원, 건강보험, 세금,
+재난지원금, 교육비, 교통비, 보육/육아, 금융/대출, 노동/고용, 소비자 보호,
+지역화폐, 에너지 바우처, 농어민 지원, 부동산 / 주택 정책, 학자금, and
+백신/예방접종.
 
 The schema matches `tests/fixtures/semantic_calibration_cases.json` so
 the same evaluator helpers (`semantic_calibration.evaluate_case`,
@@ -199,20 +254,21 @@ canary (e.g. `max_news=1`, internal-facing endpoint, no UI surface).
 
 ## H. Future path
 
-- Replace the synthetic batch with anonymized **historical claims** from
+- M6.4 grew the batch from 15 to 72 cases, hitting the spec's 50–100
+  range and the preferred ~72 target. The next escalation is to replace
+  the synthetic batch with anonymized **historical claims** from
   production logs — keep URLs / names sanitized, but use real claim
   shapes and real official-body excerpts.
-- Grow the batch to 50–100 cases so the activation-readiness signal
-  becomes statistically meaningful across domains.
-- If the live OpenAI run on the expanded historical batch surfaces raw
-  `strong` on `actor_mismatch` / `same_topic_wrong_policy` / `local_vs_central_authority`
-  patterns, extend `semantic_fact_guardrails.py` with a small,
-  deterministic actor / policy-scope extractor (M6.3 candidate). Do not
-  ship a canary before guardrails cover the failure modes the live data
-  reveals.
-- Only after a clean run against the historical batch should an operator
-  flip `SEMANTIC_MATCHING_ENABLED=true` on Render — and even then, as a
-  debug-only canary, not a user-facing rollout.
+- If a future live OpenAI run on the expanded batch (or on a historical
+  batch) surfaces raw `strong` on `actor_mismatch` /
+  `same_topic_wrong_policy` / `local_vs_central_authority` patterns,
+  extend `semantic_fact_guardrails.py` with a small, deterministic
+  actor / policy-scope extractor (M6.5 candidate). Do not ship a canary
+  before guardrails cover the failure modes the live data reveals.
+- Only after a clean live-OpenAI run against an anonymized historical
+  batch should an operator flip `SEMANTIC_MATCHING_ENABLED=true` on
+  Render — and even then, as a debug-only canary, not a user-facing
+  rollout.
 
 ## I. Validation
 

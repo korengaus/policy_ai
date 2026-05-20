@@ -71,6 +71,52 @@ MISMATCH_CATEGORIES = {
     "actor_mismatch",
 }
 
+# M6.4 expanded batch: minimum category coverage. The expanded batch must
+# contain at least one case in each of these categories so the scorecard
+# always exercises every M5.7 guardrail pattern plus the documentation-only
+# scope/actor traps.
+REQUIRED_CATEGORIES = {
+    "direct_support",
+    "contextual_only",
+    "number_mismatch",
+    "date_mismatch",
+    "eligibility_mismatch",
+    "finality_mismatch",
+    "negation_or_refutation",
+    "no_body",
+    "partial_support",
+    "same_topic_wrong_policy",
+    "actor_mismatch",
+    "local_vs_central_authority",
+}
+
+# M6.4 expanded batch: minimum per-category counts. These reflect the
+# distribution targets in the milestone spec — the expanded batch must
+# carry enough mismatch cases per category to detect uncommon failure
+# modes (per-category counts < ~5 would not give the OpenAI comparison
+# enough signal to act on).
+MINIMUM_CATEGORY_COUNTS = {
+    "direct_support": 10,
+    "number_mismatch": 6,
+    "date_mismatch": 5,
+    "eligibility_mismatch": 6,
+    "finality_mismatch": 6,
+    "negation_or_refutation": 5,
+    "partial_support": 5,
+    "same_topic_wrong_policy": 5,
+    "no_body": 2,
+}
+
+# Combined "actor / scope mismatch" floor — the highest-risk current
+# guardrail gap. The spec asks for at least 8 cases that exercise an
+# actor / policy-scope / local-vs-central pattern, taken together.
+SCOPE_MISMATCH_CATEGORIES = {
+    "actor_mismatch",
+    "local_vs_central_authority",
+    "same_topic_wrong_policy",
+}
+SCOPE_MISMATCH_MINIMUM = 8
+
 
 @contextmanager
 def _env(**overrides):
@@ -116,13 +162,15 @@ class FixtureShapeTests(unittest.TestCase):
         cases = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
         self.assertIsInstance(cases, list)
 
-    def test_fixture_has_at_least_ten_cases(self):
-        # M6.2 target: 10-20 cases. Below 10 the activation-readiness
-        # signal is too noisy to act on.
+    def test_fixture_has_at_least_fifty_cases(self):
+        # M6.4 target: 50-100 cases (preferred ~72). The expanded batch
+        # provides enough domain coverage that uncommon failure modes
+        # (actor mismatch, local-vs-central scope, partial support,
+        # ambiguous policy language) get exercised at meaningful counts.
         cases = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
         self.assertGreaterEqual(
-            len(cases), 10,
-            msg=f"expected >= 10 real-claim cases; found {len(cases)}",
+            len(cases), 50,
+            msg=f"expected >= 50 real-claim cases (M6.4 expanded batch); found {len(cases)}",
         )
 
     def test_case_ids_are_unique(self):
@@ -183,6 +231,52 @@ class FixtureShapeTests(unittest.TestCase):
                     f"risk_flag {expected_flag!r}; got {flags}"
                 ),
             )
+
+    def test_required_categories_are_present(self):
+        # The M6.4 expanded batch must cover every category in the
+        # required set so the scorecard always exercises all M5.7
+        # guardrail patterns plus the documentation-only scope/actor
+        # traps. A missing category would silently drop a failure mode.
+        cases = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+        seen = {case.get("category") for case in cases}
+        missing = REQUIRED_CATEGORIES - seen
+        self.assertFalse(missing, f"missing required categories: {sorted(missing)}")
+
+    def test_minimum_per_category_counts(self):
+        # Per-category floors keep the activation-readiness signal robust.
+        # A batch with 50 direct_support and 1 of each trap would pass
+        # the >=50% mismatch test but give the OpenAI comparison no
+        # signal on individual failure modes.
+        from collections import Counter
+        cases = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+        counts = Counter(case.get("category") for case in cases)
+        for category, minimum in MINIMUM_CATEGORY_COUNTS.items():
+            self.assertGreaterEqual(
+                counts.get(category, 0), minimum,
+                msg=(
+                    f"category {category!r} has only "
+                    f"{counts.get(category, 0)} case(s); M6.4 minimum is "
+                    f"{minimum}. Per-category counts: {dict(counts)}"
+                ),
+            )
+
+    def test_scope_mismatch_categories_have_combined_minimum(self):
+        # Actor/scope/local-vs-central cases are the current highest-risk
+        # future guardrail gap. The expanded batch must carry enough of
+        # them combined to detect a real-OpenAI raw-strong false positive
+        # if one ever appears in those categories.
+        from collections import Counter
+        cases = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+        counts = Counter(case.get("category") for case in cases)
+        scope_total = sum(counts.get(cat, 0) for cat in SCOPE_MISMATCH_CATEGORIES)
+        self.assertGreaterEqual(
+            scope_total, SCOPE_MISMATCH_MINIMUM,
+            msg=(
+                f"only {scope_total} scope/actor/wrong-policy cases "
+                f"(categories {sorted(SCOPE_MISMATCH_CATEGORIES)}); "
+                f"M6.4 minimum is {SCOPE_MISMATCH_MINIMUM}"
+            ),
+        )
 
     def test_uses_synthetic_example_urls(self):
         # Real production URLs and real personal data must not leak in.

@@ -328,5 +328,1261 @@
       "should_not_be_strong": true,
       "risk_flags": ["finality_mismatch"]
     }
+  },
+  {
+    "case_id": "real_housing_fraud_counseling_hotline",
+    "category": "direct_support",
+    "description": "전세사기 피해자 상담 전화 운영 주장에 대해 동일 사안을 다루는 본문이 직접 지지한다.",
+    "claim_text": "정부가 전세사기 피해자 전용 상담 전화를 운영한다고 발표했다.",
+    "sources": [
+      {
+        "source_id": "src_housing_fraud_hotline",
+        "title": "전세사기 피해자 상담 전화 운영 안내",
+        "url": "https://example.go.kr/housing-fraud-counseling-hotline",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 전세사기 피해자 전용 상담 전화를 운영한다고 안내했다. 운영 시간과 번호는 거주지 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "housing-fraud-counseling-hotline",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": false,
+      "risk_flags": []
+    }
+  },
+  {
+    "case_id": "real_childcare_multichild_allowance",
+    "category": "direct_support",
+    "description": "다자녀 가구 보육 수당 인상 주장에 대해 동일 사안의 본문이 직접 지지한다.",
+    "claim_text": "보건복지부가 다자녀 가구 보육 수당을 인상한다고 발표했다.",
+    "sources": [
+      {
+        "source_id": "src_multichild_allowance",
+        "title": "다자녀 가구 보육 수당 인상 안내",
+        "url": "https://example.mohw.go.kr/multichild-childcare-allowance",
+        "publisher": "Example Government",
+        "official_body_text": "보건복지부는 다자녀 가구 보육 수당을 인상한다고 안내했다. 적용 시기와 신청 방법은 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "multichild-childcare-allowance",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": false,
+      "risk_flags": []
+    }
+  },
+  {
+    "case_id": "real_student_lunch_low_income_support",
+    "category": "direct_support",
+    "description": "저소득층 학생 학교 급식비 지원 확대 주장에 대해 동일 사안의 본문이 직접 지지한다.",
+    "claim_text": "교육부가 저소득층 학생 학교 급식비 지원을 확대한다고 발표했다.",
+    "sources": [
+      {
+        "source_id": "src_student_lunch_expansion",
+        "title": "저소득층 학생 학교 급식비 지원 확대 안내",
+        "url": "https://example.moe.go.kr/low-income-student-lunch-expansion",
+        "publisher": "Example Government",
+        "official_body_text": "교육부는 저소득층 학생 학교 급식비 지원을 확대한다고 안내했다. 신청 절차는 학교 행정실에서 안내한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "low-income-student-lunch-expansion",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": false,
+      "risk_flags": []
+    }
+  },
+  {
+    "case_id": "real_sme_loan_guarantee_expansion",
+    "category": "direct_support",
+    "description": "소상공인 신용보증 한도 확대 주장에 대해 동일 사안의 본문이 직접 지지한다.",
+    "claim_text": "중소벤처기업부가 소상공인 신용보증 한도를 확대한다고 발표했다.",
+    "sources": [
+      {
+        "source_id": "src_sme_guarantee_expansion",
+        "title": "소상공인 신용보증 한도 확대 안내",
+        "url": "https://example.mss.go.kr/sme-credit-guarantee-expansion",
+        "publisher": "Example Government",
+        "official_body_text": "중소벤처기업부는 소상공인 신용보증 한도를 확대한다고 안내했다. 자격과 절차는 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "sme-credit-guarantee-expansion",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": false,
+      "risk_flags": []
+    }
+  },
+  {
+    "case_id": "real_labor_unpaid_wage_relief",
+    "category": "direct_support",
+    "description": "체불 임금 구제 절차 시행 주장에 대해 동일 사안의 본문이 직접 지지한다.",
+    "claim_text": "고용노동부가 체불 임금 구제 절차를 시행한다고 발표했다.",
+    "sources": [
+      {
+        "source_id": "src_unpaid_wage_relief",
+        "title": "체불 임금 구제 절차 시행 안내",
+        "url": "https://example.moel.go.kr/unpaid-wage-relief-procedure",
+        "publisher": "Example Government",
+        "official_body_text": "고용노동부는 체불 임금 구제 절차를 시행한다고 안내했다. 신고와 상담은 지방고용노동관서에서 안내한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "unpaid-wage-relief-procedure",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": false,
+      "risk_flags": []
+    }
+  },
+  {
+    "case_id": "real_energy_voucher_low_income",
+    "category": "direct_support",
+    "description": "저소득층 에너지 바우처 시행 주장에 대해 동일 사안의 본문이 직접 지지한다.",
+    "claim_text": "산업통상자원부가 저소득층 에너지 바우처를 시행한다고 발표했다.",
+    "sources": [
+      {
+        "source_id": "src_energy_voucher",
+        "title": "저소득층 에너지 바우처 시행 안내",
+        "url": "https://example.motie.go.kr/low-income-energy-voucher",
+        "publisher": "Example Government",
+        "official_body_text": "산업통상자원부는 저소득층 에너지 바우처를 시행한다고 안내했다. 신청 자격과 절차는 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "low-income-energy-voucher",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": false,
+      "risk_flags": []
+    }
+  },
+  {
+    "case_id": "real_farmer_operational_loan_expansion",
+    "category": "direct_support",
+    "description": "농가 영농자금 지원 확대 주장에 대해 동일 사안의 본문이 직접 지지한다.",
+    "claim_text": "농림축산식품부가 농가 영농자금 지원을 확대한다고 발표했다.",
+    "sources": [
+      {
+        "source_id": "src_farmer_loan_expansion",
+        "title": "농가 영농자금 지원 확대 안내",
+        "url": "https://example.mafra.go.kr/farmer-operational-loan-expansion",
+        "publisher": "Example Government",
+        "official_body_text": "농림축산식품부는 농가 영농자금 지원을 확대한다고 안내했다. 신청 자격과 절차는 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "farmer-operational-loan-expansion",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": false,
+      "risk_flags": []
+    }
+  },
+  {
+    "case_id": "real_infant_free_vaccination",
+    "category": "direct_support",
+    "description": "영유아 무료 예방접종 시행 주장에 대해 동일 사안의 본문이 직접 지지한다.",
+    "claim_text": "보건복지부가 영유아 무료 예방접종을 시행한다고 발표했다.",
+    "sources": [
+      {
+        "source_id": "src_infant_vaccination",
+        "title": "영유아 무료 예방접종 시행 안내",
+        "url": "https://example.mohw.go.kr/infant-free-vaccination",
+        "publisher": "Example Government",
+        "official_body_text": "보건복지부는 영유아 무료 예방접종을 시행한다고 안내했다. 접종 일정과 장소는 보건소 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "infant-free-vaccination",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": false,
+      "risk_flags": []
+    }
+  },
+  {
+    "case_id": "real_seoul_local_voucher",
+    "category": "direct_support",
+    "description": "서울시가 시민 지역화폐를 발행한다는 주장에 대해 동일 지자체 본문이 직접 지지한다.",
+    "claim_text": "서울시가 시민 지역화폐를 발행한다고 안내했다.",
+    "sources": [
+      {
+        "source_id": "src_seoul_voucher",
+        "title": "서울시 시민 지역화폐 발행 안내",
+        "url": "https://example.seoul.go.kr/seoul-citizen-local-voucher",
+        "publisher": "Example Government",
+        "official_body_text": "서울시는 시민 지역화폐를 발행한다고 안내했다. 사용처와 신청 절차는 시 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "seoul-citizen-local-voucher",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": false,
+      "risk_flags": []
+    }
+  },
+  {
+    "case_id": "real_housing_fraud_free_legal_aid",
+    "category": "direct_support",
+    "description": "법무부의 전세사기 피해자 무료 법률 구조 운영 주장에 대해 동일 사안의 본문이 직접 지지한다.",
+    "claim_text": "법무부가 전세사기 피해자에게 무료 법률 구조를 운영한다고 발표했다.",
+    "sources": [
+      {
+        "source_id": "src_free_legal_aid",
+        "title": "전세사기 피해자 무료 법률 구조 운영 안내",
+        "url": "https://example.moj.go.kr/housing-fraud-legal-aid",
+        "publisher": "Example Government",
+        "official_body_text": "법무부는 전세사기 피해자에게 무료 법률 구조를 운영한다고 안내했다. 신청 접수는 거주지 법률구조공단을 통해 가능하다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "housing-fraud-legal-aid",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": false,
+      "risk_flags": []
+    }
+  },
+  {
+    "case_id": "real_school_crosswalk_enforcement",
+    "category": "direct_support",
+    "description": "학교 앞 횡단보도 단속 강화 시행 주장에 대해 동일 사안의 본문이 직접 지지한다.",
+    "claim_text": "행정안전부가 학교 앞 횡단보도 단속 강화를 시행한다고 발표했다.",
+    "sources": [
+      {
+        "source_id": "src_crosswalk_enforcement",
+        "title": "학교 앞 횡단보도 단속 강화 시행 안내",
+        "url": "https://example.mois.go.kr/school-crosswalk-enforcement",
+        "publisher": "Example Government",
+        "official_body_text": "행정안전부는 학교 앞 횡단보도 단속 강화를 시행한다고 안내했다. 적용 구역과 시기는 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "school-crosswalk-enforcement",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": false,
+      "risk_flags": []
+    }
+  },
+  {
+    "case_id": "real_senior_transit_universal_vs_age",
+    "category": "eligibility_mismatch",
+    "description": "모든 노인이 무료 교통 혜택을 받는다는 주장에 대해 본문은 만 65세 이상 자격 요건 충족자에 한해 가능하다고 안내한다.",
+    "claim_text": "누구나 만 65세가 아니어도 노인 무료 교통 혜택을 받을 수 있다.",
+    "sources": [
+      {
+        "source_id": "src_senior_transit_age_eligibility",
+        "title": "노인 무료 교통 혜택 자격 안내",
+        "url": "https://example.molit.go.kr/senior-transit-age-eligibility",
+        "publisher": "Example Government",
+        "official_body_text": "노인 무료 교통 혜택은 만 65세 이상 자격 요건을 충족한 사람에 한해 제공된다. 자세한 조건은 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "senior-transit-age-eligibility",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["eligibility_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_rental_subsidy_universal_vs_income",
+    "category": "eligibility_mismatch",
+    "description": "누구나 임대료 보조를 받을 수 있다는 주장에 대해 본문은 가구 소득 기준 충족 가구에 한해 가능하다고 안내한다.",
+    "claim_text": "누구나 임대료 보조를 신청할 수 있다.",
+    "sources": [
+      {
+        "source_id": "src_rental_subsidy_income",
+        "title": "임대료 보조 신청 자격 안내",
+        "url": "https://example.molit.go.kr/rental-subsidy-income-eligibility",
+        "publisher": "Example Government",
+        "official_body_text": "임대료 보조는 가구 소득 기준을 충족한 가구에 한해 신청을 받는다. 자세한 자격은 공고문에 명시되어 있다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "rental-subsidy-income-eligibility",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["eligibility_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_vaccination_universal_vs_target_group",
+    "category": "eligibility_mismatch",
+    "description": "모든 국민이 무료 접종을 받는다는 주장에 대해 본문은 고위험군 대상자에 한해 가능하다고 안내한다.",
+    "claim_text": "모든 국민이 새 백신을 무료로 접종받을 수 있다.",
+    "sources": [
+      {
+        "source_id": "src_vaccination_target_group",
+        "title": "신규 백신 무료 접종 대상자 안내",
+        "url": "https://example.mohw.go.kr/vaccination-target-group",
+        "publisher": "Example Government",
+        "official_body_text": "신규 백신 무료 접종은 고위험군 대상자 자격 요건을 충족한 사람에 한해 제공된다. 자세한 조건은 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "vaccination-target-group",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["eligibility_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_childcare_universal_vs_dualworking",
+    "category": "eligibility_mismatch",
+    "description": "모든 가구가 보육 지원을 받는다는 주장에 대해 본문은 맞벌이 가구 자격 요건 충족자에 한해 지급된다고 안내한다.",
+    "claim_text": "모든 가구가 정부의 새 보육 지원을 받을 수 있다.",
+    "sources": [
+      {
+        "source_id": "src_childcare_dualworking",
+        "title": "맞벌이 가구 보육 지원 대상 안내",
+        "url": "https://example.mohw.go.kr/dual-working-childcare-eligibility",
+        "publisher": "Example Government",
+        "official_body_text": "새 보육 지원은 맞벌이 가구 자격 요건을 충족한 가구에 한해 지급된다. 자세한 조건은 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "dual-working-childcare-eligibility",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["eligibility_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_youth_job_grant_universal_vs_registered",
+    "category": "eligibility_mismatch",
+    "description": "모든 청년이 지원금을 받는다는 주장에 대해 본문은 취업 등록 청년에 한해 지급된다고 안내한다.",
+    "claim_text": "모든 청년이 새 청년 지원금을 받을 수 있다.",
+    "sources": [
+      {
+        "source_id": "src_youth_job_registered",
+        "title": "취업 등록 청년 지원금 대상 안내",
+        "url": "https://example.moel.go.kr/registered-youth-job-grant",
+        "publisher": "Example Government",
+        "official_body_text": "새 청년 지원금은 취업 등록 청년 자격 요건을 충족한 사람에 한해 지급된다. 자세한 조건은 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "registered-youth-job-grant",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["eligibility_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_youth_rent_amount_mismatch",
+    "category": "number_mismatch",
+    "description": "청년 월세 50만원 보조 주장에 대해 본문은 30만원이라고 명시한다.",
+    "claim_text": "정부가 청년에게 월세 50만원을 보조한다고 발표했다.",
+    "sources": [
+      {
+        "source_id": "src_youth_rent_amount_mismatch",
+        "title": "청년 월세 보조 금액 안내",
+        "url": "https://example.molit.go.kr/youth-rent-subsidy-amount",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 청년에게 월세 30만원을 보조한다고 안내했다. 신청 자격과 절차는 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "youth-rent-subsidy-amount",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["number_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_senior_lump_sum_amount_mismatch",
+    "category": "number_mismatch",
+    "description": "노인 일시금 200만원 주장에 대해 본문은 100만원이라고 명시한다.",
+    "claim_text": "정부가 노인 1인당 200만원의 일시금을 지급한다고 발표했다.",
+    "sources": [
+      {
+        "source_id": "src_senior_lump_sum_mismatch",
+        "title": "노인 일시금 지급 안내",
+        "url": "https://example.mohw.go.kr/senior-lump-sum-amount",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 노인 1인당 100만원의 일시금을 지급한다고 안내했다. 신청 자격과 절차는 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "senior-lump-sum-amount",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["number_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_multichild_grant_amount_mismatch",
+    "category": "number_mismatch",
+    "description": "다자녀 가구 1가구당 100만원 주장에 대해 본문은 50만원이라고 명시한다.",
+    "claim_text": "정부가 다자녀 가구에 1가구당 100만원의 지원금을 지급한다.",
+    "sources": [
+      {
+        "source_id": "src_multichild_amount_mismatch",
+        "title": "다자녀 가구 지원금 안내",
+        "url": "https://example.mohw.go.kr/multichild-household-grant-amount",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 다자녀 가구에 1가구당 50만원의 지원금을 지급한다고 안내했다. 신청 자격과 절차는 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "multichild-household-grant-amount",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["number_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_sme_rd_amount_mismatch",
+    "category": "number_mismatch",
+    "description": "소상공인 R&D 자금 5억원 주장에 대해 본문은 2억원이라고 명시한다.",
+    "claim_text": "정부가 소상공인 R&D 자금으로 5억원을 지원한다고 발표했다.",
+    "sources": [
+      {
+        "source_id": "src_sme_rd_amount_mismatch",
+        "title": "소상공인 R&D 자금 지원 안내",
+        "url": "https://example.mss.go.kr/sme-rd-budget-amount",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 소상공인 R&D 자금으로 2억원을 지원한다고 안내했다. 신청 자격과 절차는 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "sme-rd-budget-amount",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["number_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_disaster_percent_mismatch",
+    "category": "number_mismatch",
+    "description": "재난 피해 보상 80% 주장에 대해 본문은 50%라고 명시한다.",
+    "claim_text": "정부가 재난 피해 보상으로 피해액의 80%를 지급한다.",
+    "sources": [
+      {
+        "source_id": "src_disaster_percent_mismatch",
+        "title": "재난 피해 보상 비율 안내",
+        "url": "https://example.mois.go.kr/disaster-compensation-percent",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 재난 피해 보상으로 피해액의 50%를 지급한다고 안내했다. 적용 기준과 절차는 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "disaster-compensation-percent",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["number_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_property_tax_percent_mismatch",
+    "category": "number_mismatch",
+    "description": "부동산세 인상 15% 주장에 대해 본문은 10%라고 명시한다.",
+    "claim_text": "정부가 부동산세를 15% 인상한다고 발표했다.",
+    "sources": [
+      {
+        "source_id": "src_property_tax_percent_mismatch",
+        "title": "부동산세 인상 안내",
+        "url": "https://example.mosf.go.kr/property-tax-rate-percent",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 부동산세를 10% 인상한다고 안내했다. 적용 시점과 대상은 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "property-tax-rate-percent",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["number_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_tuition_exemption_percent_mismatch",
+    "category": "number_mismatch",
+    "description": "등록금 100% 면제 주장에 대해 본문은 50% 감면이라고 명시한다.",
+    "claim_text": "정부가 대학 등록금을 100% 면제한다고 발표했다.",
+    "sources": [
+      {
+        "source_id": "src_tuition_exemption_percent_mismatch",
+        "title": "대학 등록금 감면 안내",
+        "url": "https://example.moe.go.kr/tuition-reduction-percent",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 대학 등록금을 50% 감면한다고 안내했다. 적용 대상과 자격은 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "tuition-reduction-percent",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["number_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_tax_cut_month_mismatch",
+    "category": "date_mismatch",
+    "description": "세금 인하 2026년 3월 시행 주장에 대해 본문은 2026년 4월이라고 명시한다.",
+    "claim_text": "정부가 2026년 3월부터 세금 인하를 시행한다.",
+    "sources": [
+      {
+        "source_id": "src_tax_cut_month_mismatch",
+        "title": "세금 인하 시행 시기 안내",
+        "url": "https://example.mosf.go.kr/tax-cut-month-schedule",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 2026년 4월부터 세금 인하를 시행한다고 안내했다. 적용 대상과 절차는 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "tax-cut-month-schedule",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["date_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_sme_aid_year_mismatch",
+    "category": "date_mismatch",
+    "description": "자영업자 손실보전 2027년 시행 주장에 대해 본문은 2025년 시범 운영이라고 명시한다.",
+    "claim_text": "정부가 2027년부터 자영업자 손실보전을 시행한다.",
+    "sources": [
+      {
+        "source_id": "src_sme_loss_year_mismatch",
+        "title": "자영업자 손실보전 시범 운영 안내",
+        "url": "https://example.mss.go.kr/sole-proprietor-loss-year",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 2025년 일부 지역에서 자영업자 손실보전 시범 운영을 시작한다고 안내했다. 본격 시행 시점은 미정이다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "sole-proprietor-loss-year",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["date_mismatch", "finality_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_application_period_month_mismatch",
+    "category": "date_mismatch",
+    "description": "신청 기간 2026년 6월 주장에 대해 본문은 2026년 7월이라고 명시한다.",
+    "claim_text": "지원금 신청 기간은 2026년 6월이라고 정부가 발표했다.",
+    "sources": [
+      {
+        "source_id": "src_application_month_mismatch",
+        "title": "지원금 신청 기간 안내",
+        "url": "https://example.go.kr/aid-application-month",
+        "publisher": "Example Government",
+        "official_body_text": "지원금 신청 기간은 2026년 7월로 안내한다. 자세한 신청 절차는 공고문에 명시되어 있다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "aid-application-month",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["date_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_policy_announcement_year_mismatch",
+    "category": "date_mismatch",
+    "description": "발표 시점 2024년 주장에 대해 본문은 2025년 발표라고 명시한다.",
+    "claim_text": "정부가 2024년 농어민 기본소득 도입 계획을 발표했다.",
+    "sources": [
+      {
+        "source_id": "src_announce_year_mismatch",
+        "title": "농어민 기본소득 도입 발표 안내",
+        "url": "https://example.mafra.go.kr/farmer-basic-income-announce-year",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 2025년 농어민 기본소득 도입 계획을 발표한다고 안내했다. 추진 일정은 추후 공지될 예정이다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "farmer-basic-income-announce-year",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["date_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_school_year_application_mismatch",
+    "category": "date_mismatch",
+    "description": "2026 학년도 적용 주장에 대해 본문은 2025 학년도라고 명시한다.",
+    "claim_text": "교육부가 2026년부터 새 입시 제도를 적용한다.",
+    "sources": [
+      {
+        "source_id": "src_school_year_mismatch",
+        "title": "새 입시 제도 적용 안내",
+        "url": "https://example.moe.go.kr/admission-school-year",
+        "publisher": "Example Government",
+        "official_body_text": "교육부는 2025년부터 새 입시 제도를 적용한다고 안내했다. 자세한 시행 사항은 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "admission-school-year",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["date_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_childcare_expansion_month_mismatch",
+    "category": "date_mismatch",
+    "description": "보육 확대 2027년 1월 주장에 대해 본문은 2026년 6월이라고 명시한다.",
+    "claim_text": "정부가 2027년 1월부터 보육 지원 확대를 시행한다.",
+    "sources": [
+      {
+        "source_id": "src_childcare_month_mismatch",
+        "title": "보육 지원 확대 시행 시기 안내",
+        "url": "https://example.mohw.go.kr/childcare-expansion-month",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 2026년 6월부터 보육 지원 확대를 시행한다고 안내했다. 적용 대상과 자격은 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "childcare-expansion-month",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["date_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_property_tax_increase_finality_mismatch",
+    "category": "finality_mismatch",
+    "description": "부동산세 인상 확정 주장에 대해 본문은 검토 중이며 미정이라고 명시한다.",
+    "claim_text": "정부가 부동산세 인상을 최종 확정했다.",
+    "sources": [
+      {
+        "source_id": "src_property_tax_review",
+        "title": "부동산세 인상 검토 진행 안내",
+        "url": "https://example.mosf.go.kr/property-tax-review",
+        "publisher": "Example Government",
+        "official_body_text": "부동산세 인상 방안은 정부 검토 중이며 시행 여부는 미정이다. 입법 절차가 종료되면 공지된다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "property-tax-review",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["finality_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_vaccine_free_finality_mismatch",
+    "category": "finality_mismatch",
+    "description": "백신 무료 시행 확정 주장에 대해 본문은 검토 단계라고 명시한다.",
+    "claim_text": "보건복지부가 새 백신 무료 시행을 최종 확정했다.",
+    "sources": [
+      {
+        "source_id": "src_vaccine_free_review",
+        "title": "새 백신 무료 시행 검토 안내",
+        "url": "https://example.mohw.go.kr/new-vaccine-free-review",
+        "publisher": "Example Government",
+        "official_body_text": "새 백신 무료 시행 방안은 보건복지부 검토 단계이며 시행 시점은 추후 공지될 예정이다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "new-vaccine-free-review",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["finality_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_bus_fare_cut_finality_mismatch",
+    "category": "finality_mismatch",
+    "description": "버스 요금 인하 확정 주장에 대해 본문은 일부 지역 시범 운영이라고 명시한다.",
+    "claim_text": "정부가 전국 버스 요금 인하를 최종 확정했다.",
+    "sources": [
+      {
+        "source_id": "src_bus_fare_pilot",
+        "title": "버스 요금 인하 시범 운영 안내",
+        "url": "https://example.molit.go.kr/bus-fare-pilot",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 일부 지역에서 버스 요금 인하 시범 운영을 시작한다고 안내했다. 본격 시행 여부는 추후 공지될 예정이다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "bus-fare-pilot",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["finality_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_minimum_wage_finality_mismatch",
+    "category": "finality_mismatch",
+    "description": "최저임금 인상 확정 주장에 대해 본문은 노사정 협의 중이라고 명시한다.",
+    "claim_text": "정부가 최저임금 인상을 최종 확정했다.",
+    "sources": [
+      {
+        "source_id": "src_minimum_wage_negotiation",
+        "title": "최저임금 인상 노사정 협의 안내",
+        "url": "https://example.moel.go.kr/minimum-wage-negotiation",
+        "publisher": "Example Government",
+        "official_body_text": "최저임금 인상안은 노사정 협의 중이며 시행 여부는 미정이다. 협의 결과는 추후 공지될 예정이다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "minimum-wage-negotiation",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["finality_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_student_loan_cancellation_finality_mismatch",
+    "category": "finality_mismatch",
+    "description": "학자금 대출 탕감 확정 주장에 대해 본문은 검토 중이라고 명시한다.",
+    "claim_text": "정부가 학자금 대출 탕감을 최종 결정했다.",
+    "sources": [
+      {
+        "source_id": "src_student_loan_review",
+        "title": "학자금 대출 탕감 검토 안내",
+        "url": "https://example.moe.go.kr/student-loan-cancellation-review",
+        "publisher": "Example Government",
+        "official_body_text": "학자금 대출 탕감 방안은 검토 중이며 시행 여부는 추후 공지될 예정이다. 자세한 사항은 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "student-loan-cancellation-review",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["finality_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_negation_traffic_fine_abolition_false",
+    "category": "negation_or_refutation",
+    "description": "교통과태료 폐지 주장에 대해 본문은 사실이 아니라고 정정한다.",
+    "claim_text": "정부가 교통과태료를 전면 폐지한다.",
+    "sources": [
+      {
+        "source_id": "src_negation_traffic_fine",
+        "title": "교통과태료 폐지 보도 정정 안내",
+        "url": "https://example.mois.go.kr/traffic-fine-refutation",
+        "publisher": "Example Government",
+        "official_body_text": "교통과태료 폐지 보도는 사실이 아닙니다. 정부는 현재 폐지 계획이 없다고 정정 안내합니다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "traffic-fine-refutation",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["negation_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_negation_sme_tax_exempt_false",
+    "category": "negation_or_refutation",
+    "description": "소상공인 세금 전면 면제 주장에 대해 본문은 추진 보류라고 명시한다.",
+    "claim_text": "정부가 소상공인 세금을 전면 면제한다.",
+    "sources": [
+      {
+        "source_id": "src_negation_sme_tax",
+        "title": "소상공인 세금 면제 추진 보류 안내",
+        "url": "https://example.mosf.go.kr/sme-tax-exemption-withdrawal",
+        "publisher": "Example Government",
+        "official_body_text": "소상공인 세금 면제 추진 계획은 보류되었으며 해당 보도는 사실이 아닙니다. 시행 시점은 정해진 바 없다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "sme-tax-exemption-withdrawal",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["negation_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_negation_childcare_deletion_false",
+    "category": "negation_or_refutation",
+    "description": "보육비 폐지 주장에 대해 본문은 사실이 아니라고 정정한다.",
+    "claim_text": "정부가 보육비 지원금을 전면 폐지한다.",
+    "sources": [
+      {
+        "source_id": "src_negation_childcare",
+        "title": "보육비 지원금 폐지 보도 정정 안내",
+        "url": "https://example.mohw.go.kr/childcare-deletion-refutation",
+        "publisher": "Example Government",
+        "official_body_text": "보육비 지원금 폐지 보도는 사실이 아닙니다. 정부는 현재 폐지 계획이 없다고 정정 안내합니다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "childcare-deletion-refutation",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["negation_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_negation_property_tax_abolition_false",
+    "category": "negation_or_refutation",
+    "description": "종부세 완전 폐지 주장에 대해 본문은 보류라고 명시한다.",
+    "claim_text": "정부가 종부세를 완전 폐지한다.",
+    "sources": [
+      {
+        "source_id": "src_negation_property_tax",
+        "title": "종부세 완전 폐지 추진 보류 안내",
+        "url": "https://example.mosf.go.kr/property-tax-abolition-withdrawal",
+        "publisher": "Example Government",
+        "official_body_text": "종부세 완전 폐지 추진 계획은 보류되었으며 해당 보도는 사실이 아닙니다. 시행 시점은 정해진 바 없다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "property-tax-abolition-withdrawal",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["negation_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_partial_youth_startup_no_amount",
+    "category": "partial_support",
+    "description": "청년 창업 1인당 1,000만원 주장에 대해 본문은 제도 운영만 확인하고 금액을 언급하지 않는다.",
+    "claim_text": "정부가 청년 창업자에게 1인당 1,000만원의 지원금을 지급한다.",
+    "sources": [
+      {
+        "source_id": "src_partial_youth_startup",
+        "title": "청년 창업 지원 제도 안내",
+        "url": "https://example.mss.go.kr/youth-startup-overview",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 청년 창업 지원 제도를 운영하고 있다. 자격과 한도는 매년 검토되어 조정된다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "youth-startup-overview",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["missing_critical_fact"]
+    }
+  },
+  {
+    "case_id": "real_partial_disaster_aid_no_date",
+    "category": "partial_support",
+    "description": "재난지원금 2026년 3월 시행 주장에 대해 본문은 운영 중이라는 사실만 확인한다.",
+    "claim_text": "정부가 2026년 3월부터 재난지원금 신규 제도를 시행한다.",
+    "sources": [
+      {
+        "source_id": "src_partial_disaster_aid",
+        "title": "재난지원금 운영 안내",
+        "url": "https://example.mois.go.kr/disaster-aid-overview",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 재난지원금 제도를 운영하고 있다. 자세한 시기와 적용 대상은 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "disaster-aid-overview",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["missing_critical_fact"]
+    }
+  },
+  {
+    "case_id": "real_partial_health_insurance_no_rate",
+    "category": "partial_support",
+    "description": "건강보험료 5% 인하 주장에 대해 본문은 정책 운영만 확인하고 구체적 비율을 언급하지 않는다.",
+    "claim_text": "정부가 건강보험료를 5% 인하한다.",
+    "sources": [
+      {
+        "source_id": "src_partial_health_insurance",
+        "title": "건강보험 정책 운영 안내",
+        "url": "https://example.mohw.go.kr/health-insurance-policy-overview",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 건강보험 정책을 운영하고 있다. 자세한 세율 조정은 매년 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "health-insurance-policy-overview",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["missing_critical_fact"]
+    }
+  },
+  {
+    "case_id": "real_partial_childcare_no_eligibility",
+    "category": "partial_support",
+    "description": "보육 지원 대상 자격 주장에 대해 본문은 운영 안내만 한다.",
+    "claim_text": "정부가 모든 다자녀 가구를 보육 지원 대상에 포함한다.",
+    "sources": [
+      {
+        "source_id": "src_partial_childcare_eligibility",
+        "title": "보육 지원 제도 운영 안내",
+        "url": "https://example.mohw.go.kr/childcare-policy-overview",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 보육 지원 제도를 운영하고 있다. 자세한 자격 조건은 공고에 명시되어 있다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "childcare-policy-overview",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["specific_eligibility_not_in_source"]
+    }
+  },
+  {
+    "case_id": "real_partial_housing_no_scope",
+    "category": "partial_support",
+    "description": "임대 한도 확대 주장에 대해 본문은 정책 안내만 한다.",
+    "claim_text": "정부가 청년 임대 보증 한도를 1억원으로 확대한다.",
+    "sources": [
+      {
+        "source_id": "src_partial_housing",
+        "title": "청년 임대 보증 제도 운영 안내",
+        "url": "https://example.molit.go.kr/youth-rental-guarantee-overview",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 청년 임대 보증 제도를 운영하고 있다. 자세한 한도와 조건은 매년 공고에 명시된다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "youth-rental-guarantee-overview",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["missing_critical_fact"]
+    }
+  },
+  {
+    "case_id": "real_wrong_policy_youth_voucher_vs_loan",
+    "category": "same_topic_wrong_policy",
+    "description": "청년 월세 바우처 주장에 대해 본문은 같은 주제를 다루지만 다른 정책(청년 전세대출)을 안내한다.",
+    "claim_text": "정부가 청년 월세 바우처를 신설한다.",
+    "sources": [
+      {
+        "source_id": "src_wrong_policy_youth_voucher",
+        "title": "청년 전세대출 한도 상향 안내",
+        "url": "https://example.fsc.go.kr/youth-jeonse-loan-vs-voucher",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 청년 전세대출 한도 상향 정책을 안내했다. 청년 주거 안정성 강화가 목적이다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "youth-jeonse-loan-vs-voucher",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["policy_scope_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_wrong_policy_sme_grant_vs_rd",
+    "category": "same_topic_wrong_policy",
+    "description": "소상공인 긴급 지원금 주장에 대해 본문은 소상공인 R&D 지원을 안내한다.",
+    "claim_text": "정부가 소상공인 긴급 지원금을 신설한다.",
+    "sources": [
+      {
+        "source_id": "src_wrong_policy_sme_grant",
+        "title": "소상공인 R&D 지원 예산 확대 안내",
+        "url": "https://example.mss.go.kr/sme-rd-vs-grant",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 소상공인 R&D 지원 예산을 확대한다고 안내했다. 소상공인 디지털 전환을 돕는다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "sme-rd-vs-grant",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["policy_scope_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_wrong_policy_insurance_rate_vs_screening",
+    "category": "same_topic_wrong_policy",
+    "description": "건강보험료 인하 주장에 대해 본문은 건강검진 확대를 안내한다.",
+    "claim_text": "보건복지부가 건강보험료를 인하한다.",
+    "sources": [
+      {
+        "source_id": "src_wrong_policy_insurance",
+        "title": "국가 건강검진 항목 확대 안내",
+        "url": "https://example.mohw.go.kr/health-screening-vs-rate",
+        "publisher": "Example Government",
+        "official_body_text": "보건복지부는 국가 건강검진 항목을 확대한다고 안내했다. 검진 대상 연령과 항목이 추가된다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "health-screening-vs-rate",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["policy_scope_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_wrong_policy_housing_loan_vs_voucher",
+    "category": "same_topic_wrong_policy",
+    "description": "주거 대출 한도 확대 주장에 대해 본문은 주거 바우처를 안내한다.",
+    "claim_text": "정부가 청년 주거 대출 한도를 확대한다.",
+    "sources": [
+      {
+        "source_id": "src_wrong_policy_housing_voucher",
+        "title": "청년 주거 바우처 시행 안내",
+        "url": "https://example.molit.go.kr/youth-housing-voucher-vs-loan",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 청년 주거 바우처 시행 정책을 안내했다. 청년 주거 안정성 강화가 목적이다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "youth-housing-voucher-vs-loan",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["policy_scope_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_wrong_policy_sme_loan_vs_guarantee",
+    "category": "same_topic_wrong_policy",
+    "description": "소상공인 대출 한도 주장에 대해 본문은 신용보증 한도를 안내한다.",
+    "claim_text": "정부가 소상공인 대출 한도를 확대한다.",
+    "sources": [
+      {
+        "source_id": "src_wrong_policy_sme_loan",
+        "title": "소상공인 신용보증 한도 확대 안내",
+        "url": "https://example.mss.go.kr/sme-guarantee-vs-loan",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 소상공인 신용보증 한도를 확대한다고 안내했다. 보증 대상과 절차는 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "sme-guarantee-vs-loan",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["policy_scope_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_wrong_policy_youth_employment_vs_internship",
+    "category": "same_topic_wrong_policy",
+    "description": "청년 취업 지원금 주장에 대해 본문은 청년 인턴십 프로그램을 안내한다.",
+    "claim_text": "정부가 청년 취업 지원금을 신설한다.",
+    "sources": [
+      {
+        "source_id": "src_wrong_policy_youth_employment",
+        "title": "청년 인턴십 프로그램 운영 안내",
+        "url": "https://example.moel.go.kr/youth-internship-vs-grant",
+        "publisher": "Example Government",
+        "official_body_text": "정부는 청년 인턴십 프로그램 운영 정책을 안내했다. 참여 자격과 절차는 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "youth-internship-vs-grant",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["policy_scope_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_actor_mohw_vs_moe_school_health",
+    "category": "actor_mismatch",
+    "description": "보건복지부의 학생 영양 정책 주장에 대해 본문은 교육부의 학교 보건 정책을 안내한다.",
+    "claim_text": "보건복지부가 학생 영양 개선 정책을 신설한다고 발표했다.",
+    "sources": [
+      {
+        "source_id": "src_actor_mohw_moe",
+        "title": "교육부 학교 보건 정책 운영 안내",
+        "url": "https://example.moe.go.kr/school-health-policy-actor-mismatch",
+        "publisher": "Example Government",
+        "official_body_text": "교육부는 학교 보건 정책을 운영한다고 안내했다. 학교별 운영 사항은 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "school-health-policy-actor-mismatch",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["actor_mismatch", "policy_scope_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_actor_molit_vs_mosf_real_estate",
+    "category": "actor_mismatch",
+    "description": "국토교통부의 부동산 대책 주장에 대해 본문은 기획재정부의 재정 정책을 안내한다.",
+    "claim_text": "국토교통부가 부동산 가격 안정 대책을 최종 확정했다.",
+    "sources": [
+      {
+        "source_id": "src_actor_molit_mosf",
+        "title": "기획재정부 재정 정책 운영 안내",
+        "url": "https://example.mosf.go.kr/fiscal-policy-actor-mismatch",
+        "publisher": "Example Government",
+        "official_body_text": "기획재정부는 재정 정책 운영 사항을 안내했다. 자세한 추진 일정은 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "fiscal-policy-actor-mismatch",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["actor_mismatch", "policy_scope_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_local_seoul_only_subsidy",
+    "category": "local_vs_central_authority",
+    "description": "정부 전국 시행 주장에 대해 본문은 서울시 자체 지원금만 안내한다.",
+    "claim_text": "정부가 전국 영유아 가구에 보육 지원금을 신설한다.",
+    "sources": [
+      {
+        "source_id": "src_local_seoul_subsidy",
+        "title": "서울시 영유아 보육 지원금 안내",
+        "url": "https://example.seoul.go.kr/seoul-infant-childcare-local",
+        "publisher": "Example Government",
+        "official_body_text": "서울시는 시 거주 영유아 가구에 보육 지원금을 지급한다고 안내했다. 신청은 거주지 동주민센터에서 가능하다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "seoul-infant-childcare-local",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["actor_scope_mismatch", "local_vs_central"]
+    }
+  },
+  {
+    "case_id": "real_local_busan_voucher_vs_national",
+    "category": "local_vs_central_authority",
+    "description": "정부 전국 지역화폐 주장에 대해 본문은 부산시 자체 지역화폐를 안내한다.",
+    "claim_text": "정부가 전국 지역화폐를 신설한다.",
+    "sources": [
+      {
+        "source_id": "src_local_busan_voucher",
+        "title": "부산시 시민 지역화폐 발행 안내",
+        "url": "https://example.busan.go.kr/busan-citizen-voucher-local",
+        "publisher": "Example Government",
+        "official_body_text": "부산시는 시민 지역화폐를 발행한다고 안내했다. 사용처와 신청 절차는 시 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "busan-citizen-voucher-local",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["actor_scope_mismatch", "local_vs_central"]
+    }
+  },
+  {
+    "case_id": "real_local_gyeonggi_pilot_vs_national",
+    "category": "local_vs_central_authority",
+    "description": "정부 전국 시행 주장에 대해 본문은 경기도 시범 사업을 안내한다.",
+    "claim_text": "정부가 전국 청년 주거 지원 제도를 최종 확정 시행한다.",
+    "sources": [
+      {
+        "source_id": "src_local_gyeonggi_pilot",
+        "title": "경기도 청년 주거 지원 시범 사업 안내",
+        "url": "https://example.gg.go.kr/gyeonggi-youth-housing-pilot",
+        "publisher": "Example Government",
+        "official_body_text": "경기도는 청년 주거 지원 시범 사업을 자체적으로 운영한다고 안내했다. 본격 시행 여부는 추후 공지될 예정이다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "gyeonggi-youth-housing-pilot",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["finality_mismatch", "actor_scope_mismatch"]
+    }
+  },
+  {
+    "case_id": "real_no_body_sme_rd_announcement",
+    "category": "no_body",
+    "description": "중소기업 R&D 지원 예산 확대 주장에 대해 공식 본문이 비어 있는 사례.",
+    "claim_text": "정부가 중소기업 R&D 지원 예산을 확대한다.",
+    "sources": [
+      {
+        "source_id": "src_no_body_sme_rd_announcement",
+        "title": "중소기업 R&D 지원 예산 안내",
+        "url": "https://example.mss.go.kr/sme-rd-no-body-announcement",
+        "publisher": "Example Government",
+        "official_body_text": ""
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "sme-rd-no-body-announcement",
+      "should_rank_related_first": false,
+      "expected_support_level": "unavailable",
+      "should_not_be_strong": true,
+      "should_be_unavailable_when_no_body": true,
+      "risk_flags": ["official_body_missing"]
+    }
+  },
+  {
+    "case_id": "real_no_body_youth_rent_announcement",
+    "category": "no_body",
+    "description": "청년 월세 보조금 정책 주장에 대해 공식 본문이 비어 있는 사례.",
+    "claim_text": "정부가 청년 월세 보조금 정책을 시행한다.",
+    "sources": [
+      {
+        "source_id": "src_no_body_youth_rent_announcement",
+        "title": "청년 월세 보조금 안내",
+        "url": "https://example.molit.go.kr/youth-rent-no-body-announcement",
+        "publisher": "Example Government",
+        "official_body_text": ""
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "youth-rent-no-body-announcement",
+      "should_rank_related_first": false,
+      "expected_support_level": "unavailable",
+      "should_not_be_strong": true,
+      "should_be_unavailable_when_no_body": true,
+      "risk_flags": ["official_body_missing"]
+    }
+  },
+  {
+    "case_id": "real_contextual_labor_general_overview",
+    "category": "contextual_only",
+    "description": "최저임금 시간당 15,000원 인상 주장에 대해 본문은 노동시장 정책 일반 안내만 다룬다.",
+    "claim_text": "정부가 최저임금을 시간당 15,000원으로 인상한다.",
+    "sources": [
+      {
+        "source_id": "src_labor_general_overview",
+        "title": "노동시장 정책 일반 안내",
+        "url": "https://example.moel.go.kr/labor-policy-general-overview",
+        "publisher": "Example Government",
+        "official_body_text": "노동시장 정책은 매년 노사정 협의를 거쳐 조정된다. 자세한 사항은 고용노동부 공고를 참고한다."
+      }
+    ],
+    "expected": {
+      "related_source_url_contains": "labor-policy-general-overview",
+      "should_rank_related_first": true,
+      "expected_support_level": "any",
+      "should_not_be_strong": true,
+      "risk_flags": ["missing_critical_fact", "specific_amount_not_in_source"]
+    }
   }
 ]
