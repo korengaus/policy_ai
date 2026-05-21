@@ -106,6 +106,7 @@ class SelfContainedSmokeTests(unittest.TestCase):
             "disabled_check", "token_check", "task_creation_check",
             "idempotency_check", "list_detail_check", "decision_check",
             "verdict_isolation_check", "publication_absent_check",
+            "audit_trail_check",  # M9.0
         ):
             self.assertTrue(
                 summary[key]["passed"],

@@ -565,4 +565,50 @@ for (const banned of [
   );
 }
 
+// 11. M9.0 — decision history shows audit fields (source / id /
+//     reviewer / transition). Pin via the renderer's template literals
+//     so any future edit that drops a field shows up as a test failure.
+//     The renderer formats audit chips inline; assert each chip is in
+//     the markup verbatim.
+const HISTORY_RENDERER_REQUIRED = [
+  "${transition}",
+  "source: ${source}",
+  "id: ${decisionId}",
+  "리뷰어: ${reviewer}",
+  "server-review-history-audit",
+];
+for (const fragment of HISTORY_RENDERER_REQUIRED) {
+  assert.ok(
+    html.includes(fragment),
+    `decision history renderer must contain audit fragment: ${fragment}`,
+  );
+}
+// The decision dropdown vocabulary remains exactly the four allowed
+// decisions — pinned again here in case the M9.0 edits perturbed it.
+assert.ok(
+  /value="approve"[^>]*>approve/.test(html)
+    && /value="reject"[^>]*>reject/.test(html)
+    && /value="needs_more_evidence"[^>]*>needs_more_evidence/.test(html)
+    && /value="comment"[^>]*>comment/.test(html),
+  "decision dropdown must keep exactly approve / reject / needs_more_evidence / comment",
+);
+// No publication affordance leaked into the new history rendering.
+// We only ban *affordance* wording — the M8.7 "발행 안 함" disclaimer
+// elsewhere is legitimate. Decision-value checks above already pin
+// the dropdown vocabulary.
+const sectionFromHistory = html.slice(
+  html.indexOf("serverReviewHistory"),
+  html.indexOf("serverReviewBindEvents"),
+);
+for (const banned of [
+  "auto-publish", "auto_publish",
+  "published</option", "corrected</option",
+  "발행 버튼", "발행 가능",
+]) {
+  assert.ok(
+    !sectionFromHistory.includes(banned),
+    `decision history block must not include publication affordance: ${banned}`,
+  );
+}
+
 console.log("server-review UI smoke tests passed");

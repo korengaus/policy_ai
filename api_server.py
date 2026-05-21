@@ -776,6 +776,11 @@ class _ReviewDecisionRequest(BaseModel):
     reviewer_id: Optional[str] = None
     comment: Optional[str] = None
     public_note: Optional[str] = None
+    # Phase 2 M9.0 — optional operator-supplied audit label. NOT auth,
+    # never derived from REVIEW_API_TOKEN, never echoed back as identity.
+    # Unknown values fall back to "unknown" via
+    # review_workflow.normalize_decision_source.
+    decision_source: Optional[str] = None
 
 
 def _require_review_token(
@@ -865,10 +870,13 @@ def review_task_detail(
     task = get_review_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="review task not found")
-    decisions = list_review_decisions(task_id)
+    decisions = review_workflow.build_decision_audit_records(
+        list_review_decisions(task_id)
+    )
     return {
         "task": review_workflow.detail_review_task(task, decisions=decisions),
         "decisions": decisions,
+        "audit_version": review_workflow.AUDIT_SCHEMA_VERSION,
     }
 
 
@@ -988,8 +996,15 @@ def review_record_decision(
 
     now = review_workflow.now_iso()
     decision_id = review_workflow.make_review_decision_id()
+    # Phase 2 M9.0 — normalize the optional decision_source label. Default
+    # to "review_api" so HTTP-API calls without an explicit label still
+    # carry a stable audit marker. Never use REVIEW_API_TOKEN here.
+    decision_source = review_workflow.normalize_decision_source(
+        body.decision_source,
+        default=review_workflow.DECISION_SOURCE_REVIEW_API,
+    )
     try:
-        record_review_decision(
+        stored_row = record_review_decision(
             decision_id=decision_id,
             task_id=task_id,
             decision=decision,
@@ -1000,6 +1015,7 @@ def review_record_decision(
             new_status=new_status,
             created_at=now,
             metadata={},
+            decision_source=decision_source,
         )
         if new_status != current_status:
             update_review_task_status(task_id, new_status=new_status, updated_at=now)
@@ -1008,13 +1024,21 @@ def review_record_decision(
         raise HTTPException(status_code=500, detail="failed to record review decision")
 
     updated_task = get_review_task(task_id) or task
-    decisions = list_review_decisions(task_id)
+    decisions = review_workflow.build_decision_audit_records(
+        list_review_decisions(task_id)
+    )
+    audit_record = review_workflow.build_decision_audit_record(stored_row)
     return {
         "task": review_workflow.detail_review_task(updated_task, decisions=decisions),
         "decision_id": decision_id,
         "previous_status": current_status,
         "new_status": new_status,
         "status_changed": new_status != current_status,
+        # M9.0 audit additions — additive, existing keys preserved above.
+        "transition": review_workflow.transition_label(current_status, new_status),
+        "decision_source": decision_source,
+        "audit_version": review_workflow.AUDIT_SCHEMA_VERSION,
+        "audit_record": audit_record,
     }
 
 
@@ -1027,5 +1051,12 @@ def review_list_decisions(
     task = get_review_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="review task not found")
-    decisions = list_review_decisions(task_id)
-    return {"task_id": task_id, "decisions": decisions, "count": len(decisions)}
+    decisions = review_workflow.build_decision_audit_records(
+        list_review_decisions(task_id)
+    )
+    return {
+        "task_id": task_id,
+        "decisions": decisions,
+        "count": len(decisions),
+        "audit_version": review_workflow.AUDIT_SCHEMA_VERSION,
+    }

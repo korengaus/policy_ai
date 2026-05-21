@@ -1498,6 +1498,21 @@
       word-break: break-word;
     }
 
+    .server-review-history-audit {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 2px 0 4px;
+      color: #64748b;
+      font-size: 11px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .server-review-history-audit span {
+      background: #f1f5f9;
+      padding: 1px 6px;
+      border-radius: 4px;
+    }
+
     .selected-issue-intro {
       border: 1px solid #dbeafe;
       border-radius: 12px;
@@ -8016,13 +8031,30 @@
         const comment = escapeHtml(d.comment || "");
         const note = escapeHtml(d.public_note || "");
         const when = escapeHtml(d.created_at || "");
+        // M9.0 — audit fields. ``transition`` falls back to the
+        // legacy "prev → next" string when the server hasn't enriched
+        // the row yet; ``decision_source`` defaults to "unknown".
+        const transition = escapeHtml(
+          d.transition || (
+            prev && next
+              ? `${prev} → ${next}`
+              : (prev ? `${prev} → (없음)` : "(상태 변경 없음)")
+          ),
+        );
+        const source = escapeHtml(d.decision_source || "unknown");
+        const decisionId = escapeHtml(d.decision_id || "");
         return `
           <div class="server-review-history-row">
             <div class="row-head">
-              <span>${decision} · ${prev || "(이전 상태 없음)"} → ${next || "(상태 변경 없음)"}</span>
+              <span>${decision} · ${transition}</span>
               <span>${when}</span>
             </div>
-            <div class="row-body">${reviewer ? `리뷰어: ${reviewer}\n` : ""}${comment ? `코멘트: ${comment}\n` : ""}${note ? `공개 메모: ${note}` : ""}</div>
+            <div class="row-meta server-review-history-audit">
+              <span>source: ${source}</span>
+              ${decisionId ? `<span>id: ${decisionId}</span>` : ""}
+              ${reviewer ? `<span>리뷰어: ${reviewer}</span>` : ""}
+            </div>
+            <div class="row-body">${comment ? `코멘트: ${comment}\n` : ""}${note ? `공개 메모: ${note}` : ""}</div>
           </div>
         `;
       }).join("");

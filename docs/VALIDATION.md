@@ -39,7 +39,8 @@ python tests/test_review_workflow_smoke.py
 python tests/test_operator_preflight.py   # M8.5: operator preflight helper
 python tests/test_review_bundle.py        # M8.6: post-implementation review bundle helper
 python tests/test_review_api_exposure_smoke.py  # M8.8: no-token public-exposure smoke
-npm test   # runs regression.test.js + localstorage_slim.test.js + review_ui.test.js (M8.1 + M8.2 + M8.7)
+python tests/test_review_audit_trail.py   # M9.0: reviewer decision audit trail
+npm test   # runs regression.test.js + localstorage_slim.test.js + review_ui.test.js (M8.1 + M8.2 + M8.7 + M9.0)
 ```
 
 **Shortcut**: instead of running each test individually, use the
@@ -87,6 +88,34 @@ as part of the standard offline suite. **`validate.py` does not call
 Render** — the live exposure smoke is intentionally only run via the
 `review-exposure` operational profile, not as part of `validate.py`
 or the `quick` profile.
+
+For the M9.0 reviewer decision audit trail (offline, no Render, no
+OpenAI — uses FastAPI TestClient + per-test temp SQLite):
+
+```
+python tests/test_review_api.py
+python tests/test_review_workflow.py
+python tests/test_review_workflow_smoke.py
+python tests/test_review_audit_trail.py
+node tests/review_ui.test.js
+python scripts/validate.py
+python scripts/run_operational_checks.py --profile review-local
+```
+
+These pin:
+
+- `decision_source` defaults to `review_api`, accepts `review_ui` /
+  `smoke_test`, falls back to `unknown` for unrecognized values
+- the `transition` label per decision
+  (`approve` → `pending_review → approved`, etc.)
+- `audit_version=1` on top-level and per-row
+- `audit_record` shape on POST decision
+- no token / SDK-key literal anywhere in audit responses
+- reviewer_id is operator-supplied and is never the `X-Review-Token`
+  value
+- the decision-vocabulary contract (`approve` / `reject` /
+  `needs_more_evidence` / `comment`) is unchanged
+- no UI affordance for `published` / `corrected` / publish actions
 
 Before staging changes, the M8.5 preflight helper recommends a precise
 `git add` command (never stages anything itself). It is exercised in

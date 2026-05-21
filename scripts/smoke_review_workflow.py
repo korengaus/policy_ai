@@ -342,7 +342,12 @@ def _check_list_detail(api_server, token: str, expected_task_id: str) -> dict:
 
 
 def _check_decisions(api_server, token: str) -> dict:
-    """F. Exercise every allowed decision against a fresh task."""
+    """F. Exercise every allowed decision against a fresh task.
+
+    Phase 2 M9.0 — also asserts the audit fields appear in the POST
+    decision response and in the embedded decisions list (transition,
+    decision_source, audit_version, decision_id, previous/new status).
+    """
     from fastapi.testclient import TestClient
     decision_to_expected_status = {
         "approve": "approved",
@@ -380,19 +385,54 @@ def _check_decisions(api_server, token: str) -> dict:
                         "decision": decision,
                         "reviewer_id": "smoke-local",
                         "comment": "smoke-only",
+                        # M9.0 — operator-supplied audit label, not auth.
+                        "decision_source": "smoke_test",
                     },
                     headers={"X-Review-Token": token},
                 )
                 dec_body = dec_resp.json() if dec_resp.status_code == 200 else {}
                 new_status = dec_body.get("new_status")
+                prev_status = dec_body.get("previous_status")
+                expected_new = decision_to_expected_status[decision]
+                expected_prev = "pending_review"
+                expected_transition = (
+                    f"{expected_prev} (unchanged)"
+                    if expected_new == expected_prev
+                    else f"{expected_prev} → {expected_new}"
+                )
+                transition_ok = dec_body.get("transition") == expected_transition
+                audit_record = dec_body.get("audit_record") or {}
+                source_ok = (
+                    dec_body.get("decision_source") == "smoke_test"
+                    and audit_record.get("decision_source") == "smoke_test"
+                )
+                audit_version_ok = (
+                    dec_body.get("audit_version") == 1
+                    and audit_record.get("audit_version") == 1
+                )
+                decision_id_ok = (
+                    bool(dec_body.get("decision_id"))
+                    and audit_record.get("decision_id") == dec_body.get("decision_id")
+                )
                 per_decision[decision] = {
                     "passed": (
                         dec_resp.status_code == 200
-                        and new_status == decision_to_expected_status[decision]
+                        and new_status == expected_new
+                        and prev_status == expected_prev
+                        and transition_ok
+                        and source_ok
+                        and audit_version_ok
+                        and decision_id_ok
                     ),
                     "decision_status_code": dec_resp.status_code,
                     "new_status": new_status,
-                    "expected_status": decision_to_expected_status[decision],
+                    "previous_status": prev_status,
+                    "expected_status": expected_new,
+                    "transition": dec_body.get("transition"),
+                    "transition_matches": transition_ok,
+                    "decision_source": dec_body.get("decision_source"),
+                    "audit_version": dec_body.get("audit_version"),
+                    "decision_id_present": decision_id_ok,
                 }
     return {
         "passed": all(d.get("passed") for d in per_decision.values()),
@@ -475,6 +515,120 @@ def _check_verdict_isolation(api_server, token: str) -> dict:
     }
 
 
+def _check_audit_trail(api_server, token: str) -> dict:
+    """I. Phase 2 M9.0 — verify decision audit trail exposes audit fields.
+
+    Records two decisions (comment then approve) against a fresh task,
+    then re-fetches the decisions list and asserts every audit field is
+    present, transition labels are correct, and no token-shaped literal
+    leaked into the response. ``decision_source`` defaults to
+    ``review_api`` when the client omits it, and respects ``smoke_test``
+    when provided.
+    """
+    from fastapi.testclient import TestClient
+    import re as _re
+
+    payload = _conservative_synthetic_payload(
+        claim="감사 추적 검수 청구항 — M9.0 audit trail check.",
+        title="audit-trail 검수 스모크",
+        url="https://example.go.kr/policy/youth-support/audit",
+    )
+    body = {
+        "result_id": "smoke-audit-1",
+        "job_id": "smoke-audit-job",
+        "item_index": 0,
+        "result_payload": payload,
+    }
+    token_shaped = _re.compile(r"[0-9a-fA-F]{32,}")
+    with _temp_review_env(token):
+        with TestClient(api_server.app) as client:
+            create = _post_from_result(client, token, body)
+            if create.status_code != 200:
+                return {
+                    "passed": False,
+                    "reason": "could not create audit task",
+                    "status_code": create.status_code,
+                }
+            task_id = (create.json().get("task") or {}).get("task_id")
+
+            # Decision 1: comment with explicit decision_source.
+            comment_resp = client.post(
+                f"/review/tasks/{task_id}/decision",
+                json={
+                    "decision": "comment",
+                    "reviewer_id": "smoke-local",
+                    "comment": "audit smoke comment",
+                    "decision_source": "smoke_test",
+                },
+                headers={"X-Review-Token": token},
+            )
+            # Decision 2: approve WITHOUT decision_source — must default
+            # to "review_api" server-side (operator label, not auth).
+            approve_resp = client.post(
+                f"/review/tasks/{task_id}/decision",
+                json={
+                    "decision": "approve",
+                    "reviewer_id": "smoke-local",
+                },
+                headers={"X-Review-Token": token},
+            )
+            list_resp = client.get(
+                f"/review/tasks/{task_id}/decisions",
+                headers={"X-Review-Token": token},
+            )
+
+    comment_body = comment_resp.json() if comment_resp.status_code == 200 else {}
+    approve_body = approve_resp.json() if approve_resp.status_code == 200 else {}
+    list_body = list_resp.json() if list_resp.status_code == 200 else {}
+
+    comment_audit_ok = (
+        comment_resp.status_code == 200
+        and comment_body.get("transition") == "pending_review (unchanged)"
+        and comment_body.get("decision_source") == "smoke_test"
+        and comment_body.get("audit_version") == 1
+        and bool(comment_body.get("decision_id"))
+        and bool((comment_body.get("audit_record") or {}).get("created_at"))
+    )
+    approve_audit_ok = (
+        approve_resp.status_code == 200
+        and approve_body.get("transition") == "pending_review → approved"
+        and approve_body.get("decision_source") == "review_api"
+        and approve_body.get("audit_version") == 1
+        and bool(approve_body.get("decision_id"))
+    )
+    decisions = list_body.get("decisions") or []
+    list_audit_ok = (
+        list_resp.status_code == 200
+        and list_body.get("audit_version") == 1
+        and len(decisions) == 2
+        and all(d.get("audit_version") == 1 for d in decisions)
+        and all(bool(d.get("transition")) for d in decisions)
+        and all(bool(d.get("decision_id")) for d in decisions)
+        and {d.get("decision_source") for d in decisions} == {
+            "smoke_test", "review_api",
+        }
+    )
+    serialized = json.dumps(list_body, ensure_ascii=False)
+    no_token_leak = (
+        token not in serialized
+        and not token_shaped.search(serialized)
+    )
+
+    return {
+        "passed": bool(
+            comment_audit_ok and approve_audit_ok
+            and list_audit_ok and no_token_leak
+        ),
+        "comment_audit_ok": comment_audit_ok,
+        "approve_audit_ok": approve_audit_ok,
+        "list_audit_ok": list_audit_ok,
+        "no_token_leak_in_decision_list": no_token_leak,
+        "comment_transition": comment_body.get("transition"),
+        "approve_transition": approve_body.get("transition"),
+        "list_count": len(decisions),
+    }
+
+
 def _check_publication_absent(api_server, token: str) -> dict:
     """H. No /publish endpoint exists; reserved status names are unreachable."""
     from fastapi.testclient import TestClient
@@ -538,6 +692,7 @@ CHECK_KEYS = (
     "decision_check",
     "verdict_isolation_check",
     "publication_absent_check",
+    "audit_trail_check",  # M9.0
 )
 
 
@@ -570,6 +725,7 @@ def run_self_contained() -> dict:
         summary["decision_check"] = _check_decisions(api_server, token)
         summary["verdict_isolation_check"] = _check_verdict_isolation(api_server, token)
         summary["publication_absent_check"] = _check_publication_absent(api_server, token)
+        summary["audit_trail_check"] = _check_audit_trail(api_server, token)
 
     summary["passed"] = all(bool(summary[k].get("passed")) for k in CHECK_KEYS)
     return summary

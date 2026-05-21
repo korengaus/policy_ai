@@ -1,4 +1,4 @@
-# Server-Backed Reviewer Workflow (Phase 2 M8.0 + M8.1 + M8.2 + M8.3 + M8.7 + M8.8)
+# Server-Backed Reviewer Workflow (Phase 2 M8.0 + M8.1 + M8.2 + M8.3 + M8.7 + M8.8 + M9.0)
 
 A backend-first foundation for the human-review layer. AI drafts and
 summarizes evidence; humans approve, reject, or request more evidence.
@@ -664,7 +664,224 @@ reachable. The two complement each other — UI visibility is not auth,
 and the M8.8 smoke is what tells the operator the real fence is
 working.
 
-## I. Future work (post-M8.8)
+## H'''''. Reviewer decision audit trail (M9.0)
+
+M9.0 strengthens the internal audit trail every reviewer decision
+leaves behind. Strictly additive: existing API fields are preserved,
+existing tests still pass, no verdict logic / publication / auth
+changes, no Postgres migration. SQLite remains the source of truth.
+
+### What was stored before M9.0
+
+The `review_decisions` table already carried:
+
+```
+decision_id, task_id, decision, reviewer_id, comment, public_note,
+previous_status, new_status, created_at, metadata_json
+```
+
+And the POST `/review/tasks/{task_id}/decision` response already
+returned `decision_id`, `previous_status`, `new_status`, and
+`status_changed`. M9.0 keeps every one of those, and adds three
+audit-shape additions plus one new column.
+
+### What M9.0 adds
+
+| field | location | type | meaning |
+| --- | --- | --- | --- |
+| `decision_source` | new SQLite column on `review_decisions`; request + response field | string | Operator-supplied audit label — **never** identity / auth |
+| `transition` | response field on POST decision + GET decisions | string | Deterministic human-readable status change, e.g. `pending_review → approved` |
+| `audit_version` | top-level + per-row | int | Stable schema marker (currently `1`) |
+| `audit_record` | top-level on POST decision | dict | The stored row enriched with the three fields above |
+
+The `decision_source` column is added via an idempotent additive
+migration in `database._ensure_review_tables` (CREATE TABLE includes
+it; an ALTER TABLE ADD COLUMN runs for installs that pre-date M9.0,
+wrapped in `try / except sqlite3.OperationalError` so a second call
+is a no-op).
+
+### `decision_source` vocabulary
+
+A small, deliberately tiny set:
+
+| value | when |
+| --- | --- |
+| `review_api` | default on the HTTP POST endpoint when the client omits the field |
+| `review_ui` | the internal/admin reviewer UI; the UI may supply this label |
+| `smoke_test` | offline smoke (e.g. `scripts/smoke_review_workflow.py`) |
+| `unknown` | a value the server can't recognize; legacy rows whose column is NULL also surface this |
+
+Pinned by `review_workflow.KNOWN_DECISION_SOURCES`. The normalizer
+function `review_workflow.normalize_decision_source(value, *, default)`:
+
+- returns the documented default when value is `None`, `""`, or
+  whitespace
+- lowercases the input and accepts any of the four known values
+- maps anything else to `"unknown"` (it never fabricates a fake
+  identity)
+
+**`decision_source` is not authentication.** It is an operator-supplied
+label that records *how the call was made*, not *who made it*. The
+review API gate remains exactly `REVIEW_API_ENABLED` + a matching
+`X-Review-Token` header, served by `review_auth.py`. The
+`review_workflow` module never reads any shared review secret; pinned
+by `tests/test_review_audit_trail.py::ReviewWorkflowHelperTests::
+test_audit_helper_does_not_read_token_env`.
+
+### `transition` semantics
+
+`review_workflow.transition_label(previous_status, new_status)` is the
+single source of truth:
+
+| input | output |
+| --- | --- |
+| `("pending_review", "approved")` | `pending_review → approved` |
+| `("pending_review", "rejected")` | `pending_review → rejected` |
+| `("pending_review", "needs_more_evidence")` | `pending_review → needs_more_evidence` |
+| `("approved", "approved")` | `approved (unchanged)` (comment-only on an approved task) |
+| `(None, "pending_review")` | `(unknown) → pending_review` |
+| `(None, None)` | `(unknown)` |
+
+The comment-only "unchanged" branch matches the M8.0 transition rules
+verbatim — comment-only decisions never change status.
+
+### API response shape (additive)
+
+`POST /review/tasks/{task_id}/decision` now returns the existing keys
+plus the M9.0 audit fields:
+
+```jsonc
+{
+  "task": {
+    ...,
+    "decisions": [/* audit-enriched rows */]
+  },
+  "decision_id": "decision_abc...",
+  "previous_status": "pending_review",
+  "new_status": "approved",
+  "status_changed": true,
+
+  // M9.0 additions:
+  "transition": "pending_review → approved",
+  "decision_source": "review_ui",
+  "audit_version": 1,
+  "audit_record": {
+    "decision_id": "decision_abc...",
+    "task_id": "review_xyz...",
+    "decision": "approve",
+    "reviewer_id": "operator-jane",
+    "comment": "...",
+    "public_note": null,
+    "previous_status": "pending_review",
+    "new_status": "approved",
+    "created_at": "2026-05-21T00:00:00.000000+00:00",
+    "metadata": {},
+    "decision_source": "review_ui",
+    "transition": "pending_review → approved",
+    "audit_version": 1
+  }
+}
+```
+
+`GET /review/tasks/{task_id}/decisions` and `GET /review/tasks/{task_id}`
+now also enrich each decision row through
+`review_workflow.build_decision_audit_records(...)` and surface
+`audit_version` at the top level.
+
+The `audit_record` shape is the canonical M9.0 "decision audit record."
+It is intentionally a shallow projection of the stored row plus the
+three computed fields — easy to inspect, easy to diff across milestones.
+
+### `reviewer_id` safety
+
+- `reviewer_id` is a free-text label the operator supplies in the
+  request body. It is never derived from `X-Review-Token` and never
+  echoed back by `review_auth`.
+- An empty / missing value is stored as SQL `NULL` and surfaces as
+  `null` in the JSON response — *not* as `"unknown"`. (The
+  `decision_source` field uses `"unknown"` for legacy rows; the two
+  use distinct sentinel conventions on purpose.)
+- The audit record carries `reviewer_id` verbatim; the test
+  `tests/test_review_audit_trail.py::TokenSafetyInAuditTests::
+  test_reviewer_id_is_operator_supplied_not_token` pins that the
+  stored value equals what the body sent, never what the
+  `X-Review-Token` header carried.
+
+### Verdict isolation preserved
+
+M9.0 does **not** mutate:
+
+- the original analysis result payload (the caller's dict)
+- `final_decision`, `policy_confidence`, `verification_card`
+- the stored review-task snapshot's verdict fields
+- any export / methodology wording
+- semantic evidence metadata
+
+Pinned by:
+
+- `tests/test_review_audit_trail.py::AuditDoesNotMutateVerdictTests`
+- existing `tests/test_review_api.py::VerdictIsolationTests`
+- `scripts/smoke_review_workflow.py::_check_verdict_isolation`
+- `scripts/smoke_review_workflow.py::_check_audit_trail` (M9.0)
+
+### UI surface (internal/admin-only)
+
+`web/index.html`'s internal reviewer/admin decision history block now
+renders the transition string in place of the old `prev → next` chip
+plus a small audit-info row carrying `source:`, `id:`, and the
+optional `리뷰어:` chip. The vocabulary stays exactly the four allowed
+decisions (`approve`, `reject`, `needs_more_evidence`, `comment`) —
+M9.0 adds no UI affordance for `published` / `corrected` / any publish
+button. Pinned by `tests/review_ui.test.js` step 11.
+
+The UI continues to:
+
+- send the token only via `X-Review-Token` (never in URLs / bodies /
+  localStorage)
+- **not** auto-fetch `/review/*` on init even with a stored token
+- show the M8.7 internal-admin disclaimer block
+
+The M9.0 UI changes are contained to the existing internal/admin
+panel; no public-facing copy was touched.
+
+### Smoke + operational coverage
+
+`scripts/smoke_review_workflow.py` has a new ninth sub-check
+(`audit_trail_check`) that:
+
+- records a `comment` (with `decision_source="smoke_test"`) then an
+  `approve` (with no `decision_source` — must default to `review_api`)
+- asserts both responses carry the correct `transition`,
+  `decision_source`, `audit_version=1`, non-empty `decision_id`, and
+  matching `audit_record`
+- asserts the listing endpoint carries `audit_version=1` and
+  enriches every row
+- asserts neither the dummy token nor any hex token-shaped literal
+  appears in the listing response
+
+`scripts/run_operational_checks.py`'s `_parse_review_local_output`
+includes the new sub-check in its metrics and changes the human
+summary from "all 8 checks ok" to "all 9 checks ok". The
+`review-local` operational profile (already in the runner) continues
+to be the right way to exercise the full M8.0–M9.0 review surface
+offline.
+
+### Backwards compatibility
+
+- Clients that don't supply `decision_source` get the documented
+  `"review_api"` default and identical legacy fields in the response.
+- Clients that ignore the new top-level keys (`transition`,
+  `decision_source`, `audit_version`, `audit_record`) see exactly the
+  M8.0 response shape they already used.
+- Legacy `review_decisions` rows (those written before M9.0) surface
+  `decision_source: "unknown"` and a `transition` built from their
+  stored `previous_status` / `new_status` columns. Their other fields
+  are untouched.
+- The decision-vocabulary contract (`approve` / `reject` /
+  `needs_more_evidence` / `comment`) is unchanged. The transition
+  matrix is unchanged.
+
+## I. Future work (post-M9.0)
 
 - Proper auth + admin layer to replace the temporary token gate.
 - Postgres dual-write for review tables to match the existing pattern

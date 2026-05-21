@@ -67,6 +67,35 @@ ALL_DECISIONS = (
     DECISION_COMMENT,
 )
 
+# Phase 2 M9.0 — decision-source vocabulary.
+#
+# ``decision_source`` is a small, operator-supplied label that records *how*
+# the decision was recorded (HTTP API, internal/admin UI, automated smoke).
+# It is intentionally NOT identity / auth — see the safety contract below.
+DECISION_SOURCE_REVIEW_API = "review_api"
+DECISION_SOURCE_REVIEW_UI = "review_ui"
+DECISION_SOURCE_SMOKE_TEST = "smoke_test"
+DECISION_SOURCE_UNKNOWN = "unknown"
+
+KNOWN_DECISION_SOURCES = (
+    DECISION_SOURCE_REVIEW_API,
+    DECISION_SOURCE_REVIEW_UI,
+    DECISION_SOURCE_SMOKE_TEST,
+    DECISION_SOURCE_UNKNOWN,
+)
+
+# Stable schema marker for the audit-record wire shape. Bumped only when
+# fields are removed / renamed — additive changes leave it alone.
+AUDIT_SCHEMA_VERSION = 1
+
+# Safety contract for the audit fields (pinned by tests):
+#     * ``decision_source`` is an *operator label*, never identity / auth.
+#     * ``reviewer_id`` is operator-supplied free text, never derived
+#       from any shared review secret.
+#     * No code path here imports verdict / scoring / openai modules.
+#     * No code path here reads any shared review secret from the env;
+#       the gate lives in review_auth, not here.
+
 # Decisions that move the task to a new status. Other decisions leave
 # status untouched (``comment`` is the only such case in M8.0).
 _DECISION_TARGET_STATUS = {
@@ -388,3 +417,105 @@ def detail_review_task(task: dict, *, decisions: Optional[List[dict]] = None,
     if include_snapshot:
         summary["snapshot"] = task.get("snapshot") if isinstance(task, dict) else None
     return summary
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 M9.0 — audit-trail helpers
+# ---------------------------------------------------------------------------
+
+
+def normalize_decision_source(value: object,
+                              *,
+                              default: str = DECISION_SOURCE_REVIEW_API) -> str:
+    """Return one of the documented decision sources. Defaults safely.
+
+    Unlike the status/decision normalizers this function NEVER raises —
+    audit metadata is a soft signal, not part of the transition contract,
+    so callers can pass through user input without crashing the API on a
+    stray value.
+
+    Empty / None / non-string values resolve to ``default``.
+    Any string outside the known set is *not* fabricated into a fake
+    identity — it falls back to ``DECISION_SOURCE_UNKNOWN`` so the audit
+    record carries an explicit "we don't recognize this label" marker
+    instead of silently accepting it.
+    """
+    if value is None:
+        return default
+    try:
+        raw = str(value).strip().lower()
+    except Exception:
+        return default
+    if not raw:
+        return default
+    if raw in KNOWN_DECISION_SOURCES:
+        return raw
+    return DECISION_SOURCE_UNKNOWN
+
+
+def transition_label(previous_status: object, new_status: object) -> str:
+    """Render a short, deterministic string describing the status change.
+
+    Used by the audit record and the reviewer UI:
+
+    * ``pending_review → approved``         — status changed
+    * ``approved (unchanged)``               — comment-only on approved
+    * ``(unknown) → pending_review``         — missing previous status
+    * ``(unknown)`` — both sides missing/unparseable
+    """
+    prev = (str(previous_status).strip() if previous_status is not None else "")
+    nxt = (str(new_status).strip() if new_status is not None else "")
+    if not prev and not nxt:
+        return "(unknown)"
+    if not prev:
+        return f"(unknown) → {nxt}"
+    if not nxt:
+        return f"{prev} → (unknown)"
+    if prev == nxt:
+        return f"{prev} (unchanged)"
+    return f"{prev} → {nxt}"
+
+
+def build_decision_audit_record(decision_row: object) -> Dict[str, Any]:
+    """Project a stored review_decision row into the M9.0 audit wire shape.
+
+    Additive only: every existing key from the stored row is preserved.
+    The function never reads or returns any token / secret material —
+    ``reviewer_id`` stays as operator-supplied free text and is never
+    cross-referenced against the review-auth gate.
+
+    Added keys:
+        * ``decision_source``       — normalized, defaults to "unknown"
+                                      for legacy rows whose column is
+                                      NULL (column added in M9.0).
+        * ``transition``            — short status-change label.
+        * ``audit_version``         — stable schema marker (currently 1).
+    """
+    if not isinstance(decision_row, dict):
+        return {
+            "decision_source": DECISION_SOURCE_UNKNOWN,
+            "transition": "(unknown)",
+            "audit_version": AUDIT_SCHEMA_VERSION,
+        }
+    out: Dict[str, Any] = dict(decision_row)  # shallow copy, preserve fields
+    raw_source = out.get("decision_source")
+    if raw_source is None or raw_source == "":
+        # Legacy row from before the M9.0 column existed — surface "unknown"
+        # explicitly rather than letting the field stay null in JSON.
+        out["decision_source"] = DECISION_SOURCE_UNKNOWN
+    else:
+        out["decision_source"] = normalize_decision_source(
+            raw_source, default=DECISION_SOURCE_UNKNOWN,
+        )
+    out["transition"] = transition_label(
+        out.get("previous_status"), out.get("new_status"),
+    )
+    out["audit_version"] = AUDIT_SCHEMA_VERSION
+    return out
+
+
+def build_decision_audit_records(decision_rows: Optional[List[dict]]) -> List[Dict[str, Any]]:
+    """Vectorized version of :func:`build_decision_audit_record`."""
+    if not decision_rows:
+        return []
+    return [build_decision_audit_record(r) for r in decision_rows]

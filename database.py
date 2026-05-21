@@ -537,10 +537,22 @@ def _ensure_review_tables(connection):
             previous_status TEXT,
             new_status TEXT,
             created_at TEXT NOT NULL,
-            metadata_json TEXT
+            metadata_json TEXT,
+            decision_source TEXT
         )
         """
     )
+    # Phase 2 M9.0 — additive migration for installs that created
+    # review_decisions before the decision_source column existed. SQLite
+    # has no IF NOT EXISTS for ADD COLUMN, so we catch the OperationalError.
+    try:
+        connection.execute(
+            "ALTER TABLE review_decisions ADD COLUMN decision_source TEXT"
+        )
+    except sqlite3.OperationalError:
+        # Column already present — older table that included it, or a
+        # concurrent migration win. Either case is fine.
+        pass
     connection.execute(
         "CREATE INDEX IF NOT EXISTS idx_review_tasks_status ON review_tasks(status)"
     )
@@ -717,8 +729,16 @@ def update_review_task_status(task_id: str, *, new_status: str,
 def record_review_decision(*, decision_id: str, task_id: str, decision: str,
                            reviewer_id=None, comment=None, public_note=None,
                            previous_status=None, new_status=None,
-                           created_at: str, metadata: dict = None) -> dict:
-    """Append a decision row. Append-only — no UPDATE / DELETE path."""
+                           created_at: str, metadata: dict = None,
+                           decision_source: str = None) -> dict:
+    """Append a decision row. Append-only — no UPDATE / DELETE path.
+
+    ``decision_source`` (Phase 2 M9.0) is an operator-supplied audit
+    label like ``review_api`` / ``review_ui`` / ``smoke_test``. It is
+    NOT identity / auth and is never derived from ``REVIEW_API_TOKEN``.
+    A None value is stored as SQL NULL; the audit-record builder maps
+    that to ``unknown`` at the wire layer.
+    """
     metadata_json = json.dumps(metadata or {}, ensure_ascii=False)
     with get_connection() as connection:
         _ensure_review_tables(connection)
@@ -727,14 +747,15 @@ def record_review_decision(*, decision_id: str, task_id: str, decision: str,
             INSERT INTO review_decisions (
                 decision_id, task_id, decision, reviewer_id,
                 comment, public_note, previous_status, new_status,
-                created_at, metadata_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at, metadata_json, decision_source
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 decision_id, task_id, decision,
                 reviewer_id, comment, public_note,
                 previous_status, new_status,
                 created_at, metadata_json,
+                decision_source,
             ),
         )
         connection.commit()

@@ -776,6 +776,7 @@ def _parse_review_local_output(stdout: str, stderr: str, exit_code: int) -> dict
             "disabled_check", "token_check", "task_creation_check",
             "idempotency_check", "list_detail_check", "decision_check",
             "verdict_isolation_check", "publication_absent_check",
+            "audit_trail_check",  # M9.0
         )
     }
     fail_keys = [k for k, v in sub_results.items() if not v]
@@ -783,7 +784,7 @@ def _parse_review_local_output(stdout: str, stderr: str, exit_code: int) -> dict
         "status": _HEALTH_PASS if overall else _HEALTH_FAIL,
         "summary": (
             f"smoke_review_workflow: passed={overall} "
-            + ("all 8 checks ok" if overall else f"failed=[{', '.join(fail_keys)}]")
+            + ("all 9 checks ok" if overall else f"failed=[{', '.join(fail_keys)}]")
         ),
         "metrics": sub_results,
     }
