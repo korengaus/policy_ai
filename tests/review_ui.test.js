@@ -1,10 +1,19 @@
-// Phase 2 M8.1 — server-backed reviewer UI regression tests.
+// Phase 2 M8.1 + M8.2 + M8.7 — server-backed reviewer UI regression tests.
 //
 // Goal: prove the new admin section is wired in and that its pure helpers
 // return the documented Korean strings without ever exposing the configured
 // token. The reviewer UI module exposes a small surface via
 // window.__serverReviewHelpers so we can exercise it in a vm sandbox without
 // running a real browser or starting the FastAPI server.
+//
+// M8.7 additions tightened safety:
+//   * internal/admin-only wording + "게시가 아님" disclaimer
+//   * no /review/* auto-fetch on init (even with a stored session token)
+//   * token clear surfaces a deterministic lockout message and the helper
+//     constant is exposed for assertions
+//   * `published` / `corrected` removed from the UI status-label dict (they
+//     remain reserved server-side, but the UI carries no display label,
+//     and they remain absent from the decision dropdown)
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
@@ -47,6 +56,53 @@ for (const id of requiredIds) {
 assert.ok(
   html.includes("X-Review-Token"),
   "admin panel should reference the X-Review-Token header by name"
+);
+
+// M8.7 — internal/admin-only wording must be present in the reviewer
+// section so users cannot mistake the panel for a public publication tool.
+const M87_REQUIRED_WORDING = [
+  "관리자 전용",
+  "내부 검수",
+  "사람 검토 필요",
+  "검수 큐 등록",
+  "게시가 아님",
+  "이 도구는 내부 운영자용입니다.",
+];
+for (const phrase of M87_REQUIRED_WORDING) {
+  assert.ok(
+    html.includes(phrase),
+    `M8.7 admin/internal wording missing from index.html: ${phrase}`,
+  );
+}
+
+// M8.7 — wording that would imply public publication, final truth, or
+// auto-approval must NOT appear in the reviewer area. Scope the check
+// to the server-review section so the regular policy report wording is
+// untouched.
+const serverReviewSectionStart = html.indexOf("serverReviewDetails");
+const serverReviewSectionEnd = html.indexOf("</details>", serverReviewSectionStart);
+assert.ok(
+  serverReviewSectionStart > 0 && serverReviewSectionEnd > serverReviewSectionStart,
+  "could not locate the server-review section bounds in index.html"
+);
+const serverReviewSectionHtml = html.slice(
+  serverReviewSectionStart, serverReviewSectionEnd
+);
+for (const banned of [
+  "공개 게시", "자동 게시", "최종 진실", "공식 발표",
+  "자동 승인", "auto-publish", "auto_publish",
+]) {
+  assert.ok(
+    !serverReviewSectionHtml.includes(banned),
+    `server-review section must not include banned wording: ${banned}`,
+  );
+}
+
+// M8.7 — the panel's <summary> label itself is the opt-in gate. Pin it
+// so a future edit can't silently expand the panel by default.
+assert.ok(
+  /<summary>\s*내부 검수 도구 열기 \(관리자 전용\)\s*<\/summary>/.test(html),
+  "server-review <details> summary must use the M8.7 internal-admin label"
 );
 
 // The disabled-API banner must surface the exact operator-facing message.
@@ -110,6 +166,35 @@ assert.ok(
   "review token must not be stored in localStorage"
 );
 
+// M8.7 — there must be exactly one X-Review-Token write-site in the
+// fetch helper. We can't easily count call sites textually, but we can
+// assert the helper does not also place the token in URLs, query
+// strings, request bodies, or alternative auth headers.
+assert.ok(
+  !/[?&](?:token|review_token|x-review-token)=/i.test(html),
+  "token must never appear in a URL query string"
+);
+assert.ok(
+  !/Authorization:\s*Bearer/i.test(html),
+  "reviewer fetch must not switch to an Authorization: Bearer header"
+);
+assert.ok(
+  !/"token"\s*:\s*[A-Za-z_\$]/.test(html.slice(serverReviewSectionStart)),
+  "reviewer JSON body must not carry a token field"
+);
+
+// M8.7 — published / corrected are reserved server-side. They must NOT
+// appear as UI labels in the status dropdown / status chip dict. The
+// decision-value check above already covers the dropdown; here we pin
+// the absence of localized labels for them.
+for (const reservedLabel of ["published:", "corrected:",
+                             "발행됨 (예약)", "정정됨 (예약)"]) {
+  assert.ok(
+    !html.includes(reservedLabel),
+    `reserved server status must not have a UI label: ${reservedLabel}`,
+  );
+}
+
 // Token must NOT be hardcoded in committed source. Heuristic: the marker
 // "X-Review-Token" appears as a header alias only; common token-storage
 // patterns ("Bearer <token>", literal hex strings 32+ chars next to the alias)
@@ -157,9 +242,11 @@ function createElementStub() {
   };
 }
 
-function createSandbox() {
-  const sessionStore = new Map();
+function createSandbox(options) {
+  const opts = options || {};
+  const sessionStore = new Map(opts.session ? Object.entries(opts.session) : []);
   const localStore = new Map();
+  const fetchCalls = [];
   const sandbox = {
     console: { log() {}, warn() {}, error: console.error, debug() {}, info() {} },
     localStorage: {
@@ -172,6 +259,9 @@ function createSandbox() {
       setItem(k, v) { sessionStore.set(k, String(v)); },
       removeItem(k) { sessionStore.delete(k); },
     },
+    __sessionStore: sessionStore,
+    __localStore: localStore,
+    __fetchCalls: fetchCalls,
     Blob: function Blob(parts) {
       this.size = (parts || []).reduce(
         (acc, p) => acc + (typeof p === "string" ? p.length : (p && p.length) || 0),
@@ -199,8 +289,22 @@ function createSandbox() {
     URL: { createObjectURL() { return "blob:test"; }, revokeObjectURL() {} },
     alert() {},
     confirm() { return true; },
-    fetch() { throw new Error("network disabled in regression fixtures"); },
-    setTimeout() {},
+    fetch(input, init) {
+      // Record every fetch invocation so individual tests can assert
+      // that no /review/* request was fired automatically. The default
+      // shape returns a benign 503-disabled-like response so any code
+      // path that *does* call fetch sees a predictable rejection rather
+      // than a thrown error.
+      fetchCalls.push({
+        url: typeof input === "string" ? input : (input && input.url) || "",
+        init: init || null,
+      });
+      return Promise.resolve({
+        ok: false, status: 503,
+        async json() { return { detail: "disabled (test sandbox)" }; },
+      });
+    },
+    setTimeout(fn) { try { fn(); } catch (_) {} return 0; },
     clearTimeout() {},
   };
   sandbox.window.sessionStorage = sandbox.sessionStorage;
@@ -353,5 +457,112 @@ assert.ok(
   !("semantic_label" in builtPayload),
   "buildFromResultPayload must not expose a semantic label on the payload",
 );
+
+// 4. M8.7 — token cleared message exposed for tests ------------------------
+assert.strictEqual(
+  helpers.tokenClearedMessage,
+  "검수 토큰이 해제되었습니다. 서버 검수 작업을 보려면 다시 토큰을 적용해 주세요.",
+  "tokenClearedMessage must match the documented Korean copy",
+);
+
+// 5. M8.7 — published / corrected absent from the UI status-label dict.
+assert.ok(
+  helpers.statusLabels && typeof helpers.statusLabels === "object",
+  "statusLabels helper must be exposed for safety assertions",
+);
+assert.ok(!("published" in helpers.statusLabels),
+  "UI status-label dict must not carry a label for the reserved 'published' status");
+assert.ok(!("corrected" in helpers.statusLabels),
+  "UI status-label dict must not carry a label for the reserved 'corrected' status");
+// Unknown status (incl. the reserved ones) falls back to the raw key —
+// the UI surfaces no localized "발행됨/정정됨" copy.
+assert.strictEqual(helpers.formatStatusLabel("published"), "published");
+assert.strictEqual(helpers.formatStatusLabel("corrected"), "corrected");
+
+// 6. M8.7 — formatErrorMessage never echoes the token in any branch.
+//    Run every numeric status it handles (plus a few unknowns) and
+//    assert the rendered string carries no token-shaped literal. The
+//    check intentionally excludes plain SCREAMING_SNAKE constant names
+//    (e.g. REVIEW_API_ENABLED) that the disabled-API copy references —
+//    real tokens are hex / base64 / random, not underscored.
+const TOKEN_HEX_RE = /[0-9a-fA-F]{16,}/;
+const TOKEN_BASE64_RE = /[A-Za-z0-9+/=]{24,}/;
+for (const status of [0, 400, 403, 404, 409, 500, 503, 599]) {
+  const message = helpers.formatErrorMessage(status);
+  assert.ok(typeof message === "string" && message.length > 0,
+    `formatErrorMessage(${status}) must return a non-empty string`);
+  assert.ok(
+    !TOKEN_HEX_RE.test(message),
+    `formatErrorMessage(${status}) must not echo a hex token literal: ${message}`,
+  );
+  assert.ok(
+    !TOKEN_BASE64_RE.test(message),
+    `formatErrorMessage(${status}) must not echo a base64-looking token literal: ${message}`,
+  );
+}
+
+// 7. M8.7 — no automatic /review/* fetch on page initialization.
+//    Re-run the script with a token already in sessionStorage and assert
+//    that no /review/tasks call was fired by init. The operator must
+//    press "큐 새로고침" / "토큰 적용" / "검수 큐에 등록" explicitly.
+const seededSandbox = createSandbox({
+  session: { policy_ai_server_review_token: "test-session-token" },
+});
+const seededFetches = seededSandbox.__fetchCalls.filter(
+  (c) => c.url.includes("/review/")
+);
+assert.strictEqual(
+  seededFetches.length, 0,
+  `init must not auto-fetch /review/* even with a stored token; got: ${
+    JSON.stringify(seededFetches.map((c) => c.url))
+  }`
+);
+// Also check that the regular (no-token) sandbox didn't fetch /review/*.
+const baselineFetches = sandbox.__fetchCalls.filter(
+  (c) => c.url.includes("/review/")
+);
+assert.strictEqual(baselineFetches.length, 0,
+  "init must not auto-fetch /review/* when no token is stored");
+
+// 8. M8.7 — registration safety: the no-current-result and disabled-API
+//    messages remain stable. Already pinned above; here we add a
+//    duplicate-registration vocabulary check so the idempotent banner
+//    stays conservative.
+assert.ok(
+  /이미 검수 큐에 등록된 결과입니다\.\s*기존 검수 작업을 표시합니다\s*\(사람 검토 필요\)/.test(html),
+  "duplicate-registration banner must use the conservative '사람 검토 필요' copy"
+);
+assert.ok(
+  /검수 큐 등록 완료\.\s*사람 검토 대기 상태로 추가되었습니다\./.test(html),
+  "fresh-registration banner must use the '사람 검토 대기' copy (no publication wording)"
+);
+
+// 9. M8.7 — the reviewer area must contain no UI affordance that says
+//    "publish" / "auto-publish" / "published" / "corrected" as an
+//    available action. Decision-value checks above pin the dropdown;
+//    here we re-scan the server-review section text.
+const PUBLICATION_BANNED = [
+  "publish", "Publish",
+  "auto-publish", "auto_publish",
+  "발행 가능", "지금 게시", "발행 버튼",
+];
+for (const banned of PUBLICATION_BANNED) {
+  assert.ok(
+    !serverReviewSectionHtml.includes(banned),
+    `server-review section must not include publication affordance: ${banned}`,
+  );
+}
+
+// 10. M8.7 — semantic safety: the server-review area must not carry any
+//     wording that re-labels semantic signals as user-facing truth.
+for (const banned of [
+  "의미 매칭 결과 게시", "의미 매칭 자동 승인",
+  "AI가 사실로 판정", "AI 최종 진실",
+]) {
+  assert.ok(
+    !serverReviewSectionHtml.includes(banned),
+    `server-review section must not re-label semantic signals: ${banned}`,
+  );
+}
 
 console.log("server-review UI smoke tests passed");

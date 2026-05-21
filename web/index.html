@@ -1151,6 +1151,28 @@
       gap: 14px;
     }
 
+    .server-review-admin-warning {
+      border: 1px solid #f87171;
+      border-radius: 10px;
+      background: #fef2f2;
+      color: #7f1d1d;
+      padding: 12px 14px;
+      font-size: 0.92rem;
+      line-height: 1.55;
+      margin-bottom: 4px;
+    }
+    .server-review-admin-warning strong {
+      display: inline-block;
+      color: #7f1d1d;
+      margin-right: 4px;
+    }
+    .server-review-admin-warning code {
+      background: #fff1f2;
+      padding: 0 4px;
+      border-radius: 3px;
+      font-size: 0.85em;
+    }
+
     .server-review-token-panel {
       border: 1px solid #fcd34d;
       border-radius: 10px;
@@ -2223,11 +2245,19 @@
 
     <section class="history-card">
       <details class="review-tools-details" id="serverReviewDetails">
-        <summary>서버 검수 큐 (관리자 전용)</summary>
+        <summary>내부 검수 도구 열기 (관리자 전용)</summary>
         <div class="review-tools-body">
+          <div class="server-review-admin-warning" role="note" aria-label="내부 검수 도구 경고">
+            <strong>이 도구는 내부 운영자용입니다.</strong>
+            검수 큐 등록은 게시가 아니며, 기존 판정 결과(final_decision · policy_confidence · verification_card)를
+            변경하지 않습니다. 화면에 보이는 것은 인증이 아니라 단순 표시이며, 실제 보호는 서버의
+            <code>REVIEW_API_ENABLED</code> 설정과 <code>X-Review-Token</code> 헤더로만 이루어집니다.
+            여기서 발행되는 결과는 없습니다 (게시가 아님).
+          </div>
           <div class="reader-note">
             서버 백엔드의 리뷰 API에 연결된 내부 검수 도구입니다. 토큰을 보유한 운영자만 사용할 수 있으며,
-            검증 판정 로직과 공개 화면에는 영향을 주지 않습니다. 이 화면에서 발행되는 결과는 없습니다.
+            검증 판정 로직과 공개 화면에는 영향을 주지 않습니다. 사람 검토가 필요한 AI 초안을 모아
+            검수 큐에 등록하기 위한 내부 작업 영역이며, 이 화면에서 발행되는 결과는 없습니다.
           </div>
           <div class="server-review-panel">
             <div class="server-review-token-panel">
@@ -7759,13 +7789,15 @@
     //   * UI surfaces a deterministic message when REVIEW_API_ENABLED is off
     //   * No publish/correction path is exposed
     const SERVER_REVIEW_TOKEN_STORAGE_KEY = "policy_ai_server_review_token";
+    // Only statuses the M8.x backend will actually return for a reviewer
+    // are labeled. `published` / `corrected` remain reserved server-side
+    // but the UI does NOT carry a display label for them — there is no
+    // publication path in the reviewer UI.
     const SERVER_REVIEW_STATUS_LABELS = {
       pending_review: "대기 (pending_review)",
       needs_more_evidence: "근거 보강 필요 (needs_more_evidence)",
       approved: "승인됨 (approved)",
       rejected: "반려됨 (rejected)",
-      published: "발행됨 (예약)",
-      corrected: "정정됨 (예약)",
     };
     const SERVER_REVIEW_API_DISABLED_MESSAGE =
       "리뷰 API가 비활성화되어 있습니다. 로컬/운영 환경에서 REVIEW_API_ENABLED 설정이 필요합니다.";
@@ -7773,6 +7805,10 @@
       "X-Review-Token이 누락되었거나 일치하지 않습니다. 토큰을 다시 확인해 주세요.";
     const SERVER_REVIEW_NO_CURRENT_RESULT_MESSAGE =
       "등록할 분석 결과가 없습니다. 먼저 분석을 실행하거나 기록에서 결과를 선택하세요.";
+    // Surfaced by every gated action (refresh / register / decision) after
+    // the operator clears the token, so the lockout state is unambiguous.
+    const SERVER_REVIEW_TOKEN_CLEARED_MESSAGE =
+      "검수 토큰이 해제되었습니다. 서버 검수 작업을 보려면 다시 토큰을 적용해 주세요.";
     const SERVER_REVIEW_FROM_RESULT_PATH = "/review/tasks/from-result";
 
     let serverReviewSelectedTaskId = null;
@@ -7883,6 +7919,17 @@
       if (history) {
         history.innerHTML = '<div class="empty-state">선택한 작업의 판정 이력이 없습니다.</div>';
       }
+    }
+
+    // Full lockout after token clear: also drop the cached task list so a
+    // stale row cannot be selected, blanked the register banner, and
+    // re-renders the empty placeholder in the list area. Used by the token
+    // clear button and the gated-action helpers below.
+    function serverReviewResetAfterTokenClear() {
+      serverReviewLastList = [];
+      serverReviewClearDetail();
+      serverReviewRenderEmpty("토큰을 적용하면 서버 검수 큐를 불러옵니다.");
+      serverReviewSetRegisterStatus(null, "");
     }
 
     function serverReviewRenderEmpty(message) {
@@ -8019,7 +8066,7 @@
       if (!id) return;
       const token = serverReviewGetToken();
       if (!token) {
-        serverReviewSetStatusBanner("error", "토큰이 없습니다. 먼저 토큰을 적용해 주세요.");
+        serverReviewSetStatusBanner("error", SERVER_REVIEW_TOKEN_CLEARED_MESSAGE);
         return;
       }
       serverReviewSelectedTaskId = id;
@@ -8040,6 +8087,10 @@
     }
 
     async function serverReviewSubmitDecision() {
+      if (!serverReviewGetToken()) {
+        serverReviewSetStatusBanner("error", SERVER_REVIEW_TOKEN_CLEARED_MESSAGE);
+        return;
+      }
       const id = serverReviewSelectedTaskId;
       if (!id) {
         serverReviewSetStatusBanner("error", "먼저 검수 작업을 선택해 주세요.");
@@ -8137,7 +8188,7 @@
       if (!token) {
         serverReviewSetRegisterStatus(
           "error",
-          "토큰이 없습니다. 먼저 토큰을 적용해 주세요.",
+          SERVER_REVIEW_TOKEN_CLEARED_MESSAGE,
         );
         return;
       }
@@ -8211,19 +8262,29 @@
           return;
         }
         serverReviewSetStatusBanner("success", "토큰을 적용했습니다. 큐를 불러옵니다...");
+        // Token apply is an explicit operator action; loading the list
+        // here matches the documented M8.1 UX. No other init path auto-
+        // fetches /review/tasks.
         await serverReviewLoadList();
       });
       clearBtn.addEventListener("click", () => {
         serverReviewSetToken("");
         tokenInput.value = "";
-        serverReviewClearDetail();
-        serverReviewRenderEmpty("토큰을 적용하면 서버 검수 큐를 불러옵니다.");
-        serverReviewSetStatusBanner("info", "토큰을 해제했습니다.");
+        serverReviewResetAfterTokenClear();
+        serverReviewSetStatusBanner("info", SERVER_REVIEW_TOKEN_CLEARED_MESSAGE);
       });
       refreshBtn.addEventListener("click", () => {
+        if (!serverReviewGetToken()) {
+          serverReviewSetStatusBanner("error", SERVER_REVIEW_TOKEN_CLEARED_MESSAGE);
+          return;
+        }
         serverReviewLoadList();
       });
       filterEl.addEventListener("change", () => {
+        if (!serverReviewGetToken()) {
+          serverReviewSetStatusBanner("error", SERVER_REVIEW_TOKEN_CLEARED_MESSAGE);
+          return;
+        }
         serverReviewLoadList();
       });
       listEl.addEventListener("click", (event) => {
@@ -8245,9 +8306,16 @@
       submitBtn.addEventListener("click", () => {
         serverReviewSubmitDecision();
       });
+      // M8.7 — page initialization must NOT auto-call /review/tasks even
+      // when a token is already in sessionStorage. The operator must
+      // explicitly trigger queue refresh / register / decision actions.
+      // This keeps the reviewer UI a strictly manual, internal/admin
+      // workflow.
       if (serverReviewGetToken()) {
-        serverReviewSetStatusBanner("info", "저장된 세션 토큰을 사용합니다.");
-        serverReviewLoadList();
+        serverReviewSetStatusBanner(
+          "info",
+          "저장된 세션 토큰이 있습니다. '큐 새로고침'을 누르면 검수 큐를 불러옵니다.",
+        );
       } else {
         serverReviewSetStatusBanner(
           "info",
@@ -8265,7 +8333,9 @@
         disabledMessage: SERVER_REVIEW_API_DISABLED_MESSAGE,
         forbiddenMessage: SERVER_REVIEW_API_FORBIDDEN_MESSAGE,
         noCurrentResultMessage: SERVER_REVIEW_NO_CURRENT_RESULT_MESSAGE,
+        tokenClearedMessage: SERVER_REVIEW_TOKEN_CLEARED_MESSAGE,
         fromResultPath: SERVER_REVIEW_FROM_RESULT_PATH,
+        statusLabels: SERVER_REVIEW_STATUS_LABELS,
       };
     }
 

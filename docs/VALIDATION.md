@@ -38,7 +38,7 @@ python tests/test_review_api.py
 python tests/test_review_workflow_smoke.py
 python tests/test_operator_preflight.py   # M8.5: operator preflight helper
 python tests/test_review_bundle.py        # M8.6: post-implementation review bundle helper
-npm test   # runs regression.test.js + localstorage_slim.test.js + review_ui.test.js (M8.1 + M8.2)
+npm test   # runs regression.test.js + localstorage_slim.test.js + review_ui.test.js (M8.1 + M8.2 + M8.7)
 ```
 
 **Shortcut**: instead of running each test individually, use the
@@ -55,6 +55,21 @@ OpenAI, dummy in-process token only):
 python scripts/smoke_review_workflow.py --self-contained
 python scripts/run_operational_checks.py --profile review-local
 ```
+
+For the M8.7 reviewer/admin UI safety hardening (offline, no network,
+no fetch — runs in a `vm` sandbox):
+
+```
+node tests/review_ui.test.js
+```
+
+This pins the admin-only wording (`관리자 전용`, `내부 검수`,
+`사람 검토 필요`, `검수 큐 등록`, `게시가 아님`), the no-`/review/*`
+auto-fetch on page initialization (even with a token already in
+`sessionStorage`), the token-clear lockout message, the absence of
+`published` / `corrected` UI labels, and the absence of any
+`/publish` / `/correct` endpoint reference. `npm test` already
+invokes this file, so `scripts/validate.py` covers it.
 
 Before staging changes, the M8.5 preflight helper recommends a precise
 `git add` command (never stages anything itself). It is exercised in

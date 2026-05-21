@@ -1,4 +1,4 @@
-# Server-Backed Reviewer Workflow (Phase 2 M8.0 + M8.1 + M8.2 + M8.3)
+# Server-Backed Reviewer Workflow (Phase 2 M8.0 + M8.1 + M8.2 + M8.3 + M8.7)
 
 A backend-first foundation for the human-review layer. AI drafts and
 summarizes evidence; humans approve, reject, or request more evidence.
@@ -409,7 +409,113 @@ Both commands run end-to-end in a few seconds and exit `0` on pass,
   uses conservative Korean copy (`사람 검토 필요`, `moderate`) and
   never re-labels semantic signals as user-facing truth.
 
-## I. Future work (post-M8.3)
+## H'''. Reviewer/admin UI safety hardening (M8.7)
+
+M8.7 hardens the existing M8.0–M8.2 reviewer/admin panel in
+`web/index.html` so the server-backed review workflow is unambiguously
+internal, manual, token-gated, and **non-publication**. No backend
+behavior, verdict logic, or semantic activation changes. No real auth.
+
+### What changed in the UI
+
+1. **Stronger admin-only labeling.** The `<details>` summary now reads
+   **"내부 검수 도구 열기 (관리자 전용)"**. A red `role="note"`
+   disclaimer renders at the top of the expanded panel:
+
+   > **이 도구는 내부 운영자용입니다.** 검수 큐 등록은 게시가
+   > 아니며, 기존 판정 결과(`final_decision` · `policy_confidence` ·
+   > `verification_card`)를 변경하지 않습니다. 화면에 보이는 것은
+   > 인증이 아니라 단순 표시이며, 실제 보호는 서버의
+   > `REVIEW_API_ENABLED` 설정과 `X-Review-Token` 헤더로만
+   > 이루어집니다. 여기서 발행되는 결과는 없습니다 (게시가 아님).
+
+   The required Korean phrases — `관리자 전용`, `내부 검수`,
+   `사람 검토 필요`, `검수 큐 등록`, `게시가 아님` — are pinned by
+   `tests/review_ui.test.js::M87_REQUIRED_WORDING`.
+
+2. **No `/review/*` auto-fetch on init.** Page initialization
+   (`serverReviewBindEvents`) **never** calls `serverReviewLoadList()`
+   automatically, even when a session token is already in
+   `sessionStorage`. The init code only sets a non-loading banner that
+   tells the operator to press **큐 새로고침**. The four explicit
+   action sites are now the **only** call sites for `/review/*`:
+   - **토큰 적용** (intentional explicit operator action — preserves M8.1 UX)
+   - **큐 새로고침** (button click; gated on token presence)
+   - **검수 큐에 등록** (button click; gated on token presence)
+   - **판정 기록** submission (button click; gated on token presence)
+
+   Pinned by `tests/review_ui.test.js` step 7 (the seeded-token
+   re-init asserts zero `/review/*` fetches).
+
+3. **Token clear lockout.** Clearing the token now resets the cached
+   task list, hides the detail panel, blanks the register banner, and
+   surfaces a deterministic Korean message:
+
+   > 검수 토큰이 해제되었습니다. 서버 검수 작업을 보려면 다시 토큰을
+   > 적용해 주세요.
+
+   Every gated action (refresh / filter change / register / decision /
+   detail load) re-checks the token and surfaces the same message
+   when absent — no `/review/*` call can fire while the operator is
+   locked out. Exposed for tests as
+   `window.__serverReviewHelpers.tokenClearedMessage`.
+
+4. **`published` / `corrected` removed from UI labels.** They remain
+   *reserved* server statuses (the transition matrix still refuses
+   them), but the UI carries no localized label for them, no decision
+   value, no chip class entry. If the backend ever returns one, the
+   chip falls through to the raw key — there is no copy that says
+   "발행됨" / "정정됨" anywhere in `web/index.html`.
+
+5. **Token handling unchanged but reinforced.** The token is still:
+   - sent only as the `X-Review-Token` header
+   - stored only in `sessionStorage` (`policy_ai_server_review_token`)
+   - never placed in URLs, query strings, request bodies, logs, or
+     visible status text
+   - never hard-coded in committed source
+
+   New static checks in `tests/review_ui.test.js` pin the absence of
+   `?token=…` query strings, `Authorization: Bearer …` headers, and
+   `"token": <value>` JSON body fields anywhere in the reviewer
+   section.
+
+### What did NOT change
+
+- **No real auth.** UI visibility is not authentication. The only
+  real protection remains `REVIEW_API_ENABLED=true` + a matching
+  `REVIEW_API_TOKEN` + the `X-Review-Token` header sent by the client.
+- **No publication path.** `published` / `corrected` are still
+  reserved-and-unreachable server-side. No publish endpoint. No
+  publish/correct UI affordance. The transition matrix refuses them.
+- **No verdict mutation.** `buildReviewTaskFromResultPayload` still
+  passes verdict-side fields verbatim and never mutates the source
+  context (pinned since M8.2). Review decisions remain audit-only and
+  never rewrite `final_decision` / `policy_confidence` /
+  `verification_card`.
+- **No semantic re-labeling.** Semantic matching remains debug
+  metadata only. The reviewer UI surfaces no copy that would re-label
+  semantic signals as user-facing truth.
+- **No Render env change.** `REVIEW_API_ENABLED` stays unset on
+  Render. `render.yaml` is unchanged. M8.7 is a frontend-only
+  hardening pass.
+
+### Why "UI visibility is not auth"
+
+The `<details>` opt-in gate, the red admin warning, the disabled
+controls when no token is present — all of these are *clarity*
+mechanisms, not security mechanisms. A determined viewer can read the
+HTML/JS. The actual security boundary is on the server:
+
+1. `REVIEW_API_ENABLED` must be `true` (else every `/review/*` returns
+   503 — pinned by `tests/test_review_api.py::SafetyGateTests`).
+2. `REVIEW_API_TOKEN` must match what the client sends via
+   `X-Review-Token` (else 403 — same test file).
+3. Render keeps `REVIEW_API_ENABLED` unset by default.
+
+If the operator wants a stricter UX in a future milestone, the right
+path is real auth + an admin role, not stronger client-side hiding.
+
+## I. Future work (post-M8.7)
 
 - Proper auth + admin layer to replace the temporary token gate.
 - Postgres dual-write for review tables to match the existing pattern
