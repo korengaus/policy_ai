@@ -67,6 +67,8 @@ PROFILES = (
     "review-local",
     "review-exposure",
     "review-token-gate",
+    "source-registry",
+    "source-crawler",
     "full",
 )
 
@@ -301,6 +303,166 @@ def _review_local_step() -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Phase 2 M10.1 — source-registry profile.
+#
+# Four steps, every one offline (no Render, no OpenAI, no network):
+#   1) scripts/validate_source_registry.py            — schema check
+#   2) scripts/classify_source_url.py --help          — CLI smoke
+#   3) scripts/classify_source_url.py <matched_url>   — MATCHED probe
+#   4) scripts/classify_source_url.py <unknown_url>   — NO_MATCH probe
+#
+# Steps 3 and 4 each carry their own parser so the runner can mark
+# the expected NO_MATCH exit-code-1 step as a *pass* without
+# special-casing exit codes elsewhere.
+# ---------------------------------------------------------------------------
+
+
+# Sample URLs chosen so the profile exercises both halves of the
+# CLI's exit policy. The matched URL hits ``kr_law_open_data_candidate``
+# in ``data/source_registry.json``; the no-match URL is documented as
+# unreachable from the seed.
+SOURCE_REGISTRY_MATCHED_URL_SAMPLE = "https://www.law.go.kr/sample"
+SOURCE_REGISTRY_NO_MATCH_URL_SAMPLE = "https://unknown-source-example.invalid/page"
+
+
+def _source_registry_validate_step() -> dict:
+    return {
+        "name": "validate_source_registry",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "validate_source_registry.py"),
+            "--json",
+        ],
+        "parser": _parse_validate_source_registry_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _source_registry_help_step() -> dict:
+    return {
+        "name": "classify_source_url(--help)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "classify_source_url.py"),
+            "--help",
+        ],
+        "parser": _parse_classify_help_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _source_registry_matched_step() -> dict:
+    return {
+        "name": "classify_source_url(matched)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "classify_source_url.py"),
+            SOURCE_REGISTRY_MATCHED_URL_SAMPLE,
+        ],
+        "parser": _parse_classify_matched_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _source_registry_no_match_step() -> dict:
+    return {
+        "name": "classify_source_url(no_match)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "classify_source_url.py"),
+            SOURCE_REGISTRY_NO_MATCH_URL_SAMPLE,
+        ],
+        # No_match is the *expected* behavior, so exit_code=1 means the
+        # CLI is working correctly. The custom parser turns that into
+        # a runner-level PASS.
+        "parser": _parse_classify_no_match_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 M10.2 — source-crawler profile.
+#
+# Dry-run only. The crawler never fetches in this profile (no --save).
+# Steps:
+#   1) scripts/validate_source_registry.py                       (schema)
+#   2) scripts/fetch_registry_source.py --help                   (CLI smoke)
+#   3) scripts/fetch_registry_source.py --source-id ... --dry-run (safety)
+#   4) scripts/classify_source_url.py <same url>                  (consistency)
+#
+# The dry-run step's expected exit code is 1 (the seed entry is
+# default_enabled=false; the safety check refuses). The custom
+# parser treats that exit-1 + "safety_refusal" + "DRY RUN" combo
+# as a PASS, the same shape the M10.1 no-match parser uses.
+# ---------------------------------------------------------------------------
+
+
+SOURCE_CRAWLER_PROBE_SOURCE_ID = "kr_law_open_data_candidate"
+SOURCE_CRAWLER_PROBE_URL = "https://www.law.go.kr/sample"
+
+
+def _source_crawler_help_step() -> dict:
+    return {
+        "name": "fetch_registry_source(--help)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "fetch_registry_source.py"),
+            "--help",
+        ],
+        "parser": _parse_fetch_help_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _source_crawler_dry_run_step() -> dict:
+    return {
+        "name": "fetch_registry_source(dry_run)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "fetch_registry_source.py"),
+            "--source-id", SOURCE_CRAWLER_PROBE_SOURCE_ID,
+            "--url", SOURCE_CRAWLER_PROBE_URL,
+            "--dry-run",
+        ],
+        # The seed entry is default_enabled=false so the safety check
+        # refuses. That refusal is the expected dry-run outcome —
+        # the parser treats it as PASS.
+        "parser": _parse_fetch_dry_run_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _source_crawler_consistency_step() -> dict:
+    return {
+        "name": "classify_source_url(crawler_consistency)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "classify_source_url.py"),
+            SOURCE_CRAWLER_PROBE_URL,
+        ],
+        # Same URL the dry-run step probed. The classifier sees
+        # MATCHED (kr_law_open_data_candidate) — confirms registry
+        # entry + crawler agree on the host.
+        "parser": _parse_classify_matched_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
 def _historical_dry_run_step() -> dict:
     return {
         "name": "historical_dry_run",
@@ -388,6 +550,27 @@ def _resolve_steps(args: argparse.Namespace) -> List[dict]:
         # profile in a smoke-test harness.
         if not args.skip_render:
             steps.append(_review_token_gate_step(args))
+
+    if profile == "source-registry":
+        # M10.1 — offline source-registry validator + URL classifier
+        # CLI smokes. Fully local (never hits Render, never calls
+        # OpenAI). The no-match step uses a custom parser because its
+        # *expected* exit code is 1 (NO_MATCH on the unknown URL is
+        # the correct CLI behavior).
+        steps.append(_source_registry_validate_step())
+        steps.append(_source_registry_help_step())
+        steps.append(_source_registry_matched_step())
+        steps.append(_source_registry_no_match_step())
+
+    if profile == "source-crawler":
+        # M10.2 — dry-run only crawler profile. Never fetches: the
+        # dry-run step runs against the disabled seed entry, so the
+        # safety check refuses. The custom parser treats the
+        # expected refusal as PASS. No --save anywhere.
+        steps.append(_source_registry_validate_step())
+        steps.append(_source_crawler_help_step())
+        steps.append(_source_crawler_dry_run_step())
+        steps.append(_source_crawler_consistency_step())
 
     if profile == "full":
         if not args.skip_render and not args.skip_semantic_canary:
@@ -686,6 +869,192 @@ def _parse_smoke_canary_output(stdout: str, stderr: str, exit_code: int) -> dict
         "status": status,
         "summary": summary_text,
         "metrics": metrics,
+    }
+
+
+# ---------------------------------------------------------------------------
+# M10.1 — source-registry profile parsers.
+# ---------------------------------------------------------------------------
+
+
+def _parse_validate_source_registry_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """Parse ``scripts/validate_source_registry.py --json`` output.
+    The JSON payload carries ``passed`` / ``sources_count`` /
+    ``issues`` / ``warnings`` — surface them as runner metrics."""
+    summary_obj: Optional[dict] = None
+    candidate = stdout if stdout.startswith("{") else ""
+    if not candidate:
+        nl = stdout.find("\n{")
+        candidate = stdout[nl + 1:] if nl != -1 else ""
+    if candidate:
+        try:
+            summary_obj = json.loads(candidate)
+        except Exception:
+            summary_obj = None
+    if summary_obj is None:
+        return {
+            "status": _HEALTH_PASS if exit_code == 0 else _HEALTH_FAIL,
+            "summary": (
+                f"validate_source_registry exit_code={exit_code} "
+                "(JSON not detected)"
+            ),
+        }
+    passed = bool(summary_obj.get("passed"))
+    status = _HEALTH_PASS if passed and exit_code == 0 else _HEALTH_FAIL
+    return {
+        "status": status,
+        "summary": (
+            f"validate_source_registry: passed={passed} "
+            f"sources_count={summary_obj.get('sources_count')} "
+            f"enabled_count={summary_obj.get('enabled_count')} "
+            f"issues={len(summary_obj.get('issues') or [])}"
+        ),
+        "metrics": {
+            "passed": passed,
+            "sources_count": int(summary_obj.get("sources_count") or 0),
+            "enabled_count": int(summary_obj.get("enabled_count") or 0),
+            "browser_required_count": int(
+                summary_obj.get("browser_required_count") or 0
+            ),
+            "issues_count": len(summary_obj.get("issues") or []),
+            "warnings_count": len(summary_obj.get("warnings") or []),
+        },
+    }
+
+
+def _parse_classify_help_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``--help`` must exit 0 and surface the documented header."""
+    ok = (
+        exit_code == 0
+        and "Classify URLs against" in stdout
+        and "Exit codes" in stdout
+    )
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"classify_source_url --help: exit_code={exit_code} "
+            f"help_text_detected={ok}"
+        ),
+    }
+
+
+def _parse_classify_matched_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """Matched URL probe must exit 0, surface MATCHED + the
+    candidate source_id, and carry the documented safety note."""
+    has_matched = "Status: MATCHED" in stdout
+    has_safety = "official_source_candidate does not imply truth" in stdout
+    ok = exit_code == 0 and has_matched and has_safety
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"classify_source_url(matched): exit_code={exit_code} "
+            f"matched_detected={has_matched} "
+            f"safety_note_detected={has_safety}"
+        ),
+        "metrics": {
+            "matched_detected": has_matched,
+            "safety_note_detected": has_safety,
+            "exit_code_ok": exit_code == 0,
+        },
+    }
+
+
+def _parse_classify_no_match_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """No-match URL probe must exit **1** and surface NO_MATCH + the
+    safety note. Exit 0 here would mean the CLI failed to enforce its
+    conservative exit policy and must surface as a runner FAIL."""
+    has_no_match = "Status: NO_MATCH" in stdout
+    has_safety = "official_source_candidate does not imply truth" in stdout
+    ok = exit_code == 1 and has_no_match and has_safety
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"classify_source_url(no_match): exit_code={exit_code} "
+            f"no_match_detected={has_no_match} "
+            f"safety_note_detected={has_safety}"
+        ),
+        "metrics": {
+            "no_match_detected": has_no_match,
+            "safety_note_detected": has_safety,
+            "exit_code_was_one": exit_code == 1,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# M10.2 — source-crawler profile parsers.
+# ---------------------------------------------------------------------------
+
+
+def _parse_fetch_help_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``fetch_registry_source.py --help`` must exit 0 and surface
+    the documented header text."""
+    ok = (
+        exit_code == 0
+        and "fetch_registry_source" in stdout
+        and "Exit codes" in stdout
+    )
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"fetch_registry_source --help: exit_code={exit_code} "
+            f"help_text_detected={ok}"
+        ),
+    }
+
+
+def _parse_fetch_dry_run_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """The dry-run probe runs against a default_enabled=false seed
+    entry, so the M10.2 safety check refuses. Expected:
+
+        * exit_code = 1
+        * stdout carries "DRY RUN" + "safety_refusal" + the safety notes
+        * network_fetch_performed is False (the CLI prints that line)
+
+    Anything else is a regression — including the dangerous shape
+    "exit_code=0 with no DRY RUN line", which would mean the safety
+    check no longer fires."""
+    has_dry_run = "DRY RUN" in stdout
+    has_safety_refusal = (
+        "safety_refusal" in stdout or "would refuse fetch" in stdout
+    )
+    has_truth_note = "truth_claim: False" in stdout
+    no_network = "network_fetch_performed: False" in stdout
+    ok = (
+        exit_code == 1
+        and has_dry_run
+        and has_safety_refusal
+        and has_truth_note
+        and no_network
+    )
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"fetch_registry_source(dry_run): exit_code={exit_code} "
+            f"dry_run_detected={has_dry_run} "
+            f"safety_refusal_detected={has_safety_refusal} "
+            f"truth_note_detected={has_truth_note} "
+            f"no_network={no_network}"
+        ),
+        "metrics": {
+            "exit_code_was_one": exit_code == 1,
+            "dry_run_detected": has_dry_run,
+            "safety_refusal_detected": has_safety_refusal,
+            "truth_note_detected": has_truth_note,
+            "no_network": no_network,
+        },
     }
 
 

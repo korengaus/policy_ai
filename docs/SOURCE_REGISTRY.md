@@ -239,3 +239,318 @@ issues, warnings
 - Add a separate, equally-conservative registry of "explicitly NOT
   trusted" domains (denylist) once we have content samples to back
   the call.
+
+## URL Classifier CLI
+
+Use `scripts/classify_source_url.py` (Phase 2 M10.1) to classify URLs
+against the registry **offline**. The CLI never fetches, scrapes,
+contacts any external service, or modifies the registry file. It is
+the read-only consumer of the M10.0 helpers
+(`classify_url_against_registry` + `build_source_capture_plan`)
+documented in §G.
+
+### Usage
+
+```
+python scripts/classify_source_url.py https://www.law.go.kr/page
+python scripts/classify_source_url.py --json https://www.law.go.kr/page
+python scripts/classify_source_url.py --url https://www.law.go.kr/a --url https://other.com/b
+python scripts/classify_source_url.py --registry-path data/source_registry.json https://www.law.go.kr/page
+```
+
+### Per-URL status values
+
+| status | meaning |
+| --- | --- |
+| `MATCHED` | URL matched a registry entry and is allowed (`reason="matched"` + `allowed=true` + non-null `matched_source_id`) |
+| `NO_MATCH` | No registry entry claimed the URL (`reason="no_match"`) |
+| `REJECTED` | URL safety rejection by the helper (`reason` in `credentials_in_url`, `missing_scheme_or_host`, `invalid_host`, `empty_url`) |
+| `ERROR` | Unexpected exception during classification, or registry-side inconsistency (`reason` in `registry_not_object`, `registry_sources_not_list`) |
+
+### Important notes
+
+- This CLI makes no network requests. `urllib.parse` is the only
+  `urllib` submodule it touches; `urllib.request` is intentionally
+  not imported.
+- `MATCHED` only means the URL matches a registry candidate entry —
+  it does **not** guarantee the truthfulness of any content at that
+  URL. The CLI prints this safety note on every URL, in both human
+  and `--json` output.
+- The capture plan is a **future plan only**. No scraping or crawling
+  is performed. The JSON `capture_plan.network_fetch_performed` field
+  is always `false`.
+- All registry entries remain `default_enabled=false` and
+  `operator_review_required=true` until the operator explicitly
+  changes them. The CLI does not modify the registry.
+
+### Exit codes (strict)
+
+- `0` — every URL matched a known, allowed registry entry
+- `1` — any URL was `NO_MATCH`, `REJECTED`, `ERROR`, or the registry
+  file failed to load
+- `2` — CLI usage error (no URLs provided, unrecognized arguments)
+
+A single `NO_MATCH` in a batch forces exit `1` even when every other
+URL matches — pinned by `tests/test_source_url_classifier.py::
+MultipleUrlsTests::test_one_no_match_in_batch_forces_exit_1`.
+
+### Sample human output
+
+```
+=== URL Classification Results ===
+
+URL: https://www.law.go.kr/sample
+Status: MATCHED
+source_id: kr_law_open_data_candidate
+source_type: law_or_regulation
+allowed: True
+official_source_candidate: True
+
+[Important]
+- MATCHED only means this URL matches a registry candidate.
+- official_source_candidate does not imply truth.
+- The capture plan is a future plan only. No scraping or crawling is performed by this CLI.
+
+Capture Plan:
+  capture_method: manual_or_http
+  browser_automation: maybe_required
+  plan_status: manual_review
+  operator_review_required: True
+  default_enabled: False
+  network_fetch_performed: False
+
+Summary: 1 processed | matched=1 | no_match=0 | rejected=0 | errors=0
+
+[Safety] official_source_candidate does not imply truth.
+[Safety] The capture plan is a future plan only. No scraping or crawling is performed by this CLI.
+[Safety] All registry entries remain operator_review_required=true and default_enabled=false until explicitly enabled by an operator.
+```
+
+### JSON output shape
+
+Stable top-level keys: `cli_version`, `registry_path`, `processed_at`,
+`results`, `summary`, `safety_notes`. Each `results` entry carries:
+
+```jsonc
+{
+  "url": "…",
+  "status": "MATCHED" | "NO_MATCH" | "REJECTED" | "ERROR",
+  "classification": {
+    "matched_source_id": "…",
+    "allowed": true,
+    "reason": "matched",
+    "host": "…",
+    "source_type": "…",                 // present only on MATCHED
+    "official_source_candidate": true   // present only on MATCHED
+  },
+  "capture_plan": {                     // present only on MATCHED
+    "capture_method": "…",
+    "browser_automation": "…",
+    "operator_review_required": true,
+    "default_enabled": false,
+    "url_allowed": true,
+    "network_fetch_performed": false,
+    "plan_status": "manual_review"
+  },
+  "safety_note": "official_source_candidate does not imply truth"
+}
+```
+
+`summary.all_matched_safely` is `true` only when every URL in the
+batch reached `MATCHED`. The CLI exit code is the boolean
+`summary.all_matched_safely` (true → 0, false → 1).
+
+### Operational profile
+
+`scripts/run_operational_checks.py --profile source-registry`
+(M10.1) chains the four offline checks:
+
+1. `scripts/validate_source_registry.py --json` — schema check.
+2. `scripts/classify_source_url.py --help` — CLI smoke.
+3. `scripts/classify_source_url.py https://www.law.go.kr/sample` —
+   expected `MATCHED` against `kr_law_open_data_candidate`.
+4. `scripts/classify_source_url.py https://unknown-source-example.invalid/page`
+   — expected `NO_MATCH` (the runner's custom parser treats exit-code-1
+   as a PASS here because the conservative exit policy is the
+   contract under test).
+
+The profile never hits Render, never calls OpenAI, never starts a
+server, and never modifies the registry.
+
+### Valid enum values (from current registry schema)
+
+`source_type`:
+`government_policy`, `government_press`, `law_or_regulation`,
+`parliament`, `local_government`, `public_agency`, `news`,
+`fact_check`, `demo`.
+
+`capture_method`:
+`manual_or_http`, `rss`, `api`, `html`, `pdf`, `browser_required`,
+`unknown`.
+
+`browser_automation`:
+`not_required`, `maybe_required`, `required`, `unknown`.
+
+`plan_status` (from `build_source_capture_plan`):
+`manual_review`, `http_fetch_candidate`, `browser_candidate`,
+`unsupported`.
+
+## Static Crawler (`source_crawler.py`)
+
+`source_crawler.py` (Phase 2 M10.2) provides a bounded static HTTP
+fetcher for registry-candidate URLs. It uses `requests` +
+`BeautifulSoup` only — no Playwright, no browser automation, no
+JavaScript execution. Results are stored as raw fetch artifacts in
+the `source_fetch_artifacts` SQLite table; they do **not** affect
+`final_decision`, `policy_confidence`, `verification_card`, or
+semantic matching in any way.
+
+### Important safety constraints
+
+- Fetches are refused unless explicitly triggered by an operator via
+  `scripts/fetch_registry_source.py --save`.
+- The pipeline (`main.py` / `analyze_pipeline` / `api_server.py`)
+  never imports `source_crawler`. Pinned by
+  `tests/test_source_crawler.py::StaticSafetyTests::test_crawler_not_imported_by_pipeline_entry_points`.
+- All registry entries are `default_enabled=false`. No automated
+  fetch occurs against the current seed.
+- Fetch results are stored as raw artifacts only. They do **not**
+  affect verdict logic, `policy_confidence`, `verification_card`,
+  or semantic matching.
+- `truth_claim` is always `False` in every fetch result. The
+  database layer forces this to 0 on `save_fetch_artifact` even
+  if a caller passes `truth_claim=True`.
+- Fetch results require separate human review before any use in
+  verification.
+
+### Operator fetch CLI
+
+```
+python scripts/fetch_registry_source.py --source-id <id> --url <url> --dry-run
+python scripts/fetch_registry_source.py --source-id <id> --url <url> --save
+python scripts/fetch_registry_source.py --source-id <id> --url <url> --json
+```
+
+`--dry-run` is the default. The dry-run path runs all safety checks
+**without** any network request — `_run_safety_checks` is invoked
+directly, never `requests.get`. Use `--save` only when intentionally
+fetching and persisting.
+
+The CLI prints these safety notes in every output mode:
+
+- `truth_claim: False — fetch results do not imply truth of any content`
+- `official_source_candidate does not guarantee content accuracy`
+- `Fetch results are raw artifacts and require separate human review before any use in verification.`
+
+### Safety checks enforced before any fetch (first match wins)
+
+1. `default_enabled` must be `True` → otherwise refuse with
+   `"source not enabled for automated fetch"`.
+2. `operator_review_required` must be `False` → otherwise refuse with
+   `"operator review required before fetch"`.
+3. URL scheme must be `https` → otherwise refuse with
+   `"only https urls are permitted"`.
+4. URL host must be in `allowed_domains` (exact match by default;
+   strict subdomain match when `allow_subdomains=true`) → otherwise
+   refuse with `"url host not in allowed_domains"`.
+5. `browser_automation` must not be `"required"` → otherwise refuse
+   with `"source requires browser automation, static fetch not appropriate"`.
+
+A refusal returns a `FetchResult` with `success=False`,
+`network_fetch_performed=False`, `truth_claim=False`, and a
+descriptive `error` string. No exception is raised.
+
+### Bounded behavior on actual fetches
+
+- Single attempt — no retries.
+- At most `MAX_REDIRECTS` (3) redirects.
+- `Content-Length` header above `MAX_CONTENT_BYTES` (2 MB) aborts
+  *before* reading the body.
+- Body bytes capped at `MAX_CONTENT_BYTES` regardless of headers.
+- Extracted text capped at `MAX_TEXT_CHARS` (50 000 chars).
+- Text extraction strips `<script>`, `<style>`, `<nav>`,
+  `<footer>`, `<header>` before extracting text.
+- Text extraction is skipped for non-`text/html` content types
+  (PDF / JSON / XML); the `error` field carries a note explaining
+  the skip.
+- Default timeout is `DEFAULT_TIMEOUT_SECONDS` (15 s); override via
+  `config["timeout"]` or `--timeout-seconds`.
+- No cookies are sent; sessions are never reused across fetches.
+- The default User-Agent is a neutral descriptive string
+  (`policy_ai-source-crawler/M10.2 …`), not a bot identifier and
+  not a browser impersonation.
+
+### `FetchResult` fields (stable wire shape)
+
+```
+url, source_id, status_code, content_type, raw_html, text_content,
+fetch_timestamp, fetch_duration_ms, success, error,
+network_fetch_performed, truth_claim, official_source_candidate
+```
+
+`truth_claim` is **always** `False`.
+`network_fetch_performed` is `True` only when `requests.get` was
+actually invoked; safety-check refusals leave it `False`.
+
+### `source_fetch_artifacts` table (SQLite)
+
+```
+id                        INTEGER PRIMARY KEY AUTOINCREMENT
+source_id                 TEXT NOT NULL
+url                       TEXT NOT NULL
+fetch_timestamp           TEXT NOT NULL
+status_code               INTEGER
+content_type              TEXT
+success                   INTEGER NOT NULL DEFAULT 0
+error                     TEXT
+text_content              TEXT
+raw_html                  TEXT
+fetch_duration_ms         INTEGER
+truth_claim               INTEGER NOT NULL DEFAULT 0
+official_source_candidate INTEGER NOT NULL DEFAULT 0
+created_at                TEXT NOT NULL
+```
+
+Created idempotently via `_ensure_source_fetch_artifacts_table` from
+`init_db()` (or the standalone `init_source_fetch_artifacts_table()`).
+The `idx_source_fetch_artifacts_source` index covers the
+`(source_id, fetch_timestamp)` lookup used by `get_fetch_artifacts`.
+
+### Operational profile
+
+`scripts/run_operational_checks.py --profile source-crawler` chains
+four **offline** checks:
+
+1. `scripts/validate_source_registry.py --json` — schema check.
+2. `scripts/fetch_registry_source.py --help` — CLI smoke.
+3. `scripts/fetch_registry_source.py --source-id kr_law_open_data_candidate --url https://www.law.go.kr/sample --dry-run`
+   — expected safety refusal (the seed entry is
+   `default_enabled=false`); the runner's custom parser treats the
+   refusal as PASS.
+4. `scripts/classify_source_url.py https://www.law.go.kr/sample`
+   — same URL through the M10.1 classifier as a consistency check.
+
+The profile never hits the network, never calls OpenAI, never starts
+a server, and never enables any registry entry.
+
+### Sample dry-run output (offline, no network)
+
+```
+=== fetch_registry_source: DRY RUN — no network request made ===
+source_id: kr_law_open_data_candidate
+url: https://www.law.go.kr/sample
+registry_path: <repo>/data/source_registry.json
+source_found: True
+safety_refusal: source not enabled for automated fetch
+result: would refuse fetch — safety check failed
+network_fetch_performed: False
+truth_claim: False
+
+[Safety] truth_claim: False — fetch results do not imply truth of any content
+[Safety] official_source_candidate does not guarantee content accuracy
+[Safety] Fetch results are raw artifacts and require separate human review before any use in verification.
+```
+
+The exit code in this example is `1` because the safety check
+refused. Both `--dry-run` and `--save` reserve exit `0` for "fetch
+would actually proceed" / "fetch succeeded".

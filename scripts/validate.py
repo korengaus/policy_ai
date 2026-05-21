@@ -39,7 +39,8 @@ def _commands() -> List[List[str]]:
     python = sys.executable or "python"
     npm = _npm_executable()
     return [
-        [python, "-m", "compileall", "api_server.py", "database.py", "job_manager.py"],
+        [python, "-m", "compileall", "api_server.py", "database.py", "job_manager.py",
+         "source_crawler.py", "scripts/fetch_registry_source.py"],
         [python, "tests/test_jobs.py"],
         [python, "tests/test_postgres_dual_write.py"],
         [python, "tests/test_ai_reasoner_status.py"],
@@ -63,6 +64,12 @@ def _commands() -> List[List[str]]:
         [python, "tests/test_review_api_token_gate_smoke.py"],
         [python, "tests/test_review_ui_local_demo.py"],
         [python, "tests/test_source_registry.py"],
+        # M10.1 — URL classifier CLI smoke + assertions.
+        [python, "scripts/classify_source_url.py", "--help"],
+        [python, "tests/test_source_url_classifier.py"],
+        # M10.2 — static crawler + operator CLI (dry-run only).
+        [python, "scripts/fetch_registry_source.py", "--help"],
+        [python, "tests/test_source_crawler.py"],
         [npm, "test"],
     ]
 

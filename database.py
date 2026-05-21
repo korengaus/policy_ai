@@ -44,6 +44,7 @@ def init_db():
         _ensure_jobs_table(connection)
         _ensure_embedding_cache_table(connection)
         _ensure_review_tables(connection)
+        _ensure_source_fetch_artifacts_table(connection)
         connection.commit()
 
 
@@ -788,6 +789,153 @@ def list_review_decisions(task_id: str) -> list:
             (task_id,),
         ).fetchall()
     return [_row_to_review_decision(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 M10.2: source-fetch-artifact persistence.
+#
+# Read-only catalog of operator-triggered static fetches against
+# registry-candidate sources. The pipeline (analyze_pipeline /
+# main.py) never reads or writes this table. ``truth_claim`` is
+# stored as 0 on every row — the registry contract is that fetch
+# artifacts never assert truth.
+# ---------------------------------------------------------------------------
+
+
+def _ensure_source_fetch_artifacts_table(connection):
+    """Idempotent. Safe to call repeatedly."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS source_fetch_artifacts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_id TEXT NOT NULL,
+            url TEXT NOT NULL,
+            fetch_timestamp TEXT NOT NULL,
+            status_code INTEGER,
+            content_type TEXT,
+            success INTEGER NOT NULL DEFAULT 0,
+            error TEXT,
+            text_content TEXT,
+            raw_html TEXT,
+            fetch_duration_ms INTEGER,
+            truth_claim INTEGER NOT NULL DEFAULT 0,
+            official_source_candidate INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_source_fetch_artifacts_source "
+        "ON source_fetch_artifacts(source_id, fetch_timestamp)"
+    )
+
+
+def init_source_fetch_artifacts_table():
+    """Public idempotent initializer. Independent of init_db() so tests
+    and the operator CLI can call it without touching analysis_results."""
+    with get_connection() as connection:
+        _ensure_source_fetch_artifacts_table(connection)
+        connection.commit()
+
+
+def _row_to_fetch_artifact(row) -> dict:
+    """SQLite row → fetch-artifact dict. Maps the integer success /
+    truth_claim / official_source_candidate columns back to booleans
+    so callers don't have to remember the SQLite-boolean convention."""
+    if row is None:
+        return {}
+    out = {k: row[k] for k in row.keys()}
+    out["success"] = bool(out.get("success", 0))
+    # truth_claim is stored as 0 and surfaced as a bool. The registry
+    # contract is that this field is always False; we re-assert here
+    # as a defensive measure against any future row corruption.
+    out["truth_claim"] = bool(out.get("truth_claim", 0))
+    out["official_source_candidate"] = bool(
+        out.get("official_source_candidate", 0)
+    )
+    return out
+
+
+def save_fetch_artifact(fetch_result: dict) -> int:
+    """Persist one fetch artifact and return the inserted row id.
+
+    ``fetch_result`` matches the shape returned by
+    ``source_crawler.fetch_result_to_dict``. Missing fields default
+    safely. ``truth_claim`` is always stored as 0 regardless of the
+    input (defensive against future regressions in the crawler that
+    might try to set it true)."""
+    if not isinstance(fetch_result, dict):
+        raise ValueError("fetch_result must be a dict")
+    if not fetch_result.get("source_id"):
+        raise ValueError("fetch_result.source_id is required")
+    if not fetch_result.get("url"):
+        raise ValueError("fetch_result.url is required")
+    if not fetch_result.get("fetch_timestamp"):
+        raise ValueError("fetch_result.fetch_timestamp is required")
+    created_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with get_connection() as connection:
+        _ensure_source_fetch_artifacts_table(connection)
+        cursor = connection.execute(
+            """
+            INSERT INTO source_fetch_artifacts (
+                source_id, url, fetch_timestamp,
+                status_code, content_type, success, error,
+                text_content, raw_html, fetch_duration_ms,
+                truth_claim, official_source_candidate,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(fetch_result.get("source_id")),
+                str(fetch_result.get("url")),
+                str(fetch_result.get("fetch_timestamp")),
+                fetch_result.get("status_code"),
+                fetch_result.get("content_type"),
+                1 if fetch_result.get("success") else 0,
+                fetch_result.get("error"),
+                fetch_result.get("text_content"),
+                fetch_result.get("raw_html"),
+                fetch_result.get("fetch_duration_ms"),
+                # truth_claim is forced to 0 — the registry contract.
+                0,
+                1 if fetch_result.get("official_source_candidate") else 0,
+                created_at,
+            ),
+        )
+        connection.commit()
+        return int(cursor.lastrowid)
+
+
+def get_fetch_artifacts(source_id: str = None, limit: int = 50) -> list:
+    """Return fetch artifacts (newest first), optionally filtered
+    by ``source_id``. ``limit`` is clamped to ``[1, 500]`` so a single
+    call cannot pull the whole table."""
+    try:
+        capped_limit = max(1, min(int(limit or 50), 500))
+    except (TypeError, ValueError):
+        capped_limit = 50
+    with get_connection() as connection:
+        _ensure_source_fetch_artifacts_table(connection)
+        if source_id:
+            rows = connection.execute(
+                """
+                SELECT * FROM source_fetch_artifacts
+                WHERE source_id = ?
+                ORDER BY fetch_timestamp DESC, id DESC
+                LIMIT ?
+                """,
+                (str(source_id), capped_limit),
+            ).fetchall()
+        else:
+            rows = connection.execute(
+                """
+                SELECT * FROM source_fetch_artifacts
+                ORDER BY fetch_timestamp DESC, id DESC
+                LIMIT ?
+                """,
+                (capped_limit,),
+            ).fetchall()
+    return [_row_to_fetch_artifact(r) for r in rows]
 
 
 def embedding_cache_stats() -> dict:
