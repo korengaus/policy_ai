@@ -66,8 +66,14 @@ PROFILES = (
     "historical",
     "review-local",
     "review-exposure",
+    "review-token-gate",
     "full",
 )
+
+# M9.5 — env var name the review-token-gate profile expects the
+# operator to have set locally. Documented here (and in the profile
+# step's command) so the runner never has to read the value itself.
+REVIEW_TOKEN_GATE_DEFAULT_ENV = "REVIEW_API_SMOKE_TOKEN"
 
 DEFAULT_BASE_URL = "https://policy-ai-q5ax.onrender.com"
 DEFAULT_QUERY = "전세사기"
@@ -244,6 +250,35 @@ def _review_exposure_step(args: argparse.Namespace) -> dict:
     }
 
 
+def _review_token_gate_step(args: argparse.Namespace) -> dict:
+    """Phase 2 M9.5: controlled review API token-gate smoke.
+
+    Hits ``args.base_url`` via the M9.5 read-only token-gate smoke.
+    The smoke itself reads the correct token from
+    ``REVIEW_API_SMOKE_TOKEN`` in the operator's local env (or
+    whatever name the operator passes via the smoke's own
+    ``--token-env`` flag). The runner does NOT inspect, copy, or
+    echo the token; it only invokes the subprocess and parses the
+    subprocess's stdout. The token never appears in the runner's
+    own command list either.
+    """
+    return {
+        "name": "smoke_review_api_token_gate",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "smoke_review_api_token_gate.py"),
+            "--base-url", args.base_url,
+            "--token-env", REVIEW_TOKEN_GATE_DEFAULT_ENV,
+            "--timeout-seconds", str(int(args.timeout_seconds)),
+        ],
+        "parser": _parse_review_token_gate_output,
+        "hits_render": True,
+        "may_call_openai": False,
+        "requires_secret_env": REVIEW_TOKEN_GATE_DEFAULT_ENV,
+        "optional": False,
+    }
+
+
 def _review_local_step() -> dict:
     """Phase 2 M8.3: offline reviewer-workflow smoke.
 
@@ -343,6 +378,16 @@ def _resolve_steps(args: argparse.Namespace) -> List[dict]:
         # without paying the canary's OpenAI / semantic cost.
         if not args.skip_render:
             steps.append(_review_exposure_step(args))
+
+    if profile == "review-token-gate":
+        # M9.5 — only safe to run when the operator has intentionally
+        # set REVIEW_API_ENABLED=true on the deploy AND has the smoke
+        # token (REVIEW_API_SMOKE_TOKEN) in their local env. Never
+        # bundled into quick / validate / review-exposure. --skip-render
+        # drops the step entirely so the operator can no-op the
+        # profile in a smoke-test harness.
+        if not args.skip_render:
+            steps.append(_review_token_gate_step(args))
 
     if profile == "full":
         if not args.skip_render and not args.skip_semantic_canary:
@@ -641,6 +686,90 @@ def _parse_smoke_canary_output(stdout: str, stderr: str, exit_code: int) -> dict
         "status": status,
         "summary": summary_text,
         "metrics": metrics,
+    }
+
+
+def _parse_review_token_gate_output(stdout: str, stderr: str, exit_code: int) -> dict:
+    """Phase 2 M9.5: parse ``smoke_review_api_token_gate.py`` output.
+
+    Same JSON-tail / fallback shape as the exposure parser. Surfaces
+    the M9.5 metrics distinctly from the M8.8 exposure parser so the
+    runner record can be inspected without confusing the two profiles.
+    """
+    summary_obj: Optional[dict] = None
+    if stdout.startswith("{"):
+        candidate = stdout
+    else:
+        start = stdout.find("\n{")
+        candidate = stdout[start + 1:] if start != -1 else ""
+    if candidate:
+        try:
+            summary_obj = json.loads(candidate)
+        except Exception:
+            summary_obj = None
+            idx = candidate.rfind("\n}")
+            while idx != -1 and summary_obj is None:
+                try:
+                    summary_obj = json.loads(candidate[: idx + 2])
+                except Exception:
+                    idx = candidate.rfind("\n}", 0, idx)
+
+    if summary_obj is None:
+        passed = exit_code == 0
+        return {
+            "status": _HEALTH_PASS if passed else _HEALTH_FAIL,
+            "summary": (
+                f"smoke_review_api_token_gate exit_code={exit_code} "
+                "(JSON summary not detected)"
+            ),
+        }
+
+    passed = bool(summary_obj.get("passed"))
+    public_access_detected = bool(summary_obj.get("public_access_detected"))
+    disabled_detected = bool(summary_obj.get("disabled_detected"))
+    token_gate_ok = bool(summary_obj.get("token_gate_ok"))
+    valid_token_read_ok = bool(summary_obj.get("valid_token_read_ok"))
+    auth_passed_not_found_count = int(
+        summary_obj.get("auth_passed_not_found_count") or 0
+    )
+    token_required_count = int(summary_obj.get("token_required_count") or 0)
+    disabled_count = int(summary_obj.get("disabled_count") or 0)
+    unexpected_count = int(summary_obj.get("unexpected_count") or 0)
+    recommendation = str(summary_obj.get("recommendation") or "")
+
+    # public_access is the hard fail signal; otherwise trust the
+    # smoke's own ``passed`` decision.
+    if public_access_detected:
+        status = _HEALTH_FAIL
+    elif passed:
+        status = _HEALTH_PASS
+    else:
+        status = _HEALTH_FAIL
+
+    summary_text = (
+        f"smoke_review_api_token_gate: passed={passed} "
+        f"public_access_detected={public_access_detected} "
+        f"disabled_detected={disabled_detected} "
+        f"token_gate_ok={token_gate_ok} "
+        f"valid_token_read_ok={valid_token_read_ok} "
+        f"token_required={token_required_count} "
+        f"auth_passed_not_found={auth_passed_not_found_count} "
+        f"unexpected={unexpected_count}"
+    )
+    return {
+        "status": status,
+        "summary": summary_text,
+        "metrics": {
+            "public_access_detected": public_access_detected,
+            "disabled_detected": disabled_detected,
+            "token_gate_ok": token_gate_ok,
+            "valid_token_read_ok": valid_token_read_ok,
+            "auth_passed_not_found_count": auth_passed_not_found_count,
+            "token_required_count": token_required_count,
+            "disabled_count": disabled_count,
+            "unexpected_count": unexpected_count,
+            "recommendation": recommendation,
+        },
     }
 
 
@@ -961,12 +1090,13 @@ def _next_actions(overall: str, records: List[dict]) -> List[str]:
     warm up. Hard safety signals (provider_errors, overstrong_like,
     semantic unavailable while expected) always do.
     """
-    # M8.8 — public-exposure failure must always surface a specific
-    # rollback hint, ahead of any other recommendation. Inspect the
-    # exposure step's metrics block.
+    # M8.8 + M9.5 — public-exposure failure (from either smoke) must
+    # always surface a specific rollback hint, ahead of any other
+    # recommendation. Inspect the exposure / token-gate step metrics.
     exposure_records = [
         r for r in records
         if str(r.get("name", "")).startswith("smoke_review_api_exposure(")
+        or str(r.get("name", "")) == "smoke_review_api_token_gate"
     ]
     public_exposure_records = [
         r for r in exposure_records
@@ -975,13 +1105,46 @@ def _next_actions(overall: str, records: List[dict]) -> List[str]:
     if public_exposure_records:
         actions: List[str] = [
             "PUBLIC EXPOSURE detected: at least one /review/* endpoint "
-            "returned 2xx WITHOUT a token. Set REVIEW_API_ENABLED=false in "
-            "the Render dashboard immediately and investigate.",
+            "returned 2xx WITHOUT a valid token. Set REVIEW_API_ENABLED=false "
+            "in the Render dashboard immediately and investigate.",
         ]
         for r in public_exposure_records:
             rec = (r.get("metrics") or {}).get("recommendation") or ""
             if rec:
                 actions.append(f"{r['name']}: {rec}")
+        return actions
+
+    # M9.5-specific failure paths — surface before generic fail hints
+    # so the operator knows whether the deploy is just disabled (not a
+    # bug) or the token doesn't match.
+    token_gate_records = [
+        r for r in records
+        if str(r.get("name", "")) == "smoke_review_api_token_gate"
+    ]
+    token_gate_fail_records = [
+        r for r in token_gate_records
+        if r.get("status") == _HEALTH_FAIL
+        and not (r.get("metrics") or {}).get("public_access_detected")
+    ]
+    if token_gate_fail_records:
+        actions: List[str] = []
+        for r in token_gate_fail_records:
+            metrics = r.get("metrics") or {}
+            if metrics.get("disabled_detected"):
+                actions.append(
+                    f"{r['name']}: review API is disabled on this deploy "
+                    "(503). No public exposure detected. If you intended the "
+                    "API to stay disabled, run the review-exposure profile "
+                    "instead — that's the right check for current Render policy."
+                )
+            else:
+                rec = metrics.get("recommendation") or ""
+                actions.append(f"{r['name']}: {rec or 'token-gate fail'}")
+        actions.append(
+            "Do not paste the review token into chat or any committed "
+            "file. Keep REVIEW_API_SMOKE_TOKEN local-only and clear the "
+            "env var after the smoke completes."
+        )
         return actions
 
     canary_records = [

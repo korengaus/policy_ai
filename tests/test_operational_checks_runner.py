@@ -219,6 +219,84 @@ class ProfileResolutionTests(unittest.TestCase):
     def test_review_exposure_is_a_known_profile(self):
         self.assertIn("review-exposure", runner_module.PROFILES)
 
+    # M9.5 — review-token-gate profile.
+    def test_review_token_gate_profile_resolves_to_token_gate_smoke(self):
+        steps = runner_module._resolve_steps(_argv_to_args(
+            "--profile", "review-token-gate",
+            "--base-url", "http://example.invalid",
+        ))
+        names = _step_names(steps)
+        self.assertEqual(names, ["smoke_review_api_token_gate"])
+        # Hits Render; never calls OpenAI; carries the smoke env-var
+        # name as metadata so the runner can surface the requirement
+        # to operators in future tooling. The runner itself never
+        # reads the token value — only the subprocess does.
+        self.assertTrue(steps[0]["hits_render"])
+        self.assertFalse(steps[0]["may_call_openai"])
+        self.assertEqual(steps[0].get("requires_secret_env"),
+                         "REVIEW_API_SMOKE_TOKEN")
+        cmd = " ".join(steps[0]["command"])
+        self.assertIn("smoke_review_api_token_gate.py", cmd)
+        self.assertIn("--token-env REVIEW_API_SMOKE_TOKEN", cmd)
+        self.assertIn("--base-url http://example.invalid", cmd)
+        # The runner command must NEVER carry the token value or any
+        # secret-bearing CLI flag. We ban specifically value-carrying
+        # token flags (``--token <value>`` / ``--token=<value>``);
+        # ``--token-env`` is fine because it only names an env var.
+        import re as _re
+        for forbidden_re in (
+            r"--token(?:\s|=)(?!env\b)",   # --token <val> but not --token-env
+            r"REVIEW_API_TOKEN=",
+            r"X-Review-Token",
+            r"Authorization",
+            r"Bearer",
+        ):
+            self.assertIsNone(
+                _re.search(forbidden_re, cmd),
+                f"runner command must not match {forbidden_re!r}: {cmd}",
+            )
+
+    def test_review_token_gate_profile_is_not_part_of_quick(self):
+        # quick must stay offline + no-Render + no-secret-required.
+        steps = runner_module._resolve_steps(_argv_to_args("--profile", "quick"))
+        names = _step_names(steps)
+        self.assertNotIn("smoke_review_api_token_gate", names)
+        for step in steps:
+            self.assertFalse(
+                step["hits_render"],
+                f"quick must not include any Render-hitting step "
+                f"(got {step['name']!r})",
+            )
+
+    def test_review_token_gate_profile_dropped_when_skip_render(self):
+        steps = runner_module._resolve_steps(_argv_to_args(
+            "--profile", "review-token-gate",
+            "--base-url", "http://example.invalid",
+            "--skip-render",
+        ))
+        self.assertEqual(steps, [])
+
+    def test_review_token_gate_is_a_known_profile(self):
+        self.assertIn("review-token-gate", runner_module.PROFILES)
+
+    def test_review_token_gate_is_separate_from_review_exposure(self):
+        # The two profiles must not overlap — each resolves to a
+        # different smoke script.
+        exposure_steps = runner_module._resolve_steps(_argv_to_args(
+            "--profile", "review-exposure",
+            "--base-url", "http://example.invalid",
+        ))
+        token_gate_steps = runner_module._resolve_steps(_argv_to_args(
+            "--profile", "review-token-gate",
+            "--base-url", "http://example.invalid",
+        ))
+        exposure_scripts = {" ".join(s["command"]) for s in exposure_steps}
+        token_gate_scripts = {" ".join(s["command"]) for s in token_gate_steps}
+        for exp in exposure_scripts:
+            self.assertNotIn("smoke_review_api_token_gate.py", exp)
+        for tg in token_gate_scripts:
+            self.assertNotIn("smoke_review_api_exposure.py", tg)
+
     def test_historical_profile_includes_dry_run_and_optional_eval(self):
         steps = runner_module._resolve_steps(_argv_to_args("--profile", "historical"))
         names = _step_names(steps)
@@ -606,6 +684,95 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(parsed["status"], "fail")
         self.assertIn("JSON summary not detected", parsed["summary"])
 
+    # M9.5 — review-token-gate parser.
+    def test_review_token_gate_pass_detected(self):
+        sample = (
+            "[token-gate] passed=True\n"
+            "{\n"
+            "  \"passed\": true,\n"
+            "  \"base_url\": \"https://example.invalid\",\n"
+            "  \"token_env_var\": \"REVIEW_API_SMOKE_TOKEN\",\n"
+            "  \"token_present\": true,\n"
+            "  \"token_value_printed\": false,\n"
+            "  \"public_access_detected\": false,\n"
+            "  \"disabled_detected\": false,\n"
+            "  \"token_gate_ok\": true,\n"
+            "  \"valid_token_read_ok\": true,\n"
+            "  \"auth_passed_not_found_count\": 3,\n"
+            "  \"token_required_count\": 2,\n"
+            "  \"disabled_count\": 0,\n"
+            "  \"unexpected_count\": 0,\n"
+            "  \"results\": [],\n"
+            "  \"warnings\": [],\n"
+            "  \"errors\": [],\n"
+            "  \"recommendation\": \"PASS: review API is enabled and token-gated\"\n"
+            "}\n"
+        )
+        parsed = runner_module._parse_review_token_gate_output(sample, "", 0)
+        self.assertEqual(parsed["status"], "pass")
+        metrics = parsed["metrics"]
+        self.assertTrue(metrics["token_gate_ok"])
+        self.assertTrue(metrics["valid_token_read_ok"])
+        self.assertEqual(metrics["auth_passed_not_found_count"], 3)
+        self.assertEqual(metrics["token_required_count"], 2)
+        self.assertFalse(metrics["public_access_detected"])
+        self.assertFalse(metrics["disabled_detected"])
+        self.assertIn("PASS", metrics["recommendation"])
+
+    def test_review_token_gate_public_access_marks_status_fail(self):
+        sample = (
+            "{\n"
+            "  \"passed\": false,\n"
+            "  \"base_url\": \"http://example.invalid\",\n"
+            "  \"token_env_var\": \"REVIEW_API_SMOKE_TOKEN\",\n"
+            "  \"token_present\": true,\n"
+            "  \"token_value_printed\": false,\n"
+            "  \"public_access_detected\": true,\n"
+            "  \"disabled_detected\": false,\n"
+            "  \"token_gate_ok\": false,\n"
+            "  \"valid_token_read_ok\": true,\n"
+            "  \"auth_passed_not_found_count\": 0,\n"
+            "  \"token_required_count\": 0,\n"
+            "  \"disabled_count\": 0,\n"
+            "  \"unexpected_count\": 0,\n"
+            "  \"results\": [], \"warnings\": [], \"errors\": [],\n"
+            "  \"recommendation\": \"FAIL: public exposure\"\n"
+            "}\n"
+        )
+        parsed = runner_module._parse_review_token_gate_output(sample, "", 1)
+        self.assertEqual(parsed["status"], "fail")
+        self.assertTrue(parsed["metrics"]["public_access_detected"])
+        self.assertIn("public_access_detected=True", parsed["summary"])
+
+    def test_review_token_gate_disabled_detected_marks_fail(self):
+        sample = (
+            "{\n"
+            "  \"passed\": false,\n"
+            "  \"token_env_var\": \"REVIEW_API_SMOKE_TOKEN\",\n"
+            "  \"public_access_detected\": false,\n"
+            "  \"disabled_detected\": true,\n"
+            "  \"token_gate_ok\": false,\n"
+            "  \"valid_token_read_ok\": false,\n"
+            "  \"auth_passed_not_found_count\": 0,\n"
+            "  \"token_required_count\": 0,\n"
+            "  \"disabled_count\": 6,\n"
+            "  \"unexpected_count\": 0,\n"
+            "  \"results\": [], \"warnings\": [], \"errors\": [],\n"
+            "  \"recommendation\": \"FAIL: review API disabled\"\n"
+            "}\n"
+        )
+        parsed = runner_module._parse_review_token_gate_output(sample, "", 1)
+        self.assertEqual(parsed["status"], "fail")
+        self.assertTrue(parsed["metrics"]["disabled_detected"])
+        self.assertFalse(parsed["metrics"]["public_access_detected"])
+
+    def test_review_token_gate_falls_back_when_json_missing(self):
+        parsed = runner_module._parse_review_token_gate_output(
+            "no json here", "", 1,
+        )
+        self.assertEqual(parsed["status"], "fail")
+        self.assertIn("JSON summary not detected", parsed["summary"])
+
     def test_historical_dry_run_pass_detected(self):
         sample = (
             "[build-historical] reports_scanned=471 sqlite_rows=105 "
@@ -832,6 +999,120 @@ class OrchestrationTests(unittest.TestCase):
                 "}\n"
             )
             fake = FakeRunner([(1, exposure_fail, "")])
+            report = runner_module.run(args, runner=fake)
+            self.assertEqual(report["overall_status"], "fail")
+            joined = " ".join(report["next_actions"])
+            self.assertIn("PUBLIC EXPOSURE", joined)
+            self.assertIn("REVIEW_API_ENABLED=false", joined)
+
+    def test_review_token_gate_orchestrates_with_injected_runner(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = _argv_to_args(
+                "--profile", "review-token-gate",
+                "--base-url", "http://example.invalid",
+                "--no-default-reports",
+                "--json-out", str(Path(tmp) / "out.json"),
+            )
+            token_gate_pass = (
+                "[token-gate] passed=True\n"
+                "{\n"
+                "  \"passed\": true,\n"
+                "  \"token_env_var\": \"REVIEW_API_SMOKE_TOKEN\",\n"
+                "  \"public_access_detected\": false,\n"
+                "  \"disabled_detected\": false,\n"
+                "  \"token_gate_ok\": true,\n"
+                "  \"valid_token_read_ok\": true,\n"
+                "  \"auth_passed_not_found_count\": 3,\n"
+                "  \"token_required_count\": 2,\n"
+                "  \"disabled_count\": 0,\n"
+                "  \"unexpected_count\": 0,\n"
+                "  \"results\": [], \"warnings\": [], \"errors\": [],\n"
+                "  \"recommendation\": \"PASS: review API token-gated\"\n"
+                "}\n"
+            )
+            fake = FakeRunner([(0, token_gate_pass, "")])
+            report = runner_module.run(args, runner=fake)
+            self.assertEqual(len(fake.calls), 1)
+            self.assertEqual(report["overall_status"], "pass")
+            self.assertEqual(report["commands"][0]["status"], "pass")
+            executed = " ".join(fake.calls[0])
+            self.assertIn("smoke_review_api_token_gate.py", executed)
+            self.assertIn("--token-env REVIEW_API_SMOKE_TOKEN", executed)
+            # The runner-issued command must NOT carry the token value
+            # or any auth header — it never reads the env var itself.
+            # ``--token-env`` (env var name only) is allowed.
+            import re as _re
+            for pattern in (
+                r"--token(?:\s|=)(?!env\b)",
+                r"Authorization", r"Bearer", r"X-Review-Token",
+            ):
+                self.assertIsNone(
+                    _re.search(pattern, executed),
+                    f"runner command must not match {pattern!r}",
+                )
+
+    def test_review_token_gate_disabled_surfaces_clear_next_action(self):
+        # When token-gate runs against a deploy with the review API
+        # disabled, the runner's next_actions must say "review API is
+        # disabled... no public exposure detected... use review-exposure".
+        with tempfile.TemporaryDirectory() as tmp:
+            args = _argv_to_args(
+                "--profile", "review-token-gate",
+                "--base-url", "http://example.invalid",
+                "--no-default-reports",
+                "--json-out", str(Path(tmp) / "out.json"),
+            )
+            disabled_payload = (
+                "{\n"
+                "  \"passed\": false,\n"
+                "  \"token_env_var\": \"REVIEW_API_SMOKE_TOKEN\",\n"
+                "  \"public_access_detected\": false,\n"
+                "  \"disabled_detected\": true,\n"
+                "  \"token_gate_ok\": false,\n"
+                "  \"valid_token_read_ok\": false,\n"
+                "  \"auth_passed_not_found_count\": 0,\n"
+                "  \"token_required_count\": 0,\n"
+                "  \"disabled_count\": 6,\n"
+                "  \"unexpected_count\": 0,\n"
+                "  \"results\": [], \"warnings\": [], \"errors\": [],\n"
+                "  \"recommendation\": \"FAIL: API disabled\"\n"
+                "}\n"
+            )
+            fake = FakeRunner([(1, disabled_payload, "")])
+            report = runner_module.run(args, runner=fake)
+            self.assertEqual(report["overall_status"], "fail")
+            joined = " ".join(report["next_actions"])
+            self.assertIn("review API is disabled", joined)
+            self.assertIn("No public exposure", joined)
+            self.assertIn("review-exposure", joined)
+            # And the operator is reminded not to paste the token.
+            self.assertIn("REVIEW_API_SMOKE_TOKEN", joined)
+
+    def test_review_token_gate_public_exposure_surfaces_rollback_hint(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = _argv_to_args(
+                "--profile", "review-token-gate",
+                "--base-url", "http://example.invalid",
+                "--no-default-reports",
+                "--json-out", str(Path(tmp) / "out.json"),
+            )
+            payload = (
+                "{\n"
+                "  \"passed\": false,\n"
+                "  \"public_access_detected\": true,\n"
+                "  \"disabled_detected\": false,\n"
+                "  \"token_gate_ok\": false,\n"
+                "  \"valid_token_read_ok\": true,\n"
+                "  \"auth_passed_not_found_count\": 0,\n"
+                "  \"token_required_count\": 0,\n"
+                "  \"disabled_count\": 0,\n"
+                "  \"unexpected_count\": 0,\n"
+                "  \"token_env_var\": \"REVIEW_API_SMOKE_TOKEN\",\n"
+                "  \"results\": [], \"warnings\": [], \"errors\": [],\n"
+                "  \"recommendation\": \"FAIL: public-exposure incident\"\n"
+                "}\n"
+            )
+            fake = FakeRunner([(1, payload, "")])
             report = runner_module.run(args, runner=fake)
             self.assertEqual(report["overall_status"], "fail")
             joined = " ".join(report["next_actions"])

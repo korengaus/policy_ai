@@ -1,4 +1,4 @@
-# Server-Backed Reviewer Workflow (Phase 2 M8.0 + M8.1 + M8.2 + M8.3 + M8.7 + M8.8 + M9.0 + M9.1 + M9.2 + M9.3 + M9.4)
+# Server-Backed Reviewer Workflow (Phase 2 M8.0 + M8.1 + M8.2 + M8.3 + M8.7 + M8.8 + M9.0 + M9.1 + M9.2 + M9.3 + M9.4 + M9.5)
 
 A backend-first foundation for the human-review layer. AI drafts and
 summarizes evidence; humans approve, reject, or request more evidence.
@@ -1462,7 +1462,128 @@ python scripts\serve_review_ui_local_demo.py --db-path reports\review_ui_local_d
 #   http://127.0.0.1:8000/?operator_tools=1
 ```
 
-## I. Future work (post-M9.4)
+## H''''''''''. Controlled review API token-gate smoke (M9.5)
+
+The M8.8 review-exposure smoke verifies the **current** Render policy —
+review API disabled, every `/review/*` endpoint returns 503. M9.5 adds
+a complementary smoke for the **future** state where the operator
+intentionally sets `REVIEW_API_ENABLED=true` + `REVIEW_API_TOKEN` on
+Render and wants a low-blast-radius verification that the token gate
+behaves correctly.
+
+**M9.5 does not enable the review API.** It only ships tooling +
+documentation so the operator can verify the gate later, on demand,
+when they choose to enable it. Current Render policy remains
+disabled-by-default; the existing `review-exposure` profile is still
+the right check while the API stays off.
+
+### Difference between `review-exposure` and `review-token-gate`
+
+| profile | sends a token? | expects review API to be… | current Render? | future activation? |
+| --- | --- | --- | --- | --- |
+| `review-exposure` (M8.8) | no | disabled (or token-gated, but mostly disabled) | **default check** — disabled is the expected state | runs anyway, classifies 403 as a benign mismatch |
+| `review-token-gate` (M9.5) | yes — read from a local env var | enabled and token-gated | not run today (review API is off) | run by the operator after they manually enable `REVIEW_API_ENABLED` on Render |
+
+The two profiles are intentionally separate scripts so they cannot be
+confused operationally.
+
+### Endpoints probed (read-only, GET-only, six requests)
+
+| # | method | path | token sent |
+| --- | --- | --- | --- |
+| 1 | `GET` | `/review/tasks` | no token (expect 403) |
+| 2 | `GET` | `/review/tasks` | wrong token (expect 403) |
+| 3 | `GET` | `/review/tasks` | correct token (expect 200) |
+| 4 | `GET` | `/review/tasks/nonexistent-token-gate-smoke-id` | correct token (expect 404) |
+| 5 | `GET` | `/review/tasks/nonexistent-token-gate-smoke-id/decisions` | correct token (expect 404) |
+| 6 | `GET` | `/review/tasks/nonexistent-token-gate-smoke-id/audit-packet` | correct token (expect 404) |
+
+The smoke is **GET-only**. It never POSTs, never creates a review
+task, never records a decision, never mutates any task. The
+nonexistent task id is a literal string the smoke synthesizes — it
+will never collide with a real review task because no code path can
+ever create that id (no POST happens).
+
+### Token handling
+
+The smoke reads the correct token only from a local environment
+variable. **There is no `--token` CLI flag.** Pass the env var name
+with `--token-env <NAME>`; default is `REVIEW_API_SMOKE_TOKEN`.
+
+- If the env var is missing or empty → exit code **2** with a safe
+  PowerShell instruction (`$env:<NAME> = "<paste locally only>"`,
+  `Remove-Item Env:\<NAME>`). The script never asks the operator to
+  paste the token into chat or any committed file.
+- The token value is **never** echoed to stdout / stderr / the JSON
+  payload / the recommendation string. The JSON carries a literal
+  `token_value_printed: false` flag for consumers to pin.
+- The token is sent only as the `X-Review-Token` header via
+  `urllib.request.Request(headers={...})`. It never appears in the
+  URL, the request body (the smoke is GET-only and explicitly passes
+  `data=None`), or any redirect URL.
+- The smoke **never** falls back to `REVIEW_API_TOKEN` if
+  `REVIEW_API_SMOKE_TOKEN` is missing. The two env vars are
+  intentionally distinct so the operator's server-config token does
+  not leak into a smoke run.
+
+### Exact commands
+
+```powershell
+# 1. Set the smoke token locally (in PowerShell). The value should
+#    match REVIEW_API_TOKEN on the deploy — never paste it into chat
+#    or a committed file.
+$env:REVIEW_API_SMOKE_TOKEN = "<paste-locally-only>"
+
+# 2. Run the smoke (either directly, or via the operational runner).
+python scripts/smoke_review_api_token_gate.py --base-url https://policy-ai-q5ax.onrender.com
+# or
+python scripts/run_operational_checks.py --profile review-token-gate --base-url https://policy-ai-q5ax.onrender.com
+
+# 3. Clear the env var.
+Remove-Item Env:\REVIEW_API_SMOKE_TOKEN
+```
+
+### Classification rules
+
+| classification | trigger | pass / fail in M9.5 mode |
+| --- | --- | --- |
+| `token_required` | 403 with no/wrong token | expected — pass when exactly 2 occurrences (no-token + wrong-token) |
+| `valid_token_ok` | 200 with the correct token | expected — pass when ≥ 1 occurrence (the `/review/tasks` listing) |
+| `auth_passed_not_found` | 404 with the correct token | expected — pass when exactly 3 occurrences (the three nonexistent ids) |
+| `public_access` | 2xx with no/wrong token | **hard FAIL** — public-exposure incident |
+| `token_rejected_valid_request` | 403 with the correct token | **FAIL** — local smoke token doesn't match Render `REVIEW_API_TOKEN` |
+| `disabled_when_enabled_expected` | 503 with `disabled` body | **FAIL** — review API is not actually enabled (the M8.8 exposure profile is the right check for the disabled state) |
+| `unexpected` | anything else (404 without auth, 500, network error, …) | **FAIL** — surface for inspection |
+
+Top-level metrics surfaced in the JSON + runner:
+
+```
+passed, base_url, token_env_var, token_present, token_value_printed,
+public_access_detected, disabled_detected, token_gate_ok,
+valid_token_read_ok, auth_passed_not_found_count,
+token_required_count, disabled_count, unexpected_count, results,
+warnings, errors, recommendation
+```
+
+### What this does NOT do
+
+- **Does not enable the review API.** No env var is set by the smoke;
+  no Render API is called from the smoke or the helper.
+- **Does not create review records.** GET-only by both spec and source
+  scan. Pinned by `tests/test_review_api_token_gate_smoke.py`:
+  - `test_probe_catalogue_is_get_only`
+  - `test_smoke_only_issues_get_requests`
+  - `test_request_helper_never_sends_a_body`
+  - `test_script_never_constructs_state_changing_git_or_post`
+- **Does not derive identity from the token.** No reviewer_id is
+  written by the smoke; no review-decision endpoint is hit.
+- **Does not modify verdict / publication / semantic activation.**
+- **Does not call OpenAI.** Pinned by
+  `tests/test_review_api_token_gate_smoke.py::StaticSafetyTests`.
+- **Does not import any network library besides stdlib `urllib`.**
+  No `requests`, no `httpx`, no `urllib3`.
+
+## I. Future work (post-M9.5)
 
 - Proper auth + admin layer to replace the temporary token gate.
 - Postgres dual-write for review tables to match the existing pattern

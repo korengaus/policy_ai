@@ -39,6 +39,7 @@ python tests/test_review_workflow_smoke.py
 python tests/test_operator_preflight.py   # M8.5: operator preflight helper
 python tests/test_review_bundle.py        # M8.6: post-implementation review bundle helper
 python tests/test_review_api_exposure_smoke.py  # M8.8: no-token public-exposure smoke
+python tests/test_review_api_token_gate_smoke.py # M9.5: controlled token-gate smoke (mocked HTTP)
 python tests/test_review_audit_trail.py   # M9.0 + M9.1: decision audit trail + audit packet endpoint
 python tests/test_review_ui_local_demo.py # M9.3: local reviewer UI activation dry-run helper
 npm test   # runs regression.test.js + localstorage_slim.test.js + review_ui.test.js (M8.1 + M8.2 + M8.7 + M9.0 + M9.2 + M9.4)
@@ -180,6 +181,21 @@ visiting `https://policy-ai-q5ax.onrender.com/?operator_tools=1`
 (the reviewer/admin panels stay disabled-by-default for normal
 public visitors, and the review API itself remains 503-disabled
 until `REVIEW_API_ENABLED=true` is set in the Render dashboard).
+
+For the M9.5 controlled token-gate smoke (offline tests use mocked
+HTTP only — the live smoke is intentionally not part of validate /
+quick):
+
+```
+python tests/test_review_api_token_gate_smoke.py
+```
+
+Live token-gate runs are not part of `validate.py` or the `quick`
+operational profile. They are only safe to invoke when the operator
+has manually set `REVIEW_API_ENABLED=true` + `REVIEW_API_TOKEN` on
+the deploy AND has a matching `REVIEW_API_SMOKE_TOKEN` env var in
+their local PowerShell session. See `docs/REVIEW_WORKFLOW.md`
+§H'''''''''' for the operator runbook.
 
 Before staging changes, the M8.5 preflight helper recommends a precise
 `git add` command (never stages anything itself). It is exercised in

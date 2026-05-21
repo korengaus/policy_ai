@@ -60,6 +60,7 @@ def _commands() -> List[List[str]]:
         [python, "tests/test_operator_preflight.py"],
         [python, "tests/test_review_bundle.py"],
         [python, "tests/test_review_api_exposure_smoke.py"],
+        [python, "tests/test_review_api_token_gate_smoke.py"],
         [python, "tests/test_review_ui_local_demo.py"],
         [npm, "test"],
     ]

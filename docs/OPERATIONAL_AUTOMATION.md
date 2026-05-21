@@ -42,6 +42,7 @@ decisions and never modifies Render env.
 | `historical` | historical builder dry-run + deterministic eval (if file exists) | No | No | check builder output / regenerate batch evaluation |
 | `review-local` (M8.3) | offline reviewer-workflow smoke — `scripts/smoke_review_workflow.py --self-contained` | No | No | exercise M8.0–M8.2 reviewer surface against a temp SQLite DB with a dummy in-process token |
 | `review-exposure` (M8.8) | no-token public-exposure smoke — `scripts/smoke_review_api_exposure.py --expect-disabled` | Yes | No | verify `/review/*` is disabled-or-token-gated on a deploy after reviewer/admin UI or review API changes |
+| `review-token-gate` (M9.5) | controlled token-gate smoke — `scripts/smoke_review_api_token_gate.py --token-env REVIEW_API_SMOKE_TOKEN` | Yes | No | verify the token gate works after the operator manually enables review API on Render; requires local `REVIEW_API_SMOKE_TOKEN` env var |
 | `full` | `validate` + `render-canary` + `historical` | Yes | Indirectly via Render | nightly / weekly comprehensive check |
 
 ## D. Common usage
@@ -675,6 +676,80 @@ This is **not** added to any operational profile:
 
 See `docs/REVIEW_WORKFLOW.md` §H'''''''' for the visual-confirmation
 runbook the helper prints.
+
+## F'''''''. Controlled review API token-gate smoke (M9.5)
+
+The `review-token-gate` profile wraps
+`scripts/smoke_review_api_token_gate.py`. **It is only safe to run
+when the operator has intentionally set `REVIEW_API_ENABLED=true` +
+`REVIEW_API_TOKEN` in the Render dashboard** and has matched that
+value to a local `REVIEW_API_SMOKE_TOKEN` env var. M9.5 itself does
+not change Render env.
+
+### Exact command
+
+```powershell
+$env:REVIEW_API_SMOKE_TOKEN = "<paste-locally-only>"
+python scripts/run_operational_checks.py --profile review-token-gate \
+  --base-url https://policy-ai-q5ax.onrender.com
+Remove-Item Env:\REVIEW_API_SMOKE_TOKEN
+```
+
+### What this profile does
+
+- Issues exactly **6** GET requests against `/review/tasks` and
+  `/review/tasks/<nonexistent>/{ ,decisions,audit-packet}`:
+  - 1× no-token (expect 403)
+  - 1× wrong-token (expect 403)
+  - 4× correct-token (expect 200 + three 404s after auth passes)
+- Classifies each response. Pass requires `token_required_count=2`,
+  `valid_token_read_ok=true`, `auth_passed_not_found_count=3`,
+  `public_access_detected=false`, `disabled_detected=false`,
+  `unexpected_count=0`.
+- Surfaces structured metrics under `commands[i].metrics`:
+  `public_access_detected`, `disabled_detected`, `token_gate_ok`,
+  `valid_token_read_ok`, `auth_passed_not_found_count`,
+  `token_required_count`, `disabled_count`, `unexpected_count`,
+  `recommendation`.
+
+### What this profile does NOT do
+
+- **Does not enable the review API.** Render env is not modified.
+- **Does not require a token via CLI.** The token is read only from
+  the local env var named by `--token-env` (default
+  `REVIEW_API_SMOKE_TOKEN`). Missing/empty env → exit 2 with a safe
+  PowerShell instruction; the token value never appears in stdout /
+  stderr / JSON / the runner's report / the command line.
+- **Does not call OpenAI.** Stdlib `urllib` only.
+- **Does not run from `quick` / `validate` / `review-exposure` /
+  `render-canary`.** Each of those keeps a different invariant; this
+  profile stands alone.
+- **`--skip-render` drops the step entirely** (so the runner can
+  no-op the profile in a harness).
+
+### `_next_actions` behavior
+
+- `public_access_detected=true` → leads with the same
+  "PUBLIC EXPOSURE" rollback hint as `review-exposure`.
+- `disabled_detected=true` → explains the review API isn't enabled
+  on this deploy and points to `review-exposure` as the right check
+  for that state. No public exposure was detected.
+- `token_rejected_valid_request` → explains the local
+  `REVIEW_API_SMOKE_TOKEN` doesn't match Render's
+  `REVIEW_API_TOKEN`. Reminds the operator not to paste either
+  value into chat or a committed file.
+- pass → "Safe to proceed with token-gated review API checks."
+
+### Validation
+
+```
+python tests/test_review_api_token_gate_smoke.py
+python tests/test_operational_checks_runner.py
+```
+
+The unit tests use mocked HTTP responses; no real Render call, no
+real token required. The live profile is intentionally **not** part
+of CI.
 
 ## G. Relationship to future AI agents automation
 
