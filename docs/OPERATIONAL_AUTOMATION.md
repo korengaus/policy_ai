@@ -201,6 +201,85 @@ EMBEDDING_PROVIDER=disabled
 Then re-run `--profile post-commit` to confirm the legacy verdict path
 is unchanged.
 
+## F'. Semantic canary safety classification (M8.4)
+
+Render canary runs historically returned `overall_status=warn` whenever
+`runtime_p95_ms` exceeded the 1500 ms warn threshold, even when every
+semantic safety metric was clean. That made `warn` ambiguous — was it
+"runtime is slow today" or "the canary detected a semantic safety
+regression"? M8.4 splits those signals so the report answers that
+question without re-reading the raw scorecard.
+
+The canary step's `metrics` block now carries:
+
+| field | values | meaning |
+| --- | --- | --- |
+| `semantic_safety_status` | `pass` / `warn` / `fail` | Looks **only** at provider errors, overstrong_like detection, and semantic availability. Never at runtime / cap_ratio. |
+| `semantic_runtime_status` | `pass` / `warn` | Tripped by `runtime_p95_ms > 1500` or `cap_ratio > 0.70`. Never `fail` — runtime is a soft signal. |
+| `rollback_recommended` | `true` / `false` | `true` only when at least one hard safety signal fires. |
+| `rollback_reasons` | list of strings | One entry per hard safety signal that fired (provider errors, overstrong_like, semantic configured-but-unavailable, smoke exit 1/2). |
+| `warn_only_reasons` | list of strings | Soft signals that warrant attention but **not** rollback (runtime, cap_ratio). |
+| `semantic_safety_summary` | short string | Single-line human-readable digest for reports. |
+
+These fields are surfaced in three places:
+
+1. The per-step `summary` string appends
+   `semantic_safety_status=...`, `semantic_runtime_status=...`, and
+   `rollback_recommended=...`.
+2. The JSON report stores the full lists under
+   `commands[i].metrics`.
+3. The runner's per-run `next_actions` block prints specific
+   guidance — either the rollback recipe (with reasons) or the
+   "runtime-only warn — no rollback recommended" message.
+
+### Classification rules
+
+The classifier is deterministic. Same canary scorecard always produces
+the same classification.
+
+- `rollback_recommended=true` (and therefore `semantic_safety_status=fail`)
+  when **any** of:
+  - `provider_errors > 0`
+  - `overstrong_like > 0`
+  - smoke exit code 2 (semantic expected enabled but unavailable, with
+    `--fail-on-semantic-unavailable`)
+  - `semantic_enabled=1` and `semantic_available=0` in the scorecard
+  - smoke exit code 1 (script / server / result-shape failure)
+- `semantic_safety_status=pass` when `provider_errors=0` and
+  `overstrong_like=0` and no rollback trigger fires.
+- `semantic_runtime_status=warn` when `runtime_p95_ms > 1500` or
+  `cap_ratio > 0.70`. Runtime warnings alone do **not** force a
+  rollback.
+- A scorecard with `health=warn` but a hard safety trigger (e.g.
+  `semantic_enabled=1` + `semantic_available=0`) is **promoted** to
+  step status `fail` and `rollback_recommended=true`. The classifier
+  is intentionally more conservative than the smoke's `health` value
+  here.
+
+### Reading the runner output
+
+- `provider_errors=0` and `overstrong_like=0` with `semantic_available=1`
+  means semantic safety is clean. Even when overall status is `warn`,
+  the operator should look at `semantic_safety_status` first — if it
+  is `pass`, the warn is runtime-only and no rollback is recommended.
+- A runtime-only warn alone is **not** a rollback reason. Re-run after
+  a few minutes; warm-cache effects typically resolve it.
+- The runner's printed `next_actions` block tells the operator whether
+  a rollback is recommended. If it says "no rollback recommended",
+  trust it — the classifier already inspected every hard safety signal.
+
+### Exact render-canary command
+
+```
+python scripts/run_operational_checks.py --profile render-canary \
+  --base-url https://policy-ai-q5ax.onrender.com \
+  --include-secondary-query
+```
+
+This is the command the operator runs after a Render redeploy. The
+runner never modifies Render env; rollback is still a manual operator
+action in the Render dashboard.
+
 ## G. Relationship to future AI agents automation
 
 This is the first automation layer. It produces structured JSON

@@ -181,6 +181,47 @@ Computed deterministically by
 - UI / export wording changed (this should be impossible because no
   M7.x code touches that path — but smoke verifies)
 
+## G'. Runtime-only warn interpretation (M8.4)
+
+Recent Render canary runs frequently produced `health=warn` purely
+because `runtime_ms_p95` crossed the 1500 ms threshold — even when
+every semantic safety metric was clean (`provider_error_count=0`,
+`overstrong_like_count=0`, `semantic_available=1`, `cap_ratio=0.0`).
+That made `warn` ambiguous and slow to interpret. M8.4 splits the
+runner-side classification so the operator can tell at a glance:
+
+> Is this a runtime hiccup, or did the canary catch a real semantic
+> safety regression?
+
+`scripts/run_operational_checks.py` (M8.4) attaches a
+`semantic_safety_status` / `semantic_runtime_status` /
+`rollback_recommended` triple to every canary step. See
+`docs/OPERATIONAL_AUTOMATION.md` §F' for the full table.
+
+**Rollback criteria** (`rollback_recommended=true`):
+
+- `provider_error_count > 0`
+- `overstrong_like_count > 0`
+- `semantic_available_count = 0` when semantic was expected enabled
+  (smoke exit code 2 / `--fail-on-semantic-unavailable`, OR scorecard
+  shows `semantic_enabled=1` with `semantic_available=0`)
+- the legacy async smoke fails on the same endpoint
+- smoke script / server / result-shape failure (smoke exit 1)
+
+**Non-rollback criteria** (`rollback_recommended=false`):
+
+- `runtime_p95` above threshold **alone**, with clean safety metrics
+  (`provider_errors=0`, `overstrong_like=0`, `semantic_available=1`).
+  Re-run after a few minutes — warm-cache effects typically resolve
+  it.
+- `cap_ratio` above 0.70 **alone** with otherwise clean safety
+  metrics. Investigate input drift before declaring it a regression;
+  a single noisy query can trip cap_ratio on small `n`.
+
+The smoke's `health` value is still `warn` in these cases, but the
+runner clearly reports `semantic_safety_status=pass` and
+`rollback_recommended=false`. No env-var change is needed.
+
 ## H. Rollback
 
 Reverse the env-var change in the Render dashboard:

@@ -32,7 +32,7 @@ python tests/test_semantic_real_claim_batch.py
 python tests/test_historical_claim_batch_builder.py
 python tests/test_semantic_canary_metrics.py
 python tests/test_smoke_semantic_canary.py
-python tests/test_operational_checks_runner.py
+python tests/test_operational_checks_runner.py    # includes M8.4 canary classification tests
 python tests/test_review_workflow.py
 python tests/test_review_api.py
 python tests/test_review_workflow_smoke.py

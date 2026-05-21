@@ -393,41 +393,221 @@ _CANARY_SCORE_RE = re.compile(
 )
 
 
+def _canary_safe_int(value: Any, default: int = 0) -> int:
+    try:
+        if value is None:
+            return default
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _canary_safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+# M8.4 thresholds — kept in sync with semantic_canary_metrics.WARN_* constants.
+# Duplicated here (not imported) because run_operational_checks.py is a pure
+# subprocess orchestrator and must not import verdict / scoring / agent modules.
+_CANARY_WARN_CAP_RATIO = 0.70
+_CANARY_WARN_RUNTIME_MS_P95 = 1500
+
+
+def _classify_canary_semantic_safety(fields: dict, exit_code: int) -> dict:
+    """Phase 2 M8.4: separate semantic safety signals from runtime-only warns.
+
+    Returns a dict with stable keys the runner / report can rely on:
+
+    * ``semantic_safety_status`` — ``pass`` / ``warn`` / ``fail``. Looks only
+      at provider errors, overstrong_like detection, and semantic
+      availability — never at runtime / cap_ratio.
+    * ``semantic_runtime_status`` — ``pass`` / ``warn``. Tripped by
+      runtime_p95 above the M7.2 threshold or cap_ratio above 0.70.
+    * ``rollback_recommended`` — bool. ``True`` only when at least one
+      hard safety signal fires (provider_errors > 0, overstrong_like > 0,
+      semantic configured-but-unavailable, smoke exit 1/2).
+    * ``rollback_reasons`` — list of human-readable strings, one per hard
+      safety signal.
+    * ``warn_only_reasons`` — list of human-readable strings for soft
+      signals that warrant attention but **not** rollback (runtime, cap).
+    * ``semantic_safety_summary`` — short single-line message for reports.
+
+    The classifier is deterministic — same input always produces the
+    same output. It never recommends "verified" and never claims a
+    semantic match strength is a verdict. The whole point of this layer
+    is operational, not verdict.
+    """
+    provider_errors = _canary_safe_int(fields.get("provider_errors"))
+    overstrong_like = _canary_safe_int(fields.get("overstrong_like"))
+    semantic_enabled = _canary_safe_int(fields.get("semantic_enabled"))
+    semantic_available = _canary_safe_int(fields.get("semantic_available"))
+    cap_ratio = _canary_safe_float(fields.get("cap_ratio"))
+    runtime_p95 = _canary_safe_int(fields.get("runtime_p95_ms"))
+
+    rollback_reasons: List[str] = []
+    warn_only_reasons: List[str] = []
+
+    # Hard safety signals → rollback. Order matches the runbook.
+    if provider_errors > 0:
+        rollback_reasons.append(
+            f"provider_errors={provider_errors} — provider failures must be addressed"
+        )
+    if overstrong_like > 0:
+        rollback_reasons.append(
+            f"overstrong_like={overstrong_like} — critical mismatch detected with "
+            "strong support (M6.5-style failure mode)"
+        )
+    if exit_code == 2:
+        rollback_reasons.append(
+            "semantic was expected enabled but unavailable "
+            "(smoke_semantic_canary exit code 2 / --fail-on-semantic-unavailable)"
+        )
+    elif semantic_enabled > 0 and semantic_available == 0:
+        # Even without --fail-on-semantic-unavailable, configured-but-
+        # unavailable semantic on a canary run is a rollback trigger:
+        # the canary was meant to measure live semantic behavior and the
+        # provider isn't answering.
+        rollback_reasons.append(
+            "semantic_enabled=1 but semantic_available=0 — provider configured "
+            "but unavailable"
+        )
+    if exit_code == 1:
+        rollback_reasons.append(
+            "smoke_semantic_canary exited 1 (script / server / result-shape failure)"
+        )
+
+    # Soft signals — these are warn-only and must NOT promote to rollback.
+    if cap_ratio > _CANARY_WARN_CAP_RATIO:
+        warn_only_reasons.append(
+            f"cap_ratio={cap_ratio:.3f} > {_CANARY_WARN_CAP_RATIO:.2f} — "
+            "guardrails carrying high safety load; investigate input drift"
+        )
+    if runtime_p95 > _CANARY_WARN_RUNTIME_MS_P95:
+        warn_only_reasons.append(
+            f"runtime_p95_ms={runtime_p95} > {_CANARY_WARN_RUNTIME_MS_P95} — "
+            "verify Render request budget (cold-start / warm-cache effects)"
+        )
+
+    rollback_recommended = bool(rollback_reasons)
+
+    if rollback_recommended:
+        semantic_safety_status = _HEALTH_FAIL
+    elif provider_errors == 0 and overstrong_like == 0:
+        # Clean safety signals. Note semantic_enabled=0 with available=0
+        # is also "pass" — the canary just isn't measuring live semantic.
+        semantic_safety_status = _HEALTH_PASS
+    else:
+        semantic_safety_status = _HEALTH_WARN
+
+    semantic_runtime_status = _HEALTH_WARN if warn_only_reasons else _HEALTH_PASS
+
+    if semantic_safety_status == _HEALTH_PASS:
+        safety_summary = (
+            "semantic safety clean: "
+            f"provider_errors=0 overstrong_like=0 "
+            f"semantic_enabled={semantic_enabled} "
+            f"semantic_available={semantic_available}"
+        )
+    elif semantic_safety_status == _HEALTH_FAIL:
+        safety_summary = "semantic safety FAIL — " + "; ".join(rollback_reasons)
+    else:
+        safety_summary = "semantic safety degraded but no rollback trigger"
+
+    return {
+        "semantic_safety_status": semantic_safety_status,
+        "semantic_runtime_status": semantic_runtime_status,
+        "rollback_recommended": rollback_recommended,
+        "rollback_reasons": rollback_reasons,
+        "warn_only_reasons": warn_only_reasons,
+        "semantic_safety_summary": safety_summary,
+    }
+
+
 def _parse_smoke_canary_output(stdout: str, stderr: str, exit_code: int) -> dict:
-    # Map smoke_semantic_canary exit codes to runner statuses.
-    #   0 — clean
-    #   1 — script / server failure → fail
-    #   2 — semantic unavailable when expected → fail
-    #   3 — health warn/fail when --fail-on-health-warn was set → warn or fail
-    if exit_code in (1, 2):
+    """Phase 2 M8.4: parse the canary scorecard and classify safety vs. runtime.
+
+    smoke_semantic_canary exit codes:
+        0 — clean
+        1 — script / server failure → fail
+        2 — semantic unavailable when expected → fail
+        3 — health warn/fail when --fail-on-health-warn was set → warn or fail
+
+    Every code path now goes through ``_classify_canary_semantic_safety``
+    so the report always carries the new M8.4 fields (semantic_safety_status,
+    semantic_runtime_status, rollback_recommended, rollback_reasons,
+    warn_only_reasons, semantic_safety_summary), even when the scorecard
+    line is missing or the smoke failed early.
+    """
+    match = _CANARY_SCORE_RE.search(stdout)
+    fields: Dict[str, Any] = match.groupdict() if match else {}
+    classification = _classify_canary_semantic_safety(fields, exit_code)
+
+    metrics: Dict[str, Any] = {**fields, **classification}
+    rb_flag = "true" if classification["rollback_recommended"] else "false"
+
+    # Step status. The runner-level status uses the smoke's own health
+    # mapping for exit 0; exit 1/2 are hard fails; exit 3 (warn/fail with
+    # --fail-on-health-warn) is treated as warn or fail based on the
+    # scorecard health value.
+    if exit_code == 1:
         return {
             "status": _HEALTH_FAIL,
-            "summary": f"smoke_semantic_canary exited {exit_code}",
+            "summary": (
+                f"smoke_semantic_canary exited 1 — {classification['semantic_safety_summary']} "
+                f"rollback_recommended={rb_flag}"
+            ),
+            "metrics": metrics,
+        }
+    if exit_code == 2:
+        return {
+            "status": _HEALTH_FAIL,
+            "summary": (
+                "smoke_semantic_canary exited 2 — semantic expected enabled but unavailable "
+                f"rollback_recommended={rb_flag}"
+            ),
+            "metrics": metrics,
         }
 
-    match = _CANARY_SCORE_RE.search(stdout)
     if not match:
         return {
             "status": _HEALTH_UNKNOWN if exit_code == 0 else _HEALTH_FAIL,
             "summary": "smoke_semantic_canary scorecard line not detected",
+            "metrics": metrics,
         }
-    fields = match.groupdict()
+
     health = fields.get("health", "unknown").lower()
     status_map = {"pass": _HEALTH_PASS, "warn": _HEALTH_WARN, "fail": _HEALTH_FAIL}
     status = status_map.get(health, _HEALTH_UNKNOWN)
+
+    # When the smoke reports health=warn but the safety classifier flags a
+    # rollback signal (e.g. semantic_enabled=1 but semantic_available=0),
+    # promote the step status to fail. The classifier is conservative —
+    # we trust it over the smoke's softer ``health`` value here.
+    if classification["rollback_recommended"] and status != _HEALTH_FAIL:
+        status = _HEALTH_FAIL
+
+    summary_text = (
+        "smoke_semantic_canary: "
+        f"health={health} "
+        f"semantic_enabled={fields['semantic_enabled']} "
+        f"semantic_available={fields['semantic_available']} "
+        f"provider_errors={fields['provider_errors']} "
+        f"overstrong_like={fields['overstrong_like']} "
+        f"cap_ratio={fields['cap_ratio']} "
+        f"runtime_p95_ms={fields['runtime_p95_ms']} "
+        f"semantic_safety_status={classification['semantic_safety_status']} "
+        f"semantic_runtime_status={classification['semantic_runtime_status']} "
+        f"rollback_recommended={rb_flag}"
+    )
     return {
         "status": status,
-        "summary": (
-            "smoke_semantic_canary: "
-            f"health={health} "
-            f"semantic_enabled={fields['semantic_enabled']} "
-            f"semantic_available={fields['semantic_available']} "
-            f"provider_errors={fields['provider_errors']} "
-            f"overstrong_like={fields['overstrong_like']} "
-            f"cap_ratio={fields['cap_ratio']} "
-            f"runtime_p95_ms={fields['runtime_p95_ms']}"
-        ),
-        "metrics": {k: v for k, v in fields.items()},
+        "summary": summary_text,
+        "metrics": metrics,
     }
 
 
@@ -654,15 +834,73 @@ def _classify_overall(records: List[dict]) -> str:
 
 
 def _next_actions(overall: str, records: List[dict]) -> List[str]:
-    """Operational hints based on the overall status. Conservative."""
+    """Operational hints based on the overall status. Conservative.
+
+    M8.4: when a semantic canary step is present, use its
+    ``rollback_recommended`` / ``rollback_reasons`` / ``warn_only_reasons``
+    classification to split clear rollback guidance from runtime-only
+    warnings. Runtime-only warnings explicitly do **not** trigger a
+    rollback recommendation; the operator should re-run after caches
+    warm up. Hard safety signals (provider_errors, overstrong_like,
+    semantic unavailable while expected) always do.
+    """
+    canary_records = [
+        r for r in records
+        if str(r.get("name", "")).startswith("smoke_semantic_canary(")
+    ]
+    rollback_records = [
+        r for r in canary_records
+        if (r.get("metrics") or {}).get("rollback_recommended")
+    ]
+    runtime_only_records = [
+        r for r in canary_records
+        if (r.get("metrics") or {}).get("semantic_runtime_status") == _HEALTH_WARN
+        and not (r.get("metrics") or {}).get("rollback_recommended")
+    ]
+
+    if rollback_records:
+        actions: List[str] = []
+        for r in rollback_records:
+            reasons = (r.get("metrics") or {}).get("rollback_reasons") or []
+            joined = "; ".join(reasons) if reasons else "rollback_recommended=true"
+            actions.append(f"{r['name']}: rollback_recommended=true — {joined}")
+        actions.append(
+            "Roll back the Render semantic env vars in the dashboard "
+            "(SEMANTIC_MATCHING_ENABLED=false, EMBEDDING_PROVIDER=disabled) "
+            "and re-run --profile post-commit to confirm the legacy verdict "
+            "path is unchanged."
+        )
+        actions.append(
+            "Do not commit code that broke validate.py. Reports under "
+            "reports/ are gitignored — keep them locally for the postmortem."
+        )
+        return actions
+
     if overall == _HEALTH_FAIL:
         return [
             "At least one step failed. Inspect stderr_tail in the JSON report.",
-            "For Render canary failures, consider rolling back env vars in the "
-            "Render dashboard (SEMANTIC_MATCHING_ENABLED=false, "
-            "EMBEDDING_PROVIDER=disabled) and re-running --profile post-commit.",
+            "For non-canary failures, fix the failing step locally and re-run "
+            "--profile quick before pushing.",
             "Do not commit code that broke validate.py.",
         ]
+
+    if runtime_only_records:
+        actions = []
+        for r in runtime_only_records:
+            warns = (r.get("metrics") or {}).get("warn_only_reasons") or []
+            joined = "; ".join(warns) if warns else "runtime warn"
+            actions.append(
+                f"{r['name']}: runtime-only warn — {joined}. Semantic safety "
+                "signals are clean (provider_errors=0, overstrong_like=0, "
+                "semantic_available=1); no rollback recommended."
+            )
+        actions.append(
+            "Runtime-only semantic canary warning detected. Re-run after a "
+            "few minutes to see if warm caches resolve the warning; no "
+            "rollback needed unless the warn pattern persists across runs."
+        )
+        return actions
+
     if overall == _HEALTH_WARN:
         return [
             "Warn-level signals detected. Common causes: cold-start runtime, "

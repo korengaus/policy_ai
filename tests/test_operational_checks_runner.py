@@ -265,6 +265,156 @@ class ParserTests(unittest.TestCase):
             "some unrelated output", "", 0,
         )
         self.assertEqual(parsed["status"], "unknown")
+        # M8.4 — even with no scorecard the safety classification fields
+        # must be present (default to clean / no rollback).
+        metrics = parsed["metrics"]
+        self.assertEqual(metrics["semantic_safety_status"], "pass")
+        self.assertEqual(metrics["semantic_runtime_status"], "pass")
+        self.assertFalse(metrics["rollback_recommended"])
+        self.assertEqual(metrics["rollback_reasons"], [])
+
+    # -----------------------------------------------------------------------
+    # M8.4 — semantic canary safety classification
+    # -----------------------------------------------------------------------
+
+    _RUNTIME_ONLY_WARN_FIXTURE = (
+        "result_count=1 semantic_summary_count=1 semantic_enabled=1 "
+        "semantic_available=1 provider_errors=0 overstrong_like=0 "
+        "cap_ratio=0.000 runtime_p95_ms=7523 health=warn"
+    )
+
+    _CLEAN_PASS_FIXTURE = (
+        "result_count=1 semantic_summary_count=1 semantic_enabled=1 "
+        "semantic_available=1 provider_errors=0 overstrong_like=0 "
+        "cap_ratio=0.000 runtime_p95_ms=400 health=pass"
+    )
+
+    def test_canary_runtime_only_warn_is_not_rollback(self):
+        parsed = runner_module._parse_smoke_canary_output(
+            self._RUNTIME_ONLY_WARN_FIXTURE, "", 0,
+        )
+        # Step status preserves the smoke's own warn classification — this
+        # is intentionally not promoted to fail.
+        self.assertEqual(parsed["status"], "warn")
+        metrics = parsed["metrics"]
+        self.assertEqual(metrics["semantic_safety_status"], "pass")
+        self.assertEqual(metrics["semantic_runtime_status"], "warn")
+        self.assertFalse(metrics["rollback_recommended"])
+        self.assertEqual(metrics["rollback_reasons"], [])
+        # warn_only_reasons should mention the runtime threshold trip.
+        joined_warns = " ".join(metrics["warn_only_reasons"])
+        self.assertIn("runtime_p95_ms", joined_warns)
+        # Summary surfaces the classification flags explicitly.
+        self.assertIn("semantic_safety_status=pass", parsed["summary"])
+        self.assertIn("rollback_recommended=false", parsed["summary"])
+
+    def test_canary_runtime_only_warn_next_actions_say_no_rollback(self):
+        parsed = runner_module._parse_smoke_canary_output(
+            self._RUNTIME_ONLY_WARN_FIXTURE, "", 0,
+        )
+        record = {
+            "name": "smoke_semantic_canary(전세사기/expect-enabled)",
+            "status": parsed["status"],
+            "metrics": parsed["metrics"],
+        }
+        actions = runner_module._next_actions("warn", [record])
+        joined = "\n".join(actions)
+        self.assertIn("runtime-only warn", joined)
+        self.assertIn("no rollback recommended", joined)
+        # Hard rollback message must NOT appear.
+        self.assertNotIn("Roll back the Render semantic env vars", joined)
+
+    def test_canary_provider_errors_force_rollback(self):
+        sample = (
+            "result_count=1 semantic_summary_count=1 semantic_enabled=1 "
+            "semantic_available=1 provider_errors=1 overstrong_like=0 "
+            "cap_ratio=0.000 runtime_p95_ms=400 health=fail"
+        )
+        parsed = runner_module._parse_smoke_canary_output(sample, "", 0)
+        self.assertEqual(parsed["status"], "fail")
+        metrics = parsed["metrics"]
+        self.assertEqual(metrics["semantic_safety_status"], "fail")
+        self.assertTrue(metrics["rollback_recommended"])
+        joined_reasons = " ".join(metrics["rollback_reasons"])
+        self.assertIn("provider_errors=1", joined_reasons)
+        actions = runner_module._next_actions("fail", [
+            {"name": "smoke_semantic_canary(전세사기/expect-enabled)",
+             "status": "fail", "metrics": metrics},
+        ])
+        joined = "\n".join(actions)
+        self.assertIn("rollback_recommended=true", joined)
+        self.assertIn("provider_errors=1", joined)
+        self.assertIn("Roll back the Render semantic env vars", joined)
+
+    def test_canary_overstrong_like_forces_rollback(self):
+        sample = (
+            "result_count=1 semantic_summary_count=1 semantic_enabled=1 "
+            "semantic_available=1 provider_errors=0 overstrong_like=1 "
+            "cap_ratio=0.000 runtime_p95_ms=400 health=fail"
+        )
+        parsed = runner_module._parse_smoke_canary_output(sample, "", 0)
+        self.assertEqual(parsed["status"], "fail")
+        metrics = parsed["metrics"]
+        self.assertEqual(metrics["semantic_safety_status"], "fail")
+        self.assertTrue(metrics["rollback_recommended"])
+        joined_reasons = " ".join(metrics["rollback_reasons"])
+        self.assertIn("overstrong_like=1", joined_reasons)
+
+    def test_canary_semantic_unavailable_while_expected_forces_rollback(self):
+        # Health=warn but the safety classifier should promote to fail
+        # because semantic_enabled=1 with semantic_available=0 means the
+        # canary was meant to measure semantic and the provider isn't
+        # answering.
+        sample = (
+            "result_count=1 semantic_summary_count=1 semantic_enabled=1 "
+            "semantic_available=0 provider_errors=0 overstrong_like=0 "
+            "cap_ratio=0.000 runtime_p95_ms=400 health=warn"
+        )
+        parsed = runner_module._parse_smoke_canary_output(sample, "", 0)
+        # Promoted to fail by the classifier.
+        self.assertEqual(parsed["status"], "fail")
+        metrics = parsed["metrics"]
+        self.assertEqual(metrics["semantic_safety_status"], "fail")
+        self.assertTrue(metrics["rollback_recommended"])
+        joined_reasons = " ".join(metrics["rollback_reasons"])
+        self.assertIn("semantic_available=0", joined_reasons)
+
+    def test_canary_exit_2_records_rollback_reason(self):
+        # Even with an empty scorecard line, exit 2 means semantic was
+        # expected enabled but unavailable.
+        parsed = runner_module._parse_smoke_canary_output("", "FAIL: semantic", 2)
+        self.assertEqual(parsed["status"], "fail")
+        metrics = parsed["metrics"]
+        self.assertTrue(metrics["rollback_recommended"])
+        joined_reasons = " ".join(metrics["rollback_reasons"])
+        self.assertIn("expected enabled but unavailable", joined_reasons)
+
+    def test_canary_clean_pass_has_no_rollback_and_runtime_pass(self):
+        parsed = runner_module._parse_smoke_canary_output(
+            self._CLEAN_PASS_FIXTURE, "", 0,
+        )
+        self.assertEqual(parsed["status"], "pass")
+        metrics = parsed["metrics"]
+        self.assertEqual(metrics["semantic_safety_status"], "pass")
+        self.assertEqual(metrics["semantic_runtime_status"], "pass")
+        self.assertFalse(metrics["rollback_recommended"])
+        self.assertEqual(metrics["rollback_reasons"], [])
+        self.assertEqual(metrics["warn_only_reasons"], [])
+
+    def test_canary_cap_ratio_warn_is_warn_only(self):
+        sample = (
+            "result_count=1 semantic_summary_count=1 semantic_enabled=1 "
+            "semantic_available=1 provider_errors=0 overstrong_like=0 "
+            "cap_ratio=0.850 runtime_p95_ms=400 health=warn"
+        )
+        parsed = runner_module._parse_smoke_canary_output(sample, "", 0)
+        self.assertEqual(parsed["status"], "warn")
+        metrics = parsed["metrics"]
+        self.assertEqual(metrics["semantic_safety_status"], "pass")
+        self.assertEqual(metrics["semantic_runtime_status"], "warn")
+        self.assertFalse(metrics["rollback_recommended"])
+        joined_warns = " ".join(metrics["warn_only_reasons"])
+        self.assertIn("cap_ratio", joined_warns)
 
     def test_review_local_pass_detected(self):
         # Realistic smoke output: human summary + JSON tail.
