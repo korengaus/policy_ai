@@ -35,7 +35,7 @@ python tests/test_smoke_semantic_canary.py
 python tests/test_operational_checks_runner.py
 python tests/test_review_workflow.py
 python tests/test_review_api.py
-npm test   # runs regression.test.js + localstorage_slim.test.js + review_ui.test.js (M8.1)
+npm test   # runs regression.test.js + localstorage_slim.test.js + review_ui.test.js (M8.1 + M8.2)
 ```
 
 **Shortcut**: instead of running each test individually, use the

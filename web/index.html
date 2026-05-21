@@ -1225,6 +1225,33 @@
       color: #991b1b;
     }
 
+    .server-review-register-panel {
+      border: 1px solid #c7d2fe;
+      border-radius: 10px;
+      background: #eef2ff;
+      padding: 14px;
+    }
+
+    .server-review-register-panel h4 {
+      margin: 0 0 6px 0;
+      color: #312e81;
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    .server-review-register-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+      flex-wrap: wrap;
+    }
+
+    .server-review-register-actions button {
+      min-height: 36px;
+      padding: 6px 14px;
+      font-size: 13px;
+    }
+
     .server-review-list-panel {
       border: 1px solid #cbd5e1;
       border-radius: 10px;
@@ -2221,6 +2248,19 @@
                 코드, 로그, URL에는 포함되지 않습니다.
               </div>
               <div id="serverReviewStatus" class="server-review-status" role="status" aria-live="polite"></div>
+            </div>
+
+            <div class="server-review-register-panel">
+              <h4>분석 결과 → 검수 큐 등록</h4>
+              <div class="reader-note">
+                현재 화면에 표시 중인 분석 결과를 서버 검수 큐에 사람 검토 필요 상태로 등록합니다.
+                이 동작은 게시가 아니며, final_decision / policy_confidence / verification_card 값은
+                변경되지 않습니다. 같은 결과를 다시 등록하면 기존 검수 작업이 그대로 사용됩니다.
+              </div>
+              <div class="server-review-register-actions">
+                <button id="serverReviewRegisterCurrentBtn" class="primary" type="button">검수 큐에 등록</button>
+              </div>
+              <div id="serverReviewRegisterStatus" class="server-review-status" role="status" aria-live="polite"></div>
             </div>
 
             <div class="server-review-list-panel">
@@ -7731,6 +7771,9 @@
       "리뷰 API가 비활성화되어 있습니다. 로컬/운영 환경에서 REVIEW_API_ENABLED 설정이 필요합니다.";
     const SERVER_REVIEW_API_FORBIDDEN_MESSAGE =
       "X-Review-Token이 누락되었거나 일치하지 않습니다. 토큰을 다시 확인해 주세요.";
+    const SERVER_REVIEW_NO_CURRENT_RESULT_MESSAGE =
+      "등록할 분석 결과가 없습니다. 먼저 분석을 실행하거나 기록에서 결과를 선택하세요.";
+    const SERVER_REVIEW_FROM_RESULT_PATH = "/review/tasks/from-result";
 
     let serverReviewSelectedTaskId = null;
     let serverReviewLastList = [];
@@ -8037,6 +8080,106 @@
       await serverReviewLoadList();
     }
 
+    // M8.2 — Build the /review/tasks/from-result body from the current
+    // analysis result snapshot without mutating the source. The caller
+    // passes `currentReportContext` (or a compatible shape). Only safe,
+    // already-public fields go into the payload; the server still runs
+    // its own snapshot extractor for verdict-side fields.
+    function buildReviewTaskFromResultPayload(context, itemIndex) {
+      const safeContext = context && typeof context === "object" ? context : {};
+      const sourceResults = Array.isArray(safeContext.results) ? safeContext.results : [];
+      const resultsCopy = sourceResults.slice();
+      const safeIndex = (
+        Number.isInteger(itemIndex) && itemIndex >= 0 && itemIndex < resultsCopy.length
+      ) ? itemIndex : 0;
+      const focusItem = (resultsCopy[safeIndex] && typeof resultsCopy[safeIndex] === "object")
+        ? resultsCopy[safeIndex]
+        : {};
+      const resultIdRaw = focusItem.result_id;
+      const resultId = (resultIdRaw === null || resultIdRaw === undefined || resultIdRaw === "")
+        ? null
+        : String(resultIdRaw);
+      const query = safeContext.query ? String(safeContext.query) : null;
+      // Wrap in the /jobs/{id}/result-style envelope the server expects.
+      // We do NOT mutate any item in `sourceResults`; the wrapper holds
+      // the same references — the server snapshot extractor reads only.
+      return {
+        result_id: resultId,
+        job_id: null,
+        item_index: safeIndex,
+        query,
+        result_payload: {
+          status: "ok",
+          query,
+          result: { results: resultsCopy },
+        },
+      };
+    }
+
+    function serverReviewSetRegisterStatus(kind, message) {
+      const el = document.getElementById("serverReviewRegisterStatus");
+      if (!el) return;
+      el.classList.remove("is-info", "is-success", "is-error");
+      if (!message) {
+        el.style.display = "none";
+        el.textContent = "";
+        return;
+      }
+      if (kind === "success") el.classList.add("is-success");
+      else if (kind === "error") el.classList.add("is-error");
+      else el.classList.add("is-info");
+      el.style.display = "block";
+      el.textContent = message;
+    }
+
+    async function serverReviewRegisterCurrentResult() {
+      const token = serverReviewGetToken();
+      if (!token) {
+        serverReviewSetRegisterStatus(
+          "error",
+          "토큰이 없습니다. 먼저 토큰을 적용해 주세요.",
+        );
+        return;
+      }
+      const context = currentReportContext;
+      const hasResults = context
+        && Array.isArray(context.results)
+        && context.results.length > 0;
+      if (!hasResults) {
+        serverReviewSetRegisterStatus("error", SERVER_REVIEW_NO_CURRENT_RESULT_MESSAGE);
+        return;
+      }
+      const candidateIndex = Number.isInteger(selectedResultIndex)
+        ? selectedResultIndex
+        : 0;
+      const payload = buildReviewTaskFromResultPayload(context, candidateIndex);
+      serverReviewSetRegisterStatus("info", "서버 검수 큐에 등록 중...");
+      const result = await serverReviewFetch(
+        SERVER_REVIEW_FROM_RESULT_PATH,
+        { method: "POST", body: payload },
+      );
+      if (!result.ok) {
+        const message = serverReviewFormatErrorMessage(result.status);
+        serverReviewSetRegisterStatus("error", message);
+        return;
+      }
+      const task = (result.body && result.body.task) || {};
+      const idempotent = !!(result.body && result.body.idempotent);
+      serverReviewSetRegisterStatus(
+        "success",
+        idempotent
+          ? "이미 검수 큐에 등록된 결과입니다. 기존 검수 작업을 표시합니다 (사람 검토 필요)."
+          : "검수 큐 등록 완료. 사람 검토 대기 상태로 추가되었습니다.",
+      );
+      // Refresh the queue so the row's status chip reflects reality, then
+      // select the created/existing task if the server returned an id.
+      await serverReviewLoadList();
+      const taskId = task && task.task_id ? String(task.task_id) : "";
+      if (taskId) {
+        await serverReviewLoadDetail(taskId);
+      }
+    }
+
     function serverReviewBindEvents() {
       const saveBtn = document.getElementById("serverReviewTokenSaveBtn");
       const clearBtn = document.getElementById("serverReviewTokenClearBtn");
@@ -8045,8 +8188,14 @@
       const filterEl = document.getElementById("serverReviewStatusFilter");
       const listEl = document.getElementById("serverReviewList");
       const submitBtn = document.getElementById("serverReviewSubmitDecisionBtn");
+      const registerBtn = document.getElementById("serverReviewRegisterCurrentBtn");
       if (!saveBtn || !clearBtn || !tokenInput || !refreshBtn || !filterEl || !listEl || !submitBtn) {
         return;
+      }
+      if (registerBtn) {
+        registerBtn.addEventListener("click", () => {
+          serverReviewRegisterCurrentResult();
+        });
       }
       saveBtn.addEventListener("click", async () => {
         const value = (tokenInput.value || "").trim();
@@ -8112,8 +8261,11 @@
       window.__serverReviewHelpers = {
         formatErrorMessage: serverReviewFormatErrorMessage,
         formatStatusLabel: serverReviewFormatStatusLabel,
+        buildFromResultPayload: buildReviewTaskFromResultPayload,
         disabledMessage: SERVER_REVIEW_API_DISABLED_MESSAGE,
         forbiddenMessage: SERVER_REVIEW_API_FORBIDDEN_MESSAGE,
+        noCurrentResultMessage: SERVER_REVIEW_NO_CURRENT_RESULT_MESSAGE,
+        fromResultPath: SERVER_REVIEW_FROM_RESULT_PATH,
       };
     }
 

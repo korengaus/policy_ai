@@ -30,6 +30,9 @@ const requiredIds = [
   "serverReviewPublicNote",
   "serverReviewSubmitDecisionBtn",
   "serverReviewHistory",
+  // M8.2 — analysis-to-review queue bridge.
+  "serverReviewRegisterCurrentBtn",
+  "serverReviewRegisterStatus",
 ];
 for (const id of requiredIds) {
   assert.ok(
@@ -62,6 +65,50 @@ for (const decision of ["approve", "reject", "needs_more_evidence", "comment"]) 
     `decision dropdown should offer value="${decision}"`
   );
 }
+
+// Reserved publication-side statuses must NOT appear as decision values, and
+// no publish/correct endpoint may be referenced from the frontend.
+for (const reserved of ["published", "corrected"]) {
+  assert.ok(
+    !html.includes(`value="${reserved}"`),
+    `decision dropdown must not surface reserved status value="${reserved}"`
+  );
+}
+assert.ok(
+  !/\/review\/tasks\/[^"'`\s]*\/publish/.test(html),
+  "frontend must not reference a /review/tasks/.../publish endpoint"
+);
+assert.ok(
+  !/\/review\/tasks\/[^"'`\s]*\/correct/.test(html),
+  "frontend must not reference a /review/tasks/.../correct endpoint"
+);
+
+// M8.2 — analysis-to-review bridge: the from-result endpoint path must
+// appear verbatim, and only in the call site (no query-string token, no
+// hash fragment).
+assert.ok(
+  html.includes("/review/tasks/from-result"),
+  "frontend must call /review/tasks/from-result for the M8.2 bridge"
+);
+assert.ok(
+  !/\/review\/tasks\/from-result[^"'`\s]*[?#]/.test(html),
+  "from-result path must not embed query-string or fragment data (token must stay in header)"
+);
+// The M8.2 friendly-empty Korean message must remain stable.
+assert.ok(
+  html.includes(
+    "등록할 분석 결과가 없습니다. 먼저 분석을 실행하거나 기록에서 결과를 선택하세요."
+  ),
+  "frontend must surface the deterministic 'no current result' message"
+);
+
+// Token storage must remain sessionStorage-only — the M8.2 bridge must
+// not introduce a second token store via localStorage.
+const reviewSection = html.slice(html.indexOf("serverReviewToken"));
+assert.ok(
+  !/localStorage[^\n]*(?:[Rr]eview|REVIEW)[^\n]*[Tt]oken/.test(reviewSection),
+  "review token must not be stored in localStorage"
+);
 
 // Token must NOT be hardcoded in committed source. Heuristic: the marker
 // "X-Review-Token" appears as a header alias only; common token-storage
@@ -208,5 +255,103 @@ assert.ok(helpers.formatStatusLabel("needs_more_evidence").includes("needs_more_
 // Unknown status falls back to the raw key (never to an empty/error label).
 assert.strictEqual(helpers.formatStatusLabel("totally_unknown"), "totally_unknown");
 assert.strictEqual(helpers.formatStatusLabel(""), "(없음)");
+
+// 3. M8.2 from-result helper checks ------------------------------------------
+assert.strictEqual(
+  helpers.fromResultPath,
+  "/review/tasks/from-result",
+  "fromResultPath helper must equal the documented endpoint",
+);
+assert.strictEqual(
+  helpers.noCurrentResultMessage,
+  "등록할 분석 결과가 없습니다. 먼저 분석을 실행하거나 기록에서 결과를 선택하세요.",
+  "noCurrentResultMessage must match the documented Korean copy",
+);
+assert.strictEqual(
+  typeof helpers.buildFromResultPayload, "function",
+  "buildFromResultPayload helper must be exposed for testing",
+);
+
+// Helper must be defensive against missing / nullish input.
+const emptyPayload = helpers.buildFromResultPayload(null, 0);
+assert.ok(emptyPayload && typeof emptyPayload === "object",
+  "buildFromResultPayload(null, 0) must still return an object");
+const emptyResults = emptyPayload.result_payload.result.results;
+assert.ok(
+  emptyResults && typeof emptyResults.length === "number" && emptyResults.length === 0,
+  "buildFromResultPayload must default results to an empty list on null context",
+);
+assert.strictEqual(emptyPayload.item_index, 0);
+assert.strictEqual(emptyPayload.job_id, null);
+assert.strictEqual(emptyPayload.result_id, null);
+
+// Helper must NOT mutate the original context — deepStrictEqual before/after.
+const sourceItem = {
+  result_id: 42,
+  title: "테스트 제목",
+  original_url: "https://example.go.kr/x",
+  final_decision: { decision_label: "사실 확인 필요" },
+  policy_confidence: { verification_strength: "moderate" },
+  verification_card: { summary: "draft" },
+  normalized_claims: [{ claim_text: "정부가 청년 보조금을 신설한다." }],
+};
+const context = {
+  query: "전세사기",
+  maxNews: 1,
+  results: [sourceItem],
+  analyzedAt: "2026-05-21T00:00:00Z",
+};
+const contextSnapshot = JSON.parse(JSON.stringify(context));
+const builtPayload = helpers.buildFromResultPayload(context, 0);
+assert.deepStrictEqual(
+  context, contextSnapshot,
+  "buildFromResultPayload must not mutate the source context",
+);
+// Original result item is also untouched (no rewrites of final_decision /
+// policy_confidence / verification_card).
+assert.deepStrictEqual(sourceItem, contextSnapshot.results[0]);
+
+// Payload shape checks.
+assert.strictEqual(builtPayload.result_id, "42",
+  "result_id should be coerced to string from the focused item");
+assert.strictEqual(builtPayload.item_index, 0);
+assert.strictEqual(builtPayload.job_id, null,
+  "job_id must be null when the frontend has no live job handle");
+assert.strictEqual(builtPayload.query, "전세사기");
+assert.ok(builtPayload.result_payload && typeof builtPayload.result_payload === "object");
+assert.ok(Array.isArray(builtPayload.result_payload.result.results));
+assert.strictEqual(builtPayload.result_payload.result.results.length, 1);
+// Verdict-side fields are passed through verbatim (the server snapshot
+// extractor reads them — the UI must not rewrite them).
+assert.deepStrictEqual(
+  builtPayload.result_payload.result.results[0].final_decision,
+  { decision_label: "사실 확인 필요" },
+);
+assert.deepStrictEqual(
+  builtPayload.result_payload.result.results[0].policy_confidence,
+  { verification_strength: "moderate" },
+);
+assert.deepStrictEqual(
+  builtPayload.result_payload.result.results[0].verification_card,
+  { summary: "draft" },
+);
+
+// Out-of-range / non-integer item_index must coerce to 0 without throwing.
+const oob = helpers.buildFromResultPayload(context, 99);
+assert.strictEqual(oob.item_index, 0);
+const nan = helpers.buildFromResultPayload(context, "abc");
+assert.strictEqual(nan.item_index, 0);
+
+// The helper must NOT introduce any semantic-truth label of its own — only
+// pass through existing fields. Sample sanity check: an item without a
+// semantic_evidence_summary stays without one.
+assert.ok(
+  !("semantic_evidence_summary" in builtPayload.result_payload.result.results[0]),
+  "buildFromResultPayload must not inject semantic labels into the payload",
+);
+assert.ok(
+  !("semantic_label" in builtPayload),
+  "buildFromResultPayload must not expose a semantic label on the payload",
+);
 
 console.log("server-review UI smoke tests passed");
