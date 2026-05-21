@@ -39,8 +39,9 @@ python tests/test_review_workflow_smoke.py
 python tests/test_operator_preflight.py   # M8.5: operator preflight helper
 python tests/test_review_bundle.py        # M8.6: post-implementation review bundle helper
 python tests/test_review_api_exposure_smoke.py  # M8.8: no-token public-exposure smoke
-python tests/test_review_audit_trail.py   # M9.0: reviewer decision audit trail
-npm test   # runs regression.test.js + localstorage_slim.test.js + review_ui.test.js (M8.1 + M8.2 + M8.7 + M9.0)
+python tests/test_review_audit_trail.py   # M9.0 + M9.1: decision audit trail + audit packet endpoint
+python tests/test_review_ui_local_demo.py # M9.3: local reviewer UI activation dry-run helper
+npm test   # runs regression.test.js + localstorage_slim.test.js + review_ui.test.js (M8.1 + M8.2 + M8.7 + M9.0 + M9.2)
 ```
 
 **Shortcut**: instead of running each test individually, use the
@@ -135,6 +136,24 @@ These pin:
   and the absence of any publication affordance in the new section.
   `npm test` already invokes this file, so `scripts/validate.py`
   covers it.
+
+For the M9.3 local reviewer UI activation dry-run (offline, no Render,
+no OpenAI — seeds a SQLite demo DB under `reports/` and optionally
+exercises the seeded endpoints via FastAPI TestClient):
+
+```
+python tests/test_review_ui_local_demo.py
+python scripts/prepare_review_ui_local_demo.py --reset
+python scripts/prepare_review_ui_local_demo.py --verify
+```
+
+After `prepare_review_ui_local_demo.py --reset`, the operator can run
+the printed PowerShell commands in another shell to start a local
+uvicorn against the demo DB and visually exercise the M9.2 audit
+packet viewer. **`reports/review_ui_local_demo.sqlite` must not be
+committed** — it lives under the gitignored `reports/` directory and
+the `operator_preflight.is_forbidden_path` classifier rejects it from
+any recommended `git add`.
 
 Before staging changes, the M8.5 preflight helper recommends a precise
 `git add` command (never stages anything itself). It is exercised in

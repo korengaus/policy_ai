@@ -618,6 +618,39 @@ python scripts/smoke_review_api_exposure.py --base-url http://127.0.0.1:8000 --e
 The local form points at a running uvicorn that has `REVIEW_API_ENABLED`
 unset; both endpoints should return 503 and the smoke should pass.
 
+## F'''''. Local reviewer UI activation dry-run (M9.3)
+
+`scripts/prepare_review_ui_local_demo.py` + `scripts/serve_review_ui_local_demo.py`
+form a **local-only manual dry-run helper**, not an operational runner
+profile. They exist because Render keeps the review API disabled by
+default, so the operator cannot exercise the M9.2 audit-packet UI
+viewer against the public deploy without changing Render env — which
+is intentionally out of scope.
+
+Exact commands:
+
+```
+python scripts/prepare_review_ui_local_demo.py --reset
+python scripts/prepare_review_ui_local_demo.py --verify
+# Then in PowerShell, paste the runbook the helper printed:
+$env:REVIEW_API_ENABLED = "true"
+$env:REVIEW_API_TOKEN = "local-review-demo-token"
+python scripts\serve_review_ui_local_demo.py --db-path reports\review_ui_local_demo.sqlite
+```
+
+This is **not** added to any operational profile:
+
+- **Not in `quick`** — `quick` stays offline and never spawns a server.
+- **Not in `render-canary`** — the helper never hits Render.
+- **Not in `review-exposure`** — that profile probes Render's
+  `/review/*` surface; the local demo is a separate local-only flow.
+- **Not in `review-local`** — that profile already runs the offline
+  reviewer-workflow smoke (`scripts/smoke_review_workflow.py`), which
+  is the right tool for CI / unattended verification.
+
+See `docs/REVIEW_WORKFLOW.md` §H'''''''' for the visual-confirmation
+runbook the helper prints.
+
 ## G. Relationship to future AI agents automation
 
 This is the first automation layer. It produces structured JSON

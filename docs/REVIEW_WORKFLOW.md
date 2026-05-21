@@ -1,4 +1,4 @@
-# Server-Backed Reviewer Workflow (Phase 2 M8.0 + M8.1 + M8.2 + M8.3 + M8.7 + M8.8 + M9.0 + M9.1 + M9.2)
+# Server-Backed Reviewer Workflow (Phase 2 M8.0 + M8.1 + M8.2 + M8.3 + M8.7 + M8.8 + M9.0 + M9.1 + M9.2 + M9.3)
 
 A backend-first foundation for the human-review layer. AI drafts and
 summarizes evidence; humans approve, reject, or request more evidence.
@@ -1215,7 +1215,134 @@ packet-specific override.
   the summary-builder assertions in step 12f (no
   `semantic_evidence_summary`, no "match strength" / "truth" labels).
 
-## I. Future work (post-M9.2)
+## H''''''''. Local reviewer UI activation dry-run (M9.3)
+
+The audit-packet UI shipped in M9.2 is intentionally token-gated by the
+M8.0 `review_auth` gate. Render keeps `REVIEW_API_ENABLED` unset by
+default (current policy: disabled-by-default), so the operator cannot
+visually exercise the **감사 패킷 보기** flow against the public Render
+deployment — the panel will surface the disabled-API banner, not the
+packet viewer.
+
+M9.3 ships a local-only dry-run helper that lets the operator stand up
+a self-contained demo of the reviewer UI — including the audit packet
+viewer — against a temporary SQLite database, **without** modifying
+Render env, **without** using any real `REVIEW_API_TOKEN`, and
+**without** calling any external service.
+
+### Two-script flow
+
+1. **`scripts/prepare_review_ui_local_demo.py`** — seeds a small Korean
+   demo task (status `pending_review`, `final_decision: 사람 검토 필요`,
+   `policy_confidence: moderate`, one `needs_more_evidence` decision
+   already recorded) into `reports/review_ui_local_demo.sqlite` and
+   prints a PowerShell runbook.
+2. **`scripts/serve_review_ui_local_demo.py`** — a tiny launcher that
+   monkey-patches `database.DB_PATH` before importing `api_server`
+   then starts uvicorn against the demo DB. The project's DB path is
+   a module-level constant (no env-var indirection), so this launcher
+   exists to avoid touching `policy_ai.db` or editing tracked source.
+
+### Exact commands
+
+```
+# 1. Prepare (or reset) the demo DB.
+python scripts/prepare_review_ui_local_demo.py --reset
+
+# 2. Optional self-test that the seeded DB + endpoints work without
+#    spawning a real server (FastAPI TestClient + temp env vars).
+python scripts/prepare_review_ui_local_demo.py --verify
+
+# 3. Open a new PowerShell tab and start the local demo server. The
+#    helper printed these exact lines; the operator pastes them.
+$env:REVIEW_API_ENABLED = "true"
+$env:REVIEW_API_TOKEN = "local-review-demo-token"
+python scripts\serve_review_ui_local_demo.py --db-path reports\review_ui_local_demo.sqlite
+
+# 4. In a browser, open http://127.0.0.1:8000/ and exercise the UI.
+```
+
+### Visual confirmation steps (operator-facing)
+
+1. Expand `내부 검수 도구 열기 (관리자 전용)`.
+2. Paste the dummy token `local-review-demo-token` and click `토큰 적용`.
+3. Click `큐 새로고침` — the seeded task appears.
+4. Select the seeded task — detail + decision history render.
+5. Click `감사 패킷 보기` — the M9.2 viewer shows the summary + raw
+   JSON. Verify `safety_contract.publication: false`, the four
+   `mutates_*: false` flags, and `semantic_matching_debug_only: true`.
+6. Click `감사 패킷 복사` — the success banner reads "내부 검수 기록
+   확인용이며 게시물이 아닙니다."
+7. Click `토큰 해제` — the audit-packet view and the queue clear.
+
+### CLI flags
+
+| flag | default | purpose |
+| --- | --- | --- |
+| `--db-path <path>` | `reports/review_ui_local_demo.sqlite` | Must live under `reports/`; anything else is refused at exit 2 |
+| `--token <dummy>` | `local-review-demo-token` | Operator-supplied dummy label; empty string is rejected |
+| `--reset` | off | Required to overwrite an existing demo DB |
+| `--verify` | off | After seeding, exercise the three review endpoints against the seeded DB via FastAPI TestClient |
+| `--host` / `--port` | `127.0.0.1` / `8000` | Only used for the printed runbook URL |
+| `--json` | off | Print a stable JSON summary instead of the runbook |
+
+JSON keys (stable, pinned by tests):
+
+```
+passed, db_path, token_is_dummy, token_label, seeded_task_ids,
+expected_local_url, powershell_commands, warnings, errors, verify
+```
+
+### Hard contracts
+
+- **Render env is unchanged.** `REVIEW_API_ENABLED` stays unset on
+  Render. `render.yaml` is unchanged. The demo runs only against a
+  local SQLite file the helper writes under `reports/`.
+- **Never reads a real shared review secret from the environment.**
+  If the operator has a real `REVIEW_API_TOKEN` exported, the helper
+  detects its presence, emits a warning, and uses its own dummy
+  label regardless. The real value is never echoed to stdout, JSON,
+  or any printed runbook line. Pinned by
+  `tests/test_review_ui_local_demo.py::TokenSafetyTests`.
+- **Never reads any shared OpenAI key from the environment.** The
+  helper does not reference the variable anywhere in source. Pinned
+  by `NetworkSafetyTests`.
+- **No network calls.** The helper imports neither `requests` nor
+  `httpx` nor `urllib.request`. `--verify` uses FastAPI's
+  in-process `TestClient` — no real HTTP server starts.
+- **No verdict mutation.** Seeds go through the existing
+  `database.create_review_task` + `database.record_review_decision`
+  helpers; `final_decision`, `policy_confidence`,
+  `verification_card` snapshots are conservative-wording Korean
+  defaults and are never rewritten by the helper.
+- **No publication path.** No `published` / `corrected` decision or
+  status is ever written by the seed. The seeded task remains either
+  `pending_review` or moves into `needs_more_evidence` per the M8.0
+  transition matrix.
+- **`reports/` outputs are not committed.** The demo DB filename
+  pattern `reports/review_ui_local_demo.sqlite` is already covered
+  by `.gitignore`'s `reports/` rule and by the
+  `operator_preflight.is_forbidden_path` classifier — pinned by
+  `ReportsExclusionTests`.
+
+### Limitations
+
+- The project's DB path lives in `database.DB_PATH` as a module-level
+  constant. There is intentionally no env-var indirection in M9.3 —
+  changing the runtime DB path requires the launcher's
+  monkey-patching pattern. This is documented but **not** widened
+  to a general env-var contract; that's a future-milestone decision.
+- The demo seeds **one** task with **one** decision. That's enough
+  to exercise the M9.2 viewer end-to-end. Operators who need a
+  richer fixture can run the helper, then use the local uvicorn +
+  `POST /review/tasks/from-result` flow to add more, but tests pin
+  only the one-task case.
+- `--verify` exercises the three review endpoints
+  (`/review/tasks`, `/review/tasks/{id}`, `/review/tasks/{id}/audit-packet`)
+  with the dummy token, but does not render the browser UI. Visual
+  confirmation of the M9.2 buttons remains an operator step.
+
+## I. Future work (post-M9.3)
 
 - Proper auth + admin layer to replace the temporary token gate.
 - Postgres dual-write for review tables to match the existing pattern
