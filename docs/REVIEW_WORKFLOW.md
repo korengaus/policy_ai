@@ -1,17 +1,21 @@
-# Server-Backed Reviewer Workflow (Phase 2 M8.0 + M8.1 + M8.2)
+# Server-Backed Reviewer Workflow (Phase 2 M8.0 + M8.1 + M8.2 + M8.3)
 
 A backend-first foundation for the human-review layer. AI drafts and
 summarizes evidence; humans approve, reject, or request more evidence.
-**No publication path is enabled in M8.0, M8.1, or M8.2** — `published`
-and `corrected` are reserved status names that no transition reaches.
+**No publication path is enabled in M8.0, M8.1, M8.2, or M8.3** —
+`published` and `corrected` are reserved status names that no
+transition reaches.
 
 M8.0 introduced the storage tables, API surface, and safety gate.
 M8.1 wires those endpoints to a local/dev admin UI panel inside
 `web/index.html`. M8.2 adds an analysis-to-review queue bridge — a
 small admin-only button that posts the currently displayed analysis
 result to `POST /review/tasks/from-result` so operators don't have to
-hand-craft the payload. Verdict logic and the existing public-facing
-report are intentionally untouched.
+hand-craft the payload. M8.3 adds a self-contained operational smoke
+script (`scripts/smoke_review_workflow.py`) and a `review-local`
+profile in the operational runner so the entire M8.0–M8.2 surface can
+be exercised offline against a temp SQLite DB. Verdict logic and the
+existing public-facing report are intentionally untouched.
 
 ## A. Purpose
 
@@ -35,6 +39,7 @@ report are intentionally untouched.
 | Safety gate | ✓ `REVIEW_API_ENABLED` + `REVIEW_API_TOKEN` + `X-Review-Token` header (M8.0) |
 | Frontend wiring | ✓ Local/dev admin panel in `web/index.html` (M8.1, token-gated) |
 | Analysis → queue bridge | ✓ "검수 큐에 등록" button calls `POST /review/tasks/from-result` (M8.2, token-gated, idempotent) |
+| Offline operational smoke | ✓ `scripts/smoke_review_workflow.py --self-contained` + `--profile review-local` runner (M8.3, fully offline, dummy in-process token) |
 | Publication | **not implemented**; transitions into `published` / `corrected` are refused |
 | Verdict mutation | **disabled by contract**, pinned by `tests/test_review_api.py::VerdictIsolationTests` |
 | Postgres dual-write | **deferred** — SQLite remains source of truth |
@@ -341,7 +346,70 @@ for JS regression tests.
 - Semantic matching remains debug metadata only; the bridge never
   re-labels semantic signals as user-facing truth.
 
-## I. Future work (post-M8.2)
+## H''. Local review-workflow smoke (M8.3)
+
+`scripts/smoke_review_workflow.py` exercises the full M8.0–M8.2
+review surface offline against a temporary SQLite database, using a
+dummy in-process token that is never logged, persisted, or echoed.
+
+### Exact command
+
+```
+python scripts/smoke_review_workflow.py --self-contained
+```
+
+The operational runner wires the same script behind a dedicated
+profile:
+
+```
+python scripts/run_operational_checks.py --profile review-local
+```
+
+Both commands run end-to-end in a few seconds and exit `0` on pass,
+`1` on a failed sub-check, `2` if `--self-contained` is omitted
+(reserved for a future live mode).
+
+### What it validates
+
+| sub-check | what it asserts |
+| --- | --- |
+| `disabled_check` | With `REVIEW_API_ENABLED` unset, `GET /review/tasks` returns **503** and the detail mentions "disabled". |
+| `token_check` | With env set: missing header → 403, wrong token → 403, correct token → 200. The token is sent only as `X-Review-Token`. |
+| `task_creation_check` | `POST /review/tasks/from-result` with a synthetic Korean policy claim returns 200, `status=pending_review`, `human_review_required=true`, and the snapshot preserves `final_decision` / `policy_confidence` exactly. |
+| `idempotency_check` | Two identical POSTs return the same `task_id` and the second carries `idempotent=true`. |
+| `list_detail_check` | `GET /review/tasks` includes the created task; `GET /review/tasks/{id}` returns it with `status=pending_review`. |
+| `decision_check` | Each allowed decision (`approve`, `reject`, `needs_more_evidence`, `comment`) is exercised against a **separate** synthetic task; each ends in the documented status. `comment` never changes status. |
+| `verdict_isolation_check` | After `comment` + `approve`, the snapshot's `final_decision` / `policy_confidence` are byte-for-byte identical to creation time, and the original payload dict the script passed in is unchanged. |
+| `publication_absent_check` | `POST /review/tasks/{id}/publish` → 404 / 405; submitting `{"decision": "published"}` or `{"decision": "corrected"}` → 400. |
+
+### Token + environment safety
+
+- The script uses a **dummy** in-process token literal (a fixed string,
+  not a secret). It is **never** printed to stdout, stderr, or the
+  JSON summary — verified by `tests/test_review_workflow_smoke.py`.
+- The operator never has to paste a real `REVIEW_API_TOKEN`. The
+  script sets `REVIEW_API_ENABLED=true` / `REVIEW_API_TOKEN=<dummy>`
+  in-process only for the duration of the run and restores prior
+  values (including unset) on exit, even on exception.
+- The smoke does **not** enable the Render review API. `render.yaml`
+  is not modified. `REVIEW_API_ENABLED` stays unset on Render.
+
+### Hard contracts (preserved)
+
+- **검수 큐 등록은 게시가 아니며, `final_decision` /
+  `policy_confidence` / `verification_card` verdict를 변경하지
+  않는다.** The smoke proves this via the verdict-isolation check.
+- No publication path. The smoke asserts `/publish` is absent and the
+  reserved statuses are unreachable.
+- No real auth introduced. The temporary token gate remains the only
+  fence.
+- No OpenAI calls. No Render calls. No external network. Tests pin
+  this (`test_review_workflow_smoke.py::SecretsAndIsolationTests`).
+- Semantic matching activation is unchanged. The synthetic payload
+  uses conservative Korean copy (`사람 검토 필요`, `moderate`) and
+  never re-labels semantic signals as user-facing truth.
+
+## I. Future work (post-M8.3)
 
 - Proper auth + admin layer to replace the temporary token gate.
 - Postgres dual-write for review tables to match the existing pattern
@@ -356,6 +424,9 @@ for JS regression tests.
 ```
 python tests/test_review_workflow.py
 python tests/test_review_api.py
+python tests/test_review_workflow_smoke.py
+python scripts/smoke_review_workflow.py --self-contained
+python scripts/run_operational_checks.py --profile review-local
 node tests/review_ui.test.js
 python scripts/validate.py
 ```

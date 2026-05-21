@@ -40,6 +40,7 @@ decisions and never modifies Render env.
 | `render-baseline` | legacy smoke + semantic canary (no `expect-enabled`) | Yes | Indirectly via Render if semantic on | inspect current Render semantic state |
 | `render-canary` | semantic canary with `--expect-semantic-enabled --expect-provider openai --fail-on-semantic-unavailable` + legacy smoke | Yes | **Yes — Render will issue OpenAI requests** | monitor active semantic canary |
 | `historical` | historical builder dry-run + deterministic eval (if file exists) | No | No | check builder output / regenerate batch evaluation |
+| `review-local` (M8.3) | offline reviewer-workflow smoke — `scripts/smoke_review_workflow.py --self-contained` | No | No | exercise M8.0–M8.2 reviewer surface against a temp SQLite DB with a dummy in-process token |
 | `full` | `validate` + `render-canary` + `historical` | Yes | Indirectly via Render | nightly / weekly comprehensive check |
 
 ## D. Common usage
@@ -77,6 +78,25 @@ Historical dry-run + deterministic eval (no network):
 ```
 python scripts/run_operational_checks.py --profile historical
 ```
+
+Reviewer-workflow smoke (offline, no Render, no OpenAI, dummy
+in-process token only):
+
+```
+python scripts/run_operational_checks.py --profile review-local
+```
+
+Pass/warn/fail interpretation for `review-local`:
+
+| smoke result | runner status | meaning |
+| --- | --- | --- |
+| every sub-check `passed=true`, exit 0 | `pass` | M8.0–M8.2 review surface intact: disabled-by-default, token gate, from-result, idempotency, list/detail, every allowed decision, verdict isolation, and the absent publication path are all working. |
+| any sub-check `passed=false`, exit 1 | `fail` | At least one reviewer-workflow contract regressed. The runner summary names the failing sub-check; inspect the smoke's JSON tail in the report. Do **not** roll forward until the failing sub-check is restored. |
+| CLI misuse (e.g. `--self-contained` missing), exit 2 | `fail` | Treat as a hard fail; the smoke did not run any contract check. |
+
+`review-local` is fully local/offline: it does **not** call OpenAI, does
+**not** call Render, does **not** require `REVIEW_API_TOKEN` from the
+operator, and does **not** modify Render env / `render.yaml`.
 
 Full check (validate + canary + historical):
 

@@ -144,6 +144,33 @@ class ProfileResolutionTests(unittest.TestCase):
         self.assertIn("expect-enabled", names[1])
         self.assertTrue(names[2].startswith("smoke_async_job("))
 
+    def test_review_local_profile_includes_only_smoke_review_workflow(self):
+        steps = runner_module._resolve_steps(_argv_to_args(
+            "--profile", "review-local",
+            "--base-url", "http://example.invalid",
+        ))
+        names = _step_names(steps)
+        self.assertEqual(names, ["smoke_review_workflow(self-contained)"])
+        # The step must not hit Render and must not be flagged as may-call-openai.
+        self.assertFalse(steps[0]["hits_render"])
+        self.assertFalse(steps[0]["may_call_openai"])
+        # The command must reference the smoke script with --self-contained.
+        cmd = " ".join(steps[0]["command"])
+        self.assertIn("smoke_review_workflow.py", cmd)
+        self.assertIn("--self-contained", cmd)
+        # The runner must NOT pass any --base-url or token-related arg to the
+        # smoke script — it is fully offline.
+        self.assertNotIn("--base-url", cmd)
+        self.assertNotIn("REVIEW_API_TOKEN", cmd)
+
+    def test_review_local_profile_unaffected_by_skip_render_flag(self):
+        # The review-local profile is offline; --skip-render must not drop it.
+        steps = runner_module._resolve_steps(_argv_to_args(
+            "--profile", "review-local", "--skip-render",
+        ))
+        names = _step_names(steps)
+        self.assertEqual(names, ["smoke_review_workflow(self-contained)"])
+
     def test_historical_profile_includes_dry_run_and_optional_eval(self):
         steps = runner_module._resolve_steps(_argv_to_args("--profile", "historical"))
         names = _step_names(steps)
@@ -238,6 +265,58 @@ class ParserTests(unittest.TestCase):
             "some unrelated output", "", 0,
         )
         self.assertEqual(parsed["status"], "unknown")
+
+    def test_review_local_pass_detected(self):
+        # Realistic smoke output: human summary + JSON tail.
+        sample = (
+            "[smoke-review] self-contained run\n"
+            "  disabled_check         : True\n"
+            "  token_check            : True\n"
+            "  passed=True\n"
+            "{\n"
+            "  \"mode\": \"self-contained\",\n"
+            "  \"passed\": true,\n"
+            "  \"disabled_check\": {\"passed\": true},\n"
+            "  \"token_check\": {\"passed\": true},\n"
+            "  \"task_creation_check\": {\"passed\": true},\n"
+            "  \"idempotency_check\": {\"passed\": true},\n"
+            "  \"list_detail_check\": {\"passed\": true},\n"
+            "  \"decision_check\": {\"passed\": true},\n"
+            "  \"verdict_isolation_check\": {\"passed\": true},\n"
+            "  \"publication_absent_check\": {\"passed\": true}\n"
+            "}\n"
+        )
+        parsed = runner_module._parse_review_local_output(sample, "", 0)
+        self.assertEqual(parsed["status"], "pass")
+        self.assertIn("passed=True", parsed["summary"])
+        # Metrics record each sub-check.
+        self.assertTrue(parsed["metrics"]["verdict_isolation_check"])
+        self.assertTrue(parsed["metrics"]["publication_absent_check"])
+
+    def test_review_local_fail_detected_when_sub_check_fails(self):
+        # Smoke ran end-to-end (exit_code=1) but a sub-check failed.
+        sample = (
+            "[smoke-review] self-contained run\n"
+            "{\n"
+            "  \"passed\": false,\n"
+            "  \"disabled_check\": {\"passed\": true},\n"
+            "  \"token_check\": {\"passed\": true},\n"
+            "  \"task_creation_check\": {\"passed\": true},\n"
+            "  \"idempotency_check\": {\"passed\": true},\n"
+            "  \"list_detail_check\": {\"passed\": true},\n"
+            "  \"decision_check\": {\"passed\": true},\n"
+            "  \"verdict_isolation_check\": {\"passed\": false},\n"
+            "  \"publication_absent_check\": {\"passed\": true}\n"
+            "}\n"
+        )
+        parsed = runner_module._parse_review_local_output(sample, "", 1)
+        self.assertEqual(parsed["status"], "fail")
+        self.assertIn("verdict_isolation_check", parsed["summary"])
+
+    def test_review_local_fail_on_unexpected_exit_code(self):
+        # Anything other than 0/1 (e.g. 2 = bad CLI usage) is a hard fail.
+        parsed = runner_module._parse_review_local_output("", "argparse complained", 2)
+        self.assertEqual(parsed["status"], "fail")
 
     def test_historical_dry_run_pass_detected(self):
         sample = (
@@ -368,6 +447,40 @@ class OrchestrationTests(unittest.TestCase):
             self.assertEqual(report["overall_status"], "warn")
             self.assertEqual(report["commands"][0]["status"], "warn")
             self.assertEqual(report["commands"][1]["status"], "pass")
+
+    def test_review_local_orchestrates_with_injected_runner(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = _argv_to_args(
+                "--profile", "review-local",
+                "--no-default-reports",
+                "--json-out", str(Path(tmp) / "out.json"),
+            )
+            smoke_pass = (
+                "[smoke-review] self-contained run\n"
+                "{\n"
+                "  \"passed\": true,\n"
+                "  \"disabled_check\": {\"passed\": true},\n"
+                "  \"token_check\": {\"passed\": true},\n"
+                "  \"task_creation_check\": {\"passed\": true},\n"
+                "  \"idempotency_check\": {\"passed\": true},\n"
+                "  \"list_detail_check\": {\"passed\": true},\n"
+                "  \"decision_check\": {\"passed\": true},\n"
+                "  \"verdict_isolation_check\": {\"passed\": true},\n"
+                "  \"publication_absent_check\": {\"passed\": true}\n"
+                "}\n"
+            )
+            fake = FakeRunner([(0, smoke_pass, "")])
+            report = runner_module.run(args, runner=fake)
+            self.assertEqual(len(fake.calls), 1)
+            self.assertEqual(report["overall_status"], "pass")
+            self.assertEqual(report["commands"][0]["status"], "pass")
+            # The injected command must NOT carry any Render base URL or
+            # token argument — review-local is fully offline.
+            executed = " ".join(fake.calls[0])
+            self.assertIn("smoke_review_workflow.py", executed)
+            self.assertIn("--self-contained", executed)
+            self.assertNotIn("--base-url", executed)
+            self.assertNotIn("REVIEW_API_TOKEN", executed)
 
     def test_main_exit_code_2_when_warn_and_fail_on_warn(self):
         with tempfile.TemporaryDirectory() as tmp:

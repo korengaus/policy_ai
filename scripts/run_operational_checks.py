@@ -24,6 +24,7 @@ Profiles:
     render-baseline legacy + semantic canary (no semantic-enabled expectation)
     render-canary   semantic canary expecting openai + legacy smoke
     historical      historical batch dry-run + deterministic eval if file exists
+    review-local    self-contained reviewer-workflow smoke (offline, no Render, no OpenAI)
     full            validate + render-canary + historical
 
 Exit codes:
@@ -57,7 +58,15 @@ except Exception:
     pass
 
 
-PROFILES = ("quick", "post-commit", "render-baseline", "render-canary", "historical", "full")
+PROFILES = (
+    "quick",
+    "post-commit",
+    "render-baseline",
+    "render-canary",
+    "historical",
+    "review-local",
+    "full",
+)
 
 DEFAULT_BASE_URL = "https://policy-ai-q5ax.onrender.com"
 DEFAULT_QUERY = "전세사기"
@@ -210,6 +219,28 @@ def _smoke_canary_step(args: argparse.Namespace, query: str, *, expect_enabled: 
     }
 
 
+def _review_local_step() -> dict:
+    """Phase 2 M8.3: offline reviewer-workflow smoke.
+
+    Runs ``scripts/smoke_review_workflow.py --self-contained`` which spins
+    up the FastAPI app against a temp SQLite DB and a dummy in-process
+    token. Never calls Render, never calls OpenAI, never modifies Render
+    env, never prints the dummy token.
+    """
+    return {
+        "name": "smoke_review_workflow(self-contained)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "smoke_review_workflow.py"),
+            "--self-contained",
+        ],
+        "parser": _parse_review_local_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
 def _historical_dry_run_step() -> dict:
     return {
         "name": "historical_dry_run",
@@ -275,6 +306,10 @@ def _resolve_steps(args: argparse.Namespace) -> List[dict]:
         if not args.skip_historical:
             steps.append(_historical_dry_run_step())
             steps.append(_historical_eval_step())
+
+    if profile == "review-local":
+        # Fully offline: no Render, no OpenAI, no token from operator.
+        steps.append(_review_local_step())
 
     if profile == "full":
         if not args.skip_render and not args.skip_semantic_canary:
@@ -393,6 +428,69 @@ def _parse_smoke_canary_output(stdout: str, stderr: str, exit_code: int) -> dict
             f"runtime_p95_ms={fields['runtime_p95_ms']}"
         ),
         "metrics": {k: v for k, v in fields.items()},
+    }
+
+
+def _parse_review_local_output(stdout: str, stderr: str, exit_code: int) -> dict:
+    """Phase 2 M8.3: parse ``smoke_review_workflow.py --self-contained`` output.
+
+    The smoke prints a deterministic human-readable summary block followed
+    by the same data as JSON. The parser prefers the JSON tail when present
+    (so future schema additions surface in the runner's report) and falls
+    back to the ``passed=...`` line otherwise.
+    """
+    if exit_code not in (0, 1):
+        return {
+            "status": _HEALTH_FAIL,
+            "summary": f"smoke_review_workflow exited {exit_code}",
+        }
+    summary_obj: Optional[dict] = None
+    # The JSON dump starts at the first '{' at column 0 and ends at the
+    # matching closing brace at column 0.
+    start = stdout.find("\n{")
+    if start != -1:
+        candidate = stdout[start + 1:]
+        # Try progressively shorter candidates until json.loads succeeds.
+        try:
+            summary_obj = json.loads(candidate)
+        except Exception:
+            summary_obj = None
+            for marker in ("\n}\n", "\n}"):
+                idx = candidate.rfind(marker)
+                while idx != -1:
+                    try:
+                        summary_obj = json.loads(candidate[: idx + 2])
+                        break
+                    except Exception:
+                        idx = candidate.rfind(marker, 0, idx)
+                if summary_obj is not None:
+                    break
+    if summary_obj is None:
+        passed = exit_code == 0
+        return {
+            "status": _HEALTH_PASS if passed else _HEALTH_FAIL,
+            "summary": (
+                f"smoke_review_workflow exit_code={exit_code} "
+                "(JSON summary block not detected)"
+            ),
+        }
+    overall = bool(summary_obj.get("passed"))
+    sub_results = {
+        key: bool((summary_obj.get(key) or {}).get("passed"))
+        for key in (
+            "disabled_check", "token_check", "task_creation_check",
+            "idempotency_check", "list_detail_check", "decision_check",
+            "verdict_isolation_check", "publication_absent_check",
+        )
+    }
+    fail_keys = [k for k, v in sub_results.items() if not v]
+    return {
+        "status": _HEALTH_PASS if overall else _HEALTH_FAIL,
+        "summary": (
+            f"smoke_review_workflow: passed={overall} "
+            + ("all 8 checks ok" if overall else f"failed=[{', '.join(fail_keys)}]")
+        ),
+        "metrics": sub_results,
     }
 
 

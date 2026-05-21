@@ -35,6 +35,7 @@ python tests/test_smoke_semantic_canary.py
 python tests/test_operational_checks_runner.py
 python tests/test_review_workflow.py
 python tests/test_review_api.py
+python tests/test_review_workflow_smoke.py
 npm test   # runs regression.test.js + localstorage_slim.test.js + review_ui.test.js (M8.1 + M8.2)
 ```
 
@@ -43,6 +44,14 @@ operational runner's `quick` profile (M7.5):
 
 ```
 python scripts/run_operational_checks.py --profile quick
+```
+
+For a focused reviewer-workflow smoke (M8.3, offline, no Render, no
+OpenAI, dummy in-process token only):
+
+```
+python scripts/smoke_review_workflow.py --self-contained
+python scripts/run_operational_checks.py --profile review-local
 ```
 
 It calls `scripts/validate.py` and writes a consolidated report under
