@@ -363,6 +363,179 @@ forced to false by mere presence. If one of these is passed via
 `--expected`, it moves to `forbidden_files_present` and `commit_ready`
 is forced to false.
 
+## F'''. Review bundle helper (M8.6)
+
+`scripts/build_review_bundle.py` is a local-only operator helper that
+turns the current uncommitted change set into a compact,
+ChatGPT-friendly text bundle. It builds on top of
+`scripts/operator_preflight.py`: it reuses the same forbidden /
+excluded classification, the same recommended `git add` command, and
+adds a header (project, timestamp, latest commit, mode), an optional
+length-capped diff section, a copy-paste ChatGPT block, and a fixed
+safety reminder.
+
+**It never stages, commits, pushes, modifies git state, modifies Render
+env, calls OpenAI, or hits any network.** The only subprocess
+invocations it makes are read-only git commands:
+
+- `git status --porcelain` (via `operator_preflight.run_git_status`)
+- `git log --oneline -1`
+- `git diff --no-color HEAD -- <safe expected path>` (only when
+  `--include-diff` is passed, and only for paths classified as
+  safe-expected)
+
+This tool is **developer / operator tooling only.** It is not a
+product feature. It complements — not replaces — operator review.
+
+### Exact commands
+
+Default mode (writes `reports/review_bundle_<ts>.txt`, prints the
+path):
+
+```
+python scripts/build_review_bundle.py --expected web/index.html docs/REVIEW_WORKFLOW.md
+```
+
+With a milestone label (appears in the header and the ChatGPT block):
+
+```
+python scripts/build_review_bundle.py --expected web/index.html docs/REVIEW_WORKFLOW.md --milestone "Phase 2 M8.6"
+```
+
+ChatGPT-pasteable summary only (printed to stdout, no file written):
+
+```
+python scripts/build_review_bundle.py --expected web/index.html docs/REVIEW_WORKFLOW.md --chatgpt-summary
+```
+
+Full bundle to stdout (no file written):
+
+```
+python scripts/build_review_bundle.py --expected web/index.html docs/REVIEW_WORKFLOW.md --stdout
+```
+
+Stable JSON (no file written; useful for tooling):
+
+```
+python scripts/build_review_bundle.py --expected web/index.html docs/REVIEW_WORKFLOW.md --json
+```
+
+Include a length-capped diff for safe expected files only:
+
+```
+python scripts/build_review_bundle.py --expected web/index.html docs/REVIEW_WORKFLOW.md --include-diff
+```
+
+Add manual test result notes (the helper does **not** run these
+commands — you paste in the result you already observed):
+
+```
+python scripts/build_review_bundle.py --expected web/index.html docs/REVIEW_WORKFLOW.md \
+  --test-note "python scripts/validate.py -> PASS" \
+  --test-note "python scripts/run_operational_checks.py --profile quick -> PASS"
+```
+
+### Default output location
+
+The default file is `reports/review_bundle_<timestamp>.txt`. The
+`reports/` directory is gitignored (`.gitignore` line 5) and must
+**never** be committed. The helper itself refuses to ever include
+`reports/...` files in its own recommended `git add` command, and the
+`review_bundle_*.txt` filename pattern is treated as always-excluded
+even outside `reports/`.
+
+### CLI flags
+
+| flag | default | purpose |
+| --- | --- | --- |
+| `--expected <paths...>` | none | Whitelist of files the operator intends to stage |
+| `--milestone <label>` | none | Optional milestone label for header + ChatGPT block |
+| `--test-note <text>` (repeatable) | none | Manually-supplied test result strings |
+| `--include-diff` | off | Append a length-capped diff section (safe expected files only) |
+| `--max-diff-chars <n>` | 30000 | Truncation cap for the combined diff section |
+| `--stdout` | off | Print the full bundle to stdout; do not write a file |
+| `--json` | off | Print stable JSON to stdout; do not write a file |
+| `--chatgpt-summary` | off | Print only the ChatGPT block to stdout; do not write a file |
+| `--out <path>` | `reports/review_bundle_<ts>.txt` | Custom output path; must end `.txt` and live under `reports/` |
+| `--repo-root <path>` | script's parent | Override repository root (mostly for tests) |
+
+`--stdout`, `--json`, and `--chatgpt-summary` are mutually exclusive.
+
+### JSON payload
+
+Stable keys (always present, in alphabetical order):
+
+```
+commit_ready, errors, excluded_local_only_files,
+expected_changed_files, expected_files, expected_missing_files,
+forbidden_files_present, latest_commit, milestone, output_path,
+passed, recommended_git_add_command, test_notes,
+unexpected_changed_files, warnings
+```
+
+No secret-like values (`sk-`, `OPENAI_API_KEY`, `REVIEW_API_TOKEN`)
+ever appear in the JSON output. Pinned by
+`tests/test_review_bundle.py::JSONOutputTests`.
+
+### Diff handling (`--include-diff`)
+
+- Diffs are gathered only for files in `expected_changed_files` that
+  are **not** classified as forbidden by the bundle helper's superset
+  check (preflight + the `review_bundle_*.txt` pattern). Forbidden
+  expected files appear in the diff section's "skipped" list with no
+  content shown.
+- Diff content is concatenated and capped at `--max-diff-chars`
+  (default 30000); when truncation happens, a clear
+  `[truncated at N characters]` marker is appended.
+- The helper never reads or includes diff for
+  `.claude/settings.local.json`, `reports/`, `.env`, `.env.*`, build
+  caches, or any other excluded pattern.
+
+### Always-excluded patterns
+
+Inherited from `scripts/operator_preflight.py` (§F'' above) and
+additionally:
+
+| pattern | reason |
+| --- | --- |
+| `review_bundle_*.txt` | the helper's own gitignored output |
+
+If `.claude/settings.local.json` or `reports/...` are modified locally,
+they appear under `excluded_local_only_files` with a warning; their
+presence alone does not block `commit_ready`. If any always-excluded
+path is explicitly passed via `--expected`, it is promoted to
+`forbidden_files_present` and `commit_ready` is forced to `False`.
+
+### When to run it
+
+Use the helper **after Claude implementation finishes and before** you
+manually run `git add` / `git commit`. The typical loop:
+
+1. Claude implements a milestone.
+2. Operator runs `python scripts/validate.py` and any milestone-specific
+   smoke commands.
+3. Operator runs `python scripts/build_review_bundle.py --expected ...`
+   with the intended file list.
+4. Operator pastes the ChatGPT block into ChatGPT for review.
+5. Only after ChatGPT and the operator agree, the operator runs the
+   recommended `git add` (never `git add .`) and `git commit`.
+
+The bundle does **not** replace operator judgment. It packages the
+review-ready facts so the operator and ChatGPT can both look at the
+same artifacts.
+
+### Validation
+
+```
+python tests/test_review_bundle.py
+python scripts/validate.py
+python scripts/run_operational_checks.py --profile quick
+```
+
+`tests/test_review_bundle.py` is invoked from `scripts/validate.py`,
+so the `quick` profile covers it. None of these commands call
+OpenAI, hit Render, or modify any external state.
+
 ## G. Relationship to future AI agents automation
 
 This is the first automation layer. It produces structured JSON

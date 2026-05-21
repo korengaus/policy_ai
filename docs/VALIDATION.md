@@ -37,6 +37,7 @@ python tests/test_review_workflow.py
 python tests/test_review_api.py
 python tests/test_review_workflow_smoke.py
 python tests/test_operator_preflight.py   # M8.5: operator preflight helper
+python tests/test_review_bundle.py        # M8.6: post-implementation review bundle helper
 npm test   # runs regression.test.js + localstorage_slim.test.js + review_ui.test.js (M8.1 + M8.2)
 ```
 
@@ -68,6 +69,26 @@ python scripts/operator_preflight.py --expected ... --json
 
 See `docs/OPERATIONAL_AUTOMATION.md` §F'' for the always-excluded
 patterns and the rationale.
+
+After Claude finishes implementing a milestone and before manually
+running `git add`/`git commit`, the M8.6 review bundle helper packages
+the change set into a ChatGPT-friendly summary (never stages anything
+itself). It writes by default to `reports/review_bundle_<ts>.txt`,
+which is gitignored and must **not** be committed:
+
+```
+python scripts/build_review_bundle.py --expected web/index.html docs/REVIEW_WORKFLOW.md
+python scripts/build_review_bundle.py --expected ... --milestone "Phase 2 M8.6"
+python scripts/build_review_bundle.py --expected ... --chatgpt-summary
+python scripts/build_review_bundle.py --expected ... --include-diff
+python scripts/build_review_bundle.py --expected ... --stdout
+python scripts/build_review_bundle.py --expected ... --json
+```
+
+See `docs/OPERATIONAL_AUTOMATION.md` §F''' for the full flag list,
+diff-handling rules, and the always-excluded patterns. The
+helper is exercised in `scripts/validate.py` via
+`tests/test_review_bundle.py`.
 
 It calls `scripts/validate.py` and writes a consolidated report under
 `reports/operational_check_<timestamp>.{json,md}` (gitignored). See
@@ -187,3 +208,6 @@ the workflow at that point (not done here to keep M4 minimal).
 - **`.claude/settings.local.json` must not be committed.** It is now in
   `.gitignore` for new clones, but the file is already tracked in this repo;
   exclude it from commits explicitly when staging changes.
+- **`reports/review_bundle_*.txt` must not be committed.** They live under
+  the gitignored `reports/` directory and contain transient review artifacts
+  for ChatGPT/operator inspection only.
