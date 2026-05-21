@@ -1,4 +1,4 @@
-# Server-Backed Reviewer Workflow (Phase 2 M8.0 + M8.1 + M8.2 + M8.3 + M8.7 + M8.8 + M9.0 + M9.1 + M9.2 + M9.3)
+# Server-Backed Reviewer Workflow (Phase 2 M8.0 + M8.1 + M8.2 + M8.3 + M8.7 + M8.8 + M9.0 + M9.1 + M9.2 + M9.3 + M9.4)
 
 A backend-first foundation for the human-review layer. AI drafts and
 summarizes evidence; humans approve, reject, or request more evidence.
@@ -1342,7 +1342,127 @@ expected_local_url, powershell_commands, warnings, errors, verify
   with the dummy token, but does not render the browser UI. Visual
   confirmation of the M9.2 buttons remains an operator step.
 
-## I. Future work (post-M9.3)
+## H'''''''''. Public/admin surface separation (M9.4)
+
+M8.7 / M9.2 hardened the reviewer/admin UI so it reads as
+internal-only, but the panels were still visible on every public
+page load — confusing for a public-facing product. M9.4 separates
+the surfaces: the reviewer/admin sections are now **hidden by
+default** on the public page and revealed only through an explicit
+operator-mode opt-in. **This is UI visibility only — not
+authentication.** The real protection of the review API remains
+`REVIEW_API_ENABLED` + `X-Review-Token` server-side.
+
+### What changed
+
+`web/index.html` now wraps both reviewer sections (the
+localStorage-backed "검수자 도구 보기" queue from M8.0 era and the
+server-backed "내부 검수 도구 열기 (관리자 전용)" panel from
+M8.1 / M8.2 / M8.7 / M9.0 / M9.2) in a single container:
+
+```html
+<div id="operatorTools" class="operator-tools" hidden>
+  <aside class="operator-tools-banner" role="note">
+    <strong>내부 운영자 도구 (관리자 전용)</strong>
+    내부 운영자 도구가 표시되어 있습니다. 이 표시는 인증이 아니며,
+    실제 보호는 REVIEW_API_ENABLED와 X-Review-Token으로
+    이루어집니다. 여기서 발행되는 결과는 없습니다 (게시가 아님).
+    <button id="operatorToolsHideBtn">운영자 도구 숨기기</button>
+  </aside>
+  …two existing reviewer sections, unchanged…
+</div>
+```
+
+The `hidden` attribute defaults the container off. JS on init runs
+`applyOperatorToolsVisibility()`:
+
+1. If `?operator_tools=1` is present in the URL, set the
+   sessionStorage flag `policy_ai_operator_tools_visible=true` and
+   strip the query param from the visible URL via
+   `history.replaceState`.
+2. If the sessionStorage flag is set (either by step 1 above, or
+   left over from earlier in the same tab session), unhide the
+   container.
+3. Otherwise the container stays hidden.
+
+The hide button calls `hideOperatorToolsAndResetState()`:
+
+- Clears the operator-mode sessionStorage flag.
+- Clears `policy_ai_server_review_token` from sessionStorage.
+- Re-runs `serverReviewResetAfterTokenClear()` (M8.7) which drops
+  the cached queue, hides the task detail, blanks the register
+  banner, and resets the M9.2 audit-packet view.
+- Re-hides the wrapper.
+
+### Two ways to reveal
+
+| how | URL example | when |
+| --- | --- | --- |
+| URL flag (first visit) | `http://127.0.0.1:8000/?operator_tools=1` | the operator opts in once per tab; the flag is then cleaned out of the URL |
+| URL flag (Render) | `https://policy-ai-q5ax.onrender.com/?operator_tools=1` | same; sessionStorage holds for the rest of the tab |
+| sessionStorage already set | (any URL) | a subsequent navigation in the same tab session |
+| `sessionStorage.setItem("policy_ai_operator_tools_visible", "true")` | (any URL) | manual DevTools nudge for tests / debugging |
+
+### What this does NOT do
+
+- **Not authentication.** Anyone with the URL flag can reveal the
+  panel — that's by design. The reveal is a *UX gate* (don't show
+  internal tools to public visitors by default), not a security
+  gate. The server-side review-auth gate remains
+  `REVIEW_API_ENABLED` + a matching `X-Review-Token` header, which
+  is what actually keeps the `/review/*` endpoints inaccessible
+  on Render (current Render policy: disabled-by-default,
+  `disabled_count=6` per the M8.8 exposure smoke).
+- **No auto-fetch on init.** Even when the operator-tools wrapper
+  is revealed, page initialization still does not call any
+  `/review/*` endpoint. The M8.7 contract is preserved verbatim:
+  the operator must press `토큰 적용` / `큐 새로고침` /
+  `검수 큐에 등록` / `판정 기록` / `감사 패킷 보기` explicitly.
+  Pinned by `tests/review_ui.test.js` step 13e and 13f (URL-flag
+  sandbox and seeded-flag sandbox both assert zero `/review/*`
+  fetches during init).
+- **No localStorage.** Neither the operator-mode flag nor the
+  review session token is ever written to `localStorage`. Pinned
+  by step 13d, 13g, and 13h.
+- **No publication path added.** The reviewer/admin sections inside
+  the wrapper are the same M8.0 / M8.1 / M8.2 / M8.7 / M9.0 / M9.2
+  blocks — no new buttons, no new decision values, no published /
+  corrected affordance.
+- **No verdict mutation.** `final_decision`, `policy_confidence`,
+  `verification_card` — unchanged. Wrapping the existing sections
+  in a `<div>` doesn't touch any verdict-side code path.
+- **No semantic-as-truth.** The wrapper carries no new copy; the
+  M8.7 / M9.2 disclaimer text inside the inner panels is preserved.
+- **No Render env change.** `REVIEW_API_ENABLED` stays unset on
+  Render; `render.yaml` is untouched.
+
+### Operator UX
+
+After deploy, a normal public visitor sees the public verification
+UI without any reviewer/admin clutter. An operator who needs the
+admin surface either:
+
+- bookmarks `https://policy-ai-q5ax.onrender.com/?operator_tools=1`
+  (or the local equivalent) and reveals via URL once per tab, or
+- pastes `?operator_tools=1` onto the current URL.
+
+The reveal lasts only for the current browser tab. Closing the tab
+or pressing **운영자 도구 숨기기** clears the flag.
+
+To exercise the full reveal → review queue → audit packet flow
+locally, the M9.3 demo helper still applies:
+
+```
+python scripts/prepare_review_ui_local_demo.py --reset
+# In another PowerShell tab:
+$env:REVIEW_API_ENABLED = "true"
+$env:REVIEW_API_TOKEN = "local-review-demo-token"
+python scripts\serve_review_ui_local_demo.py --db-path reports\review_ui_local_demo.sqlite
+# Then in a browser:
+#   http://127.0.0.1:8000/?operator_tools=1
+```
+
+## I. Future work (post-M9.4)
 
 - Proper auth + admin layer to replace the temporary token gate.
 - Postgres dual-write for review tables to match the existing pattern

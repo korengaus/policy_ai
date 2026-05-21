@@ -41,7 +41,7 @@ python tests/test_review_bundle.py        # M8.6: post-implementation review bun
 python tests/test_review_api_exposure_smoke.py  # M8.8: no-token public-exposure smoke
 python tests/test_review_audit_trail.py   # M9.0 + M9.1: decision audit trail + audit packet endpoint
 python tests/test_review_ui_local_demo.py # M9.3: local reviewer UI activation dry-run helper
-npm test   # runs regression.test.js + localstorage_slim.test.js + review_ui.test.js (M8.1 + M8.2 + M8.7 + M9.0 + M9.2)
+npm test   # runs regression.test.js + localstorage_slim.test.js + review_ui.test.js (M8.1 + M8.2 + M8.7 + M9.0 + M9.2 + M9.4)
 ```
 
 **Shortcut**: instead of running each test individually, use the
@@ -154,6 +154,32 @@ packet viewer. **`reports/review_ui_local_demo.sqlite` must not be
 committed** — it lives under the gitignored `reports/` directory and
 the `operator_preflight.is_forbidden_path` classifier rejects it from
 any recommended `git add`.
+
+For the M9.4 public/admin surface separation (offline, no network):
+
+```
+node tests/review_ui.test.js
+```
+
+`step 13` of the reviewer-UI test file pins: the operator-tools
+wrapper exists and defaults to `hidden`; the disclaimer wording
+includes `내부 운영자 도구`, `관리자 전용`, `이 표시는 인증이 아니며`,
+`REVIEW_API_ENABLED`, `X-Review-Token`, `운영자 도구 숨기기`, and
+`게시가 아님`; `?operator_tools=1` reveals the panel + sets the
+sessionStorage flag + strips the URL param via
+`history.replaceState`; a pre-set sessionStorage flag reveals the
+panel without the URL flag; neither reveal path fires any
+`/review/*` request on init; the hide button clears the operator-mode
+flag, the review session token, and any loaded review state; neither
+the operator-mode flag nor the review token ever uses `localStorage`.
+`npm test` already invokes this file, so `scripts/validate.py`
+covers it.
+
+After deploy, the operator can visually confirm the reveal by
+visiting `https://policy-ai-q5ax.onrender.com/?operator_tools=1`
+(the reviewer/admin panels stay disabled-by-default for normal
+public visitors, and the review API itself remains 503-disabled
+until `REVIEW_API_ENABLED=true` is set in the Render dashboard).
 
 Before staging changes, the M8.5 preflight helper recommends a precise
 `git add` command (never stages anything itself). It is exercised in

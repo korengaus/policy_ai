@@ -1111,6 +1111,48 @@
       line-height: 1.45;
     }
 
+    /* M9.4 — operator-tools wrapper. Hidden by default; revealed only
+       via ?operator_tools=1 or the matching sessionStorage flag. The
+       sections inside (M8.0 review queue + M8.1/M9.2 admin panel) keep
+       their existing styling unchanged. */
+    .operator-tools[hidden] {
+      display: none !important;
+    }
+    .operator-tools-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin: 16px 0 8px;
+      padding: 10px 14px;
+      border: 1px solid #fcd34d;
+      border-radius: 10px;
+      background: #fffbeb;
+      color: #7c2d12;
+      font-size: 0.92rem;
+    }
+    .operator-tools-banner-body {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      line-height: 1.55;
+    }
+    .operator-tools-banner-body strong {
+      color: #7c2d12;
+    }
+    .operator-tools-banner code {
+      background: #fff7e6;
+      padding: 0 4px;
+      border-radius: 3px;
+      font-size: 0.85em;
+    }
+    .operator-tools-banner button {
+      padding: 6px 12px;
+      font-size: 12px;
+      border-radius: 6px;
+      flex: 0 0 auto;
+    }
+
     .review-tools-details {
       border: 0;
     }
@@ -2322,6 +2364,41 @@
       <div class="empty-state">분석을 실행하면 결과가 여기에 표시됩니다.</div>
     </section>
 
+    <!--
+      M9.4 — public/admin surface separation.
+
+      The two reviewer sections below (the localStorage-backed "검수자
+      도구 보기" queue, M8.0 era, and the server-backed
+      "내부 검수 도구 열기 (관리자 전용)" admin panel introduced in
+      M8.1+) are wrapped in a single container that defaults to
+      ``hidden``. They become visible only when the operator opts in
+      via ``?operator_tools=1`` (which also writes a sessionStorage
+      flag for the rest of the tab session) or already has the
+      sessionStorage flag set.
+
+      This is UI visibility only — NOT authentication. The real
+      protection of the review API remains ``REVIEW_API_ENABLED`` +
+      ``X-Review-Token`` server-side. Hiding does the right thing
+      (clears the operator-mode flag, the review session token, and
+      any loaded queue/detail/audit packet state) but it is not a
+      replacement for the server gate.
+    -->
+    <div id="operatorTools" class="operator-tools" hidden>
+      <aside class="operator-tools-banner" role="note" aria-label="내부 운영자 도구 알림">
+        <div class="operator-tools-banner-body">
+          <strong>내부 운영자 도구 (관리자 전용)</strong>
+          <span>
+            내부 운영자 도구가 표시되어 있습니다. 이 표시는 인증이 아니며,
+            실제 보호는 <code>REVIEW_API_ENABLED</code>와
+            <code>X-Review-Token</code>으로 이루어집니다.
+            여기서 발행되는 결과는 없습니다 (게시가 아님).
+          </span>
+        </div>
+        <button id="operatorToolsHideBtn" class="secondary" type="button">
+          운영자 도구 숨기기
+        </button>
+      </aside>
+
     <section class="history-card">
       <details class="review-tools-details">
         <summary>검수자 도구 보기</summary>
@@ -2465,6 +2542,7 @@
         </div>
       </details>
     </section>
+    </div><!-- /#operatorTools (M9.4 public/admin surface separation) -->
 
     <section class="history-card">
       <div class="history-header">
@@ -8743,6 +8821,126 @@
       }
     }
 
+    // -----------------------------------------------------------------
+    // M9.4 — public/admin surface separation.
+    //
+    // Operator tools are hidden by default on the public page. The
+    // operator opts in via ``?operator_tools=1`` (which sets a
+    // sessionStorage flag and is then stripped from the URL so the
+    // share-link is clean) or by re-using an existing sessionStorage
+    // flag set earlier in the same browser tab. Hiding clears the
+    // operator-mode flag, the review session token, and any loaded
+    // queue / detail / audit-packet state.
+    //
+    // This is UI visibility only. Real protection of the review API
+    // remains REVIEW_API_ENABLED + X-Review-Token server-side.
+    // -----------------------------------------------------------------
+    const OPERATOR_TOOLS_STORAGE_KEY = "policy_ai_operator_tools_visible";
+    const OPERATOR_TOOLS_URL_FLAG = "operator_tools";
+
+    function operatorToolsRequestedByUrl() {
+      try {
+        const search = (window.location && window.location.search) || "";
+        if (!search) return false;
+        const params = new URLSearchParams(search);
+        return params.get(OPERATOR_TOOLS_URL_FLAG) === "1";
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function operatorToolsFlagSet() {
+      try {
+        if (!window.sessionStorage) return false;
+        return sessionStorage.getItem(OPERATOR_TOOLS_STORAGE_KEY) === "true";
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function setOperatorToolsFlag(value) {
+      try {
+        if (!window.sessionStorage) return false;
+        if (value) {
+          sessionStorage.setItem(OPERATOR_TOOLS_STORAGE_KEY, "true");
+        } else {
+          sessionStorage.removeItem(OPERATOR_TOOLS_STORAGE_KEY);
+        }
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function operatorToolsCleanUrl() {
+      // Strip ?operator_tools=1 from the visible URL so a bookmark or
+      // shared link doesn't lock everyone into operator mode. The
+      // sessionStorage flag keeps the panel visible for the current
+      // tab session only.
+      try {
+        if (!window.history || !window.history.replaceState) return;
+        const search = (window.location && window.location.search) || "";
+        if (!search) return;
+        const params = new URLSearchParams(search);
+        if (!params.has(OPERATOR_TOOLS_URL_FLAG)) return;
+        params.delete(OPERATOR_TOOLS_URL_FLAG);
+        const remaining = params.toString();
+        const newSearch = remaining ? `?${remaining}` : "";
+        const pathname = (window.location && window.location.pathname) || "/";
+        const hash = (window.location && window.location.hash) || "";
+        window.history.replaceState({}, "", pathname + newSearch + hash);
+      } catch (_) {
+        /* ignore — visibility still works without URL cleanup */
+      }
+    }
+
+    function showOperatorTools() {
+      const el = document.getElementById("operatorTools");
+      if (el) el.hidden = false;
+    }
+
+    function hideOperatorToolsElement() {
+      const el = document.getElementById("operatorTools");
+      if (el) el.hidden = true;
+    }
+
+    function hideOperatorToolsAndResetState() {
+      // Clear visibility flag.
+      setOperatorToolsFlag(false);
+      // Clear the review session token + every piece of in-memory
+      // review-side UI state. M8.7 already pinned the lockout helper;
+      // we reuse it so the behavior is consistent with 토큰 해제.
+      try {
+        serverReviewSetToken("");
+      } catch (_) { /* helper may not be defined in some fixtures */ }
+      try {
+        serverReviewResetAfterTokenClear();
+      } catch (_) { /* same */ }
+      hideOperatorToolsElement();
+    }
+
+    function applyOperatorToolsVisibility() {
+      const requestedByUrl = operatorToolsRequestedByUrl();
+      if (requestedByUrl) {
+        setOperatorToolsFlag(true);
+        operatorToolsCleanUrl();
+      }
+      if (operatorToolsFlagSet()) {
+        showOperatorTools();
+      } else {
+        hideOperatorToolsElement();
+      }
+    }
+
+    function operatorToolsBindEvents() {
+      const hideBtn = document.getElementById("operatorToolsHideBtn");
+      if (hideBtn) {
+        hideBtn.addEventListener("click", () => {
+          hideOperatorToolsAndResetState();
+        });
+      }
+    }
+
     // Expose pure helpers for JS regression tests (no network, no I/O).
     if (typeof window !== "undefined") {
       window.__serverReviewHelpers = {
@@ -8765,12 +8963,28 @@
         auditPacketCopyFailMessage: SERVER_REVIEW_AUDIT_PACKET_COPY_FAIL_MESSAGE,
         auditPacketNotLoadedMessage: SERVER_REVIEW_AUDIT_PACKET_NOT_LOADED_MESSAGE,
         buildAuditPacketSummary: serverReviewBuildAuditPacketSummary,
+        // M9.4 — operator-mode visibility helpers.
+        operatorToolsStorageKey: OPERATOR_TOOLS_STORAGE_KEY,
+        operatorToolsUrlFlag: OPERATOR_TOOLS_URL_FLAG,
+        operatorToolsRequestedByUrl: operatorToolsRequestedByUrl,
+        operatorToolsFlagSet: operatorToolsFlagSet,
+        setOperatorToolsFlag: setOperatorToolsFlag,
+        showOperatorTools: showOperatorTools,
+        hideOperatorToolsElement: hideOperatorToolsElement,
+        hideOperatorToolsAndResetState: hideOperatorToolsAndResetState,
+        applyOperatorToolsVisibility: applyOperatorToolsVisibility,
       };
     }
 
     renderHistory(safeReadLocalHistory());
     renderReviewQueue(safeReadReviewQueue());
     renderHotTopics();
+    // M9.4 — decide reviewer/admin visibility BEFORE binding the
+    // server-review events, so the panel is in its final state when
+    // ``serverReviewBindEvents`` runs (it doesn't auto-fetch anyway,
+    // per M8.7 — ordering here is purely defensive).
+    applyOperatorToolsVisibility();
+    operatorToolsBindEvents();
     serverReviewBindEvents();
   </script>
 </body>

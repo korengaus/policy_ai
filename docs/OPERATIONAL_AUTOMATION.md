@@ -618,6 +618,31 @@ python scripts/smoke_review_api_exposure.py --base-url http://127.0.0.1:8000 --e
 The local form points at a running uvicorn that has `REVIEW_API_ENABLED`
 unset; both endpoints should return 503 and the smoke should pass.
 
+## F''''''. Public/admin surface separation (M9.4)
+
+M9.4 hides the reviewer/admin sections in `web/index.html` by default
+on the public page; they reveal only via `?operator_tools=1` or the
+matching `sessionStorage` flag. **This is UI visibility, not an
+operational runner profile** — no new command, no new operational
+check, no Render-side change.
+
+The exposure smoke (`review-exposure` profile, M8.8) still answers the
+"is the `/review/*` API publicly accessible?" question, and the M9.4
+visibility change does **not** affect that answer in either direction:
+the API was disabled-by-default before M9.4 and remains so after.
+
+If an operator wants to visually inspect the reveal flow against the
+Render deploy without touching env vars, the URL is:
+
+```
+https://policy-ai-q5ax.onrender.com/?operator_tools=1
+```
+
+The reveal exposes the panels; the panels still surface
+"리뷰 API가 비활성화되어 있습니다…" when the operator clicks
+`큐 새로고침`, because Render keeps `REVIEW_API_ENABLED` unset.
+That is the expected, safe state.
+
 ## F'''''. Local reviewer UI activation dry-run (M9.3)
 
 `scripts/prepare_review_ui_local_demo.py` + `scripts/serve_review_ui_local_demo.py`

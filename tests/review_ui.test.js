@@ -247,6 +247,20 @@ function createSandbox(options) {
   const sessionStore = new Map(opts.session ? Object.entries(opts.session) : []);
   const localStore = new Map();
   const fetchCalls = [];
+  // M9.4 — per-id element cache so tests can assert hidden state.
+  // The first ``document.getElementById(id)`` for a given id creates
+  // a stub; subsequent calls return the same instance so mutations
+  // (``el.hidden = true``) are observable to the test harness.
+  const elementCache = new Map();
+  function cachedElement(id) {
+    if (!elementCache.has(id)) {
+      elementCache.set(id, createElementStub());
+    }
+    return elementCache.get(id);
+  }
+  // M9.4 — history.replaceState call log so tests can verify the
+  // URL-flag cleanup happened.
+  const historyReplaceCalls = [];
   const sandbox = {
     console: { log() {}, warn() {}, error: console.error, debug() {}, info() {} },
     localStorage: {
@@ -262,6 +276,8 @@ function createSandbox(options) {
     __sessionStore: sessionStore,
     __localStore: localStore,
     __fetchCalls: fetchCalls,
+    __elementCache: elementCache,
+    __historyReplaceCalls: historyReplaceCalls,
     Blob: function Blob(parts) {
       this.size = (parts || []).reduce(
         (acc, p) => acc + (typeof p === "string" ? p.length : (p && p.length) || 0),
@@ -269,7 +285,7 @@ function createSandbox(options) {
       );
     },
     document: {
-      getElementById() { return createElementStub(); },
+      getElementById(id) { return cachedElement(String(id)); },
       querySelector() { return createElementStub(); },
       querySelectorAll() { return []; },
       createElement() { return createElementStub(); },
@@ -278,13 +294,40 @@ function createSandbox(options) {
       body: createElementStub(),
     },
     window: {
-      location: { origin: "http://127.0.0.1:8000", search: "" },
+      location: {
+        origin: "http://127.0.0.1:8000",
+        pathname: opts.pathname || "/",
+        search: opts.urlSearch || "",
+        hash: "",
+      },
+      history: {
+        replaceState(state, title, url) {
+          historyReplaceCalls.push({ state, title, url });
+          // Reflect the new URL in window.location so subsequent reads
+          // observe the change. Manual parse keeps the existing
+          // (custom) URL stub intact for blob handling elsewhere.
+          try {
+            const s = String(url || "");
+            const hashIdx = s.indexOf("#");
+            const pre = hashIdx >= 0 ? s.slice(0, hashIdx) : s;
+            const hash = hashIdx >= 0 ? s.slice(hashIdx) : "";
+            const queryIdx = pre.indexOf("?");
+            const pathname = queryIdx >= 0 ? pre.slice(0, queryIdx) : pre;
+            const search = queryIdx >= 0 ? pre.slice(queryIdx) : "";
+            sandbox.window.location.pathname = pathname || "/";
+            sandbox.window.location.search = search;
+            sandbox.window.location.hash = hash;
+          } catch (_) {}
+        },
+        pushState() {},
+      },
       scrollTo() {},
       addEventListener() {},
       matchMedia() {
         return { matches: false, addEventListener() {}, removeEventListener() {} };
       },
     },
+    URLSearchParams,
     navigator: { clipboard: { async writeText() {} } },
     URL: { createObjectURL() { return "blob:test"; }, revokeObjectURL() {} },
     alert() {},
@@ -919,6 +962,269 @@ if (rawAssign) {
 assert.ok(
   /rawEl\.textContent\s*=/.test(concatenatedScripts),
   "audit-packet raw area must be populated via textContent",
+);
+
+// =============================================================================
+// 13. M9.4 — public/admin surface separation
+// =============================================================================
+//
+// Pin the operator-mode reveal contract:
+//   * default page load hides the reviewer/admin sections
+//   * ``?operator_tools=1`` reveals them and writes a sessionStorage flag
+//   * the flag alone reveals them on subsequent page loads
+//   * neither path fires any /review/* request on init
+//   * the "운영자 도구 숨기기" button clears the flag, the review
+//     session token, and any loaded review state
+//   * operator-mode visibility never uses localStorage
+//   * the disclaimer wording says "이 표시는 인증이 아닙니다" and
+//     names REVIEW_API_ENABLED + X-Review-Token as the real protection
+//
+// All assertions run against fresh sandboxes built via createSandbox()
+// so each scenario starts with a clean storage state.
+
+// --- 13a. Required markup -------------------------------------------------
+const M94_REQUIRED_IDS = [
+  "operatorTools",
+  "operatorToolsHideBtn",
+];
+for (const id of M94_REQUIRED_IDS) {
+  assert.ok(
+    html.includes(`id="${id}"`),
+    `M9.4 element missing: id="${id}"`,
+  );
+}
+// The wrapper must default to hidden on the static markup so the
+// public page never paints the operator panels in the first frame.
+assert.ok(
+  /<div id="operatorTools"[^>]*\bhidden\b/.test(html),
+  "M9.4: <div id=\"operatorTools\"> must carry the hidden attribute by default",
+);
+
+// --- 13b. Disclaimer wording ---------------------------------------------
+const M94_REQUIRED_WORDING = [
+  "내부 운영자 도구",
+  "관리자 전용",
+  "이 표시는 인증이 아니며",
+  "REVIEW_API_ENABLED",
+  "X-Review-Token",
+  "운영자 도구 숨기기",
+  "게시가 아님",
+];
+for (const phrase of M94_REQUIRED_WORDING) {
+  assert.ok(
+    html.includes(phrase),
+    `M9.4 disclaimer wording missing: ${phrase}`,
+  );
+}
+
+// --- 13c. Helpers are exposed --------------------------------------------
+assert.strictEqual(
+  helpers.operatorToolsStorageKey,
+  "policy_ai_operator_tools_visible",
+);
+assert.strictEqual(helpers.operatorToolsUrlFlag, "operator_tools");
+assert.strictEqual(typeof helpers.operatorToolsRequestedByUrl, "function");
+assert.strictEqual(typeof helpers.operatorToolsFlagSet, "function");
+assert.strictEqual(typeof helpers.showOperatorTools, "function");
+assert.strictEqual(typeof helpers.hideOperatorToolsAndResetState, "function");
+assert.strictEqual(typeof helpers.applyOperatorToolsVisibility, "function");
+
+// --- 13d. Default page load → tools hidden, no /review/* fetch -----------
+const defaultSandbox = createSandbox();
+{
+  const opEl = defaultSandbox.__elementCache.get("operatorTools");
+  assert.ok(opEl, "init must touch the #operatorTools element");
+  assert.strictEqual(
+    opEl.hidden, true,
+    "default page load must leave #operatorTools hidden",
+  );
+  const sessionFlag = defaultSandbox.__sessionStore.get(
+    "policy_ai_operator_tools_visible",
+  );
+  assert.ok(!sessionFlag, "default page load must not set operator-mode flag");
+  const localFlag = defaultSandbox.__localStore.get(
+    "policy_ai_operator_tools_visible",
+  );
+  assert.ok(!localFlag, "operator-mode flag must never use localStorage");
+  const reviewFetches = defaultSandbox.__fetchCalls.filter(
+    (c) => c.url.includes("/review/")
+  );
+  assert.strictEqual(
+    reviewFetches.length, 0,
+    "default page load must not auto-fetch any /review/* endpoint",
+  );
+}
+
+// --- 13e. URL flag → tools visible + sessionStorage set + URL cleaned ----
+const urlSandbox = createSandbox({ urlSearch: "?operator_tools=1" });
+{
+  const opEl = urlSandbox.__elementCache.get("operatorTools");
+  assert.strictEqual(
+    opEl.hidden, false,
+    "?operator_tools=1 must reveal the operator-tools wrapper",
+  );
+  assert.strictEqual(
+    urlSandbox.__sessionStore.get("policy_ai_operator_tools_visible"),
+    "true",
+    "URL flag must write the sessionStorage operator-mode flag",
+  );
+  // history.replaceState was called to clean ?operator_tools=1 out of
+  // the visible URL (so a shared/bookmarked link doesn't force the
+  // mode on the next visitor).
+  assert.ok(
+    urlSandbox.__historyReplaceCalls.length >= 1,
+    "URL flag must trigger history.replaceState to clean the URL",
+  );
+  const cleanedSearch = urlSandbox.window.location.search;
+  assert.ok(
+    !cleanedSearch.includes("operator_tools"),
+    `URL must no longer carry operator_tools after cleanup; got ${cleanedSearch}`,
+  );
+  // No /review/* fetch on init even when tools are revealed.
+  const reviewFetches = urlSandbox.__fetchCalls.filter(
+    (c) => c.url.includes("/review/")
+  );
+  assert.strictEqual(
+    reviewFetches.length, 0,
+    "URL flag must not cause any auto /review/* fetch on init",
+  );
+}
+
+// --- 13f. SessionStorage flag alone → tools visible, still no fetch -----
+const seededOpSandbox = createSandbox({
+  session: { policy_ai_operator_tools_visible: "true" },
+});
+{
+  const opEl = seededOpSandbox.__elementCache.get("operatorTools");
+  assert.strictEqual(
+    opEl.hidden, false,
+    "sessionStorage flag alone must reveal the operator-tools wrapper",
+  );
+  // No /review/* fetch on init, even with the flag pre-set.
+  const reviewFetches = seededOpSandbox.__fetchCalls.filter(
+    (c) => c.url.includes("/review/")
+  );
+  assert.strictEqual(
+    reviewFetches.length, 0,
+    "operator-mode flag must not cause any auto /review/* fetch on init",
+  );
+  // No URL cleanup happens when the flag came from session, not URL.
+  assert.strictEqual(
+    seededOpSandbox.__historyReplaceCalls.length, 0,
+    "no URL cleanup when the URL didn't carry the flag",
+  );
+}
+
+// --- 13g. Hide button clears operator flag + review token + state -------
+const hideSandbox = createSandbox({
+  session: {
+    policy_ai_operator_tools_visible: "true",
+    policy_ai_server_review_token: "test-session-token-from-prior-step",
+  },
+});
+{
+  // Sanity: tools were revealed because the session flag was set.
+  const opEl = hideSandbox.__elementCache.get("operatorTools");
+  assert.strictEqual(opEl.hidden, false);
+  // Invoke the hide helper directly.
+  hideSandbox.window.__serverReviewHelpers.hideOperatorToolsAndResetState();
+  assert.strictEqual(
+    opEl.hidden, true,
+    "hide handler must hide the operator-tools wrapper",
+  );
+  // Flag + token both cleared from sessionStorage.
+  assert.strictEqual(
+    hideSandbox.__sessionStore.get("policy_ai_operator_tools_visible"),
+    undefined,
+    "hide must clear the operator-mode flag from sessionStorage",
+  );
+  assert.strictEqual(
+    hideSandbox.__sessionStore.get("policy_ai_server_review_token"),
+    undefined,
+    "hide must clear the review session token from sessionStorage",
+  );
+  // Neither value moved to localStorage.
+  assert.ok(
+    !hideSandbox.__localStore.get("policy_ai_operator_tools_visible"),
+    "operator-mode flag must never appear in localStorage",
+  );
+  assert.ok(
+    !hideSandbox.__localStore.get("policy_ai_server_review_token"),
+    "review token must never appear in localStorage",
+  );
+  // Hide must not fire any /review/* request.
+  const reviewFetches = hideSandbox.__fetchCalls.filter(
+    (c) => c.url.includes("/review/")
+  );
+  assert.strictEqual(
+    reviewFetches.length, 0,
+    "hide handler must not trigger any /review/* fetch",
+  );
+}
+
+// --- 13h. Token / publication safety in the operator-tools wrapper ------
+// Pin that no publication / public-export wording slipped into the new
+// operator-tools banner block.
+const opToolsBlockStart = html.indexOf('id="operatorTools"');
+const opToolsBlockEnd = html.indexOf(
+  '<!-- /#operatorTools', opToolsBlockStart
+);
+assert.ok(
+  opToolsBlockStart > 0 && opToolsBlockEnd > opToolsBlockStart,
+  "could not locate the M9.4 operator-tools block bounds in index.html",
+);
+const opToolsBlock = html.slice(opToolsBlockStart, opToolsBlockEnd);
+for (const banned of [
+  "auto-publish", "auto_publish",
+  "published</option", "corrected</option",
+  "발행 가능", "발행 버튼", "지금 게시", "공개 게시",
+  // The operator-mode flag must never appear in any localStorage call.
+  'localStorage.setItem("policy_ai_operator_tools_visible',
+  "localStorage.setItem('policy_ai_operator_tools_visible",
+]) {
+  assert.ok(
+    !opToolsBlock.includes(banned),
+    `operator-tools block must not include: ${banned}`,
+  );
+}
+// And the operator-mode flag string in the *whole document* must only
+// appear in sessionStorage call sites — never in localStorage assignments.
+for (const localCall of [
+  'localStorage.setItem("policy_ai_operator_tools_visible',
+  "localStorage.setItem('policy_ai_operator_tools_visible",
+  'localStorage.getItem("policy_ai_operator_tools_visible',
+  "localStorage.getItem('policy_ai_operator_tools_visible",
+]) {
+  assert.ok(
+    !html.includes(localCall),
+    `operator-mode flag must never use localStorage: ${localCall}`,
+  );
+}
+
+// --- 13i. Existing M8.x / M9.x contracts still hold ---------------------
+// Decision vocabulary unchanged.
+for (const decision of ["approve", "reject", "needs_more_evidence", "comment"]) {
+  assert.ok(
+    html.includes(`value="${decision}"`),
+    `decision dropdown still requires value="${decision}"`,
+  );
+}
+// Disabled / no-current-result / audit-packet messages unchanged.
+assert.strictEqual(
+  helpers.disabledMessage,
+  "리뷰 API가 비활성화되어 있습니다. 로컬/운영 환경에서 REVIEW_API_ENABLED 설정이 필요합니다.",
+);
+assert.strictEqual(
+  helpers.noCurrentResultMessage,
+  "등록할 분석 결과가 없습니다. 먼저 분석을 실행하거나 기록에서 결과를 선택하세요.",
+);
+assert.strictEqual(
+  helpers.auditPacketNoTaskMessage,
+  "감사 패킷을 불러올 검수 작업을 먼저 선택하세요.",
+);
+assert.strictEqual(
+  helpers.auditPacketNoTokenMessage,
+  "검수 토큰이 없습니다. 먼저 토큰을 적용해 주세요.",
 );
 
 console.log("server-review UI smoke tests passed");
