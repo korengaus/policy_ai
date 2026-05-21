@@ -547,6 +547,314 @@ class ReviewWorkflowHelperTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Phase 2 M9.1 — internal reviewer audit packet
+# ---------------------------------------------------------------------------
+
+
+class AuditPacketGatingTests(_AuditAPIBase):
+    """A. Disabled / 403 / 404 gates behave like every other /review/* surface."""
+
+    def test_audit_packet_disabled_when_review_api_disabled(self):
+        # No env → 503 with "disabled" detail.
+        with _env(REVIEW_API_ENABLED=None, REVIEW_API_TOKEN=None):
+            with self._client() as client:
+                resp = client.get(
+                    "/review/tasks/anything/audit-packet"
+                )
+        self.assertEqual(resp.status_code, 503)
+        self.assertIn("disabled", resp.json()["detail"].lower())
+
+    def test_audit_packet_403_missing_token(self):
+        with _env(**_enabled_env()):
+            with self._client() as client:
+                resp = client.get("/review/tasks/anything/audit-packet")
+        self.assertEqual(resp.status_code, 403)
+
+    def test_audit_packet_403_wrong_token(self):
+        with _env(**_enabled_env()):
+            with self._client() as client:
+                resp = client.get(
+                    "/review/tasks/anything/audit-packet",
+                    headers={"X-Review-Token": "wrong-token"},
+                )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_audit_packet_404_for_missing_task(self):
+        with _env(**_enabled_env()):
+            with self._client() as client:
+                resp = client.get(
+                    "/review/tasks/no-such-task/audit-packet",
+                    headers={"X-Review-Token": TEST_TOKEN},
+                )
+        self.assertEqual(resp.status_code, 404)
+
+
+class AuditPacketShapeTests(_AuditAPIBase):
+    """B + C — packet has the documented shape; decisions are enriched."""
+
+    def test_audit_packet_top_level_keys(self):
+        with _env(**_enabled_env()):
+            with self._client() as client:
+                task_id = self._create_task(client, idx=200)
+                resp = client.get(
+                    f"/review/tasks/{task_id}/audit-packet",
+                    headers={"X-Review-Token": TEST_TOKEN},
+                )
+        self.assertEqual(resp.status_code, 200, msg=resp.text)
+        body = resp.json()
+        self.assertEqual(set(body.keys()), {
+            "packet_type", "audit_version", "generated_at",
+            "task", "verdict_snapshot", "source_snapshot",
+            "review_decisions", "safety_contract",
+        })
+        self.assertEqual(body["packet_type"], "internal_review_audit_packet")
+        self.assertEqual(body["audit_version"], 1)
+        self.assertTrue(body["generated_at"])
+
+    def test_audit_packet_task_block(self):
+        with _env(**_enabled_env()):
+            with self._client() as client:
+                task_id = self._create_task(
+                    client, claim="감사 패킷 블록 청구항", idx=201,
+                )
+                resp = client.get(
+                    f"/review/tasks/{task_id}/audit-packet",
+                    headers={"X-Review-Token": TEST_TOKEN},
+                )
+        task_block = resp.json()["task"]
+        self.assertEqual(task_block["task_id"], task_id)
+        self.assertEqual(task_block["status"], "pending_review")
+        self.assertTrue(task_block["human_review_required"])
+        self.assertEqual(task_block["claim_text"], "감사 패킷 블록 청구항")
+
+    def test_audit_packet_verdict_and_source_snapshots(self):
+        with _env(**_enabled_env()):
+            with self._client() as client:
+                task_id = self._create_task(client, idx=202)
+                resp = client.get(
+                    f"/review/tasks/{task_id}/audit-packet",
+                    headers={"X-Review-Token": TEST_TOKEN},
+                )
+        body = resp.json()
+        verdict = body["verdict_snapshot"]
+        self.assertEqual(verdict["final_decision"], "사람 검토 필요")
+        self.assertEqual(verdict["policy_confidence"], "moderate")
+        # M9.1 snapshot extraction picks up the card status.
+        self.assertEqual(verdict["verification_card_status"], "pending_review")
+        # The synthetic payload doesn't carry a card-level "verdict" field
+        # so it surfaces as None — the helper maps empty → None.
+        self.assertIsNone(verdict["verification_card_verdict"])
+
+        source = body["source_snapshot"]
+        self.assertEqual(source["result_id"], "audit-202")
+        self.assertEqual(source["job_id"], "audit-job-202")
+        self.assertEqual(source["item_index"], 0)
+        self.assertEqual(source["query"], "감사 추적 스모크")
+
+    def test_audit_packet_review_decisions_are_audit_rich(self):
+        with _env(**_enabled_env()):
+            with self._client() as client:
+                task_id = self._create_task(client, idx=203)
+                client.post(
+                    f"/review/tasks/{task_id}/decision",
+                    json={
+                        "decision": "approve",
+                        "reviewer_id": "operator-jane",
+                        "decision_source": "review_ui",
+                    },
+                    headers={"X-Review-Token": TEST_TOKEN},
+                )
+                resp = client.get(
+                    f"/review/tasks/{task_id}/audit-packet",
+                    headers={"X-Review-Token": TEST_TOKEN},
+                )
+        decisions = resp.json()["review_decisions"]
+        self.assertEqual(len(decisions), 1)
+        d = decisions[0]
+        self.assertEqual(d["decision"], "approve")
+        self.assertEqual(d["transition"], "pending_review → approved")
+        self.assertEqual(d["decision_source"], "review_ui")
+        self.assertEqual(d["audit_version"], 1)
+        self.assertEqual(d["reviewer_id"], "operator-jane")
+        self.assertTrue(d.get("decision_id"))
+
+
+# ---------------------------------------------------------------------------
+# D — verdict isolation under audit-packet construction
+# ---------------------------------------------------------------------------
+
+
+class AuditPacketIsolationTests(_AuditAPIBase):
+    def test_audit_packet_does_not_mutate_task_or_decisions(self):
+        with _env(**_enabled_env()):
+            with self._client() as client:
+                task_id = self._create_task(client, idx=300)
+                # First fetch — establish baseline.
+                first = client.get(
+                    f"/review/tasks/{task_id}/audit-packet",
+                    headers={"X-Review-Token": TEST_TOKEN},
+                )
+                # Then fetch the underlying detail; verify it is unchanged.
+                detail_before = client.get(
+                    f"/review/tasks/{task_id}",
+                    headers={"X-Review-Token": TEST_TOKEN},
+                ).json()
+                # Re-fetch the packet — second call must not have mutated
+                # anything; verdict-side fields stay identical.
+                second = client.get(
+                    f"/review/tasks/{task_id}/audit-packet",
+                    headers={"X-Review-Token": TEST_TOKEN},
+                )
+                detail_after = client.get(
+                    f"/review/tasks/{task_id}",
+                    headers={"X-Review-Token": TEST_TOKEN},
+                ).json()
+        self.assertEqual(first.json()["verdict_snapshot"],
+                         second.json()["verdict_snapshot"])
+        # The task detail (including its snapshot) is byte-for-byte stable.
+        # generated_at on the packet differs across calls; the underlying
+        # task representation does not.
+        self.assertEqual(
+            detail_before["task"]["snapshot"],
+            detail_after["task"]["snapshot"],
+        )
+        self.assertEqual(
+            detail_before["task"]["final_decision"],
+            detail_after["task"]["final_decision"],
+        )
+        self.assertEqual(
+            detail_before["task"]["policy_confidence"],
+            detail_after["task"]["policy_confidence"],
+        )
+
+    def test_audit_packet_helper_does_not_mutate_inputs(self):
+        # Direct unit test on the pure helper.
+        task = {
+            "task_id": "t1",
+            "status": "pending_review",
+            "final_decision": "사람 검토 필요",
+            "policy_confidence": "moderate",
+            "human_review_required": True,
+            "snapshot": {
+                "verification_card_status": "pending_review",
+                "verification_card_verdict": "",
+            },
+        }
+        decisions = [
+            {"decision_id": "d1", "decision": "comment",
+             "previous_status": "pending_review",
+             "new_status": "pending_review",
+             "decision_source": "review_api"},
+        ]
+        task_snapshot = copy.deepcopy(task)
+        decisions_snapshot = copy.deepcopy(decisions)
+        packet = review_workflow.build_review_audit_packet(task, decisions)
+        self.assertEqual(packet["packet_type"], "internal_review_audit_packet")
+        # Inputs unchanged.
+        self.assertEqual(task, task_snapshot)
+        self.assertEqual(decisions, decisions_snapshot)
+
+
+# ---------------------------------------------------------------------------
+# E — safety_contract block
+# ---------------------------------------------------------------------------
+
+
+class AuditPacketSafetyContractTests(_AuditAPIBase):
+    def test_safety_contract_values(self):
+        with _env(**_enabled_env()):
+            with self._client() as client:
+                task_id = self._create_task(client, idx=400)
+                resp = client.get(
+                    f"/review/tasks/{task_id}/audit-packet",
+                    headers={"X-Review-Token": TEST_TOKEN},
+                )
+        sc = resp.json()["safety_contract"]
+        self.assertIs(sc["publication"], False)
+        self.assertIs(sc["mutates_original_result"], False)
+        self.assertIs(sc["mutates_final_decision"], False)
+        self.assertIs(sc["mutates_policy_confidence"], False)
+        self.assertIs(sc["mutates_verification_card"], False)
+        self.assertIs(sc["semantic_matching_debug_only"], True)
+        self.assertIs(sc["human_review_required"], True)
+
+
+# ---------------------------------------------------------------------------
+# F — token / secret safety in audit packet
+# ---------------------------------------------------------------------------
+
+
+class AuditPacketTokenSafetyTests(_AuditAPIBase):
+    def test_audit_packet_carries_no_token_or_secret_literal(self):
+        with _env(**_enabled_env()):
+            with self._client() as client:
+                task_id = self._create_task(client, idx=500)
+                client.post(
+                    f"/review/tasks/{task_id}/decision",
+                    json={
+                        "decision": "approve",
+                        "reviewer_id": "operator-jane",
+                        "decision_source": "review_ui",
+                    },
+                    headers={"X-Review-Token": TEST_TOKEN},
+                )
+                resp = client.get(
+                    f"/review/tasks/{task_id}/audit-packet",
+                    headers={"X-Review-Token": TEST_TOKEN},
+                )
+        text = resp.text
+        self.assertNotIn(TEST_TOKEN, text)
+        self.assertNotIn("REVIEW_API_TOKEN", text)
+        self.assertNotIn("X-Review-Token", text)
+        self.assertNotIn("OPENAI_API_KEY", text)
+        # reviewer_id reflects the operator-supplied value, not the token.
+        body = resp.json()
+        d = body["review_decisions"][0]
+        self.assertEqual(d["reviewer_id"], "operator-jane")
+        self.assertNotEqual(d["reviewer_id"], TEST_TOKEN)
+
+
+# ---------------------------------------------------------------------------
+# G — direct unit tests on the build_review_audit_packet helper
+# ---------------------------------------------------------------------------
+
+
+class AuditPacketHelperUnitTests(unittest.TestCase):
+    def test_packet_handles_non_dict_task(self):
+        packet = review_workflow.build_review_audit_packet(None, [])
+        self.assertEqual(packet["packet_type"], "internal_review_audit_packet")
+        self.assertEqual(packet["audit_version"], 1)
+        self.assertIsNone(packet["task"]["task_id"])
+        # Safety contract is fixed — non-dict input still produces the
+        # documented block.
+        sc = packet["safety_contract"]
+        self.assertIs(sc["publication"], False)
+        self.assertIs(sc["semantic_matching_debug_only"], True)
+
+    def test_packet_or_none_helper(self):
+        # Empty / whitespace / None all collapse to None.
+        self.assertIsNone(review_workflow._packet_or_none(None))
+        self.assertIsNone(review_workflow._packet_or_none(""))
+        self.assertIsNone(review_workflow._packet_or_none("   "))
+        # Real values stripped.
+        self.assertEqual(review_workflow._packet_or_none("  hello  "), "hello")
+
+    def test_packet_uses_supplied_generated_at(self):
+        fixed = "2026-05-22T00:00:00.000000+00:00"
+        packet = review_workflow.build_review_audit_packet(
+            {"task_id": "t"}, [], generated_at=fixed,
+        )
+        self.assertEqual(packet["generated_at"], fixed)
+
+    def test_packet_human_review_flag_follows_task(self):
+        packet = review_workflow.build_review_audit_packet(
+            {"task_id": "t", "human_review_required": False}, [],
+        )
+        self.assertFalse(packet["task"]["human_review_required"])
+        self.assertFalse(packet["safety_contract"]["human_review_required"])
+
+
 class SchemaMigrationTests(unittest.TestCase):
     def test_decision_source_column_is_idempotent(self):
         import database

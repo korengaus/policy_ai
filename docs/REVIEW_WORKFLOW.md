@@ -1,4 +1,4 @@
-# Server-Backed Reviewer Workflow (Phase 2 M8.0 + M8.1 + M8.2 + M8.3 + M8.7 + M8.8 + M9.0)
+# Server-Backed Reviewer Workflow (Phase 2 M8.0 + M8.1 + M8.2 + M8.3 + M8.7 + M8.8 + M9.0 + M9.1)
 
 A backend-first foundation for the human-review layer. AI drafts and
 summarizes evidence; humans approve, reject, or request more evidence.
@@ -560,6 +560,7 @@ python scripts/smoke_review_api_exposure.py \
 | `GET` | `/review/tasks` | – |
 | `GET` | `/review/tasks/nonexistent-smoke-task-id` | – |
 | `GET` | `/review/tasks/nonexistent-smoke-task-id/decisions` | – |
+| `GET` | `/review/tasks/nonexistent-smoke-task-id/audit-packet` (M9.1) | – |
 | `POST` | `/review/tasks/from-result` | small synthetic envelope, no secrets |
 | `POST` | `/review/tasks/nonexistent-smoke-task-id/decision` | `{"decision": "comment", "comment": "public exposure smoke - no token"}` |
 
@@ -881,7 +882,201 @@ offline.
   `needs_more_evidence` / `comment`) is unchanged. The transition
   matrix is unchanged.
 
-## I. Future work (post-M9.0)
+## H''''''. Internal reviewer audit packet (M9.1)
+
+M9.1 adds a single read-only endpoint that returns a complete audit
+snapshot for one review task. It is the natural complement to M9.0:
+the audit trail is now individually inspectable. **Internal/admin
+only, token-gated, disabled-by-default on Render, never publication.**
+
+### Endpoint
+
+```
+GET /review/tasks/{task_id}/audit-packet
+```
+
+Gated identically to the rest of the review surface:
+
+| condition | response |
+| --- | --- |
+| `REVIEW_API_ENABLED` unset (default on Render) | **503** disabled |
+| env set but `REVIEW_API_TOKEN` missing | **503** misconfigured |
+| header missing / wrong | **403** |
+| task does not exist | **404** |
+| OK | **200** with the audit-packet JSON below |
+
+The endpoint is read-only: no DB writes, no decision records created,
+no task fields updated, no publication path.
+
+### Response shape
+
+```jsonc
+{
+  "packet_type": "internal_review_audit_packet",
+  "audit_version": 1,
+  "generated_at": "<iso UTC microseconds>",
+  "task": {
+    "task_id": "review_abc...",
+    "status": "pending_review",
+    "claim_text": "...",
+    "title": "...",
+    "url": "...",
+    "created_at": "...",
+    "updated_at": "...",
+    "human_review_required": true
+  },
+  "verdict_snapshot": {
+    "final_decision": "사람 검토 필요",
+    "policy_confidence": "moderate",
+    "verification_card_verdict": null,
+    "verification_card_status": "pending_review"
+  },
+  "source_snapshot": {
+    "result_id": "...",
+    "job_id": "...",
+    "item_index": 0,
+    "query": "..."
+  },
+  "review_decisions": [
+    {
+      "decision_id": "decision_xxx",
+      "decision": "approve",
+      "previous_status": "pending_review",
+      "new_status": "approved",
+      "transition": "pending_review → approved",
+      "decision_source": "review_ui",
+      "audit_version": 1,
+      "reviewer_id": "operator-jane",
+      "comment": "...",
+      "public_note": null,
+      "created_at": "..."
+    }
+  ],
+  "safety_contract": {
+    "publication": false,
+    "mutates_original_result": false,
+    "mutates_final_decision": false,
+    "mutates_policy_confidence": false,
+    "mutates_verification_card": false,
+    "semantic_matching_debug_only": true,
+    "human_review_required": true
+  }
+}
+```
+
+Stable type marker: `packet_type == "internal_review_audit_packet"` —
+pinned by `tests/test_review_audit_trail.py::AuditPacketShapeTests`.
+Empty-string snapshot fields collapse to `null` so consumers can
+distinguish "field present but empty" from "field intentionally
+absent."
+
+### `verdict_snapshot` semantics
+
+- `final_decision` + `policy_confidence` come from the stored
+  `review_tasks` row (set at task creation by the M8.2 snapshot
+  extractor). They are byte-for-byte equal to what the snapshot
+  captured.
+- `verification_card_status` + `verification_card_verdict` are read
+  from the M9.1-enriched snapshot
+  (`extract_review_snapshot_from_result` now also pulls
+  `verification_card.status` and `verification_card.verdict` /
+  `verdict_label` defensively). Legacy snapshots written before M9.1
+  do not carry these keys — the packet surfaces them as `null`.
+- No code path in the packet builder reads or rewrites the original
+  payload. The helper is pure-stdlib, idempotent, and side-effect-free.
+
+### `review_decisions` reuses M9.0 audit records
+
+Each entry is the same `build_decision_audit_record` shape used by
+`POST /review/tasks/{id}/decision`, `GET /review/tasks/{id}/decisions`,
+and the embedded task-detail decisions list. Stable keys per row:
+
+```
+decision_id, task_id, decision, reviewer_id, comment, public_note,
+previous_status, new_status, created_at, metadata, decision_source,
+transition, audit_version
+```
+
+### `safety_contract` block
+
+Seven fixed flags that document the contract the packet itself
+honors. These are not derived from the task — they are static
+invariants the helper *commits to*:
+
+| flag | always | meaning |
+| --- | --- | --- |
+| `publication` | `false` | no publication path is reachable through the packet |
+| `mutates_original_result` | `false` | the helper does not touch `analysis_results` |
+| `mutates_final_decision` | `false` | verdict label is read-only |
+| `mutates_policy_confidence` | `false` | confidence label is read-only |
+| `mutates_verification_card` | `false` | card status/verdict is read-only |
+| `semantic_matching_debug_only` | `true` | semantic signals stay debug metadata, never user-facing truth |
+| `human_review_required` | (mirrors the task) | the task still requires human review |
+
+### What this does NOT do
+
+- **Does not publish anything.** The transition matrix still refuses
+  `published` / `corrected`; there is no `/publish` endpoint; no UI
+  affordance. The `publication: false` flag in `safety_contract`
+  documents this at the wire layer.
+- **Does not change verdict logic.** `policy_decision`,
+  `policy_scoring`, and `verification_card` are not imported by
+  `review_workflow.build_review_audit_packet`. The helper only
+  projects what the snapshot already carries.
+- **Does not derive identity from the token.** `reviewer_id` is
+  operator-supplied free text and is never cross-referenced against
+  `X-Review-Token`. `decision_source` is an operator/workflow label,
+  not auth.
+- **Does not echo the token.** `tests/test_review_audit_trail.py::
+  AuditPacketTokenSafetyTests` pins that no token literal /
+  `REVIEW_API_TOKEN` / `X-Review-Token` / `OPENAI_API_KEY` string
+  appears in any audit-packet response.
+- **Does not modify Render env.** `REVIEW_API_ENABLED` stays unset by
+  default on Render; the audit packet is unreachable on the public
+  deploy until an operator manually enables the review API.
+
+### How M9.1 changes the operational smoke surface
+
+The endpoint count under `/review/*` grew from 5 to **6** (the
+exposure smoke now probes `GET /review/tasks/{id}/audit-packet`).
+After a Render redeploy that includes M9.1, the operator should
+expect:
+
+```
+python scripts/smoke_review_api_exposure.py \
+  --base-url https://policy-ai-q5ax.onrender.com --expect-disabled
+# expected: passed=True, disabled_count=6, public_access_detected=false
+```
+
+`scripts/smoke_review_workflow.py --self-contained` similarly grew
+from 9 sub-checks to **10** (`audit_packet_check`). The operational
+runner's `review-local` profile reports "all 10 checks ok" on pass.
+
+### Operator runbook (post-M9.1 deploy)
+
+1. After deploying M9.1, run the no-token public-exposure smoke (no
+   secret needed):
+   ```
+   python scripts/smoke_review_api_exposure.py \
+     --base-url https://policy-ai-q5ax.onrender.com --expect-disabled
+   ```
+   `disabled_count` should be 6; `public_access_detected` must be
+   `false`. Any 2xx without a token → flip `REVIEW_API_ENABLED=false`
+   in the Render dashboard immediately and investigate.
+2. For local/dev inspection of a real task's audit packet:
+   ```powershell
+   $env:REVIEW_API_ENABLED = "true"
+   $env:REVIEW_API_TOKEN   = "<your-local-dev-token>"
+   python -m uvicorn api_server:app --reload --port 8000
+   curl -H "X-Review-Token: <token>" `
+     http://127.0.0.1:8000/review/tasks/<task_id>/audit-packet
+   ```
+3. The audit packet is the right artifact to attach to internal
+   review notes or incident postmortems. It is **not** a public
+   evidence page and must never be linked from public-facing
+   reports.
+
+## I. Future work (post-M9.1)
 
 - Proper auth + admin layer to replace the temporary token gate.
 - Postgres dual-write for review tables to match the existing pattern

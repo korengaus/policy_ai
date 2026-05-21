@@ -1060,3 +1060,31 @@ def review_list_decisions(
         "count": len(decisions),
         "audit_version": review_workflow.AUDIT_SCHEMA_VERSION,
     }
+
+
+@app.get("/review/tasks/{task_id}/audit-packet")
+def review_audit_packet(
+    task_id: str,
+    _: None = Depends(_require_review_token),
+) -> dict:
+    """Phase 2 M9.1 — internal reviewer audit packet (read-only).
+
+    Returns a structured, read-only audit snapshot for a single review
+    task: the stored task summary, the verdict snapshot extracted at
+    creation time, the source-identifier tuple, the M9.0 audit-rich
+    decision list, and a fixed safety-contract block. Never mutates the
+    task, decisions, original payload, verdict, confidence, or
+    verification-card. Never publishes. Never echoes the token.
+
+    Gated identically to the rest of the review surface:
+        * 503 when ``REVIEW_API_ENABLED`` is unset.
+        * 503 when the env var is set but ``REVIEW_API_TOKEN`` is missing.
+        * 403 when ``X-Review-Token`` is missing / wrong.
+        * 404 when the task does not exist.
+    """
+    init_review_tables()
+    task = get_review_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="review task not found")
+    decisions = list_review_decisions(task_id)
+    return review_workflow.build_review_audit_packet(task, decisions)

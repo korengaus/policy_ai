@@ -157,9 +157,11 @@ class AllowEitherTests(unittest.TestCase):
         )
         self.assertTrue(result.passed)
         self.assertFalse(result.public_access_detected)
-        # The endpoint list has 3 GETs + 2 POSTs.
-        self.assertEqual(result.disabled_count, 3)
-        self.assertEqual(result.token_required_count, 2)
+        # M9.1 endpoint list has 4 GETs + 2 POSTs.
+        get_count = sum(1 for m, _p, _b in smoke.ENDPOINTS if m == "GET")
+        post_count = sum(1 for m, _p, _b in smoke.ENDPOINTS if m == "POST")
+        self.assertEqual(result.disabled_count, get_count)
+        self.assertEqual(result.token_required_count, post_count)
         self.assertEqual(result.unexpected_count, 0)
         self.assertEqual(result.expectation_mismatch_count, 0)
 
@@ -360,6 +362,69 @@ class JSONOutputTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # I — base URL normalization + timeout handling
 # ---------------------------------------------------------------------------
+
+
+class EndpointCatalogueTests(unittest.TestCase):
+    """Phase 2 M9.1 — every gated /review/* surface must be probed."""
+
+    EXPECTED_PATHS = {
+        ("GET", "/review/tasks"),
+        ("GET", "/review/tasks/nonexistent-smoke-task-id"),
+        ("GET", "/review/tasks/nonexistent-smoke-task-id/decisions"),
+        ("GET", "/review/tasks/nonexistent-smoke-task-id/audit-packet"),
+        ("POST", "/review/tasks/from-result"),
+        ("POST", "/review/tasks/nonexistent-smoke-task-id/decision"),
+    }
+
+    def test_endpoint_catalogue_includes_every_review_surface(self):
+        actual = {(m, p) for m, p, _b in smoke.ENDPOINTS}
+        self.assertEqual(actual, self.EXPECTED_PATHS)
+        # M9.1 explicit check.
+        self.assertIn(
+            ("GET", "/review/tasks/nonexistent-smoke-task-id/audit-packet"),
+            actual,
+            "M9.1: audit-packet endpoint must be probed by the exposure smoke",
+        )
+
+    def test_audit_packet_endpoint_is_gated_when_disabled(self):
+        result = smoke.run_exposure_smoke(
+            "https://example.invalid",
+            smoke.EXPECT_DISABLED,
+            fetch_fn=_all_disabled,
+        )
+        # The audit-packet endpoint's per-result row must be classified
+        # as disabled — not unexpected, not public.
+        audit_rows = [
+            r for r in result.results
+            if r.path.endswith("/audit-packet")
+        ]
+        self.assertEqual(len(audit_rows), 1)
+        self.assertEqual(audit_rows[0].classification, "disabled")
+
+    def test_audit_packet_endpoint_token_gated_in_token_required_mode(self):
+        result = smoke.run_exposure_smoke(
+            "https://example.invalid",
+            smoke.EXPECT_TOKEN_REQUIRED,
+            fetch_fn=_all_token_required,
+        )
+        audit_rows = [
+            r for r in result.results
+            if r.path.endswith("/audit-packet")
+        ]
+        self.assertEqual(len(audit_rows), 1)
+        self.assertEqual(audit_rows[0].classification, "token_required")
+
+    def test_audit_packet_public_access_fails_hard(self):
+        def fetch(method, url, body):
+            if url.endswith("/audit-packet"):
+                return (200, '{"packet_type": "internal_review_audit_packet"}', None)
+            return (503, DISABLED_BODY, None)
+
+        result = smoke.run_exposure_smoke(
+            "https://example.invalid", smoke.EXPECT_DISABLED, fetch_fn=fetch,
+        )
+        self.assertFalse(result.passed)
+        self.assertTrue(result.public_access_detected)
 
 
 class NormalizationTests(unittest.TestCase):

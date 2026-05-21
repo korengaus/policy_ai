@@ -91,7 +91,7 @@ Pass/warn/fail interpretation for `review-local`:
 
 | smoke result | runner status | meaning |
 | --- | --- | --- |
-| every sub-check `passed=true`, exit 0 | `pass` | M8.0–M8.2 + M9.0 review surface intact: disabled-by-default, token gate, from-result, idempotency, list/detail, every allowed decision, verdict isolation, the absent publication path, **and the M9.0 decision audit trail (transition + decision_source + audit_version + audit_record)** are all working. |
+| every sub-check `passed=true`, exit 0 | `pass` | M8.0–M8.2 + M9.0 + M9.1 review surface intact: disabled-by-default, token gate, from-result, idempotency, list/detail, every allowed decision, verdict isolation, the absent publication path, the M9.0 decision audit trail (transition + decision_source + audit_version + audit_record), **and the M9.1 internal reviewer audit-packet endpoint (`GET /review/tasks/{id}/audit-packet`) with its disabled / 404 / shape / safety-contract / token-leak checks** are all working. |
 | any sub-check `passed=false`, exit 1 | `fail` | At least one reviewer-workflow contract regressed. The runner summary names the failing sub-check; inspect the smoke's JSON tail in the report. Do **not** roll forward until the failing sub-check is restored. |
 | CLI misuse (e.g. `--self-contained` missing), exit 2 | `fail` | Treat as a hard fail; the smoke did not run any contract check. |
 

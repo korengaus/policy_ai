@@ -366,6 +366,25 @@ def extract_review_snapshot_from_result(payload: Any, *, item_index: int = 0,
     else:
         policy_confidence = _coerce_str(pc, max_chars=200)
 
+    # Phase 2 M9.1 — defensively pull the verification_card status / verdict
+    # labels into the snapshot so the audit packet can surface them without
+    # having to re-open the original payload. Both keys default to empty
+    # strings when the card is missing or doesn't carry them; legacy
+    # snapshots written before M9.1 simply won't have these keys at all,
+    # and the audit-packet helper treats them as ``None``.
+    card = item.get("verification_card")
+    if isinstance(card, dict):
+        verification_card_status = _coerce_str(card.get("status"), max_chars=120)
+        verification_card_verdict = _coerce_str(
+            card.get("verdict") or card.get("verdict_label"),
+            max_chars=200,
+        )
+        verification_card_summary = _coerce_str(card.get("summary"), max_chars=400)
+    else:
+        verification_card_status = ""
+        verification_card_verdict = ""
+        verification_card_summary = ""
+
     return {
         "query": _coerce_str(query or payload.get("query"), max_chars=400),
         "item_index": int(item_index or 0),
@@ -379,6 +398,11 @@ def extract_review_snapshot_from_result(payload: Any, *, item_index: int = 0,
         "has_semantic_evidence_summary": (
             isinstance(_safe_get(item, ["debug_summary", "semantic_evidence_summary"]), dict)
         ),
+        # M9.1 audit-packet-friendly defensive labels. Empty string when
+        # absent. The packet builder maps empty to None.
+        "verification_card_status": verification_card_status,
+        "verification_card_verdict": verification_card_verdict,
+        "verification_card_summary": verification_card_summary,
     }
 
 
@@ -519,3 +543,124 @@ def build_decision_audit_records(decision_rows: Optional[List[dict]]) -> List[Di
     if not decision_rows:
         return []
     return [build_decision_audit_record(r) for r in decision_rows]
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 M9.1 — internal reviewer audit packet
+# ---------------------------------------------------------------------------
+
+
+# Stable type marker used by the audit packet endpoint. Pinned by tests
+# so a future rename surfaces immediately.
+AUDIT_PACKET_TYPE = "internal_review_audit_packet"
+
+
+def _packet_or_none(value: object) -> Optional[str]:
+    """Return ``value`` as a stripped string, or None for empty/falsy.
+
+    The audit packet prefers explicit ``None`` over empty strings so the
+    JSON consumer can distinguish "field intentionally absent" from
+    "field present but empty". Avoids accidentally surfacing a stray
+    empty-string sentinel as a real label.
+    """
+    if value is None:
+        return None
+    try:
+        s = str(value).strip()
+    except Exception:
+        return None
+    return s or None
+
+
+def build_review_audit_packet(
+    task: object,
+    decisions: Optional[List[dict]] = None,
+    *,
+    generated_at: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Project a review task + its decisions into the M9.1 audit packet.
+
+    Pure, stdlib-only, no DB / network / FastAPI dependency. Never
+    mutates the caller's ``task`` or ``decisions`` arguments. Never
+    reads or surfaces token / secret material. Conservative wording:
+    nothing in this helper rewrites verdict / confidence /
+    verification_card labels — it merely projects what the stored
+    snapshot already carries.
+
+    Output shape (stable; pinned by tests):
+
+        {
+          "packet_type": "internal_review_audit_packet",
+          "audit_version": 1,
+          "generated_at": "<iso UTC microseconds>",
+          "task": {...},
+          "verdict_snapshot": {...},
+          "source_snapshot": {...},
+          "review_decisions": [...],
+          "safety_contract": {...}
+        }
+    """
+    safe_task: Dict[str, Any] = task if isinstance(task, dict) else {}
+    snapshot_raw = safe_task.get("snapshot")
+    snapshot: Dict[str, Any] = snapshot_raw if isinstance(snapshot_raw, dict) else {}
+    decision_rows = build_decision_audit_records(decisions or [])
+
+    ts = generated_at or now_iso()
+    human_review_required = bool(safe_task.get("human_review_required", True))
+
+    task_block = {
+        "task_id": _packet_or_none(safe_task.get("task_id")),
+        "status": _packet_or_none(safe_task.get("status")),
+        "claim_text": _packet_or_none(safe_task.get("claim_text")),
+        "title": _packet_or_none(safe_task.get("title")),
+        "url": _packet_or_none(safe_task.get("url")),
+        "created_at": _packet_or_none(safe_task.get("created_at")),
+        "updated_at": _packet_or_none(safe_task.get("updated_at")),
+        "human_review_required": human_review_required,
+    }
+
+    verdict_block = {
+        "final_decision": _packet_or_none(safe_task.get("final_decision")),
+        "policy_confidence": _packet_or_none(safe_task.get("policy_confidence")),
+        # M9.1 snapshot keys; absent on legacy rows (returns None).
+        "verification_card_verdict": _packet_or_none(
+            snapshot.get("verification_card_verdict")
+        ),
+        "verification_card_status": _packet_or_none(
+            snapshot.get("verification_card_status")
+        ),
+    }
+
+    item_index_raw = safe_task.get("item_index", 0)
+    try:
+        item_index_int = int(item_index_raw or 0)
+    except (TypeError, ValueError):
+        item_index_int = 0
+
+    source_block = {
+        "result_id": _packet_or_none(safe_task.get("result_id")),
+        "job_id": _packet_or_none(safe_task.get("job_id")),
+        "item_index": item_index_int,
+        "query": _packet_or_none(safe_task.get("query")),
+    }
+
+    safety_contract = {
+        "publication": False,
+        "mutates_original_result": False,
+        "mutates_final_decision": False,
+        "mutates_policy_confidence": False,
+        "mutates_verification_card": False,
+        "semantic_matching_debug_only": True,
+        "human_review_required": human_review_required,
+    }
+
+    return {
+        "packet_type": AUDIT_PACKET_TYPE,
+        "audit_version": AUDIT_SCHEMA_VERSION,
+        "generated_at": ts,
+        "task": task_block,
+        "verdict_snapshot": verdict_block,
+        "source_snapshot": source_block,
+        "review_decisions": decision_rows,
+        "safety_contract": safety_contract,
+    }

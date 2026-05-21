@@ -118,10 +118,13 @@ SYNTHETIC_DECISION_BODY: Dict[str, object] = {
 
 
 # Endpoint catalogue. Each tuple is (method, path, optional body dict).
+# Phase 2 M9.1 — the audit-packet endpoint is also probed so the
+# no-token smoke proves *every* /review/* surface is gated.
 ENDPOINTS: Tuple[Tuple[str, str, Optional[Dict[str, object]]], ...] = (
     ("GET", "/review/tasks", None),
     ("GET", "/review/tasks/nonexistent-smoke-task-id", None),
     ("GET", "/review/tasks/nonexistent-smoke-task-id/decisions", None),
+    ("GET", "/review/tasks/nonexistent-smoke-task-id/audit-packet", None),
     ("POST", "/review/tasks/from-result", SYNTHETIC_FROM_RESULT_BODY),
     ("POST", "/review/tasks/nonexistent-smoke-task-id/decision", SYNTHETIC_DECISION_BODY),
 )

@@ -482,7 +482,8 @@ class ParserTests(unittest.TestCase):
             "  \"decision_check\": {\"passed\": true},\n"
             "  \"verdict_isolation_check\": {\"passed\": true},\n"
             "  \"publication_absent_check\": {\"passed\": true},\n"
-            "  \"audit_trail_check\": {\"passed\": true}\n"
+            "  \"audit_trail_check\": {\"passed\": true},\n"
+            "  \"audit_packet_check\": {\"passed\": true}\n"
             "}\n"
         )
         parsed = runner_module._parse_review_local_output(sample, "", 0)
@@ -492,6 +493,7 @@ class ParserTests(unittest.TestCase):
         self.assertTrue(parsed["metrics"]["verdict_isolation_check"])
         self.assertTrue(parsed["metrics"]["publication_absent_check"])
         self.assertTrue(parsed["metrics"]["audit_trail_check"])
+        self.assertTrue(parsed["metrics"]["audit_packet_check"])
 
     def test_review_local_fail_detected_when_sub_check_fails(self):
         # Smoke ran end-to-end (exit_code=1) but a sub-check failed.
@@ -507,7 +509,8 @@ class ParserTests(unittest.TestCase):
             "  \"decision_check\": {\"passed\": true},\n"
             "  \"verdict_isolation_check\": {\"passed\": false},\n"
             "  \"publication_absent_check\": {\"passed\": true},\n"
-            "  \"audit_trail_check\": {\"passed\": true}\n"
+            "  \"audit_trail_check\": {\"passed\": true},\n"
+            "  \"audit_packet_check\": {\"passed\": true}\n"
             "}\n"
         )
         parsed = runner_module._parse_review_local_output(sample, "", 1)
@@ -752,7 +755,8 @@ class OrchestrationTests(unittest.TestCase):
                 "  \"decision_check\": {\"passed\": true},\n"
                 "  \"verdict_isolation_check\": {\"passed\": true},\n"
                 "  \"publication_absent_check\": {\"passed\": true},\n"
-                "  \"audit_trail_check\": {\"passed\": true}\n"
+                "  \"audit_trail_check\": {\"passed\": true},\n"
+                "  \"audit_packet_check\": {\"passed\": true}\n"
                 "}\n"
             )
             fake = FakeRunner([(0, smoke_pass, "")])

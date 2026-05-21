@@ -629,6 +629,156 @@ def _check_audit_trail(api_server, token: str) -> dict:
     }
 
 
+def _check_audit_packet(api_server, token: str) -> dict:
+    """J. Phase 2 M9.1 — internal reviewer audit packet endpoint.
+
+    Creates a fresh task, records an approve decision, then GETs the
+    audit-packet endpoint and asserts:
+
+        * disabled-default response (503 with "disabled" detail) when
+          REVIEW_API_ENABLED is unset
+        * 200 + the M9.1 packet shape when enabled with a correct token
+        * 404 for a missing task
+        * the packet's safety_contract block has the expected values
+        * the packet's review_decisions list carries M9.0 audit fields
+        * verdict snapshot fields are unchanged (verdict isolation)
+        * the dummy token never appears in the JSON body
+    """
+    from fastapi.testclient import TestClient
+    import re as _re
+
+    payload = _conservative_synthetic_payload(
+        claim="감사 패킷 — M9.1 audit packet check.",
+        title="audit-packet 검수 스모크",
+        url="https://example.go.kr/policy/youth-support/packet",
+    )
+    body = {
+        "result_id": "smoke-audit-packet-1",
+        "job_id": "smoke-audit-packet-job",
+        "item_index": 0,
+        "result_payload": payload,
+    }
+    token_shaped = _re.compile(r"[0-9a-fA-F]{32,}")
+
+    # Step 1 — disabled-default: 503 without enabling the gate.
+    with _disabled_review_env():
+        with TestClient(api_server.app) as client:
+            disabled_resp = client.get(
+                "/review/tasks/nonexistent/audit-packet"
+            )
+    disabled_detail = ""
+    try:
+        if disabled_resp.headers.get("content-type", "").startswith("application/json"):
+            disabled_detail = str(disabled_resp.json().get("detail", ""))
+    except Exception:
+        disabled_detail = ""
+    disabled_ok = (
+        disabled_resp.status_code == 503
+        and "disabled" in disabled_detail.lower()
+    )
+
+    with _temp_review_env(token):
+        with TestClient(api_server.app) as client:
+            # Step 2 — missing task → 404.
+            missing_resp = client.get(
+                "/review/tasks/definitely-missing-task/audit-packet",
+                headers={"X-Review-Token": token},
+            )
+            missing_ok = missing_resp.status_code == 404
+
+            # Step 3 — create a task + record a decision so the packet
+            # carries a non-empty review_decisions list.
+            create = _post_from_result(client, token, body)
+            if create.status_code != 200:
+                return {
+                    "passed": False,
+                    "reason": "could not create audit-packet task",
+                    "status_code": create.status_code,
+                }
+            task_id = (create.json().get("task") or {}).get("task_id")
+            client.post(
+                f"/review/tasks/{task_id}/decision",
+                json={
+                    "decision": "approve",
+                    "reviewer_id": "smoke-local",
+                    "comment": "audit-packet smoke",
+                    "decision_source": "smoke_test",
+                },
+                headers={"X-Review-Token": token},
+            )
+
+            # Step 4 — fetch the audit packet.
+            packet_resp = client.get(
+                f"/review/tasks/{task_id}/audit-packet",
+                headers={"X-Review-Token": token},
+            )
+            packet_body = packet_resp.json() if packet_resp.status_code == 200 else {}
+
+    packet_shape_ok = (
+        packet_resp.status_code == 200
+        and packet_body.get("packet_type") == "internal_review_audit_packet"
+        and packet_body.get("audit_version") == 1
+        and bool(packet_body.get("generated_at"))
+        and isinstance(packet_body.get("task"), dict)
+        and isinstance(packet_body.get("verdict_snapshot"), dict)
+        and isinstance(packet_body.get("source_snapshot"), dict)
+        and isinstance(packet_body.get("review_decisions"), list)
+        and isinstance(packet_body.get("safety_contract"), dict)
+    )
+
+    safety = packet_body.get("safety_contract") or {}
+    safety_ok = (
+        safety.get("publication") is False
+        and safety.get("mutates_original_result") is False
+        and safety.get("mutates_final_decision") is False
+        and safety.get("mutates_policy_confidence") is False
+        and safety.get("mutates_verification_card") is False
+        and safety.get("semantic_matching_debug_only") is True
+        and safety.get("human_review_required") is True
+    )
+
+    verdict = packet_body.get("verdict_snapshot") or {}
+    verdict_isolation_ok = (
+        verdict.get("final_decision") == "사람 검토 필요"
+        and verdict.get("policy_confidence") == "moderate"
+        and verdict.get("verification_card_status") == "pending_review"
+    )
+
+    decisions = packet_body.get("review_decisions") or []
+    decisions_ok = (
+        len(decisions) == 1
+        and decisions[0].get("decision") == "approve"
+        and decisions[0].get("transition") == "pending_review → approved"
+        and decisions[0].get("decision_source") == "smoke_test"
+        and decisions[0].get("audit_version") == 1
+        and bool(decisions[0].get("decision_id"))
+    )
+
+    serialized = json.dumps(packet_body, ensure_ascii=False)
+    no_token_leak = (
+        token not in serialized
+        and not token_shaped.search(serialized)
+        and "REVIEW_API_TOKEN" not in serialized
+        and "X-Review-Token" not in serialized
+    )
+
+    return {
+        "passed": bool(
+            disabled_ok and missing_ok and packet_shape_ok
+            and safety_ok and verdict_isolation_ok
+            and decisions_ok and no_token_leak
+        ),
+        "disabled_response_ok": disabled_ok,
+        "missing_task_404_ok": missing_ok,
+        "packet_shape_ok": packet_shape_ok,
+        "safety_contract_ok": safety_ok,
+        "verdict_isolation_ok": verdict_isolation_ok,
+        "decisions_in_packet_ok": decisions_ok,
+        "no_token_leak_in_packet": no_token_leak,
+        "packet_keys": sorted(list(packet_body.keys())),
+    }
+
+
 def _check_publication_absent(api_server, token: str) -> dict:
     """H. No /publish endpoint exists; reserved status names are unreachable."""
     from fastapi.testclient import TestClient
@@ -692,7 +842,8 @@ CHECK_KEYS = (
     "decision_check",
     "verdict_isolation_check",
     "publication_absent_check",
-    "audit_trail_check",  # M9.0
+    "audit_trail_check",   # M9.0
+    "audit_packet_check",  # M9.1
 )
 
 
@@ -726,6 +877,7 @@ def run_self_contained() -> dict:
         summary["verdict_isolation_check"] = _check_verdict_isolation(api_server, token)
         summary["publication_absent_check"] = _check_publication_absent(api_server, token)
         summary["audit_trail_check"] = _check_audit_trail(api_server, token)
+        summary["audit_packet_check"] = _check_audit_packet(api_server, token)
 
     summary["passed"] = all(bool(summary[k].get("passed")) for k in CHECK_KEYS)
     return summary

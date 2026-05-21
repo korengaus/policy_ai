@@ -89,14 +89,16 @@ Render** — the live exposure smoke is intentionally only run via the
 `review-exposure` operational profile, not as part of `validate.py`
 or the `quick` profile.
 
-For the M9.0 reviewer decision audit trail (offline, no Render, no
-OpenAI — uses FastAPI TestClient + per-test temp SQLite):
+For the M9.0 reviewer decision audit trail and M9.1 internal reviewer
+audit packet (offline, no Render, no OpenAI — uses FastAPI TestClient
++ per-test temp SQLite):
 
 ```
 python tests/test_review_api.py
 python tests/test_review_workflow.py
 python tests/test_review_workflow_smoke.py
 python tests/test_review_audit_trail.py
+python tests/test_review_api_exposure_smoke.py
 node tests/review_ui.test.js
 python scripts/validate.py
 python scripts/run_operational_checks.py --profile review-local
@@ -116,6 +118,12 @@ These pin:
 - the decision-vocabulary contract (`approve` / `reject` /
   `needs_more_evidence` / `comment`) is unchanged
 - no UI affordance for `published` / `corrected` / publish actions
+- M9.1 audit-packet endpoint (`GET /review/tasks/{id}/audit-packet`)
+  is gated identically (503 disabled / 403 missing token / 404 missing
+  task), returns the documented `packet_type` /
+  `internal_review_audit_packet` shape with `audit_version: 1`, never
+  echoes the token, and the exposure smoke endpoint catalogue grew
+  from 5 to 6 paths
 
 Before staging changes, the M8.5 preflight helper recommends a precise
 `git add` command (never stages anything itself). It is exercised in
