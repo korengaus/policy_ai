@@ -751,6 +751,38 @@ The unit tests use mocked HTTP responses; no real Render call, no
 real token required. The live profile is intentionally **not** part
 of CI.
 
+## F''''''''. Official source registry (M10.0)
+
+`source_registry.py` + `data/source_registry.json` +
+`scripts/validate_source_registry.py` form a **local, offline,
+operator-curated** source-registry foundation. **It is not an
+operational runner profile** — no `--profile` flag is added in
+M10.0. The registry is consumed only by future ingestion layers
+(HTTP fetchers, browser automation, n8n / OpenClaw / browser-use
+orchestration) before they touch any URL.
+
+Validation is offline:
+
+```
+python scripts/validate_source_registry.py
+python scripts/validate_source_registry.py --json
+```
+
+`scripts/validate.py` runs `tests/test_source_registry.py` as part
+of the standard offline suite, so the `quick` operational profile
+covers the registry indirectly via tests.
+
+The registry does **not** belong in any of:
+
+- `quick` (already covered transitively via `validate.py`)
+- `render-canary` (no Render touch)
+- `review-exposure` / `review-token-gate` (the registry is not a
+  review-API check)
+- `post-commit` / `render-baseline` / `full`
+
+See `docs/SOURCE_REGISTRY.md` for the schema and the conservative
+"candidate, not truth" contract.
+
 ## G. Relationship to future AI agents automation
 
 This is the first automation layer. It produces structured JSON

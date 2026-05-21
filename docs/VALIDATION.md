@@ -42,6 +42,7 @@ python tests/test_review_api_exposure_smoke.py  # M8.8: no-token public-exposure
 python tests/test_review_api_token_gate_smoke.py # M9.5: controlled token-gate smoke (mocked HTTP)
 python tests/test_review_audit_trail.py   # M9.0 + M9.1: decision audit trail + audit packet endpoint
 python tests/test_review_ui_local_demo.py # M9.3: local reviewer UI activation dry-run helper
+python tests/test_source_registry.py     # M10.0: official source registry foundation
 npm test   # runs regression.test.js + localstorage_slim.test.js + review_ui.test.js (M8.1 + M8.2 + M8.7 + M9.0 + M9.2 + M9.4)
 ```
 
@@ -196,6 +197,24 @@ has manually set `REVIEW_API_ENABLED=true` + `REVIEW_API_TOKEN` on
 the deploy AND has a matching `REVIEW_API_SMOKE_TOKEN` env var in
 their local PowerShell session. See `docs/REVIEW_WORKFLOW.md`
 §H'''''''''' for the operator runbook.
+
+For the M10.0 official source registry foundation (offline; no
+network, no browser automation, no OpenAI):
+
+```
+python tests/test_source_registry.py
+python scripts/validate_source_registry.py
+python scripts/validate_source_registry.py --json
+python scripts/validate.py
+```
+
+`tests/test_source_registry.py` is invoked from `scripts/validate.py`,
+so the `quick` operational profile already covers it. The validator
+CLI (`scripts/validate_source_registry.py`) is intentionally
+**separate from `validate.py`** so the operator can run it on its
+own without spinning up the full suite, and so future registry
+edits surface their own clean pass/fail signal. See
+`docs/SOURCE_REGISTRY.md` for the schema + safety contract.
 
 Before staging changes, the M8.5 preflight helper recommends a precise
 `git add` command (never stages anything itself). It is exercised in
