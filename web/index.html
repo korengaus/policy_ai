@@ -1513,6 +1513,94 @@
       border-radius: 4px;
     }
 
+    .server-review-audit-packet {
+      margin-top: 14px;
+      padding: 12px 14px;
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
+      background: #f8fafc;
+    }
+    .server-review-audit-packet h4 {
+      margin: 0 0 4px;
+      font-size: 13px;
+      font-weight: 800;
+      color: #0f172a;
+    }
+    .server-review-audit-packet .reader-note {
+      font-size: 12px;
+      color: #475569;
+      margin: 0 0 8px;
+      line-height: 1.5;
+    }
+    .server-review-audit-packet-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .server-review-audit-packet-actions button {
+      padding: 6px 12px;
+      font-size: 12px;
+      border-radius: 6px;
+    }
+    .server-review-audit-packet-actions button[disabled] {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+    .server-review-audit-packet-summary {
+      margin: 6px 0;
+      padding: 8px 10px;
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      font-size: 12px;
+      color: #334155;
+    }
+    .server-review-audit-packet-summary[hidden] {
+      display: none;
+    }
+    .server-review-audit-packet-summary dl {
+      margin: 0;
+      display: grid;
+      grid-template-columns: max-content 1fr;
+      gap: 4px 10px;
+    }
+    .server-review-audit-packet-summary dt {
+      font-weight: 700;
+      color: #475569;
+    }
+    .server-review-audit-packet-summary dd {
+      margin: 0;
+      color: #0f172a;
+      word-break: break-word;
+    }
+    .server-review-audit-packet-summary .audit-section-title {
+      grid-column: 1 / -1;
+      margin-top: 6px;
+      font-weight: 800;
+      color: #0f172a;
+    }
+    .server-review-audit-packet-raw-wrap {
+      margin-top: 6px;
+    }
+    .server-review-audit-packet-raw-wrap[hidden] {
+      display: none;
+    }
+    .server-review-audit-packet-raw {
+      margin: 6px 0 0;
+      padding: 10px;
+      background: #0f172a;
+      color: #e2e8f0;
+      border-radius: 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      line-height: 1.5;
+      max-height: 360px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
     .selected-issue-intro {
       border: 1px solid #dbeafe;
       border-radius: 12px;
@@ -2351,6 +2439,26 @@
                 <div id="serverReviewHistory">
                   <div class="empty-state">선택한 작업의 판정 이력이 없습니다.</div>
                 </div>
+              </div>
+
+              <div class="server-review-audit-packet">
+                <h4>내부 감사 패킷 (관리자 전용) · 게시가 아님</h4>
+                <div class="reader-note">
+                  사람 검토 기록 확인용입니다. 게시가 아니며, 기존 판정 결과
+                  (final_decision · policy_confidence · verification_card)를
+                  변경하지 않습니다. 의미 매칭 신호는 디버그 메타데이터이며 사용자
+                  표시 진실이 아닙니다.
+                </div>
+                <div class="server-review-audit-packet-actions">
+                  <button id="serverReviewAuditPacketLoadBtn" class="secondary" type="button">감사 패킷 보기</button>
+                  <button id="serverReviewAuditPacketCopyBtn" class="secondary" type="button" disabled>감사 패킷 복사</button>
+                </div>
+                <div id="serverReviewAuditPacketStatus" class="server-review-status" role="status" aria-live="polite"></div>
+                <div id="serverReviewAuditPacketSummary" class="server-review-audit-packet-summary" hidden></div>
+                <details class="server-review-audit-packet-raw-wrap" id="serverReviewAuditPacketRawWrap" hidden>
+                  <summary>원본 JSON 보기</summary>
+                  <pre id="serverReviewAuditPacketRaw" class="server-review-audit-packet-raw" aria-label="내부 감사 패킷 원본 JSON"></pre>
+                </details>
               </div>
             </div>
           </div>
@@ -7826,6 +7934,25 @@
       "검수 토큰이 해제되었습니다. 서버 검수 작업을 보려면 다시 토큰을 적용해 주세요.";
     const SERVER_REVIEW_FROM_RESULT_PATH = "/review/tasks/from-result";
 
+    // M9.2 — internal audit packet UI (read-only, explicit click only).
+    // No public path. The UI never auto-fetches the audit packet; the
+    // operator must press "감사 패킷 보기" while a task is selected and
+    // a token is present.
+    const SERVER_REVIEW_AUDIT_PACKET_PATH_TEMPLATE =
+      "/review/tasks/{task_id}/audit-packet";
+    const SERVER_REVIEW_AUDIT_PACKET_NO_TASK_MESSAGE =
+      "감사 패킷을 불러올 검수 작업을 먼저 선택하세요.";
+    const SERVER_REVIEW_AUDIT_PACKET_NO_TOKEN_MESSAGE =
+      "검수 토큰이 없습니다. 먼저 토큰을 적용해 주세요.";
+    const SERVER_REVIEW_AUDIT_PACKET_NOT_FOUND_MESSAGE =
+      "감사 패킷을 찾을 수 없습니다. 검수 작업이 삭제되었거나 더 이상 존재하지 않을 수 있습니다.";
+    const SERVER_REVIEW_AUDIT_PACKET_COPY_OK_MESSAGE =
+      "감사 패킷 JSON을 복사했습니다. 내부 검수 기록 확인용이며 게시물이 아닙니다.";
+    const SERVER_REVIEW_AUDIT_PACKET_COPY_FAIL_MESSAGE =
+      "복사에 실패했습니다. 감사 패킷 내용을 직접 선택해 복사해 주세요.";
+    const SERVER_REVIEW_AUDIT_PACKET_NOT_LOADED_MESSAGE =
+      "복사할 감사 패킷이 없습니다. 먼저 '감사 패킷 보기'를 눌러 주세요.";
+
     let serverReviewSelectedTaskId = null;
     let serverReviewLastList = [];
 
@@ -7924,6 +8051,39 @@
       return { ok: resp.ok, status: resp.status, body };
     }
 
+    // M9.2 — currently-loaded audit packet (raw JSON object). Lives in
+    // a module-scoped variable rather than the DOM so the copy button
+    // can grab the *unrendered* JSON regardless of how the summary view
+    // is collapsed/expanded. Cleared on task change and on token clear.
+    let serverReviewLoadedAuditPacket = null;
+
+    function serverReviewResetAuditPacketView() {
+      serverReviewLoadedAuditPacket = null;
+      const summary = document.getElementById("serverReviewAuditPacketSummary");
+      if (summary) {
+        summary.hidden = true;
+        summary.innerHTML = "";
+      }
+      const rawWrap = document.getElementById("serverReviewAuditPacketRawWrap");
+      if (rawWrap) {
+        rawWrap.hidden = true;
+        if (rawWrap.open) rawWrap.open = false;
+      }
+      const raw = document.getElementById("serverReviewAuditPacketRaw");
+      // textContent (not innerHTML) — any future audit-packet content must
+      // be inserted as plain text only. Defensive even though the JSON we
+      // pretty-print never carries HTML.
+      if (raw) raw.textContent = "";
+      const copyBtn = document.getElementById("serverReviewAuditPacketCopyBtn");
+      if (copyBtn) copyBtn.disabled = true;
+      const status = document.getElementById("serverReviewAuditPacketStatus");
+      if (status) {
+        status.style.display = "none";
+        status.textContent = "";
+        status.classList.remove("is-info", "is-success", "is-error");
+      }
+    }
+
     function serverReviewClearDetail() {
       serverReviewSelectedTaskId = null;
       const detail = document.getElementById("serverReviewDetail");
@@ -7934,6 +8094,10 @@
       if (history) {
         history.innerHTML = '<div class="empty-state">선택한 작업의 판정 이력이 없습니다.</div>';
       }
+      // M9.2 — clearing the detail (e.g. token clear) must also drop
+      // any loaded audit packet view so a stale internal-audit JSON
+      // never lingers on screen for the next operator session.
+      serverReviewResetAuditPacketView();
     }
 
     // Full lockout after token clear: also drop the cached task list so a
@@ -8101,6 +8265,12 @@
         serverReviewSetStatusBanner("error", SERVER_REVIEW_TOKEN_CLEARED_MESSAGE);
         return;
       }
+      // M9.2 — selecting a different task must drop any previously loaded
+      // audit packet view. The audit packet is NOT auto-fetched for the
+      // new task; the operator must press the explicit button.
+      if (serverReviewSelectedTaskId !== id) {
+        serverReviewResetAuditPacketView();
+      }
       serverReviewSelectedTaskId = id;
       // Reflect selection in the list immediately.
       serverReviewRenderList(serverReviewLastList);
@@ -8213,6 +8383,209 @@
       else el.classList.add("is-info");
       el.style.display = "block";
       el.textContent = message;
+    }
+
+    // -----------------------------------------------------------------
+    // M9.2 — internal audit packet viewer / copy helper.
+    //
+    // Safety contract pinned by tests/review_ui.test.js:
+    //   * Never auto-fetched. Only explicit button click triggers the
+    //     GET /review/tasks/{id}/audit-packet request.
+    //   * Token sent only as X-Review-Token via serverReviewFetch.
+    //   * No publish/correct affordance. The copy success message
+    //     explicitly says "내부 검수 기록 확인용이며 게시물이 아닙니다".
+    //   * View is reset on task change + token clear.
+    //   * All rendered text uses textContent (or escapeHtml when going
+    //     into innerHTML) — never raw innerHTML with packet content.
+    // -----------------------------------------------------------------
+
+    function serverReviewSetAuditPacketStatus(kind, message) {
+      const el = document.getElementById("serverReviewAuditPacketStatus");
+      if (!el) return;
+      el.classList.remove("is-info", "is-success", "is-error");
+      if (!message) {
+        el.style.display = "none";
+        el.textContent = "";
+        return;
+      }
+      if (kind === "success") el.classList.add("is-success");
+      else if (kind === "error") el.classList.add("is-error");
+      else el.classList.add("is-info");
+      el.style.display = "block";
+      el.textContent = message;
+    }
+
+    function serverReviewAuditPacketPath(taskId) {
+      return SERVER_REVIEW_AUDIT_PACKET_PATH_TEMPLATE.replace(
+        "{task_id}", encodeURIComponent(String(taskId || "")),
+      );
+    }
+
+    function serverReviewBuildAuditPacketSummary(packet) {
+      // Defensive: any packet field may be missing/null. The summary
+      // surfaces stable fields only — no semantic labels, no raw
+      // payload. ``safety_contract`` is shown only as a debug-only
+      // contract (no value here ever flips to "true" for mutation /
+      // publication flags by design).
+      const safe = (packet && typeof packet === "object") ? packet : {};
+      const task = (safe.task && typeof safe.task === "object") ? safe.task : {};
+      const verdict = (safe.verdict_snapshot && typeof safe.verdict_snapshot === "object")
+        ? safe.verdict_snapshot : {};
+      const contract = (safe.safety_contract && typeof safe.safety_contract === "object")
+        ? safe.safety_contract : {};
+      const decisions = Array.isArray(safe.review_decisions) ? safe.review_decisions : [];
+      const render = (v) => {
+        if (v === null || v === undefined || v === "") return "(없음)";
+        return String(v);
+      };
+      const boolText = (v) => (v === true ? "true" : (v === false ? "false" : "(없음)"));
+      return [
+        { label: "packet_type", value: render(safe.packet_type) },
+        { label: "audit_version", value: render(safe.audit_version) },
+        { label: "generated_at", value: render(safe.generated_at) },
+        { label: "task_id", value: render(task.task_id) },
+        { label: "task.status", value: render(task.status) },
+        { label: "verdict_snapshot.final_decision", value: render(verdict.final_decision) },
+        { label: "verdict_snapshot.policy_confidence", value: render(verdict.policy_confidence) },
+        { label: "verdict_snapshot.verification_card_status", value: render(verdict.verification_card_status) },
+        { label: "review_decision_count", value: String(decisions.length) },
+        { label: "safety_contract.publication", value: boolText(contract.publication) },
+        { label: "safety_contract.mutates_final_decision", value: boolText(contract.mutates_final_decision) },
+        { label: "safety_contract.mutates_policy_confidence", value: boolText(contract.mutates_policy_confidence) },
+        { label: "safety_contract.mutates_verification_card", value: boolText(contract.mutates_verification_card) },
+        { label: "safety_contract.semantic_matching_debug_only", value: boolText(contract.semantic_matching_debug_only) },
+      ];
+    }
+
+    function serverReviewRenderAuditPacket(packet) {
+      const summaryEl = document.getElementById("serverReviewAuditPacketSummary");
+      const rawWrap = document.getElementById("serverReviewAuditPacketRawWrap");
+      const rawEl = document.getElementById("serverReviewAuditPacketRaw");
+      const copyBtn = document.getElementById("serverReviewAuditPacketCopyBtn");
+      if (!summaryEl || !rawEl || !rawWrap) return;
+
+      const rows = serverReviewBuildAuditPacketSummary(packet);
+      // Use escapeHtml on every label/value before inserting — the audit
+      // packet is JSON we received from the server, but defensive HTML
+      // escaping makes a stray "<" in a claim_text safe.
+      const dl = rows.map(({ label, value }) => (
+        `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd>`
+      )).join("");
+      summaryEl.hidden = false;
+      summaryEl.innerHTML = (
+        `<dl>${dl}</dl>`
+        + `<div class="audit-section-title">사람 검토 기록 확인용 · 게시가 아님</div>`
+      );
+
+      // Raw JSON goes through textContent ONLY. No innerHTML for raw.
+      try {
+        rawEl.textContent = JSON.stringify(packet, null, 2);
+      } catch (_) {
+        rawEl.textContent = "";
+      }
+      rawWrap.hidden = false;
+      if (copyBtn) copyBtn.disabled = !packet;
+    }
+
+    async function serverReviewLoadAuditPacket() {
+      const token = serverReviewGetToken();
+      if (!token) {
+        serverReviewSetAuditPacketStatus(
+          "error", SERVER_REVIEW_AUDIT_PACKET_NO_TOKEN_MESSAGE,
+        );
+        return;
+      }
+      const taskId = serverReviewSelectedTaskId;
+      if (!taskId) {
+        serverReviewSetAuditPacketStatus(
+          "error", SERVER_REVIEW_AUDIT_PACKET_NO_TASK_MESSAGE,
+        );
+        return;
+      }
+      serverReviewSetAuditPacketStatus("info", "감사 패킷을 불러오는 중...");
+      const result = await serverReviewFetch(
+        serverReviewAuditPacketPath(taskId),
+      );
+      if (!result.ok) {
+        // 404 has a packet-specific message; everything else (503/403/0/...)
+        // routes through the shared formatErrorMessage so the disabled-API
+        // and 403 messages stay byte-for-byte identical to M8.1/M8.7.
+        const message = (result.status === 404)
+          ? SERVER_REVIEW_AUDIT_PACKET_NOT_FOUND_MESSAGE
+          : serverReviewFormatErrorMessage(result.status);
+        serverReviewSetAuditPacketStatus("error", message);
+        // Do NOT keep a stale packet visible on error.
+        serverReviewLoadedAuditPacket = null;
+        const summary = document.getElementById("serverReviewAuditPacketSummary");
+        if (summary) { summary.hidden = true; summary.innerHTML = ""; }
+        const rawWrap = document.getElementById("serverReviewAuditPacketRawWrap");
+        if (rawWrap) { rawWrap.hidden = true; }
+        const rawEl = document.getElementById("serverReviewAuditPacketRaw");
+        if (rawEl) rawEl.textContent = "";
+        const copyBtn = document.getElementById("serverReviewAuditPacketCopyBtn");
+        if (copyBtn) copyBtn.disabled = true;
+        return;
+      }
+      serverReviewLoadedAuditPacket = (result.body && typeof result.body === "object")
+        ? result.body : null;
+      serverReviewRenderAuditPacket(serverReviewLoadedAuditPacket);
+      serverReviewSetAuditPacketStatus(
+        "success",
+        "감사 패킷을 불러왔습니다 (내부 검수 기록 확인용, 게시가 아님).",
+      );
+    }
+
+    async function serverReviewCopyAuditPacket() {
+      if (!serverReviewLoadedAuditPacket) {
+        serverReviewSetAuditPacketStatus(
+          "error", SERVER_REVIEW_AUDIT_PACKET_NOT_LOADED_MESSAGE,
+        );
+        return;
+      }
+      let serialized;
+      try {
+        serialized = JSON.stringify(serverReviewLoadedAuditPacket, null, 2);
+      } catch (_) {
+        serverReviewSetAuditPacketStatus(
+          "error", SERVER_REVIEW_AUDIT_PACKET_COPY_FAIL_MESSAGE,
+        );
+        return;
+      }
+      // Prefer the modern clipboard API; fall back to execCommand for
+      // legacy contexts. Either path must never crash on failure.
+      let copied = false;
+      try {
+        if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(serialized);
+          copied = true;
+        }
+      } catch (_) {
+        copied = false;
+      }
+      if (!copied) {
+        try {
+          const ta = document.createElement("textarea");
+          ta.value = serialized;
+          ta.setAttribute("readonly", "");
+          ta.style.position = "fixed";
+          ta.style.opacity = "0";
+          document.body.appendChild(ta);
+          ta.select();
+          copied = document.execCommand && document.execCommand("copy");
+          document.body.removeChild(ta);
+        } catch (_) {
+          copied = false;
+        }
+      }
+      if (copied) {
+        serverReviewSetAuditPacketStatus(
+          "success", SERVER_REVIEW_AUDIT_PACKET_COPY_OK_MESSAGE,
+        );
+      } else {
+        serverReviewSetAuditPacketStatus(
+          "error", SERVER_REVIEW_AUDIT_PACKET_COPY_FAIL_MESSAGE,
+        );
+      }
     }
 
     async function serverReviewRegisterCurrentResult() {
@@ -8338,6 +8711,20 @@
       submitBtn.addEventListener("click", () => {
         serverReviewSubmitDecision();
       });
+      // M9.2 — audit packet buttons. Both are explicit-click only. No
+      // other code path inside this binder fetches the audit packet.
+      const auditLoadBtn = document.getElementById("serverReviewAuditPacketLoadBtn");
+      if (auditLoadBtn) {
+        auditLoadBtn.addEventListener("click", () => {
+          serverReviewLoadAuditPacket();
+        });
+      }
+      const auditCopyBtn = document.getElementById("serverReviewAuditPacketCopyBtn");
+      if (auditCopyBtn) {
+        auditCopyBtn.addEventListener("click", () => {
+          serverReviewCopyAuditPacket();
+        });
+      }
       // M8.7 — page initialization must NOT auto-call /review/tasks even
       // when a token is already in sessionStorage. The operator must
       // explicitly trigger queue refresh / register / decision actions.
@@ -8368,6 +8755,16 @@
         tokenClearedMessage: SERVER_REVIEW_TOKEN_CLEARED_MESSAGE,
         fromResultPath: SERVER_REVIEW_FROM_RESULT_PATH,
         statusLabels: SERVER_REVIEW_STATUS_LABELS,
+        // M9.2 audit packet — exposed for tests/review_ui.test.js.
+        auditPacketPathTemplate: SERVER_REVIEW_AUDIT_PACKET_PATH_TEMPLATE,
+        auditPacketPath: serverReviewAuditPacketPath,
+        auditPacketNoTaskMessage: SERVER_REVIEW_AUDIT_PACKET_NO_TASK_MESSAGE,
+        auditPacketNoTokenMessage: SERVER_REVIEW_AUDIT_PACKET_NO_TOKEN_MESSAGE,
+        auditPacketNotFoundMessage: SERVER_REVIEW_AUDIT_PACKET_NOT_FOUND_MESSAGE,
+        auditPacketCopyOkMessage: SERVER_REVIEW_AUDIT_PACKET_COPY_OK_MESSAGE,
+        auditPacketCopyFailMessage: SERVER_REVIEW_AUDIT_PACKET_COPY_FAIL_MESSAGE,
+        auditPacketNotLoadedMessage: SERVER_REVIEW_AUDIT_PACKET_NOT_LOADED_MESSAGE,
+        buildAuditPacketSummary: serverReviewBuildAuditPacketSummary,
       };
     }
 

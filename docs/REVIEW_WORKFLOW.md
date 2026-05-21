@@ -1,4 +1,4 @@
-# Server-Backed Reviewer Workflow (Phase 2 M8.0 + M8.1 + M8.2 + M8.3 + M8.7 + M8.8 + M9.0 + M9.1)
+# Server-Backed Reviewer Workflow (Phase 2 M8.0 + M8.1 + M8.2 + M8.3 + M8.7 + M8.8 + M9.0 + M9.1 + M9.2)
 
 A backend-first foundation for the human-review layer. AI drafts and
 summarizes evidence; humans approve, reject, or request more evidence.
@@ -1076,7 +1076,146 @@ runner's `review-local` profile reports "all 10 checks ok" on pass.
    evidence page and must never be linked from public-facing
    reports.
 
-## I. Future work (post-M9.1)
+## H'''''''. Internal audit packet UI viewer + copy helper (M9.2)
+
+M9.2 wires the M9.1 audit-packet endpoint into the existing
+internal/admin reviewer panel as a small, explicit-click viewer + copy
+helper. **No backend changes**, no semantic verdict integration, no
+publication path, no public export. The audit packet remains
+disabled-by-default on Render — the UI is only useful to an operator
+who has manually enabled the review API and applied a token.
+
+### Where it lives
+
+Inside the existing `<details id="serverReviewDetails">` admin panel,
+below the M8.0 decision-history block, scoped to the selected task:
+
+> **내부 감사 패킷 (관리자 전용) · 게시가 아님**
+>
+> 사람 검토 기록 확인용입니다. 게시가 아니며, 기존 판정 결과
+> (`final_decision` · `policy_confidence` · `verification_card`)를
+> 변경하지 않습니다. 의미 매칭 신호는 디버그 메타데이터이며 사용자
+> 표시 진실이 아닙니다.
+
+Two buttons:
+
+| button id | label | when enabled | what it does |
+| --- | --- | --- | --- |
+| `serverReviewAuditPacketLoadBtn` | **감사 패킷 보기** | always (gated at click time) | `GET /review/tasks/{task_id}/audit-packet` with `X-Review-Token`; renders the summary + raw JSON |
+| `serverReviewAuditPacketCopyBtn` | **감사 패킷 복사** | only after a packet is loaded | copies the loaded JSON to the clipboard (`navigator.clipboard.writeText` → `execCommand` fallback) |
+
+Output surfaces:
+
+- `serverReviewAuditPacketSummary` — a compact `<dl>` summary with stable
+  fields: `packet_type`, `audit_version`, `generated_at`, `task_id`,
+  `task.status`, `verdict_snapshot.final_decision`,
+  `verdict_snapshot.policy_confidence`,
+  `verdict_snapshot.verification_card_status`,
+  `review_decision_count`, and the four `safety_contract.mutates_*`
+  flags + `safety_contract.publication` +
+  `safety_contract.semantic_matching_debug_only`. The
+  `audit-section-title` footer line repeats "사람 검토 기록 확인용 ·
+  게시가 아님" so a copy from the rendered DOM still carries the
+  conservative disclaimer.
+- `serverReviewAuditPacketRawWrap` — a `<details>` whose `<pre>` carries
+  the pretty-printed packet JSON. The `<pre>` content is set with
+  `textContent` only, never `innerHTML`.
+- `serverReviewAuditPacketStatus` — a `role="status" aria-live="polite"`
+  banner used for load / 404 / disabled / 403 / copy feedback.
+
+### Explicit-click contract
+
+The audit packet endpoint is **never** called automatically. M9.2
+preserves the M8.7 "no auto-fetch" contract verbatim:
+
+| event | does it fire `/audit-packet`? |
+| --- | --- |
+| page load (any state) | **no** |
+| reviewer panel init with a stored sessionStorage token | **no** |
+| 토큰 적용 button | no (loads the task list per M8.1; not the packet) |
+| 큐 새로고침 button | no |
+| filter change | no |
+| selecting a task in the list | no (also resets any previously-loaded packet view) |
+| 검수 큐에 등록 button | no |
+| 판정 기록 button | no |
+| **감사 패킷 보기** button click | **yes** (only path) |
+| **감사 패킷 복사** button click | no (clipboard only; uses already-loaded JSON) |
+
+Pinned by `tests/review_ui.test.js` step 12h — a seeded-token sandbox
+re-runs the script and asserts zero `/audit-packet` fetches during
+initialization.
+
+### Token / secret safety
+
+- Token is sent only as the `X-Review-Token` header via
+  `serverReviewFetch` (the existing M8.1 helper). Never in URLs,
+  query strings, request bodies, or visible status text.
+- `auditPacketPathTemplate` is the literal string
+  `/review/tasks/{task_id}/audit-packet` — no query parameter, no
+  token slot. The `auditPacketPath(taskId)` helper URL-encodes the
+  task id.
+- The copy path serializes the loaded packet via `JSON.stringify`.
+  The packet itself, returned by the M9.1 endpoint, is already
+  asserted to carry no token / `REVIEW_API_TOKEN` / `X-Review-Token`
+  literal — so the clipboard contents inherit the same property.
+- Token clear (M8.7) resets the audit-packet view, clears
+  `serverReviewLoadedAuditPacket`, hides the summary + raw JSON, and
+  disables the copy button. Selecting a different task in the list
+  also resets the view; the new task's packet is **not** auto-loaded.
+
+### State reset rules
+
+| trigger | what resets |
+| --- | --- |
+| 토큰 해제 (token clear) | `serverReviewClearDetail()` → `serverReviewResetAuditPacketView()`: loaded packet object cleared, summary + raw `<details>` hidden, raw `<pre>` cleared, copy button disabled, status banner blanked |
+| selecting a different task | same view reset (operator must press 감사 패킷 보기 again for the new task) |
+| load error (503/403/404) | loaded packet object cleared, summary + raw `<details>` hidden, status banner shows error; previous packet is not retained |
+
+### Stable Korean messages
+
+Exposed as `window.__serverReviewHelpers.auditPacket*` constants so
+tests can pin them byte-for-byte:
+
+| constant | Korean copy |
+| --- | --- |
+| `auditPacketNoTaskMessage` | 감사 패킷을 불러올 검수 작업을 먼저 선택하세요. |
+| `auditPacketNoTokenMessage` | 검수 토큰이 없습니다. 먼저 토큰을 적용해 주세요. |
+| `auditPacketNotFoundMessage` | 감사 패킷을 찾을 수 없습니다. 검수 작업이 삭제되었거나 더 이상 존재하지 않을 수 있습니다. |
+| `auditPacketCopyOkMessage` | 감사 패킷 JSON을 복사했습니다. 내부 검수 기록 확인용이며 게시물이 아닙니다. |
+| `auditPacketCopyFailMessage` | 복사에 실패했습니다. 감사 패킷 내용을 직접 선택해 복사해 주세요. |
+| `auditPacketNotLoadedMessage` | 복사할 감사 패킷이 없습니다. 먼저 '감사 패킷 보기'를 눌러 주세요. |
+
+503 disabled / 403 missing-or-wrong token / 0 network errors all
+route through the existing `serverReviewFormatErrorMessage` (same as
+the rest of the review surface) — the disabled-API and generic 403
+messages stay byte-for-byte identical to M8.1 / M8.7. Only 404 has a
+packet-specific override.
+
+### What this does NOT do
+
+- **Does not publish anything.** The button vocabulary is exactly
+  `감사 패킷 보기` / `감사 패킷 복사`. No publish / 발행 / corrected
+  affordance, no public export, no download. The static UI tests in
+  step 12c pin the absence of every publication wording in the
+  audit-packet section.
+- **Does not change verdict logic.** No `final_decision`,
+  `policy_confidence`, `verification_card`, or original payload is
+  ever mutated — the UI is read-only on top of the M9.1 endpoint,
+  which is itself read-only.
+- **Does not change `review_workflow.py`, `api_server.py`,
+  `database.py`, or `review_auth.py`.** M9.2 is frontend + tests +
+  docs only.
+- **Does not enable the review API.** Render env unchanged. With
+  `REVIEW_API_ENABLED` unset (current Render default), the load
+  button surfaces the existing 503-disabled message and no packet is
+  fetched.
+- **Does not re-label semantic signals.** The summary surfaces
+  `safety_contract.semantic_matching_debug_only: true` purely as a
+  debug-only flag; it never appears as user-facing truth. Pinned by
+  the summary-builder assertions in step 12f (no
+  `semantic_evidence_summary`, no "match strength" / "truth" labels).
+
+## I. Future work (post-M9.2)
 
 - Proper auth + admin layer to replace the temporary token gate.
 - Postgres dual-write for review tables to match the existing pattern

@@ -124,6 +124,17 @@ These pin:
   `internal_review_audit_packet` shape with `audit_version: 1`, never
   echoes the token, and the exposure smoke endpoint catalogue grew
   from 5 to 6 paths
+- M9.2 audit-packet UI viewer + copy helper lives inside the
+  existing internal/admin reviewer panel. The `node tests/review_ui.test.js`
+  step 12 pins: required markup ids, internal/admin wording
+  (`내부 감사 패킷`, `관리자 전용`, `게시가 아님`, `사람 검토 기록 확인용`),
+  the stable Korean error / copy messages, the explicit-click contract
+  (a seeded-token sandbox proves init does NOT fire any `/audit-packet`
+  request), token-header-only fetch (no `?token=` query, no
+  `Authorization: Bearer`), raw-JSON rendering via `textContent` only,
+  and the absence of any publication affordance in the new section.
+  `npm test` already invokes this file, so `scripts/validate.py`
+  covers it.
 
 Before staging changes, the M8.5 preflight helper recommends a precise
 `git add` command (never stages anything itself). It is exercised in

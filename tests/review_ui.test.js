@@ -611,4 +611,314 @@ for (const banned of [
   );
 }
 
+// =============================================================================
+// 12. M9.2 — internal audit packet UI viewer + copy helper
+// =============================================================================
+//
+// Pin the new buttons/markup, the explicit-click-only contract, the
+// stable Korean error/copy messages, the token-safety properties, and
+// the absence of any publication affordance in the new section.
+//
+// The audit-packet section lives at the bottom of the existing
+// serverReviewDetail block; everything we check is contained to it.
+
+// Locate the audit-packet block in the markup once. Anchor on the
+// class attribute on the markup div (the CSS rule above shares the
+// class name, so a bare ``server-review-audit-packet`` substring would
+// hit the stylesheet first).
+const AUDIT_PACKET_BLOCK_START = html.indexOf(
+  'class="server-review-audit-packet"'
+);
+assert.ok(
+  AUDIT_PACKET_BLOCK_START > 0,
+  "M9.2: the audit-packet section must exist in index.html",
+);
+// The block ends at the next `</div>` close that sits at the markup
+// indentation we know the file uses. To stay tolerant of indentation
+// changes, take a generous slice up to the next `</details>` (the
+// reviewer admin <details> close) and trim further if needed.
+const AUDIT_PACKET_BLOCK_END = html.indexOf(
+  "</details>", AUDIT_PACKET_BLOCK_START
+);
+assert.ok(
+  AUDIT_PACKET_BLOCK_END > AUDIT_PACKET_BLOCK_START,
+  "M9.2: could not locate the end of the audit-packet block",
+);
+const auditPacketSection = html.slice(
+  AUDIT_PACKET_BLOCK_START, AUDIT_PACKET_BLOCK_END
+);
+
+// --- 12a. Required markup ---------------------------------------------------
+const M92_REQUIRED_IDS = [
+  "serverReviewAuditPacketLoadBtn",
+  "serverReviewAuditPacketCopyBtn",
+  "serverReviewAuditPacketStatus",
+  "serverReviewAuditPacketSummary",
+  "serverReviewAuditPacketRawWrap",
+  "serverReviewAuditPacketRaw",
+];
+for (const id of M92_REQUIRED_IDS) {
+  assert.ok(
+    html.includes(`id="${id}"`),
+    `M9.2 element missing: id="${id}"`,
+  );
+}
+
+// --- 12b. Internal/admin wording in the new section -------------------------
+const M92_REQUIRED_WORDING = [
+  "감사 패킷 보기",
+  "감사 패킷 복사",
+  "내부 감사 패킷",
+  "관리자 전용",
+  "게시가 아님",
+  "사람 검토 기록 확인용",
+  "기존 판정 결과",
+];
+for (const phrase of M92_REQUIRED_WORDING) {
+  assert.ok(
+    auditPacketSection.includes(phrase),
+    `M9.2 admin/internal wording missing from audit-packet section: ${phrase}`,
+  );
+}
+
+// --- 12c. No publication affordance in the audit-packet section -------------
+for (const banned of [
+  "auto-publish", "auto_publish",
+  "published</option", "corrected</option",
+  "발행 버튼", "발행 가능", "지금 게시", "공개 게시",
+]) {
+  assert.ok(
+    !auditPacketSection.includes(banned),
+    `audit-packet section must not include publication affordance: ${banned}`,
+  );
+}
+
+// --- 12d. Stable error / copy messages -------------------------------------
+assert.strictEqual(
+  helpers.auditPacketNoTaskMessage,
+  "감사 패킷을 불러올 검수 작업을 먼저 선택하세요.",
+  "auditPacketNoTaskMessage must match the documented Korean copy",
+);
+assert.strictEqual(
+  helpers.auditPacketNoTokenMessage,
+  "검수 토큰이 없습니다. 먼저 토큰을 적용해 주세요.",
+  "auditPacketNoTokenMessage must match the documented Korean copy",
+);
+assert.strictEqual(
+  helpers.auditPacketNotFoundMessage,
+  "감사 패킷을 찾을 수 없습니다. 검수 작업이 삭제되었거나 더 이상 존재하지 않을 수 있습니다.",
+  "auditPacketNotFoundMessage must match the documented Korean copy",
+);
+assert.strictEqual(
+  helpers.auditPacketCopyOkMessage,
+  "감사 패킷 JSON을 복사했습니다. 내부 검수 기록 확인용이며 게시물이 아닙니다.",
+  "auditPacketCopyOkMessage must match the documented Korean copy",
+);
+assert.strictEqual(
+  helpers.auditPacketCopyFailMessage,
+  "복사에 실패했습니다. 감사 패킷 내용을 직접 선택해 복사해 주세요.",
+  "auditPacketCopyFailMessage must match the documented Korean copy",
+);
+assert.strictEqual(
+  helpers.auditPacketNotLoadedMessage,
+  "복사할 감사 패킷이 없습니다. 먼저 '감사 패킷 보기'를 눌러 주세요.",
+  "auditPacketNotLoadedMessage must match the documented Korean copy",
+);
+// Existing M8.1 messages still equal what M9.2 reuses on disabled / 403.
+assert.strictEqual(
+  helpers.disabledMessage,
+  "리뷰 API가 비활성화되어 있습니다. 로컬/운영 환경에서 REVIEW_API_ENABLED 설정이 필요합니다.",
+  "audit-packet UI reuses the documented disabled message",
+);
+
+// --- 12e. Path template carries no token, no query string ------------------
+assert.strictEqual(
+  helpers.auditPacketPathTemplate,
+  "/review/tasks/{task_id}/audit-packet",
+  "auditPacketPathTemplate must equal the documented endpoint shape",
+);
+assert.strictEqual(
+  helpers.auditPacketPath("task_xyz"),
+  "/review/tasks/task_xyz/audit-packet",
+  "auditPacketPath helper must inject the encoded task_id only",
+);
+assert.strictEqual(
+  helpers.auditPacketPath("with space"),
+  "/review/tasks/with%20space/audit-packet",
+  "auditPacketPath helper must URL-encode the task_id",
+);
+// The path template must NOT carry a token / query parameter.
+assert.ok(
+  !helpers.auditPacketPathTemplate.includes("?"),
+  "auditPacketPathTemplate must not carry a query string",
+);
+assert.ok(
+  !/token|secret|x-review-token/i.test(helpers.auditPacketPathTemplate),
+  "auditPacketPathTemplate must not name a token-shaped query param",
+);
+
+// --- 12f. Summary builder surfaces stable fields, no semantic-as-truth -----
+const SAMPLE_PACKET = {
+  packet_type: "internal_review_audit_packet",
+  audit_version: 1,
+  generated_at: "2026-05-22T00:00:00.000000+00:00",
+  task: { task_id: "review_abc", status: "pending_review" },
+  verdict_snapshot: {
+    final_decision: "사람 검토 필요",
+    policy_confidence: "moderate",
+    verification_card_status: "pending_review",
+    verification_card_verdict: null,
+  },
+  source_snapshot: { result_id: "42", job_id: null, item_index: 0, query: "q" },
+  review_decisions: [
+    { decision_id: "d1", decision: "comment",
+      previous_status: "pending_review", new_status: "pending_review",
+      transition: "pending_review (unchanged)", decision_source: "review_ui",
+      audit_version: 1 },
+  ],
+  safety_contract: {
+    publication: false,
+    mutates_original_result: false,
+    mutates_final_decision: false,
+    mutates_policy_confidence: false,
+    mutates_verification_card: false,
+    semantic_matching_debug_only: true,
+    human_review_required: true,
+  },
+};
+const summaryRows = helpers.buildAuditPacketSummary(SAMPLE_PACKET);
+assert.ok(Array.isArray(summaryRows) && summaryRows.length >= 10,
+  "buildAuditPacketSummary must return a non-empty row list");
+const summaryByLabel = Object.fromEntries(
+  summaryRows.map((r) => [r.label, r.value])
+);
+assert.strictEqual(summaryByLabel["packet_type"], "internal_review_audit_packet");
+assert.strictEqual(summaryByLabel["audit_version"], "1");
+assert.strictEqual(summaryByLabel["task_id"], "review_abc");
+assert.strictEqual(summaryByLabel["task.status"], "pending_review");
+assert.strictEqual(summaryByLabel["verdict_snapshot.final_decision"], "사람 검토 필요");
+assert.strictEqual(summaryByLabel["verdict_snapshot.policy_confidence"], "moderate");
+assert.strictEqual(summaryByLabel["review_decision_count"], "1");
+assert.strictEqual(summaryByLabel["safety_contract.publication"], "false");
+assert.strictEqual(summaryByLabel["safety_contract.mutates_final_decision"], "false");
+assert.strictEqual(summaryByLabel["safety_contract.mutates_policy_confidence"], "false");
+assert.strictEqual(summaryByLabel["safety_contract.mutates_verification_card"], "false");
+assert.strictEqual(summaryByLabel["safety_contract.semantic_matching_debug_only"], "true");
+// No semantic label is surfaced as truth — only as a debug/safety contract.
+// The summary must NOT carry the semantic_evidence_summary key or any
+// "match strength" style field.
+for (const row of summaryRows) {
+  assert.ok(
+    !/semantic_evidence_summary/i.test(row.label),
+    `audit-packet summary must not surface semantic_evidence_summary: ${row.label}`,
+  );
+  assert.ok(
+    !/match.*strength|truth/i.test(row.label),
+    `audit-packet summary must not surface match/truth labels: ${row.label}`,
+  );
+}
+
+// --- 12g. buildAuditPacketSummary tolerates missing fields without crashing
+const partialSummary = helpers.buildAuditPacketSummary({});
+assert.ok(Array.isArray(partialSummary));
+const partialMap = Object.fromEntries(partialSummary.map((r) => [r.label, r.value]));
+assert.strictEqual(partialMap["packet_type"], "(없음)");
+assert.strictEqual(partialMap["audit_version"], "(없음)");
+assert.strictEqual(partialMap["review_decision_count"], "0");
+assert.strictEqual(partialMap["safety_contract.publication"], "(없음)");
+
+// Non-object input → safe defaults, no throw.
+const nullSummary = helpers.buildAuditPacketSummary(null);
+assert.ok(Array.isArray(nullSummary));
+
+// --- 12h. No auto-fetch on init even with a stored session token -----------
+// Re-use the seeded sandbox helper introduced in M8.7 step 7. Assert
+// that even with a token in sessionStorage, no /review/tasks/{id}/audit-packet
+// request fires during page initialization.
+const seededAuditSandbox = createSandbox({
+  session: { policy_ai_server_review_token: "audit-packet-init-token" },
+});
+const seededAuditFetches = seededAuditSandbox.__fetchCalls.filter(
+  (c) => c.url.includes("/audit-packet")
+);
+assert.strictEqual(
+  seededAuditFetches.length, 0,
+  `init must not auto-fetch /audit-packet even with a stored token; got: ${
+    JSON.stringify(seededAuditFetches.map((c) => c.url))
+  }`,
+);
+const baselineAuditFetches = sandbox.__fetchCalls.filter(
+  (c) => c.url.includes("/audit-packet")
+);
+assert.strictEqual(baselineAuditFetches.length, 0,
+  "init must not auto-fetch /audit-packet when no token is stored");
+
+// --- 12i. Static call-site audit ------------------------------------------
+// The /audit-packet path must appear in exactly one fetch call site
+// (the explicit-click loader). Static scan over scripts that built the
+// helpers above. Anything else would mean a non-explicit code path is
+// touching the endpoint.
+const concatenatedScripts = scripts.join("\n");
+const auditPacketRefs = (concatenatedScripts.match(/\/audit-packet/g) || []).length;
+assert.ok(
+  auditPacketRefs >= 1,
+  "/audit-packet path must appear at least once (in the loader)"
+);
+// The serverReviewLoadAuditPacket function is the only async function
+// that constructs the path via the template — pin its presence so a
+// refactor doesn't accidentally remove the gating.
+assert.ok(
+  /async function serverReviewLoadAuditPacket\b/.test(concatenatedScripts),
+  "serverReviewLoadAuditPacket must remain the sole entry point for the fetch",
+);
+// Token is sent only through the existing serverReviewFetch helper —
+// confirm the loader uses it rather than calling fetch() directly.
+const loaderBody = concatenatedScripts.slice(
+  concatenatedScripts.indexOf("async function serverReviewLoadAuditPacket"),
+  concatenatedScripts.indexOf("async function serverReviewCopyAuditPacket"),
+);
+assert.ok(
+  loaderBody.includes("serverReviewFetch("),
+  "serverReviewLoadAuditPacket must call through serverReviewFetch for token-header gating",
+);
+assert.ok(
+  !/\?token=/.test(loaderBody) && !/X-Review-Token/.test(loaderBody),
+  "serverReviewLoadAuditPacket must not embed token in URL or set its own auth header",
+);
+
+// --- 12j. Copy / load functions never reference token storage directly -----
+const copyBody = concatenatedScripts.slice(
+  concatenatedScripts.indexOf("async function serverReviewCopyAuditPacket"),
+);
+assert.ok(
+  !/localStorage/.test(copyBody.slice(0, 1500)),
+  "serverReviewCopyAuditPacket must not touch localStorage",
+);
+// The copy path's success message asserts internal-only / non-publication.
+assert.ok(
+  copyBody.includes("SERVER_REVIEW_AUDIT_PACKET_COPY_OK_MESSAGE"),
+  "copy success branch must reference the documented success message constant",
+);
+
+// --- 12k. Raw JSON viewer uses textContent (not innerHTML) ------------------
+// The raw JSON area must never use innerHTML — defensive against future
+// regressions. Scan the source for the raw-area assignment site.
+const rawAssign = concatenatedScripts.match(
+  /document\.getElementById\("serverReviewAuditPacketRaw"\)[^;]*\.(\w+)\s*=/g
+);
+if (rawAssign) {
+  for (const m of rawAssign) {
+    assert.ok(
+      !/\.innerHTML\s*=/.test(m),
+      `audit-packet raw area must not be assigned via innerHTML: ${m}`,
+    );
+  }
+}
+// Direct assignments to rawEl.textContent (the rendered pretty JSON)
+// must also exist.
+assert.ok(
+  /rawEl\.textContent\s*=/.test(concatenatedScripts),
+  "audit-packet raw area must be populated via textContent",
+);
+
 console.log("server-review UI smoke tests passed");
