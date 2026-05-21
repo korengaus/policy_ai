@@ -38,6 +38,7 @@ python tests/test_review_api.py
 python tests/test_review_workflow_smoke.py
 python tests/test_operator_preflight.py   # M8.5: operator preflight helper
 python tests/test_review_bundle.py        # M8.6: post-implementation review bundle helper
+python tests/test_review_api_exposure_smoke.py  # M8.8: no-token public-exposure smoke
 npm test   # runs regression.test.js + localstorage_slim.test.js + review_ui.test.js (M8.1 + M8.2 + M8.7)
 ```
 
@@ -70,6 +71,22 @@ auto-fetch on page initialization (even with a token already in
 `published` / `corrected` UI labels, and the absence of any
 `/publish` / `/correct` endpoint reference. `npm test` already
 invokes this file, so `scripts/validate.py` covers it.
+
+For the M8.8 review API public-exposure smoke (offline unit tests,
+no network — the live form is run by the operator against a deployed
+base URL):
+
+```
+python tests/test_review_api_exposure_smoke.py
+python scripts/smoke_review_api_exposure.py --base-url http://127.0.0.1:8000 --expect-disabled
+python scripts/run_operational_checks.py --profile review-exposure --base-url https://policy-ai-q5ax.onrender.com
+```
+
+`scripts/validate.py` invokes `tests/test_review_api_exposure_smoke.py`
+as part of the standard offline suite. **`validate.py` does not call
+Render** — the live exposure smoke is intentionally only run via the
+`review-exposure` operational profile, not as part of `validate.py`
+or the `quick` profile.
 
 Before staging changes, the M8.5 preflight helper recommends a precise
 `git add` command (never stages anything itself). It is exercised in

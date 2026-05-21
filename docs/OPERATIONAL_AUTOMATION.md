@@ -41,6 +41,7 @@ decisions and never modifies Render env.
 | `render-canary` | semantic canary with `--expect-semantic-enabled --expect-provider openai --fail-on-semantic-unavailable` + legacy smoke | Yes | **Yes — Render will issue OpenAI requests** | monitor active semantic canary |
 | `historical` | historical builder dry-run + deterministic eval (if file exists) | No | No | check builder output / regenerate batch evaluation |
 | `review-local` (M8.3) | offline reviewer-workflow smoke — `scripts/smoke_review_workflow.py --self-contained` | No | No | exercise M8.0–M8.2 reviewer surface against a temp SQLite DB with a dummy in-process token |
+| `review-exposure` (M8.8) | no-token public-exposure smoke — `scripts/smoke_review_api_exposure.py --expect-disabled` | Yes | No | verify `/review/*` is disabled-or-token-gated on a deploy after reviewer/admin UI or review API changes |
 | `full` | `validate` + `render-canary` + `historical` | Yes | Indirectly via Render | nightly / weekly comprehensive check |
 
 ## D. Common usage
@@ -535,6 +536,87 @@ python scripts/run_operational_checks.py --profile quick
 `tests/test_review_bundle.py` is invoked from `scripts/validate.py`,
 so the `quick` profile covers it. None of these commands call
 OpenAI, hit Render, or modify any external state.
+
+## F''''. Review API public-exposure smoke profile (M8.8)
+
+The `review-exposure` profile wraps `scripts/smoke_review_api_exposure.py`
+so the operator can run a no-token, no-secret public-exposure check
+against any deploy from the same single CLI used for the other
+profiles.
+
+### Exact command
+
+```
+python scripts/run_operational_checks.py --profile review-exposure \
+  --base-url https://policy-ai-q5ax.onrender.com
+```
+
+Internally this resolves to one step:
+
+```
+python scripts/smoke_review_api_exposure.py \
+  --base-url https://policy-ai-q5ax.onrender.com \
+  --expect-disabled \
+  --timeout-seconds 300
+```
+
+The smoke's `expect-disabled` mode matches current Render policy
+(review API disabled by default). The runner classifies any
+`public_access_detected=true` as a hard fail and surfaces a specific
+rollback hint in `next_actions` ahead of every other recommendation.
+
+### What this profile does NOT do
+
+- **Does not call OpenAI.** The smoke is pure stdlib `urllib` and
+  never touches OpenAI or any other external service.
+- **Does not require a `REVIEW_API_TOKEN`.** By design the smoke
+  cannot be tricked into sending one — the script doesn't even
+  accept a token flag.
+- **Does not modify Render env.** No `REVIEW_API_ENABLED` toggling.
+- **Does not run any other smoke.** This profile is intentionally
+  small so the operator can run it after frontend / review_* changes
+  without paying the canary's OpenAI / semantic cost.
+- **Is not part of `quick`.** `quick` stays offline + no-Render so
+  pre-commit checks remain fast and OpenAI-free. The exposure smoke
+  hits Render and belongs in the post-deploy profile family.
+
+### Metrics surfaced in the consolidated report
+
+The runner's `commands[i].metrics` block carries:
+
+| field | meaning |
+| --- | --- |
+| `public_access_detected` | `true` iff at least one endpoint returned 2xx without a token |
+| `disabled_count` | endpoints returning 503 with `disabled` body marker |
+| `token_required_count` | endpoints returning 403 |
+| `unexpected_count` | endpoints returning anything else (404 / 405 / 500 / network failure / 503 without `disabled` marker) |
+| `expectation_mismatch_count` | endpoints whose classification did not match the operator's `--expect-*` mode (still safe from public exposure) |
+| `expectation_mode` | `expect-disabled` / `expect-token-required` / `allow-disabled-or-token-required` |
+| `recommendation` | short human-readable next step (PASS / MISMATCH / FAIL …) |
+
+### When to run it
+
+After **any** deploy that touched:
+
+- `web/index.html` reviewer/admin UI (M8.1 / M8.2 / M8.7)
+- `review_auth.py`, `review_workflow.py`, or the `/review/*`
+  endpoints in `api_server.py` (M8.0)
+- environment variables that toggle `REVIEW_API_ENABLED` /
+  `REVIEW_API_TOKEN` on Render
+
+The smoke is fast (a handful of HTTP requests) and runs without any
+secret, so there's no operator-side cost to running it.
+
+### Validation
+
+```
+python tests/test_review_api_exposure_smoke.py
+python tests/test_operational_checks_runner.py
+python scripts/smoke_review_api_exposure.py --base-url http://127.0.0.1:8000 --expect-disabled  # local
+```
+
+The local form points at a running uvicorn that has `REVIEW_API_ENABLED`
+unset; both endpoints should return 503 and the smoke should pass.
 
 ## G. Relationship to future AI agents automation
 

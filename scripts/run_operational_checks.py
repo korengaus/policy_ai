@@ -65,6 +65,7 @@ PROFILES = (
     "render-canary",
     "historical",
     "review-local",
+    "review-exposure",
     "full",
 )
 
@@ -219,6 +220,30 @@ def _smoke_canary_step(args: argparse.Namespace, query: str, *, expect_enabled: 
     }
 
 
+def _review_exposure_step(args: argparse.Namespace) -> dict:
+    """Phase 2 M8.8: no-token review API public-exposure smoke.
+
+    Hits ``args.base_url`` with no ``X-Review-Token`` header and
+    verifies every ``/review/*`` endpoint returns a safe gate (503
+    disabled or 403 token-required). Never calls OpenAI. Never asks
+    the operator for ``REVIEW_API_TOKEN``. Never modifies Render env.
+    """
+    return {
+        "name": "smoke_review_api_exposure(expect-disabled)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "smoke_review_api_exposure.py"),
+            "--base-url", args.base_url,
+            "--expect-disabled",
+            "--timeout-seconds", str(int(args.timeout_seconds)),
+        ],
+        "parser": _parse_review_exposure_output,
+        "hits_render": True,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
 def _review_local_step() -> dict:
     """Phase 2 M8.3: offline reviewer-workflow smoke.
 
@@ -310,6 +335,14 @@ def _resolve_steps(args: argparse.Namespace) -> List[dict]:
     if profile == "review-local":
         # Fully offline: no Render, no OpenAI, no token from operator.
         steps.append(_review_local_step())
+
+    if profile == "review-exposure":
+        # Hits Render (or any --base-url) with NO token; never modifies
+        # Render env; never calls OpenAI. Intentionally separate from
+        # render-canary so the operator can run an exposure check
+        # without paying the canary's OpenAI / semantic cost.
+        if not args.skip_render:
+            steps.append(_review_exposure_step(args))
 
     if profile == "full":
         if not args.skip_render and not args.skip_semantic_canary:
@@ -611,6 +644,88 @@ def _parse_smoke_canary_output(stdout: str, stderr: str, exit_code: int) -> dict
     }
 
 
+def _parse_review_exposure_output(stdout: str, stderr: str, exit_code: int) -> dict:
+    """Phase 2 M8.8: parse ``smoke_review_api_exposure.py`` output.
+
+    The smoke prints a human summary followed by a JSON dump. The parser
+    prefers the JSON tail when present so the runner record carries the
+    structured counts (``public_access_detected``, ``disabled_count``,
+    ``token_required_count``, ``unexpected_count``,
+    ``expectation_mismatch_count``, ``expectation_mode``,
+    ``recommendation``). Falls back to exit-code-only on parse failure.
+    """
+    summary_obj: Optional[dict] = None
+    # Find the JSON tail: either at column 0 right at the start of stdout
+    # (the smoke prints headerless JSON in --json mode) or after the
+    # first newline (default human-summary + JSON tail).
+    if stdout.startswith("{"):
+        candidate = stdout
+    else:
+        start = stdout.find("\n{")
+        candidate = stdout[start + 1:] if start != -1 else ""
+    if candidate:
+        try:
+            summary_obj = json.loads(candidate)
+        except Exception:
+            summary_obj = None
+            idx = candidate.rfind("\n}")
+            while idx != -1 and summary_obj is None:
+                try:
+                    summary_obj = json.loads(candidate[: idx + 2])
+                except Exception:
+                    idx = candidate.rfind("\n}", 0, idx)
+
+    if summary_obj is None:
+        passed = exit_code == 0
+        return {
+            "status": _HEALTH_PASS if passed else _HEALTH_FAIL,
+            "summary": (
+                f"smoke_review_api_exposure exit_code={exit_code} "
+                "(JSON summary not detected)"
+            ),
+        }
+
+    passed = bool(summary_obj.get("passed"))
+    public_access_detected = bool(summary_obj.get("public_access_detected"))
+    disabled_count = int(summary_obj.get("disabled_count") or 0)
+    token_required_count = int(summary_obj.get("token_required_count") or 0)
+    unexpected_count = int(summary_obj.get("unexpected_count") or 0)
+    mismatch_count = int(summary_obj.get("expectation_mismatch_count") or 0)
+    expectation_mode = str(summary_obj.get("expectation_mode") or "")
+    recommendation = str(summary_obj.get("recommendation") or "")
+
+    # public_access is the hard fail signal; expectation_mismatch /
+    # unexpected also block pass. Otherwise the smoke's own ``passed``
+    # is the source of truth.
+    if public_access_detected:
+        status = _HEALTH_FAIL
+    elif passed:
+        status = _HEALTH_PASS
+    else:
+        status = _HEALTH_FAIL
+
+    summary_text = (
+        f"smoke_review_api_exposure: passed={passed} "
+        f"public_access_detected={public_access_detected} "
+        f"disabled={disabled_count} token_required={token_required_count} "
+        f"unexpected={unexpected_count} mismatch={mismatch_count} "
+        f"expectation_mode={expectation_mode}"
+    )
+    return {
+        "status": status,
+        "summary": summary_text,
+        "metrics": {
+            "public_access_detected": public_access_detected,
+            "disabled_count": disabled_count,
+            "token_required_count": token_required_count,
+            "unexpected_count": unexpected_count,
+            "expectation_mismatch_count": mismatch_count,
+            "expectation_mode": expectation_mode,
+            "recommendation": recommendation,
+        },
+    }
+
+
 def _parse_review_local_output(stdout: str, stderr: str, exit_code: int) -> dict:
     """Phase 2 M8.3: parse ``smoke_review_workflow.py --self-contained`` output.
 
@@ -844,6 +959,29 @@ def _next_actions(overall: str, records: List[dict]) -> List[str]:
     warm up. Hard safety signals (provider_errors, overstrong_like,
     semantic unavailable while expected) always do.
     """
+    # M8.8 — public-exposure failure must always surface a specific
+    # rollback hint, ahead of any other recommendation. Inspect the
+    # exposure step's metrics block.
+    exposure_records = [
+        r for r in records
+        if str(r.get("name", "")).startswith("smoke_review_api_exposure(")
+    ]
+    public_exposure_records = [
+        r for r in exposure_records
+        if (r.get("metrics") or {}).get("public_access_detected")
+    ]
+    if public_exposure_records:
+        actions: List[str] = [
+            "PUBLIC EXPOSURE detected: at least one /review/* endpoint "
+            "returned 2xx WITHOUT a token. Set REVIEW_API_ENABLED=false in "
+            "the Render dashboard immediately and investigate.",
+        ]
+        for r in public_exposure_records:
+            rec = (r.get("metrics") or {}).get("recommendation") or ""
+            if rec:
+                actions.append(f"{r['name']}: {rec}")
+        return actions
+
     canary_records = [
         r for r in records
         if str(r.get("name", "")).startswith("smoke_semantic_canary(")

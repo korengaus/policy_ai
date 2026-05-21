@@ -171,6 +171,54 @@ class ProfileResolutionTests(unittest.TestCase):
         names = _step_names(steps)
         self.assertEqual(names, ["smoke_review_workflow(self-contained)"])
 
+    # M8.8 — review-exposure profile.
+    def test_review_exposure_profile_resolves_to_exposure_smoke(self):
+        steps = runner_module._resolve_steps(_argv_to_args(
+            "--profile", "review-exposure",
+            "--base-url", "http://example.invalid",
+        ))
+        names = _step_names(steps)
+        self.assertEqual(names, ["smoke_review_api_exposure(expect-disabled)"])
+        # The single step hits Render (the supplied base URL) but does
+        # NOT call OpenAI and does NOT require a token from the operator.
+        self.assertTrue(steps[0]["hits_render"])
+        self.assertFalse(steps[0]["may_call_openai"])
+        cmd = " ".join(steps[0]["command"])
+        self.assertIn("smoke_review_api_exposure.py", cmd)
+        self.assertIn("--expect-disabled", cmd)
+        self.assertIn("--base-url http://example.invalid", cmd)
+        # The runner must NOT inject any token / Authorization arg —
+        # the exposure smoke intentionally probes without a token.
+        self.assertNotIn("REVIEW_API_TOKEN", cmd)
+        self.assertNotIn("X-Review-Token", cmd)
+        self.assertNotIn("Bearer", cmd)
+
+    def test_review_exposure_profile_is_not_part_of_quick(self):
+        # quick must never include the exposure smoke — quick is offline
+        # and must not hit Render.
+        steps = runner_module._resolve_steps(_argv_to_args("--profile", "quick"))
+        names = _step_names(steps)
+        self.assertNotIn("smoke_review_api_exposure(expect-disabled)", names)
+        for step in steps:
+            self.assertFalse(
+                step["hits_render"],
+                f"quick profile must not include any Render-hitting step "
+                f"(got {step['name']!r})",
+            )
+
+    def test_review_exposure_profile_dropped_when_skip_render(self):
+        # --skip-render takes the exposure step out (it would have hit
+        # the base URL) — the runner then has zero steps for this profile.
+        steps = runner_module._resolve_steps(_argv_to_args(
+            "--profile", "review-exposure",
+            "--base-url", "http://example.invalid",
+            "--skip-render",
+        ))
+        self.assertEqual(steps, [])
+
+    def test_review_exposure_is_a_known_profile(self):
+        self.assertIn("review-exposure", runner_module.PROFILES)
+
     def test_historical_profile_includes_dry_run_and_optional_eval(self):
         steps = runner_module._resolve_steps(_argv_to_args("--profile", "historical"))
         names = _step_names(steps)
@@ -468,6 +516,90 @@ class ParserTests(unittest.TestCase):
         parsed = runner_module._parse_review_local_output("", "argparse complained", 2)
         self.assertEqual(parsed["status"], "fail")
 
+    # M8.8 — review-exposure parser.
+    def test_review_exposure_pass_detected(self):
+        # Realistic exposure smoke output: human summary + JSON tail.
+        sample = (
+            "[exposure] base_url=https://policy-ai-q5ax.onrender.com\n"
+            "[exposure] passed=True\n"
+            "{\n"
+            "  \"passed\": true,\n"
+            "  \"base_url\": \"https://policy-ai-q5ax.onrender.com\",\n"
+            "  \"expectation_mode\": \"expect-disabled\",\n"
+            "  \"endpoints_checked\": 5,\n"
+            "  \"public_access_detected\": false,\n"
+            "  \"disabled_count\": 5,\n"
+            "  \"token_required_count\": 0,\n"
+            "  \"unexpected_count\": 0,\n"
+            "  \"expectation_mismatch_count\": 0,\n"
+            "  \"results\": [],\n"
+            "  \"warnings\": [],\n"
+            "  \"errors\": [],\n"
+            "  \"recommendation\": \"PASS: every endpoint disabled\"\n"
+            "}\n"
+        )
+        parsed = runner_module._parse_review_exposure_output(sample, "", 0)
+        self.assertEqual(parsed["status"], "pass")
+        metrics = parsed["metrics"]
+        self.assertFalse(metrics["public_access_detected"])
+        self.assertEqual(metrics["disabled_count"], 5)
+        self.assertEqual(metrics["token_required_count"], 0)
+        self.assertEqual(metrics["unexpected_count"], 0)
+        self.assertEqual(metrics["expectation_mismatch_count"], 0)
+        self.assertEqual(metrics["expectation_mode"], "expect-disabled")
+        self.assertIn("PASS", metrics["recommendation"])
+
+    def test_review_exposure_public_access_marks_status_fail(self):
+        sample = (
+            "{\n"
+            "  \"passed\": false,\n"
+            "  \"base_url\": \"http://example.invalid\",\n"
+            "  \"expectation_mode\": \"expect-disabled\",\n"
+            "  \"endpoints_checked\": 5,\n"
+            "  \"public_access_detected\": true,\n"
+            "  \"disabled_count\": 0,\n"
+            "  \"token_required_count\": 0,\n"
+            "  \"unexpected_count\": 0,\n"
+            "  \"expectation_mismatch_count\": 0,\n"
+            "  \"results\": [],\n"
+            "  \"warnings\": [],\n"
+            "  \"errors\": [],\n"
+            "  \"recommendation\": \"FAIL: public-exposure incident\"\n"
+            "}\n"
+        )
+        parsed = runner_module._parse_review_exposure_output(sample, "", 1)
+        self.assertEqual(parsed["status"], "fail")
+        self.assertTrue(parsed["metrics"]["public_access_detected"])
+        self.assertIn("public_access_detected=True", parsed["summary"])
+
+    def test_review_exposure_mismatch_in_expect_disabled_is_fail(self):
+        # 5x 403 with expect-disabled → still safe (no public access)
+        # but the operator's expectation didn't match. The runner
+        # marks this as fail so the discrepancy doesn't get hidden.
+        sample = (
+            "{\n"
+            "  \"passed\": false,\n"
+            "  \"expectation_mode\": \"expect-disabled\",\n"
+            "  \"endpoints_checked\": 5,\n"
+            "  \"public_access_detected\": false,\n"
+            "  \"disabled_count\": 0,\n"
+            "  \"token_required_count\": 5,\n"
+            "  \"unexpected_count\": 0,\n"
+            "  \"expectation_mismatch_count\": 5,\n"
+            "  \"results\": [], \"warnings\": [], \"errors\": [],\n"
+            "  \"recommendation\": \"MISMATCH: review API enabled\"\n"
+            "}\n"
+        )
+        parsed = runner_module._parse_review_exposure_output(sample, "", 1)
+        self.assertEqual(parsed["status"], "fail")
+        self.assertFalse(parsed["metrics"]["public_access_detected"])
+        self.assertEqual(parsed["metrics"]["expectation_mismatch_count"], 5)
+
+    def test_review_exposure_falls_back_when_json_missing(self):
+        parsed = runner_module._parse_review_exposure_output("no json here", "", 1)
+        self.assertEqual(parsed["status"], "fail")
+        self.assertIn("JSON summary not detected", parsed["summary"])
+
     def test_historical_dry_run_pass_detected(self):
         sample = (
             "[build-historical] reports_scanned=471 sqlite_rows=105 "
@@ -631,6 +763,72 @@ class OrchestrationTests(unittest.TestCase):
             self.assertIn("--self-contained", executed)
             self.assertNotIn("--base-url", executed)
             self.assertNotIn("REVIEW_API_TOKEN", executed)
+
+    def test_review_exposure_orchestrates_with_injected_runner(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = _argv_to_args(
+                "--profile", "review-exposure",
+                "--base-url", "http://example.invalid",
+                "--no-default-reports",
+                "--json-out", str(Path(tmp) / "out.json"),
+            )
+            exposure_pass = (
+                "[exposure] passed=True\n"
+                "{\n"
+                "  \"passed\": true,\n"
+                "  \"expectation_mode\": \"expect-disabled\",\n"
+                "  \"endpoints_checked\": 5,\n"
+                "  \"public_access_detected\": false,\n"
+                "  \"disabled_count\": 5,\n"
+                "  \"token_required_count\": 0,\n"
+                "  \"unexpected_count\": 0,\n"
+                "  \"expectation_mismatch_count\": 0,\n"
+                "  \"results\": [], \"warnings\": [], \"errors\": [],\n"
+                "  \"recommendation\": \"PASS: every endpoint disabled\"\n"
+                "}\n"
+            )
+            fake = FakeRunner([(0, exposure_pass, "")])
+            report = runner_module.run(args, runner=fake)
+            self.assertEqual(len(fake.calls), 1)
+            self.assertEqual(report["overall_status"], "pass")
+            self.assertEqual(report["commands"][0]["status"], "pass")
+            # The injected command must NOT carry any token argument.
+            executed = " ".join(fake.calls[0])
+            self.assertIn("smoke_review_api_exposure.py", executed)
+            self.assertIn("--expect-disabled", executed)
+            self.assertNotIn("REVIEW_API_TOKEN", executed)
+            self.assertNotIn("X-Review-Token", executed)
+
+    def test_review_exposure_public_access_surfaces_rollback_hint(self):
+        # When the exposure smoke flags public_access_detected the
+        # runner's next_actions must lead with a specific rollback hint.
+        with tempfile.TemporaryDirectory() as tmp:
+            args = _argv_to_args(
+                "--profile", "review-exposure",
+                "--base-url", "http://example.invalid",
+                "--no-default-reports",
+                "--json-out", str(Path(tmp) / "out.json"),
+            )
+            exposure_fail = (
+                "{\n"
+                "  \"passed\": false,\n"
+                "  \"expectation_mode\": \"expect-disabled\",\n"
+                "  \"endpoints_checked\": 5,\n"
+                "  \"public_access_detected\": true,\n"
+                "  \"disabled_count\": 4,\n"
+                "  \"token_required_count\": 0,\n"
+                "  \"unexpected_count\": 0,\n"
+                "  \"expectation_mismatch_count\": 0,\n"
+                "  \"results\": [], \"warnings\": [], \"errors\": [],\n"
+                "  \"recommendation\": \"FAIL: public-exposure incident\"\n"
+                "}\n"
+            )
+            fake = FakeRunner([(1, exposure_fail, "")])
+            report = runner_module.run(args, runner=fake)
+            self.assertEqual(report["overall_status"], "fail")
+            joined = " ".join(report["next_actions"])
+            self.assertIn("PUBLIC EXPOSURE", joined)
+            self.assertIn("REVIEW_API_ENABLED=false", joined)
 
     def test_main_exit_code_2_when_warn_and_fail_on_warn(self):
         with tempfile.TemporaryDirectory() as tmp:

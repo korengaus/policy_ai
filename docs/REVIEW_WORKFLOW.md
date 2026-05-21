@@ -1,4 +1,4 @@
-# Server-Backed Reviewer Workflow (Phase 2 M8.0 + M8.1 + M8.2 + M8.3 + M8.7)
+# Server-Backed Reviewer Workflow (Phase 2 M8.0 + M8.1 + M8.2 + M8.3 + M8.7 + M8.8)
 
 A backend-first foundation for the human-review layer. AI drafts and
 summarizes evidence; humans approve, reject, or request more evidence.
@@ -515,7 +515,156 @@ HTML/JS. The actual security boundary is on the server:
 If the operator wants a stricter UX in a future milestone, the right
 path is real auth + an admin role, not stronger client-side hiding.
 
-## I. Future work (post-M8.7)
+## H''''. Review API public-exposure smoke (M8.8)
+
+`scripts/smoke_review_api_exposure.py` is a no-token, no-secret smoke
+that hits a deployed instance with **no** `X-Review-Token` header and
+verifies every `/review/*` endpoint refuses the probe with a safe gate
+(503 disabled or 403 token-required). It is intentionally separate
+from the M8.7 reviewer/admin UI hardening (which is a frontend safety
+pass — UI visibility is *not* auth) and complements it by confirming
+the server-side gate is actually enforced.
+
+**This smoke is operator-runnable against Render without any token
+or secret.** No `REVIEW_API_TOKEN` is required, accepted, or sent. No
+OpenAI call. No Render env modification.
+
+### Exact command
+
+```
+python scripts/smoke_review_api_exposure.py \
+  --base-url https://policy-ai-q5ax.onrender.com --expect-disabled
+```
+
+This is the **current-Render** form: review API is intentionally
+disabled-by-default, so every endpoint should return 503 disabled.
+
+Other modes:
+
+```
+# Local/dev with REVIEW_API_ENABLED=true: every endpoint must be 403
+# without X-Review-Token (the gate is enforced server-side).
+python scripts/smoke_review_api_exposure.py \
+  --base-url http://127.0.0.1:8000 --expect-token-required
+
+# Permissive mode: either 503 or 403 is acceptable.
+python scripts/smoke_review_api_exposure.py \
+  --base-url https://policy-ai-q5ax.onrender.com \
+  --allow-disabled-or-token-required
+```
+
+### Endpoints probed (no token, no secrets)
+
+| method | path | body shape |
+| --- | --- | --- |
+| `GET` | `/review/tasks` | – |
+| `GET` | `/review/tasks/nonexistent-smoke-task-id` | – |
+| `GET` | `/review/tasks/nonexistent-smoke-task-id/decisions` | – |
+| `POST` | `/review/tasks/from-result` | small synthetic envelope, no secrets |
+| `POST` | `/review/tasks/nonexistent-smoke-task-id/decision` | `{"decision": "comment", "comment": "public exposure smoke - no token"}` |
+
+The POST bodies carry **no** token, no API key, no semantic label, no
+real user data, and the server should refuse them before inspecting
+the payload. The smoke records each `(method, path, status,
+classification)` triple in its JSON output.
+
+### Classification rules
+
+| classification | trigger | per-mode treatment |
+| --- | --- | --- |
+| `public_access` | any 2xx without token | **FAIL** in every mode — public-exposure incident |
+| `disabled` | HTTP 503 with `disabled` in body | safe in `allow-either`; required for `--expect-disabled` |
+| `token_required` | HTTP 403 | safe in `allow-either`; required for `--expect-token-required` |
+| `unexpected` | anything else (404, 405, 500, 503-without-disabled, network error, …) | **FAIL** — surface for inspection |
+
+Cross-mode behavior matrix:
+
+| classification | `--expect-disabled` | `--expect-token-required` | `--allow-either` |
+| --- | --- | --- | --- |
+| `public_access` | FAIL | FAIL | FAIL |
+| `disabled` (503) | PASS | MISMATCH (review API not actually enabled) | PASS |
+| `token_required` (403) | MISMATCH (review API is enabled — confirm intent; no public exposure) | PASS | PASS |
+| `unexpected` | FAIL | FAIL | FAIL |
+
+Mismatches in strict modes still report `public_access_detected=false`
+— the deployment is safe from public exposure — but exit non-zero
+so the operator notices the discrepancy. Recommendations explain the
+mismatch explicitly: "MISMATCH: every endpoint is token-gated (403)
+but the operator expected the review API to be disabled (503)…"
+
+### Output
+
+Default output is a short human summary followed by a JSON dump.
+Stable JSON keys:
+
+```
+passed, base_url, expectation_mode, endpoints_checked,
+public_access_detected, disabled_count, token_required_count,
+unexpected_count, expectation_mismatch_count, results,
+warnings, errors, recommendation
+```
+
+The output is asserted to carry no token / SDK-key / secret literal
+(pinned by `tests/test_review_api_exposure_smoke.py::JSONOutputTests`).
+Long hex / base64 runs in any response body are redacted to
+`<redacted>` before being recorded.
+
+### What this does NOT do
+
+- **Does not enable** the review API. The smoke is read-only and
+  token-less; if the server is disabled-by-default, every endpoint
+  returns 503 and the smoke passes.
+- **Does not modify Render env.** No `REVIEW_API_ENABLED` /
+  `REVIEW_API_TOKEN` mutation. The operator does not need to touch
+  the Render dashboard to run it.
+- **Does not call OpenAI** or any other external service. The only
+  HTTP target is the `--base-url` the operator passes.
+- **Does not accept a `REVIEW_API_TOKEN`** flag. By design the smoke
+  cannot be tricked into sending a token even if one is set in the
+  environment.
+- **Does not change verdict / confidence / methodology wording.**
+
+### Operator runbook
+
+1. After every deploy that touches reviewer/admin UI or `review_*`
+   server code, run the smoke against Render:
+
+   ```
+   python scripts/smoke_review_api_exposure.py \
+     --base-url https://policy-ai-q5ax.onrender.com --expect-disabled
+   ```
+
+2. Read the `recommendation` field:
+   - `PASS: …` — current Render state matches policy (review API off);
+     safe to proceed.
+   - `MISMATCH: …` — the review API was enabled but expected disabled
+     (or vice-versa). Confirm whether this was intentional in the
+     Render dashboard. No public exposure, but state diverges from
+     policy.
+   - `FAIL: at least one /review/* endpoint returned 2xx WITHOUT a
+     token. This is a public-exposure incident.` — flip
+     `REVIEW_API_ENABLED=false` in the Render dashboard immediately
+     (or remove the deployment from public DNS) and investigate
+     before anything else.
+   - `FAIL: at least one /review/* endpoint returned an unexpected
+     status …` — read the per-endpoint results; likely a proxy
+     misconfiguration or a regression in the `review_auth` gate.
+
+3. The operator runner profile `review-exposure` wraps the same call
+   (see `docs/OPERATIONAL_AUTOMATION.md` §F''''). It carries the
+   structured counts into the consolidated report under
+   `commands[i].metrics`.
+
+### Why this is a separate milestone from M8.7
+
+M8.7 hardened the frontend so the reviewer UI **reads** as internal/
+admin and could not be mistaken for a public publication tool.
+M8.8 verifies the **server** side: the review API is not publicly
+reachable. The two complement each other — UI visibility is not auth,
+and the M8.8 smoke is what tells the operator the real fence is
+working.
+
+## I. Future work (post-M8.8)
 
 - Proper auth + admin layer to replace the temporary token gate.
 - Postgres dual-write for review tables to match the existing pattern
