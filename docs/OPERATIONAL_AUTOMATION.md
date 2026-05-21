@@ -280,6 +280,89 @@ This is the command the operator runs after a Render redeploy. The
 runner never modifies Render env; rollback is still a manual operator
 action in the Render dashboard.
 
+## F''. Operator preflight (M8.5)
+
+`scripts/operator_preflight.py` is a small local-only operator helper that
+reads `git status --porcelain` and recommends a precise `git add` command.
+It **never** stages, commits, pushes, or modifies any file. It never calls
+external services, never reads `OPENAI_API_KEY`, and never modifies Render
+env.
+
+The point is to avoid `git add .` and the ".claude/settings.local.json
+slipped into a commit" failure mode that the operator hit during M8.0–
+M8.4. The script:
+
+- shows the current change set, split into changed / untracked / excluded
+  local-only;
+- accepts an `--expected <paths...>` whitelist and tells the operator
+  whether every expected file is actually changed, which files are
+  unexpectedly modified, and which dangerous files are present;
+- prints a recommended `git add` command listing **only** the safe
+  expected files;
+- can emit JSON for tooling or a compact ChatGPT review summary on
+  request;
+- refuses to mark the change set as `commit_ready` when a dangerous file
+  (e.g. `.claude/settings.local.json`) was explicitly listed in
+  `--expected`.
+
+### Exact commands
+
+Show the current change summary:
+
+```
+python scripts/operator_preflight.py
+```
+
+Recommend a `git add` command for an intended file list:
+
+```
+python scripts/operator_preflight.py --expected web/index.html docs/REVIEW_WORKFLOW.md
+```
+
+Short ChatGPT-pasteable summary:
+
+```
+python scripts/operator_preflight.py --expected web/index.html docs/REVIEW_WORKFLOW.md --chatgpt-summary
+```
+
+JSON form (stable keys, no secrets):
+
+```
+python scripts/operator_preflight.py --expected web/index.html docs/REVIEW_WORKFLOW.md --json
+```
+
+### What it never does
+
+- Never calls `git add`, `git commit`, `git push`, `git reset`, or
+  `git checkout` — the only subprocess invocation is a read-only
+  `git status --porcelain`. Verified statically and at runtime by
+  `tests/test_operator_preflight.py::ScriptSafetyTests`.
+- Never replaces operator review. The recommended command is a
+  suggestion; the operator still inspects the diff before running it.
+- Never reads or stores any API key. Never modifies Render env.
+- Never calls OpenAI / network / Render.
+
+### Always-excluded patterns
+
+The script treats these as dangerous and always excludes them from the
+recommended `git add`:
+
+| pattern | reason |
+| --- | --- |
+| `.claude/settings.local.json` | per-operator local config; never staged |
+| `reports/` and `reports/operational_check_*.{json,md}` | gitignored generated artifacts |
+| `.env`, `.env.*` (anywhere) | secrets |
+| `node_modules/`, `__pycache__/`, `.pytest_cache/`, `.mypy_cache/`, `.ruff_cache/`, `coverage/`, `.coverage` | caches |
+| `dist/`, `build/` | build outputs |
+| `*.pyc` | bytecode |
+| Root-level `operational_check_*.json` / `.md` | legacy report names |
+
+If one of these is present in the working copy, it is moved to
+`excluded_local_only_files` with a warning — `commit_ready` is **not**
+forced to false by mere presence. If one of these is passed via
+`--expected`, it moves to `forbidden_files_present` and `commit_ready`
+is forced to false.
+
 ## G. Relationship to future AI agents automation
 
 This is the first automation layer. It produces structured JSON

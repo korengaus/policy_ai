@@ -36,6 +36,7 @@ python tests/test_operational_checks_runner.py    # includes M8.4 canary classif
 python tests/test_review_workflow.py
 python tests/test_review_api.py
 python tests/test_review_workflow_smoke.py
+python tests/test_operator_preflight.py   # M8.5: operator preflight helper
 npm test   # runs regression.test.js + localstorage_slim.test.js + review_ui.test.js (M8.1 + M8.2)
 ```
 
@@ -53,6 +54,20 @@ OpenAI, dummy in-process token only):
 python scripts/smoke_review_workflow.py --self-contained
 python scripts/run_operational_checks.py --profile review-local
 ```
+
+Before staging changes, the M8.5 preflight helper recommends a precise
+`git add` command (never stages anything itself). It is exercised in
+`scripts/validate.py` via `tests/test_operator_preflight.py`:
+
+```
+python scripts/operator_preflight.py
+python scripts/operator_preflight.py --expected docs/REVIEW_WORKFLOW.md scripts/operator_preflight.py
+python scripts/operator_preflight.py --expected ... --chatgpt-summary
+python scripts/operator_preflight.py --expected ... --json
+```
+
+See `docs/OPERATIONAL_AUTOMATION.md` §F'' for the always-excluded
+patterns and the rationale.
 
 It calls `scripts/validate.py` and writes a consolidated report under
 `reports/operational_check_<timestamp>.{json,md}` (gitignored). See
