@@ -1,6 +1,15 @@
 import re
 from collections import Counter
 
+# M11.2: source-of-truth for STOPWORDS / CONCEPT_SYNONYMS lives in
+# korean_constants. evidence_comparator's variants differ from the
+# ones in official_relevance.py / official_source_body.py — see
+# docs/KOREAN_CONSTANTS.md for why they're kept distinct.
+from korean_constants import (
+    STOPWORDS_COMPARATOR as STOPWORDS,
+    CONCEPT_SYNONYMS_COMPARATOR as CONCEPT_SYNONYMS,
+)
+
 
 CONFLICT_PHRASES = [
     "\ud655\uc815\ub418\uc9c0 \uc54a\uc558\ub2e4",
@@ -14,101 +23,6 @@ CONFLICT_PHRASES = [
     "\ubc18\ubc15",
     "\uc544\ub2c8\ub2e4",
 ]
-
-STOPWORDS = {
-    "\uad00\ub828",
-    "\uae30\uc0ac",
-    "\uc815\ucc45",
-    "\uc815\ubd80",
-    "\uc624\ub298",
-    "\uc774\ubc88",
-    "\ud574\ub2f9",
-    "\ub300\ud574",
-    "\ub4f1\uc744",
-    "\ub4f1\uc774",
-    "\ubc1d\ud614\ub2e4",
-    "\uc804\ud588\ub2e4",
-    "\ud55c\ub2e4",
-    "\uc788\ub2e4",
-    "\uc5c6\ub2e4",
-    "\uc704\ud574",
-    "\uc774\ud6c4",
-    "\ubc0f",
-}
-
-CONCEPT_SYNONYMS = {
-    "rental_loan": [
-        "\uc804\uc138\ub300\ucd9c",
-        "\ubc84\ud300\ubaa9",
-        "\uc804\uc138\uc790\uae08",
-        "\uc804\uc138\uc790\uae08\ub300\ucd9c",
-        "\uc784\ucc28\ubcf4\uc99d\uae08",
-        "\uc804\uc138\uae08",
-        "\uc804\uc138",
-    ],
-    "mortgage_loan": [
-        "\uc8fc\ud0dd\ub2f4\ubcf4\ub300\ucd9c",
-        "\uc8fc\ub2f4\ub300",
-        "\ub2f4\ubcf4\ub300\ucd9c",
-        "\uc8fc\ud0dd \ub2f4\ubcf4",
-    ],
-    "interest_rate": [
-        "\uae08\ub9ac",
-        "\uc774\uc790",
-        "\uc6b0\ub300\uae08\ub9ac",
-        "\uac10\uba74",
-        "\uc774\uc790\uc9c0\uc6d0",
-        "\uc774\ucc28\ubcf4\uc804",
-    ],
-    "regulation": [
-        "\uaddc\uc81c",
-        "\uc81c\ud55c",
-        "\ucc28\ub2e8",
-        "\uad00\ub9ac\uac15\ud654",
-        "\uac00\uacc4\ubd80\ucc44 \uad00\ub9ac",
-        "\uac00\uacc4\ubd80\ucc44",
-        "\ub300\ucd9c\uaddc\uc81c",
-    ],
-    "subsidy_support": [
-        "\uc9c0\uc6d0",
-        "\ubcf4\uc870",
-        "\ubcf4\uc870\uae08",
-        "\uc774\ucc28\ubcf4\uc804",
-        "\uc8fc\uac70\ube44",
-        "\ud61c\ud0dd",
-        "\uc6b0\ub300",
-    ],
-    "target_group": [
-        "\uccad\ub144",
-        "\uc2e0\ud63c\ubd80\ubd80",
-        "\uc790\ub140\ucd9c\uc0b0",
-        "\uc911\uc18c\uae30\uc5c5 \uadfc\ub85c\uc790",
-        "\uc911\uc18c\uae30\uc5c5",
-        "\uadfc\ub85c\uc790",
-        "1\uc8fc\ud0dd\uc790",
-        "\uc720\uc8fc\ud0dd\uc790",
-    ],
-    "implementation": [
-        "\uc2dc\ud589",
-        "\uc6b4\uc601",
-        "\uc2e0\uccad",
-        "\ubaa8\uc9d1",
-        "\uacf5\uace0",
-        "\uc801\uc6a9",
-        "\uc811\uc218",
-        "\uc2dc\uc791",
-    ],
-    "review_stage": [
-        "\uac80\ud1a0",
-        "\ucd94\uc9c4",
-        "\uc870\uc0ac",
-        "\ucc29\uc218",
-        "\ub17c\uc758",
-        "\ud30c\uc545",
-        "\ud604\ud669",
-    ],
-}
-
 
 def _normalize_text(value) -> str:
     if value is None:

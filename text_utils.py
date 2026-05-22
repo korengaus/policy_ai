@@ -7,20 +7,10 @@ except Exception:
     ftfy = None
 
 
-MOJIBAKE_MARKERS = (
-    "ë",
-    "ì",
-    "ê",
-    "í",
-    "Ã",
-    "Â",
-    "ð",
-    "챙",
-    "챠",
-    "챘",
-    "횂",
-    "占",
-)
+# M11.2: source-of-truth for these markers lives in korean_constants.
+# The literal is preserved there to avoid changing detection
+# behaviour at any call site that previously iterated this tuple.
+from korean_constants import MOJIBAKE_MARKERS_TEXT_UTILS as MOJIBAKE_MARKERS
 
 
 def has_mojibake(text: str) -> bool:

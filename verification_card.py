@@ -44,33 +44,15 @@ EXCLUDED_TOP_SOURCE_TYPES = {
 # (high/medium/low/none). Update this set ONLY with operator review.
 _STRONG_VERIFICATION_STRENGTHS = frozenset({"medium", "high"})
 
-HOUSING_QUERY_TERMS = {
-    "부동산",
-    "주거",
-    "주택",
-    "전세",
-    "월세",
-    "임대",
-    "양도세",
-    "공급",
-    "재건축",
-    "재개발",
-}
-
-HOUSING_DOCUMENT_TERMS = {
-    "부동산",
-    "주거",
-    "주택",
-    "전세",
-    "월세",
-    "임대",
-    "양도세",
-    "공급",
-    "재건축",
-    "재개발",
-    "보증금",
-    "세입자",
-}
+# M11.2: HOUSING_QUERY_TERMS / HOUSING_DOCUMENT_TERMS now sourced
+# from korean_constants. They're single-source today but the audit
+# explicitly listed verification_card.py as part of the centralization
+# surface, and lifting them here keeps the keyword inventory under
+# one roof.
+from korean_constants import (
+    HOUSING_QUERY_TERMS,
+    HOUSING_DOCUMENT_TERMS,
+)
 
 MATERIAL_OFFICIAL_CONCEPTS = {
     "rental_loan",
@@ -90,27 +72,10 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-POLICY_ACTION_KEYWORDS = [
-    "검토",
-    "추진",
-    "발표",
-    "조사",
-    "착수",
-    "시행",
-    "확대",
-    "축소",
-    "제한",
-    "차단",
-    "금지",
-    "지원",
-    "감면",
-    "인하",
-    "인상",
-    "대출",
-    "금리",
-    "규제",
-    "정책",
-]
+# M11.2: POLICY_ACTION_KEYWORDS now sourced from korean_constants.
+# Originally a list; the centralized form is a tuple (immutable) —
+# call sites iterate only, so behaviour is unchanged.
+from korean_constants import POLICY_ACTION_KEYWORDS
 
 
 def _split_sentences(text: str) -> list[str]:

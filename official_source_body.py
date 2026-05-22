@@ -15,6 +15,14 @@ from official_metadata import (
     looks_like_official_search_or_index_url,
     name_implies_official,
 )
+# M11.2: source-of-truth for STOPWORDS / CONCEPT_GROUPS lives in
+# korean_constants. official_source_body's variants differ from the
+# ones in evidence_comparator.py / official_relevance.py — see
+# docs/KOREAN_CONSTANTS.md for why they're kept distinct.
+from korean_constants import (
+    STOPWORDS_OFFICIAL_BODY as STOPWORDS,
+    CONCEPT_GROUPS_OFFICIAL_BODY as CONCEPT_GROUPS,
+)
 
 
 OFFICIAL_DOMAINS = {
@@ -71,36 +79,12 @@ ERROR_PAGE_PATTERNS = {
     "forbidden",
 }
 
-STOPWORDS = {
-    "그리고",
-    "그러나",
-    "있는",
-    "없는",
-    "대한",
-    "관련",
-    "이번",
-    "기사",
-    "뉴스",
-    "정부",
-    "정책",
-    "것으로",
-    "한다고",
-    "했다",
-    "한다",
-    "있다",
-    "없다",
-}
+# M11.2: STOPWORDS now sourced from korean_constants (see top-of-file import).
 
 
-CONCEPT_GROUPS = {
-    "housing_finance": ["\uc804\uc138\ub300\ucd9c", "\uc804\uc138\uc790\uae08", "\ubc84\ud300\ubaa9", "\uc8fc\ud0dd\ub2f4\ubcf4\ub300\ucd9c", "\uc8fc\ub2f4\ub300", "\uc8fc\ud0dd\uae08\uc735"],
-    "real_estate": ["\ubd80\ub3d9\uc0b0", "\uc8fc\ud0dd", "\uc2e4\uac70\uc8fc\uc790", "\uc591\ub3c4\uc138", "\ub2e4\uc8fc\ud0dd", "\uccad\uc57d", "\uc784\ub300\ucc28"],
-    "rate_policy": ["\uae08\ub9ac", "\uae30\uc900\uae08\ub9ac", "\uc778\ud558", "\uc778\uc0c1", "\ud1b5\ud654\uc815\ucc45", "\ubb3c\uac00"],
-    "financial_regulation": ["DSR", "\uaddc\uc81c", "\uc81c\ud55c", "\uac00\uacc4\ubd80\ucc44", "\uc5f0\uccb4\uc728", "\uac10\ub3c5"],
-    "social_finance": ["\uc0ac\ud68c\uc5f0\ub300\uacbd\uc81c\uc870\uc9c1", "\uc0ac\ud68c\uc5f0\ub300\uae08\uc735", "\uc0ac\ud68c\uc5f0\ub300\uae08\uc735\ud611\uc758\ud68c", "\uae08\uc735\uc9c0\uc6d0"],
-    "jeonse_fraud": ["\uc804\uc138\uc0ac\uae30", "\uc804\uc138\ubcf4\uc99d", "\ubcf4\uc99d\uae08", "\uc784\ub300\uc778"],
-    "tax_investigation": ["\uad6d\uc138\uccad", "\uc591\ub3c4\uc138", "\uc591\ub3c4\uc18c\ub4dd\uc138", "\uc138\ubb34\uc870\uc0ac", "\ud0c8\ub8e8", "\uac00\uc0c1\uc790\uc0b0"],
-}
+# M11.2: CONCEPT_GROUPS now sourced from korean_constants (see
+# top-of-file import). INSTITUTION_TERMS is a single-source list and
+# remains in this file.
 
 INSTITUTION_TERMS = [
     "\uae08\uc735\uc704",

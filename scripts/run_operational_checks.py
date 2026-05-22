@@ -75,6 +75,7 @@ PROFILES = (
     "verdict-comparison",
     "verdict-label-diagnostic",
     "legacy-review-enroll",
+    "korean-constants",
     "full",
 )
 
@@ -866,6 +867,46 @@ def _legacy_review_enroll_tests_step() -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Phase 2 M11.2 — korean-constants profile.
+#
+# Pure data-centralization checks. No DB, no network, no OpenAI.
+# Steps:
+#   1) compileall korean_constants.py             (syntax + import smoke)
+#   2) tests/test_korean_constants.py             (immutability, pins,
+#                                                  import-graph wiring,
+#                                                  anti-reintroduction)
+# ---------------------------------------------------------------------------
+
+
+def _korean_constants_compile_step() -> dict:
+    return {
+        "name": "compileall(korean_constants.py)",
+        "command": [
+            _python(), "-m", "compileall",
+            str(ROOT / "korean_constants.py"),
+        ],
+        "parser": _parse_korean_constants_compile_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _korean_constants_tests_step() -> dict:
+    return {
+        "name": "test_korean_constants",
+        "command": [
+            _python(),
+            str(ROOT / "tests" / "test_korean_constants.py"),
+        ],
+        "parser": _parse_korean_constants_tests_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
 def _historical_dry_run_step() -> dict:
     return {
         "name": "historical_dry_run",
@@ -1037,6 +1078,15 @@ def _resolve_steps(args: argparse.Namespace) -> List[dict]:
         steps.append(_legacy_review_enroll_list_step())
         steps.append(_legacy_review_enroll_dry_run_step())
         steps.append(_legacy_review_enroll_tests_step())
+
+    if profile == "korean-constants":
+        # M11.2 — centralized Korean keyword constants. Pure data;
+        # no DB, no network, no live pipeline. The compileall step
+        # catches import errors; the test step covers immutability,
+        # regression-safety pins, minimum sizes, hygiene, cross-file
+        # equivalence, and the import-graph anti-reintroduction guard.
+        steps.append(_korean_constants_compile_step())
+        steps.append(_korean_constants_tests_step())
 
     if profile == "full":
         if not args.skip_render and not args.skip_semantic_canary:
@@ -2070,6 +2120,45 @@ def _parse_enroll_tests_output(
         "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
         "summary": (
             f"test_legacy_review_enrollment: exit_code={exit_code} "
+            f"ok_detected={has_ok}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "ok_detected": has_ok,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# M11.2 — korean-constants profile parsers.
+# ---------------------------------------------------------------------------
+
+
+def _parse_korean_constants_compile_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    ok = exit_code == 0
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"compileall(korean_constants.py): exit_code={exit_code}"
+        ),
+        "metrics": {"exit_code_ok": exit_code == 0},
+    }
+
+
+def _parse_korean_constants_tests_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``tests/test_korean_constants.py`` is a unittest runner — exit
+    0 with an 'OK' line means the suite passed (immutability +
+    regression pins + import-graph wiring all green)."""
+    has_ok = "\nOK" in (stdout + "\n" + stderr)
+    ok = exit_code == 0 and has_ok
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"test_korean_constants: exit_code={exit_code} "
             f"ok_detected={has_ok}"
         ),
         "metrics": {

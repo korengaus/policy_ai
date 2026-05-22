@@ -41,7 +41,10 @@ BAD_KEYWORDS = [
     "랭킹뉴스",
 ]
 
-MOJIBAKE_MARKERS = ["ì", "í", "ë", "ê", "Â", "Ã", "�", "媛", "쒓", "뺤", "댁", "齊"]
+# M11.2: source-of-truth for these markers lives in korean_constants.
+# article_extractor's marker set differs from text_utils's — see
+# docs/KOREAN_CONSTANTS.md for why they're kept distinct.
+from korean_constants import MOJIBAKE_MARKERS_ARTICLE_EXTRACTOR as MOJIBAKE_MARKERS
 COMMON_TEXT_PATTERN = re.compile(r"[가-힣A-Za-z0-9\s.,!?%·…~()\[\]{}<>:;\"'“”‘’/\-+_=|]")
 SPECIAL_SEQUENCE_PATTERN = re.compile(r"[^가-힣A-Za-z0-9\s.,!?%·…~()\[\]{}<>:;\"'“”‘’/\-+_=|]{2,}")
 

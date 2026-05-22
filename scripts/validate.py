@@ -49,7 +49,8 @@ def _commands() -> List[List[str]]:
          "verdict_label_diagnostic.py",
          "scripts/diagnose_verdict_labels.py",
          "legacy_review_enrollment.py",
-         "scripts/enroll_legacy_weak_verified.py"],
+         "scripts/enroll_legacy_weak_verified.py",
+         "korean_constants.py"],
         [python, "tests/test_jobs.py"],
         [python, "tests/test_postgres_dual_write.py"],
         [python, "tests/test_ai_reasoner_status.py"],
@@ -101,6 +102,8 @@ def _commands() -> List[List[str]]:
         # M11.1 — legacy weak-verified review-queue enrollment.
         [python, "scripts/enroll_legacy_weak_verified.py", "--help"],
         [python, "tests/test_legacy_review_enrollment.py"],
+        # M11.2 — centralized Korean keyword constants (read-move refactor).
+        [python, "tests/test_korean_constants.py"],
         [npm, "test"],
     ]
 

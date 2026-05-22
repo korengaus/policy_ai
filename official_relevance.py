@@ -1,17 +1,9 @@
 import re
 
-
-CONCEPT_SYNONYMS = {
-    "rental_loan": ["전세대출", "전세자금", "버팀목", "임차보증금", "전세자금대출"],
-    "mortgage_loan": ["주택담보대출", "주담대", "담보대출"],
-    "interest_rate": ["금리", "이자", "우대금리", "감면"],
-    "regulation": ["규제", "제한", "차단", "관리강화", "가계부채 관리", "가계부채"],
-    "subsidy_support": ["지원", "보조", "보조금", "이차보전", "주거비", "혜택"],
-    "target_group": ["청년", "신혼부부", "자녀출산", "중소기업 근로자", "중소기업", "근로자", "1주택자", "유주택자"],
-    "implementation": ["시행", "운영", "신청", "모집", "공고", "접수", "적용"],
-    "review_stage": ["검토", "추진", "조사", "착수", "논의", "현황", "파악"],
-    "official_statement": ["발표", "보도자료", "설명자료", "브리핑", "공지"],
-}
+# M11.2: source-of-truth for these synonyms lives in korean_constants.
+# The relevance variant is richer than the comparator variant (it
+# adds the official_statement key); see docs/KOREAN_CONSTANTS.md.
+from korean_constants import CONCEPT_SYNONYMS_RELEVANCE as CONCEPT_SYNONYMS
 
 ERROR_SIGNALS = [
     "요청하신 페이지를 찾을 수 없습니다",
