@@ -74,6 +74,7 @@ PROFILES = (
     "source-linker",
     "verdict-comparison",
     "verdict-label-diagnostic",
+    "legacy-review-enroll",
     "full",
 )
 
@@ -780,6 +781,91 @@ def _verdict_label_b08_fix_tests_step() -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Phase 2 M11.1 — legacy-review-enroll profile.
+#
+# Fully offline AND read-mostly. The profile NEVER passes --enroll to
+# the enrollment CLI; only read-only modes (--help, --check-status,
+# --list, --dry-run) and the offline test suite run. An operator
+# performing actual enrollment uses ``--enroll --yes`` manually
+# outside any profile.
+# ---------------------------------------------------------------------------
+
+
+def _legacy_review_enroll_help_step() -> dict:
+    return {
+        "name": "enroll_legacy_weak_verified(--help)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "enroll_legacy_weak_verified.py"),
+            "--help",
+        ],
+        "parser": _parse_enroll_help_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _legacy_review_enroll_check_status_step() -> dict:
+    return {
+        "name": "enroll_legacy_weak_verified(--check-status)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "enroll_legacy_weak_verified.py"),
+            "--check-status",
+        ],
+        "parser": _parse_enroll_check_status_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _legacy_review_enroll_list_step() -> dict:
+    return {
+        "name": "enroll_legacy_weak_verified(--list)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "enroll_legacy_weak_verified.py"),
+            "--list",
+        ],
+        "parser": _parse_enroll_list_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _legacy_review_enroll_dry_run_step() -> dict:
+    return {
+        "name": "enroll_legacy_weak_verified(--dry-run)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "enroll_legacy_weak_verified.py"),
+            "--dry-run",
+        ],
+        "parser": _parse_enroll_dry_run_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _legacy_review_enroll_tests_step() -> dict:
+    return {
+        "name": "test_legacy_review_enrollment",
+        "command": [
+            _python(),
+            str(ROOT / "tests" / "test_legacy_review_enrollment.py"),
+        ],
+        "parser": _parse_enroll_tests_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
 def _historical_dry_run_step() -> dict:
     return {
         "name": "historical_dry_run",
@@ -938,6 +1024,19 @@ def _resolve_steps(args: argparse.Namespace) -> List[dict]:
         steps.append(_verdict_label_diag_summary_step())
         steps.append(_verdict_label_diag_tests_step())
         steps.append(_verdict_label_b08_fix_tests_step())
+
+    if profile == "legacy-review-enroll":
+        # M11.1 — read-mostly enrollment of legacy weak-verified rows.
+        # The profile NEVER calls --enroll. Operators perform the
+        # actual write manually with ``--enroll --yes`` outside any
+        # profile. Steps cover the four read-only CLI modes plus the
+        # offline test suite (temp SQLite files; real policy_ai.db
+        # is never touched).
+        steps.append(_legacy_review_enroll_help_step())
+        steps.append(_legacy_review_enroll_check_status_step())
+        steps.append(_legacy_review_enroll_list_step())
+        steps.append(_legacy_review_enroll_dry_run_step())
+        steps.append(_legacy_review_enroll_tests_step())
 
     if profile == "full":
         if not args.skip_render and not args.skip_semantic_canary:
@@ -1838,6 +1937,139 @@ def _parse_b08_fix_tests_output(
         "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
         "summary": (
             f"test_verdict_label_b08_fix: exit_code={exit_code} "
+            f"ok_detected={has_ok}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "ok_detected": has_ok,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# M11.1 — legacy-review-enroll profile parsers.
+# ---------------------------------------------------------------------------
+
+
+def _parse_enroll_help_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``enroll_legacy_weak_verified.py --help`` must exit 0 and
+    surface the documented header text."""
+    ok = (
+        exit_code == 0
+        and "legacy weak-verified" in stdout
+        and "Exit codes" in stdout
+    )
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"enroll_legacy_weak_verified --help: exit_code={exit_code} "
+            f"help_text_detected={ok}"
+        ),
+    }
+
+
+def _parse_enroll_check_status_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``--check-status`` is read-only against the real DB. Must exit
+    0 even when there are zero candidates, and must surface the
+    safety footer."""
+    has_header = "Enrollment Status" in stdout
+    has_safety_truth = "truth_claim=False" in stdout
+    has_safety_review = "operator_review_required=True" in stdout
+    has_safety_no_result = (
+        "analysis_results.verdict_label is NOT modified" in stdout
+    )
+    ok = (
+        exit_code == 0 and has_header and has_safety_truth
+        and has_safety_review and has_safety_no_result
+    )
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"enroll_legacy_weak_verified(--check-status): "
+            f"exit_code={exit_code} header_detected={has_header} "
+            f"truth_note_detected={has_safety_truth} "
+            f"review_note_detected={has_safety_review} "
+            f"no_result_note_detected={has_safety_no_result}"
+        ),
+        "metrics": {
+            "exit_code_ok": exit_code == 0,
+            "header_detected": has_header,
+            "truth_note_detected": has_safety_truth,
+            "review_note_detected": has_safety_review,
+            "no_result_note_detected": has_safety_no_result,
+        },
+    }
+
+
+def _parse_enroll_list_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    has_header = "Legacy Weak-Verified Candidates" in stdout
+    has_safety_truth = "truth_claim=False" in stdout
+    ok = exit_code == 0 and has_header and has_safety_truth
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"enroll_legacy_weak_verified(--list): "
+            f"exit_code={exit_code} header_detected={has_header} "
+            f"truth_note_detected={has_safety_truth}"
+        ),
+        "metrics": {
+            "exit_code_ok": exit_code == 0,
+            "header_detected": has_header,
+            "truth_note_detected": has_safety_truth,
+        },
+    }
+
+
+def _parse_enroll_dry_run_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    has_header = "dry-run" in stdout
+    has_would_enroll = "Would enroll now:" in stdout
+    has_safety_truth = "truth_claim=False" in stdout
+    has_safety_no_auto = (
+        "No auto-publication" in stdout
+        or "No auto-approval" in stdout
+    )
+    ok = (
+        exit_code == 0 and has_header and has_would_enroll
+        and has_safety_truth and has_safety_no_auto
+    )
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"enroll_legacy_weak_verified(--dry-run): "
+            f"exit_code={exit_code} header_detected={has_header} "
+            f"would_enroll_line_detected={has_would_enroll} "
+            f"truth_note_detected={has_safety_truth} "
+            f"no_auto_note_detected={has_safety_no_auto}"
+        ),
+        "metrics": {
+            "exit_code_ok": exit_code == 0,
+            "header_detected": has_header,
+            "would_enroll_line_detected": has_would_enroll,
+            "truth_note_detected": has_safety_truth,
+            "no_auto_note_detected": has_safety_no_auto,
+        },
+    }
+
+
+def _parse_enroll_tests_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``tests/test_legacy_review_enrollment.py`` is a unittest runner —
+    exit 0 with an 'OK' line means the suite passed."""
+    has_ok = "\nOK" in (stdout + "\n" + stderr)
+    ok = exit_code == 0 and has_ok
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"test_legacy_review_enrollment: exit_code={exit_code} "
             f"ok_detected={has_ok}"
         ),
         "metrics": {

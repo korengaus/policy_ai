@@ -47,7 +47,9 @@ def _commands() -> List[List[str]]:
          "verdict_producer_comparison.py",
          "scripts/compare_verdict_producers.py",
          "verdict_label_diagnostic.py",
-         "scripts/diagnose_verdict_labels.py"],
+         "scripts/diagnose_verdict_labels.py",
+         "legacy_review_enrollment.py",
+         "scripts/enroll_legacy_weak_verified.py"],
         [python, "tests/test_jobs.py"],
         [python, "tests/test_postgres_dual_write.py"],
         [python, "tests/test_ai_reasoner_status.py"],
@@ -96,6 +98,9 @@ def _commands() -> List[List[str]]:
         [python, "tests/test_verdict_label_diagnostic.py"],
         # M11.0c — B08 conservative fix pin tests (offline, fast).
         [python, "tests/test_verdict_label_b08_fix.py"],
+        # M11.1 — legacy weak-verified review-queue enrollment.
+        [python, "scripts/enroll_legacy_weak_verified.py", "--help"],
+        [python, "tests/test_legacy_review_enrollment.py"],
         [npm, "test"],
     ]
 

@@ -331,3 +331,78 @@ now also runs `tests/test_verdict_label_b08_fix.py`, which pins:
 - Catalog parity (B08 risk is strict, no branch is loose)
 - Static safety (no network/OpenAI imports in
   `verification_card.py`, signature unchanged)
+
+## M11.1 — Legacy Weak-Verified Enrollment
+
+M11.0c fixed the B08 branch for future analyses. The 21 legacy rows
+identified by M11.0b still carry their original `draft_verified`
+labels in `analysis_results`. M11.1 enrolls those rows into the
+existing `review_tasks` queue for operator-driven correction.
+
+### What enrollment does
+
+For each `verdict_label_attributions` row where
+`is_weak_evidence_verified=1`:
+
+- Creates a `review_tasks` entry with the dedicated idempotency key
+  `sha256(analysis_id|legacy_weak_verified_m11_0c|legacy_review_enrollment)[:24]`
+- Status: `review_workflow.STATUS_PENDING_REVIEW`
+  (`"pending_review"`) — same status the production review API uses
+  for fresh tasks. **Never approved, published, rejected, or
+  corrected.**
+- `human_review_required=True`
+- `snapshot_json` carries the enrollment metadata under
+  `legacy_enrollment` (reason, attribution_id, weak_evidence_signals,
+  source_milestone, operator_review_required, truth_claim=False)
+- Idempotent: re-running does not duplicate (UNIQUE
+  `idempotency_key`)
+
+### What enrollment does NOT do
+
+- It does NOT modify `analysis_results` (any column).
+- It does NOT rewrite `verdict_label`.
+- It does NOT auto-approve, auto-correct, auto-publish, or
+  auto-finalize.
+- It does NOT touch the live verdict pipeline.
+- It does NOT change `render.yaml` or Render env.
+- It does NOT extend the `review_tasks` schema — enrollment metadata
+  lives inside the existing `snapshot_json` TEXT column.
+
+### Usage
+
+```
+python scripts/enroll_legacy_weak_verified.py --list
+python scripts/enroll_legacy_weak_verified.py --check-status
+python scripts/enroll_legacy_weak_verified.py --dry-run
+python scripts/enroll_legacy_weak_verified.py --enroll --yes
+python scripts/enroll_legacy_weak_verified.py --summary
+```
+
+The `--enroll` flag is required to actually write `review_tasks`.
+Without it the script is read-only. `--enroll` further requires
+either `--yes` (scripted use) or an interactive `YES` confirmation on
+a TTY; non-TTY callers without `--yes` are refused with exit 1.
+
+### After enrollment
+
+Operators can review the enrolled rows via the existing reviewer
+workflow (M8.0+ API + UI, gated by `REVIEW_API_ENABLED` and the
+`X-Review-Token` header, never bypassed by this script). The
+reviewer decision flow (M9.0+) records each decision with full audit
+metadata. Until a decision is recorded, the enrolled task stays
+`pending_review`.
+
+### Safety
+
+- `truth_claim` is always `False` in every output (CLI and
+  `LegacyEnrollmentRecord`).
+- `operator_review_required` is always `True`.
+- `review_tasks` created by this script never carry an
+  auto-finalized status (`approved` / `rejected` / `published` /
+  `corrected`).
+- The script never modifies any DB row outside `review_tasks`. The
+  test suite pins `analysis_results` byte-equality before/after
+  enrollment.
+- The `legacy-review-enroll` operational profile never invokes
+  `--enroll`; it only exercises `--help`, `--check-status`,
+  `--list`, `--dry-run`, and the offline test suite.

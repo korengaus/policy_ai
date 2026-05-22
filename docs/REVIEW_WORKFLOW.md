@@ -1619,3 +1619,20 @@ curl -H "X-Review-Token: <your-local-dev-token>" http://127.0.0.1:8000/review/ta
 ```
 
 The token must never appear in source control, logs, or chat history.
+
+## Reserved enrollment reason: `legacy_weak_verified_m11_0c`
+
+`scripts/enroll_legacy_weak_verified.py` (Phase 2 M11.1) creates
+`review_tasks` entries with the reserved reason string
+`legacy_weak_verified_m11_0c`. The reason is stored inside the
+existing `snapshot_json` column under
+`legacy_enrollment.reason`; no schema change was needed. Idempotency
+is keyed on `sha256(analysis_id|reason|legacy_review_enrollment)[:24]`,
+which collides with itself on a second run and is blocked by the
+existing `review_tasks.idempotency_key` UNIQUE constraint.
+
+Enrolled tasks land in `STATUS_PENDING_REVIEW` and are reviewed
+through the same UI and decision flow as any other task. The CLI
+never auto-approves, never auto-publishes, and never modifies
+`analysis_results`. See `docs/VERDICT_LABEL_DIAGNOSTIC.md` for the
+full operator workflow.
