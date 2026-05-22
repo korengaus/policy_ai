@@ -43,7 +43,9 @@ def _commands() -> List[List[str]]:
          "source_crawler.py", "scripts/fetch_registry_source.py",
          "scripts/enable_registry_source.py",
          "artifact_extractor.py", "scripts/extract_artifact_text.py",
-         "artifact_evidence_linker.py", "scripts/link_artifact_evidence.py"],
+         "artifact_evidence_linker.py", "scripts/link_artifact_evidence.py",
+         "verdict_producer_comparison.py",
+         "scripts/compare_verdict_producers.py"],
         [python, "tests/test_jobs.py"],
         [python, "tests/test_postgres_dual_write.py"],
         [python, "tests/test_ai_reasoner_status.py"],
@@ -83,6 +85,9 @@ def _commands() -> List[List[str]]:
         # M10.5 — evidence candidate linker + operator CLI (offline tests).
         [python, "scripts/link_artifact_evidence.py", "--help"],
         [python, "tests/test_artifact_evidence_linker.py"],
+        # M11.0a — verdict producer comparison tool (offline tests).
+        [python, "scripts/compare_verdict_producers.py", "--help"],
+        [python, "tests/test_verdict_producer_comparison.py"],
         [npm, "test"],
     ]
 

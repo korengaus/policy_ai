@@ -72,6 +72,7 @@ PROFILES = (
     "source-enable",
     "source-extractor",
     "source-linker",
+    "verdict-comparison",
     "full",
 )
 
@@ -631,6 +632,63 @@ def _source_linker_tests_step() -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Phase 2 M11.0a — verdict-comparison profile.
+#
+# Fully offline. Read-only measurement layer for the three verdict
+# producers. Never calls the network, never calls OpenAI, never
+# modifies the producers themselves, and never runs analyze_pipeline.
+# Steps:
+#   1) scripts/compare_verdict_producers.py --help        (CLI smoke)
+#   2) scripts/compare_verdict_producers.py --summary     (DB read-only)
+#   3) tests/test_verdict_producer_comparison.py          (offline tests)
+# ---------------------------------------------------------------------------
+
+
+def _verdict_comparison_help_step() -> dict:
+    return {
+        "name": "compare_verdict_producers(--help)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "compare_verdict_producers.py"),
+            "--help",
+        ],
+        "parser": _parse_compare_help_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _verdict_comparison_summary_step() -> dict:
+    return {
+        "name": "compare_verdict_producers(--summary)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "compare_verdict_producers.py"),
+            "--summary",
+        ],
+        "parser": _parse_compare_summary_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _verdict_comparison_tests_step() -> dict:
+    return {
+        "name": "test_verdict_producer_comparison",
+        "command": [
+            _python(),
+            str(ROOT / "tests" / "test_verdict_producer_comparison.py"),
+        ],
+        "parser": _parse_comparator_tests_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
 def _historical_dry_run_step() -> dict:
     return {
         "name": "historical_dry_run",
@@ -766,6 +824,15 @@ def _resolve_steps(args: argparse.Namespace) -> List[dict]:
         steps.append(_source_linker_help_step())
         steps.append(_source_linker_list_extractions_step())
         steps.append(_source_linker_tests_step())
+
+    if profile == "verdict-comparison":
+        # M11.0a — read-only verdict-producer comparison tool. Fully
+        # offline. Reads analysis_results / reports JSON; writes only
+        # to verdict_producer_comparisons (and only when --save is
+        # passed). The producers themselves are never modified.
+        steps.append(_verdict_comparison_help_step())
+        steps.append(_verdict_comparison_summary_step())
+        steps.append(_verdict_comparison_tests_step())
 
     if profile == "full":
         if not args.skip_render and not args.skip_semantic_canary:
@@ -1453,6 +1520,83 @@ def _parse_linker_tests_output(
         "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
         "summary": (
             f"test_artifact_evidence_linker: exit_code={exit_code} "
+            f"ok_detected={has_ok}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "ok_detected": has_ok,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# M11.0a — verdict-comparison profile parsers.
+# ---------------------------------------------------------------------------
+
+
+def _parse_compare_help_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``compare_verdict_producers.py --help`` must exit 0 and surface
+    the documented header text."""
+    ok = (
+        exit_code == 0
+        and "verdict producers" in stdout
+        and "Exit codes" in stdout
+    )
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"compare_verdict_producers --help: exit_code={exit_code} "
+            f"help_text_detected={ok}"
+        ),
+    }
+
+
+def _parse_compare_summary_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """The ``--summary`` mode must exit 0 even on an empty DB. The
+    output always carries the three safety notes plus the
+    ``Disagreement Summary`` header."""
+    has_header = "Disagreement Summary" in stdout
+    has_safety_truth = "truth_claim=False" in stdout
+    has_safety_review = "operator_review_required=True" in stdout
+    has_safety_no_logic = "No verdict logic was modified" in stdout
+    ok = (
+        exit_code == 0 and has_header and has_safety_truth
+        and has_safety_review and has_safety_no_logic
+    )
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"compare_verdict_producers(--summary): exit_code={exit_code} "
+            f"header_detected={has_header} "
+            f"truth_note_detected={has_safety_truth} "
+            f"review_note_detected={has_safety_review} "
+            f"no_logic_note_detected={has_safety_no_logic}"
+        ),
+        "metrics": {
+            "exit_code_ok": exit_code == 0,
+            "header_detected": has_header,
+            "truth_note_detected": has_safety_truth,
+            "review_note_detected": has_safety_review,
+            "no_logic_note_detected": has_safety_no_logic,
+        },
+    }
+
+
+def _parse_comparator_tests_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``tests/test_verdict_producer_comparison.py`` is a unittest
+    runner — exit 0 with an 'OK' line means the suite passed."""
+    has_ok = "\nOK" in (stdout + "\n" + stderr)
+    ok = exit_code == 0 and has_ok
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"test_verdict_producer_comparison: exit_code={exit_code} "
             f"ok_detected={has_ok}"
         ),
         "metrics": {

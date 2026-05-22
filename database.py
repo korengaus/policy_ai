@@ -47,6 +47,7 @@ def init_db():
         _ensure_source_fetch_artifacts_table(connection)
         _ensure_artifact_text_extractions_table(connection)
         _ensure_artifact_evidence_candidates_table(connection)
+        _ensure_verdict_producer_comparisons_table(connection)
         connection.commit()
 
 
@@ -1318,6 +1319,233 @@ def get_evidence_candidates(
     finally:
         connection.close()
     return [_row_to_evidence_candidate(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 M11.0a — verdict_producer_comparisons table.
+#
+# Read-only measurement layer for the three current verdict producers
+# (policy_decision.make_final_decision,
+# policy_scoring.calibrate_final_decision via _alert_from_score, and
+# verification_card._verdict_label). The registry-style invariants
+# still hold: ``truth_claim`` is forced to 0 and
+# ``operator_review_required`` is forced to 1 on every persisted row.
+# Comparison rows never feed the verdict path — they exist purely as
+# operator-reviewable measurement.
+# ---------------------------------------------------------------------------
+
+
+def _ensure_verdict_producer_comparisons_table(connection):
+    """Idempotent. Safe to call repeatedly."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS verdict_producer_comparisons (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            analysis_id TEXT NOT NULL,
+            source TEXT NOT NULL,
+            input_hash TEXT NOT NULL,
+            producer1_label TEXT,
+            producer1_score REAL,
+            producer1_extra TEXT,
+            producer2_label TEXT,
+            producer2_alert_level TEXT,
+            producer2_score REAL,
+            producer2_extra TEXT,
+            producer3_label TEXT,
+            producer3_extra TEXT,
+            all_three_agree INTEGER NOT NULL DEFAULT 0,
+            p1_p2_agree INTEGER NOT NULL DEFAULT 0,
+            p1_p3_agree INTEGER NOT NULL DEFAULT 0,
+            p2_p3_agree INTEGER NOT NULL DEFAULT 0,
+            disagreement_pattern TEXT,
+            most_conservative_label TEXT,
+            comparison_timestamp TEXT NOT NULL,
+            notes TEXT,
+            truth_claim INTEGER NOT NULL DEFAULT 0,
+            operator_review_required INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_verdict_comparisons_analysis "
+        "ON verdict_producer_comparisons(analysis_id)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_verdict_comparisons_pattern "
+        "ON verdict_producer_comparisons(disagreement_pattern)"
+    )
+    connection.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_verdict_comparisons_input_hash "
+        "ON verdict_producer_comparisons(input_hash)"
+    )
+
+
+def init_verdict_producer_comparisons_table(db_path: str = None):
+    """Public idempotent initializer. Independent of init_db() so tests
+    and the operator CLI can call it without touching analysis_results."""
+    connection = _open_connection(db_path)
+    try:
+        _ensure_verdict_producer_comparisons_table(connection)
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def _row_to_producer_comparison(row) -> dict:
+    """SQLite row → comparison dict. Maps the integer flag columns
+    back to booleans and leaves the JSON-encoded ``producerN_extra``
+    columns as strings (the caller decides whether to decode them)."""
+    if row is None:
+        return {}
+    out = {k: row[k] for k in row.keys()}
+    for flag in (
+        "all_three_agree", "p1_p2_agree", "p1_p3_agree", "p2_p3_agree",
+    ):
+        out[flag] = bool(out.get(flag, 0))
+    # truth_claim must always read back False; operator_review_required
+    # must always read back True. Defensive re-assertion mirrors the
+    # registry contract pattern.
+    out["truth_claim"] = bool(out.get("truth_claim", 0))
+    out["operator_review_required"] = bool(
+        out.get("operator_review_required", 1)
+    )
+    for score_field in ("producer1_score", "producer2_score"):
+        if out.get(score_field) is not None:
+            try:
+                out[score_field] = float(out[score_field])
+            except (TypeError, ValueError):
+                out[score_field] = None
+    return out
+
+
+def save_producer_comparison(comparison_dict: dict, db_path: str = None) -> int:
+    """Persist (or replace, on input_hash collision) one comparison
+    row and return the resulting row id.
+
+    ``comparison_dict`` matches
+    ``verdict_producer_comparison.comparison_to_dict``. Missing fields
+    default safely. ``truth_claim`` is always stored as 0 and
+    ``operator_review_required`` as 1 regardless of input (defensive
+    against future regressions in the comparison module).
+
+    Re-saving the same ``input_hash`` overwrites the prior row via
+    the UNIQUE index on ``input_hash`` (INSERT OR REPLACE)."""
+    if not isinstance(comparison_dict, dict):
+        raise ValueError("comparison_dict must be a dict")
+    if not comparison_dict.get("analysis_id"):
+        raise ValueError("comparison_dict.analysis_id is required")
+    if not comparison_dict.get("source"):
+        raise ValueError("comparison_dict.source is required")
+    if not comparison_dict.get("input_hash"):
+        raise ValueError("comparison_dict.input_hash is required")
+    if not comparison_dict.get("comparison_timestamp"):
+        raise ValueError("comparison_dict.comparison_timestamp is required")
+
+    def _ensure_extra_text(value):
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value
+        try:
+            return json.dumps(value, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return str(value)
+
+    created_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    connection = _open_connection(db_path)
+    try:
+        _ensure_verdict_producer_comparisons_table(connection)
+        cursor = connection.execute(
+            """
+            INSERT OR REPLACE INTO verdict_producer_comparisons (
+                analysis_id, source, input_hash,
+                producer1_label, producer1_score, producer1_extra,
+                producer2_label, producer2_alert_level,
+                producer2_score, producer2_extra,
+                producer3_label, producer3_extra,
+                all_three_agree, p1_p2_agree, p1_p3_agree, p2_p3_agree,
+                disagreement_pattern, most_conservative_label,
+                comparison_timestamp, notes,
+                truth_claim, operator_review_required, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(comparison_dict.get("analysis_id")),
+                str(comparison_dict.get("source")),
+                str(comparison_dict.get("input_hash")),
+                comparison_dict.get("producer1_label"),
+                comparison_dict.get("producer1_score"),
+                _ensure_extra_text(comparison_dict.get("producer1_extra")),
+                comparison_dict.get("producer2_label"),
+                comparison_dict.get("producer2_alert_level"),
+                comparison_dict.get("producer2_score"),
+                _ensure_extra_text(comparison_dict.get("producer2_extra")),
+                comparison_dict.get("producer3_label"),
+                _ensure_extra_text(comparison_dict.get("producer3_extra")),
+                1 if comparison_dict.get("all_three_agree") else 0,
+                1 if comparison_dict.get("p1_p2_agree") else 0,
+                1 if comparison_dict.get("p1_p3_agree") else 0,
+                1 if comparison_dict.get("p2_p3_agree") else 0,
+                comparison_dict.get("disagreement_pattern"),
+                comparison_dict.get("most_conservative_label"),
+                str(comparison_dict.get("comparison_timestamp")),
+                comparison_dict.get("notes"),
+                # truth_claim is forced to 0 — the registry contract.
+                0,
+                # operator_review_required is forced to 1 — the
+                # measurement contract.
+                1,
+                created_at,
+            ),
+        )
+        connection.commit()
+        return int(cursor.lastrowid)
+    finally:
+        connection.close()
+
+
+def get_producer_comparisons(
+    analysis_id: str = None,
+    disagreement_pattern: str = None,
+    only_disagreements: bool = False,
+    db_path: str = None,
+    limit: int = 50,
+) -> list:
+    """Return verdict-producer comparisons (newest first), optionally
+    filtered by ``analysis_id``, ``disagreement_pattern``, or the
+    ``only_disagreements`` flag (rows where ``all_three_agree=0``).
+    ``limit`` is clamped to ``[1, 500]``."""
+    try:
+        capped_limit = max(1, min(int(limit or 50), 500))
+    except (TypeError, ValueError):
+        capped_limit = 50
+    connection = _open_connection(db_path)
+    try:
+        _ensure_verdict_producer_comparisons_table(connection)
+        clauses: list = []
+        params: list = []
+        if analysis_id is not None and str(analysis_id):
+            clauses.append("analysis_id = ?")
+            params.append(str(analysis_id))
+        if disagreement_pattern:
+            clauses.append("disagreement_pattern = ?")
+            params.append(str(disagreement_pattern))
+        if only_disagreements:
+            clauses.append("all_three_agree = 0")
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(capped_limit)
+        rows = connection.execute(
+            f"""
+            SELECT * FROM verdict_producer_comparisons{where}
+            ORDER BY comparison_timestamp DESC, id DESC
+            LIMIT ?
+            """,
+            tuple(params),
+        ).fetchall()
+    finally:
+        connection.close()
+    return [_row_to_producer_comparison(r) for r in rows]
 
 
 def _open_connection(db_path):
