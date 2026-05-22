@@ -73,6 +73,7 @@ PROFILES = (
     "source-extractor",
     "source-linker",
     "verdict-comparison",
+    "verdict-label-diagnostic",
     "full",
 )
 
@@ -689,6 +690,78 @@ def _verdict_comparison_tests_step() -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Phase 2 M11.0b — verdict-label-diagnostic profile.
+#
+# Fully offline. Read-only diagnostic for verification_card._verdict_label.
+# The producers themselves are never modified, and analyze_pipeline
+# is never invoked. Steps:
+#   1) scripts/diagnose_verdict_labels.py --help          (CLI smoke)
+#   2) scripts/diagnose_verdict_labels.py --branch-table  (no-DB smoke)
+#   3) scripts/diagnose_verdict_labels.py --summary       (read-only DB)
+#   4) tests/test_verdict_label_diagnostic.py             (offline tests)
+# ---------------------------------------------------------------------------
+
+
+def _verdict_label_diag_help_step() -> dict:
+    return {
+        "name": "diagnose_verdict_labels(--help)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "diagnose_verdict_labels.py"),
+            "--help",
+        ],
+        "parser": _parse_diag_help_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _verdict_label_diag_branch_table_step() -> dict:
+    return {
+        "name": "diagnose_verdict_labels(--branch-table)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "diagnose_verdict_labels.py"),
+            "--branch-table",
+        ],
+        "parser": _parse_diag_branch_table_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _verdict_label_diag_summary_step() -> dict:
+    return {
+        "name": "diagnose_verdict_labels(--summary)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "diagnose_verdict_labels.py"),
+            "--summary",
+        ],
+        "parser": _parse_diag_summary_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _verdict_label_diag_tests_step() -> dict:
+    return {
+        "name": "test_verdict_label_diagnostic",
+        "command": [
+            _python(),
+            str(ROOT / "tests" / "test_verdict_label_diagnostic.py"),
+        ],
+        "parser": _parse_diag_tests_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
 def _historical_dry_run_step() -> dict:
     return {
         "name": "historical_dry_run",
@@ -833,6 +906,17 @@ def _resolve_steps(args: argparse.Namespace) -> List[dict]:
         steps.append(_verdict_comparison_help_step())
         steps.append(_verdict_comparison_summary_step())
         steps.append(_verdict_comparison_tests_step())
+
+    if profile == "verdict-label-diagnostic":
+        # M11.0b — read-only diagnostic for verification_card._verdict_label.
+        # Fully offline. Branch-table smoke needs no DB; summary mode
+        # reads verdict_label_attributions (empty on a clean DB);
+        # tests use temp SQLite files only. verification_card.py is
+        # never modified; analyze_pipeline is never invoked.
+        steps.append(_verdict_label_diag_help_step())
+        steps.append(_verdict_label_diag_branch_table_step())
+        steps.append(_verdict_label_diag_summary_step())
+        steps.append(_verdict_label_diag_tests_step())
 
     if profile == "full":
         if not args.skip_render and not args.skip_semantic_canary:
@@ -1597,6 +1681,114 @@ def _parse_comparator_tests_output(
         "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
         "summary": (
             f"test_verdict_producer_comparison: exit_code={exit_code} "
+            f"ok_detected={has_ok}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "ok_detected": has_ok,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# M11.0b — verdict-label-diagnostic profile parsers.
+# ---------------------------------------------------------------------------
+
+
+def _parse_diag_help_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``diagnose_verdict_labels.py --help`` must exit 0 and surface
+    the documented header text."""
+    ok = (
+        exit_code == 0
+        and "_verdict_label" in stdout
+        and "Exit codes" in stdout
+    )
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"diagnose_verdict_labels --help: exit_code={exit_code} "
+            f"help_text_detected={ok}"
+        ),
+    }
+
+
+def _parse_diag_branch_table_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``--branch-table`` must exit 0, list every documented branch
+    (including the suspected-bug B08), and surface the safety footer."""
+    has_b08 = "B08_direct_support_only" in stdout
+    has_b13 = "B13_strong_confidence_verified" in stdout
+    has_loose_risk = "verified_without_strict_checks" in stdout
+    has_safety_truth = "truth_claim=False" in stdout
+    ok = (
+        exit_code == 0 and has_b08 and has_b13 and has_loose_risk
+        and has_safety_truth
+    )
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"diagnose_verdict_labels(--branch-table): "
+            f"exit_code={exit_code} b08_detected={has_b08} "
+            f"b13_detected={has_b13} "
+            f"loose_risk_detected={has_loose_risk} "
+            f"truth_note_detected={has_safety_truth}"
+        ),
+        "metrics": {
+            "exit_code_ok": exit_code == 0,
+            "b08_detected": has_b08,
+            "b13_detected": has_b13,
+            "loose_risk_detected": has_loose_risk,
+            "truth_note_detected": has_safety_truth,
+        },
+    }
+
+
+def _parse_diag_summary_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``--summary`` must exit 0 even on an empty DB and surface the
+    three safety notes plus the header."""
+    has_header = "Diagnostic Summary" in stdout
+    has_safety_truth = "truth_claim=False" in stdout
+    has_safety_review = "operator_review_required=True" in stdout
+    has_safety_no_logic = "No verdict logic was modified" in stdout
+    ok = (
+        exit_code == 0 and has_header and has_safety_truth
+        and has_safety_review and has_safety_no_logic
+    )
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"diagnose_verdict_labels(--summary): exit_code={exit_code} "
+            f"header_detected={has_header} "
+            f"truth_note_detected={has_safety_truth} "
+            f"review_note_detected={has_safety_review} "
+            f"no_logic_note_detected={has_safety_no_logic}"
+        ),
+        "metrics": {
+            "exit_code_ok": exit_code == 0,
+            "header_detected": has_header,
+            "truth_note_detected": has_safety_truth,
+            "review_note_detected": has_safety_review,
+            "no_logic_note_detected": has_safety_no_logic,
+        },
+    }
+
+
+def _parse_diag_tests_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``tests/test_verdict_label_diagnostic.py`` is a unittest runner —
+    exit 0 with an 'OK' line means the suite passed."""
+    has_ok = "\nOK" in (stdout + "\n" + stderr)
+    ok = exit_code == 0 and has_ok
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"test_verdict_label_diagnostic: exit_code={exit_code} "
             f"ok_detected={has_ok}"
         ),
         "metrics": {

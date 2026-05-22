@@ -48,6 +48,7 @@ def init_db():
         _ensure_artifact_text_extractions_table(connection)
         _ensure_artifact_evidence_candidates_table(connection)
         _ensure_verdict_producer_comparisons_table(connection)
+        _ensure_verdict_label_attributions_table(connection)
         connection.commit()
 
 
@@ -1546,6 +1547,225 @@ def get_producer_comparisons(
     finally:
         connection.close()
     return [_row_to_producer_comparison(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 M11.0b — verdict_label_attributions table.
+#
+# Read-only diagnostic layer for ``verification_card._verdict_label``.
+# Each row records which documented branch most likely produced the
+# stored ``analysis_results.verdict_label`` value AND whether the
+# stored label is a weak-evidence "draft_verified" candidate that the
+# operator should investigate (the line 465-466 bug surface uncovered
+# by M11.0a). The registry-style invariants still hold: ``truth_claim``
+# is forced to 0 and ``operator_review_required`` is forced to 1 on
+# every persisted row. Attribution rows never feed the verdict path.
+# ---------------------------------------------------------------------------
+
+
+def _ensure_verdict_label_attributions_table(connection):
+    """Idempotent. Safe to call repeatedly."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS verdict_label_attributions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            analysis_id TEXT NOT NULL,
+            stored_verdict_label TEXT,
+            stored_verdict_confidence INTEGER,
+            stored_policy_alert_level TEXT,
+            stored_policy_confidence_score INTEGER,
+            stored_verification_strength TEXT,
+            stored_claim_text TEXT,
+            stored_evidence_summary TEXT,
+            reconstructed_inputs TEXT,
+            attributed_branch_id TEXT,
+            attribution_confidence TEXT,
+            attribution_reason TEXT,
+            is_weak_evidence_verified INTEGER NOT NULL DEFAULT 0,
+            weak_evidence_signals TEXT,
+            diagnostic_timestamp TEXT NOT NULL,
+            notes TEXT,
+            truth_claim INTEGER NOT NULL DEFAULT 0,
+            operator_review_required INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_verdict_label_attr_analysis "
+        "ON verdict_label_attributions(analysis_id)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_verdict_label_attr_branch "
+        "ON verdict_label_attributions(attributed_branch_id)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_verdict_label_attr_weak "
+        "ON verdict_label_attributions(is_weak_evidence_verified)"
+    )
+    connection.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS "
+        "idx_verdict_label_attr_analysis_unique "
+        "ON verdict_label_attributions(analysis_id)"
+    )
+
+
+def init_verdict_label_attributions_table(db_path: str = None):
+    """Public idempotent initializer. Independent of init_db() so tests
+    and the operator CLI can call it without touching analysis_results."""
+    connection = _open_connection(db_path)
+    try:
+        _ensure_verdict_label_attributions_table(connection)
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def _row_to_verdict_label_attribution(row) -> dict:
+    """SQLite row → attribution dict. Surfaces booleans as Python
+    bools and leaves the JSON-encoded ``reconstructed_inputs`` /
+    ``weak_evidence_signals`` columns as strings (callers decide
+    whether to decode)."""
+    if row is None:
+        return {}
+    out = {k: row[k] for k in row.keys()}
+    out["is_weak_evidence_verified"] = bool(
+        out.get("is_weak_evidence_verified", 0)
+    )
+    # truth_claim must always read back False; operator_review_required
+    # must always read back True. Defensive re-assertion.
+    out["truth_claim"] = bool(out.get("truth_claim", 0))
+    out["operator_review_required"] = bool(
+        out.get("operator_review_required", 1)
+    )
+    return out
+
+
+def save_verdict_label_attribution(
+    attribution_dict: dict, db_path: str = None,
+) -> int:
+    """Persist (or replace, on analysis_id collision) one attribution
+    row and return the resulting row id.
+
+    ``attribution_dict`` matches
+    ``verdict_label_diagnostic.attribution_to_dict``. Missing fields
+    default safely. ``truth_claim`` is always stored as 0 and
+    ``operator_review_required`` as 1 regardless of input (defensive
+    against future regressions).
+
+    Re-saving the same ``analysis_id`` overwrites the prior row via
+    the UNIQUE index on ``analysis_id`` (INSERT OR REPLACE)."""
+    if not isinstance(attribution_dict, dict):
+        raise ValueError("attribution_dict must be a dict")
+    if not attribution_dict.get("analysis_id"):
+        raise ValueError("attribution_dict.analysis_id is required")
+    if not attribution_dict.get("diagnostic_timestamp"):
+        raise ValueError(
+            "attribution_dict.diagnostic_timestamp is required"
+        )
+
+    def _ensure_text(value):
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value
+        try:
+            return json.dumps(value, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return str(value)
+
+    created_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    connection = _open_connection(db_path)
+    try:
+        _ensure_verdict_label_attributions_table(connection)
+        cursor = connection.execute(
+            """
+            INSERT OR REPLACE INTO verdict_label_attributions (
+                analysis_id, stored_verdict_label,
+                stored_verdict_confidence, stored_policy_alert_level,
+                stored_policy_confidence_score,
+                stored_verification_strength,
+                stored_claim_text, stored_evidence_summary,
+                reconstructed_inputs,
+                attributed_branch_id, attribution_confidence,
+                attribution_reason,
+                is_weak_evidence_verified, weak_evidence_signals,
+                diagnostic_timestamp, notes,
+                truth_claim, operator_review_required, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(attribution_dict.get("analysis_id")),
+                attribution_dict.get("stored_verdict_label"),
+                attribution_dict.get("stored_verdict_confidence"),
+                attribution_dict.get("stored_policy_alert_level"),
+                attribution_dict.get("stored_policy_confidence_score"),
+                attribution_dict.get("stored_verification_strength"),
+                attribution_dict.get("stored_claim_text"),
+                attribution_dict.get("stored_evidence_summary"),
+                _ensure_text(attribution_dict.get("reconstructed_inputs")),
+                attribution_dict.get("attributed_branch_id"),
+                attribution_dict.get("attribution_confidence"),
+                attribution_dict.get("attribution_reason"),
+                1 if attribution_dict.get("is_weak_evidence_verified") else 0,
+                _ensure_text(attribution_dict.get("weak_evidence_signals")),
+                str(attribution_dict.get("diagnostic_timestamp")),
+                attribution_dict.get("notes"),
+                # truth_claim is forced to 0 — the registry contract.
+                0,
+                # operator_review_required is forced to 1 — the
+                # diagnostic contract.
+                1,
+                created_at,
+            ),
+        )
+        connection.commit()
+        return int(cursor.lastrowid)
+    finally:
+        connection.close()
+
+
+def get_verdict_label_attributions(
+    analysis_id: str = None,
+    attributed_branch_id: str = None,
+    only_weak_evidence_verified: bool = False,
+    db_path: str = None,
+    limit: int = 100,
+) -> list:
+    """Return verdict-label attribution rows (newest first), filtered
+    by any combination of ``analysis_id``, ``attributed_branch_id``,
+    and the ``only_weak_evidence_verified`` flag. ``limit`` is
+    clamped to ``[1, 500]``."""
+    try:
+        capped_limit = max(1, min(int(limit or 100), 500))
+    except (TypeError, ValueError):
+        capped_limit = 100
+    connection = _open_connection(db_path)
+    try:
+        _ensure_verdict_label_attributions_table(connection)
+        clauses: list = []
+        params: list = []
+        if analysis_id is not None and str(analysis_id):
+            clauses.append("analysis_id = ?")
+            params.append(str(analysis_id))
+        if attributed_branch_id:
+            clauses.append("attributed_branch_id = ?")
+            params.append(str(attributed_branch_id))
+        if only_weak_evidence_verified:
+            clauses.append("is_weak_evidence_verified = 1")
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(capped_limit)
+        rows = connection.execute(
+            f"""
+            SELECT * FROM verdict_label_attributions{where}
+            ORDER BY diagnostic_timestamp DESC, id DESC
+            LIMIT ?
+            """,
+            tuple(params),
+        ).fetchall()
+    finally:
+        connection.close()
+    return [_row_to_verdict_label_attribution(r) for r in rows]
 
 
 def _open_connection(db_path):

@@ -45,7 +45,9 @@ def _commands() -> List[List[str]]:
          "artifact_extractor.py", "scripts/extract_artifact_text.py",
          "artifact_evidence_linker.py", "scripts/link_artifact_evidence.py",
          "verdict_producer_comparison.py",
-         "scripts/compare_verdict_producers.py"],
+         "scripts/compare_verdict_producers.py",
+         "verdict_label_diagnostic.py",
+         "scripts/diagnose_verdict_labels.py"],
         [python, "tests/test_jobs.py"],
         [python, "tests/test_postgres_dual_write.py"],
         [python, "tests/test_ai_reasoner_status.py"],
@@ -88,6 +90,10 @@ def _commands() -> List[List[str]]:
         # M11.0a — verdict producer comparison tool (offline tests).
         [python, "scripts/compare_verdict_producers.py", "--help"],
         [python, "tests/test_verdict_producer_comparison.py"],
+        # M11.0b — verdict label branch diagnostic (offline tests).
+        [python, "scripts/diagnose_verdict_labels.py", "--help"],
+        [python, "scripts/diagnose_verdict_labels.py", "--branch-table"],
+        [python, "tests/test_verdict_label_diagnostic.py"],
         [npm, "test"],
     ]
 
