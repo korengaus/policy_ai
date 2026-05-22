@@ -36,6 +36,14 @@ EXCLUDED_TOP_SOURCE_TYPES = {
     "attachment_only",
 }
 
+# M11.0c: verification_strength values considered strong enough to gate B08's
+# draft_verified output. Mirrors the empirical separation observed in
+# M11.0b diagnostic data: 21 bad-pattern rows had strength='none'; all 7
+# good-pattern rows had strength in {medium, high}. The exact strings
+# are produced by policy_confidence._verification_strength
+# (high/medium/low/none). Update this set ONLY with operator review.
+_STRONG_VERIFICATION_STRENGTHS = frozenset({"medium", "high"})
+
 HOUSING_QUERY_TERMS = {
     "부동산",
     "주거",
@@ -462,7 +470,17 @@ def _verdict_label(
     direct_support_count = sum(1 for item in snippets if item.get("evidence_type") == "direct_support")
     official_reference_count = sum(1 for item in snippets if item.get("evidence_type") == "official_reference")
     insufficient_count = sum(1 for item in snippets if item.get("evidence_type") == "insufficient_evidence")
-    if claim_count and direct_support_count >= claim_count:
+    # B08 (M11.0c): strict gates added — see docs/VERDICT_LABEL_DIAGNOSTIC.md
+    # Prior behaviour returned draft_verified based solely on direct_support
+    # count, which produced 21 weak-evidence verified labels in the M11.0b
+    # diagnostic sample. Conservative gates enforce score and strength
+    # alignment with B13's intent; the fall-through path remains the same.
+    if (
+        claim_count
+        and direct_support_count >= claim_count
+        and confidence_score >= 60
+        and verification_strength in _STRONG_VERIFICATION_STRENGTHS
+    ):
         return "draft_verified"
     if official_reference_count > 0 and direct_support_count == 0:
         return "draft_needs_official_confirmation"

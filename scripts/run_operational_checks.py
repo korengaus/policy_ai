@@ -762,6 +762,24 @@ def _verdict_label_diag_tests_step() -> dict:
     }
 
 
+def _verdict_label_b08_fix_tests_step() -> dict:
+    """M11.0c B08 conservative-fix pin tests. Bundled into the
+    verdict-label-diagnostic profile so any future change that drops
+    a gate or unbalances the catalog surfaces in the same profile
+    operators already run for verdict-label health."""
+    return {
+        "name": "test_verdict_label_b08_fix",
+        "command": [
+            _python(),
+            str(ROOT / "tests" / "test_verdict_label_b08_fix.py"),
+        ],
+        "parser": _parse_b08_fix_tests_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
 def _historical_dry_run_step() -> dict:
     return {
         "name": "historical_dry_run",
@@ -913,10 +931,13 @@ def _resolve_steps(args: argparse.Namespace) -> List[dict]:
         # reads verdict_label_attributions (empty on a clean DB);
         # tests use temp SQLite files only. verification_card.py is
         # never modified; analyze_pipeline is never invoked.
+        # M11.0c — adds the B08 conservative-fix pin tests so the
+        # gates (score>=60 + strength in {medium,high}) stay in place.
         steps.append(_verdict_label_diag_help_step())
         steps.append(_verdict_label_diag_branch_table_step())
         steps.append(_verdict_label_diag_summary_step())
         steps.append(_verdict_label_diag_tests_step())
+        steps.append(_verdict_label_b08_fix_tests_step())
 
     if profile == "full":
         if not args.skip_render and not args.skip_semantic_canary:
@@ -1717,14 +1738,22 @@ def _parse_diag_help_output(
 def _parse_diag_branch_table_output(
     stdout: str, stderr: str, exit_code: int,
 ) -> dict:
-    """``--branch-table`` must exit 0, list every documented branch
-    (including the suspected-bug B08), and surface the safety footer."""
+    """``--branch-table`` must exit 0, list both verified-emitting
+    branches (B08 and B13), and surface the safety footer.
+
+    M11.0c moved B08 from ``verified_without_strict_checks`` to
+    ``verified_with_strict_checks``. The expected invariant is now:
+    BOTH B08 and B13 appear in the table AND both carry the strict
+    classification. We do NOT assert the absence of the loose bucket
+    here — it remains a valid catalog constant for future regression
+    detection — only that the strict classification is present on at
+    least one branch in the printed table."""
     has_b08 = "B08_direct_support_only" in stdout
     has_b13 = "B13_strong_confidence_verified" in stdout
-    has_loose_risk = "verified_without_strict_checks" in stdout
+    has_strict_risk = "verified_with_strict_checks" in stdout
     has_safety_truth = "truth_claim=False" in stdout
     ok = (
-        exit_code == 0 and has_b08 and has_b13 and has_loose_risk
+        exit_code == 0 and has_b08 and has_b13 and has_strict_risk
         and has_safety_truth
     )
     return {
@@ -1733,14 +1762,14 @@ def _parse_diag_branch_table_output(
             f"diagnose_verdict_labels(--branch-table): "
             f"exit_code={exit_code} b08_detected={has_b08} "
             f"b13_detected={has_b13} "
-            f"loose_risk_detected={has_loose_risk} "
+            f"strict_risk_detected={has_strict_risk} "
             f"truth_note_detected={has_safety_truth}"
         ),
         "metrics": {
             "exit_code_ok": exit_code == 0,
             "b08_detected": has_b08,
             "b13_detected": has_b13,
-            "loose_risk_detected": has_loose_risk,
+            "strict_risk_detected": has_strict_risk,
             "truth_note_detected": has_safety_truth,
         },
     }
@@ -1789,6 +1818,26 @@ def _parse_diag_tests_output(
         "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
         "summary": (
             f"test_verdict_label_diagnostic: exit_code={exit_code} "
+            f"ok_detected={has_ok}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "ok_detected": has_ok,
+        },
+    }
+
+
+def _parse_b08_fix_tests_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``tests/test_verdict_label_b08_fix.py`` pins the M11.0c B08
+    gates. Same unittest runner shape — exit 0 with an 'OK' line."""
+    has_ok = "\nOK" in (stdout + "\n" + stderr)
+    ok = exit_code == 0 and has_ok
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"test_verdict_label_b08_fix: exit_code={exit_code} "
             f"ok_detected={has_ok}"
         ),
         "metrics": {

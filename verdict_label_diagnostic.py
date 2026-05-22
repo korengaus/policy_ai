@@ -79,11 +79,17 @@ rank-order which branches need scrutiny in M11.0c:
       level safe.
 
     * ``verified_without_strict_checks`` — output is ``draft_verified``
-      WITHOUT enforcing the strong-evidence gates. As of M11.0b only
-      one branch falls in this bucket: lines 465-466. **This is the
-      suspected bug surface that M11.0a uncovered.** Every row
-      attributed here is also evaluated against the weak-evidence
-      heuristics below.
+      WITHOUT enforcing the strong-evidence gates. As of M11.0b
+      exactly one branch fell in this bucket: B08 at the original
+      lines 465-466. **This was the suspected bug surface M11.0a
+      uncovered.** In M11.0c the B08 branch was patched to add
+      ``confidence_score >= 60`` AND
+      ``verification_strength in {medium, high}`` gates, so it is
+      now classified ``verified_with_strict_checks``. As of M11.0c
+      NO branch in ``_verdict_label`` falls in
+      ``verified_without_strict_checks``; the bucket constant is
+      kept exposed so any future regression that drops the gates is
+      surfaced immediately.
 
     * ``likely_true`` — output is ``draft_likely_true`` (line 478-479).
       Carries explicit ``confidence_score >= 60`` + verification-level
@@ -250,18 +256,24 @@ VERDICT_LABEL_BRANCHES: List[Dict[str, str]] = [
         "risk_classification": RISK_CONSERVATIVE_SAFE,
     },
     {
-        # !!! Suspected bug surface — the line 465-466 branch returns
-        # ``draft_verified`` based ONLY on counting direct_support
-        # evidence_snippets. No official_sources / score / strength
-        # gating. The M11.0a investigation found ≥8 weak-evidence
-        # rows attributed here.
+        # M11.0c: B08 was the suspected bug surface uncovered by M11.0a
+        # (28 production rows attributed, 21 weak-evidence verified).
+        # The branch now enforces score and verification_strength gates
+        # analogous to B13's intent, so it has been re-classified as
+        # ``verified_with_strict_checks``. As of M11.0c, NO branch in
+        # _verdict_label is in the ``verified_without_strict_checks``
+        # bucket — the bucket constant remains exposed so the catalog
+        # stays back-compatible and any future regression that drops
+        # the gates can be flagged immediately.
         "branch_id": "B08_direct_support_only",
-        "line_range": "465-466",
+        "line_range": "478-484",
         "output_label": "draft_verified",
         "trigger_summary": (
-            "claim_count > 0 AND direct_support_count >= claim_count"
+            "claim_count > 0 AND direct_support_count >= claim_count "
+            "AND confidence_score >= 60 AND "
+            "verification_strength in {medium, high}"
         ),
-        "risk_classification": RISK_VERIFIED_LOOSE,
+        "risk_classification": RISK_VERIFIED_STRICT,
     },
     {
         "branch_id": "B09_official_reference_no_direct",
@@ -601,7 +613,16 @@ def _branch_trigger_matches(
             and insufficient_claim_count >= max(1, claim_count // 2)
         )
     if branch_id == "B08_direct_support_only":
-        return bool(claim_count and direct_support_count >= claim_count)
+        # M11.0c gates: confidence_score >= 60 AND verification_strength
+        # in {medium, high} (the strong-strength set documented in
+        # verification_card._STRONG_VERIFICATION_STRENGTHS). Pure
+        # mirror of the source condition.
+        return bool(
+            claim_count
+            and direct_support_count >= claim_count
+            and confidence_score >= 60
+            and verification_strength in {"medium", "high"}
+        )
     if branch_id == "B09_official_reference_no_direct":
         return bool(
             official_reference_count > 0 and direct_support_count == 0

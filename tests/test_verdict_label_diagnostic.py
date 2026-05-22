@@ -202,8 +202,16 @@ def _row_with_broken_json() -> dict:
 class AttributeBranchTests(unittest.TestCase):
     def test_id_105_pattern_attributes_to_b08(self):
         attr = diagnostic.attribute_branch_for_row(_row_id_105_pattern())
+        # The diagnostic catalog still flags B08 as the label-emitting
+        # branch for draft_verified, but after M11.0c B08's trigger
+        # gates (score>=60 AND strength in {medium,high}) do not match
+        # the ID-105 row (score=10, strength=none). The diagnostic
+        # falls back to the first label-matching branch in source
+        # order with confidence="low" — exactly what's intended when
+        # the stored label could not have been produced by the
+        # current source.
         self.assertEqual(attr.attributed_branch_id, "B08_direct_support_only")
-        self.assertEqual(attr.attribution_confidence, "high")
+        self.assertEqual(attr.attribution_confidence, "low")
         self.assertEqual(attr.stored_verdict_label, "draft_verified")
         self.assertTrue(attr.is_weak_evidence_verified)
         # All four weak-evidence signals fire for this row.
@@ -558,11 +566,18 @@ class BranchSummaryTests(unittest.TestCase):
         self.assertEqual(
             summary["per_output_label_counts"]["draft_disputed"], 1,
         )
-        # Per-risk.
+        # Per-risk. M11.0c moved B08 from verified_without_strict_checks
+        # to verified_with_strict_checks, so both B08 and B13
+        # attributions (the two draft_verified branches) now land in
+        # the strict bucket.
         risk = summary["per_risk_classification_counts"]
-        self.assertEqual(risk["verified_without_strict_checks"], 1)
-        self.assertEqual(risk["verified_with_strict_checks"], 1)
+        self.assertEqual(risk["verified_with_strict_checks"], 2)
         self.assertEqual(risk["conservative_safe"], 1)
+        self.assertNotIn(
+            "verified_without_strict_checks", risk,
+            "no branch should land in verified_without_strict_checks "
+            "after M11.0c",
+        )
         # Weak-evidence counts.
         self.assertEqual(summary["weak_evidence_verified_count"], 1)
         self.assertIn(
@@ -631,22 +646,40 @@ class VerificationCardUnchangedTests(unittest.TestCase):
         ):
             self.assertIn(name, params)
 
-    def test_line_414_still_starts_verdict_label_definition(self):
-        lines = VERIFICATION_CARD_PATH.read_text(encoding="utf-8").splitlines()
-        # 1-indexed: lines[413] is the 414th line.
-        self.assertTrue(
-            lines[413].startswith("def _verdict_label("),
-            f"line 414 changed: {lines[413]!r}",
+    def test_verdict_label_definition_still_present(self):
+        # M11.0c shifted the definition (a new module-level constant
+        # was inserted at the top of verification_card.py to gate B08).
+        # We no longer pin a specific line number — that's brittle.
+        # Instead, confirm the definition exists exactly once, on its
+        # own line, with the documented opening signature.
+        source = VERIFICATION_CARD_PATH.read_text(encoding="utf-8")
+        matches = [
+            line for line in source.splitlines()
+            if line.startswith("def _verdict_label(")
+        ]
+        self.assertEqual(
+            len(matches), 1,
+            f"_verdict_label definition count changed: {matches!r}",
         )
 
     def test_b08_branch_still_present_in_source(self):
         source = VERIFICATION_CARD_PATH.read_text(encoding="utf-8")
-        # Pin the exact suspected-bug branch so any future refactor
-        # that removes it forces an update to this milestone's docs.
+        # B08 is now a multi-line gated if (M11.0c). Pin the two
+        # most stable substrings: the count predicate and the
+        # score gate. Any future refactor that drops either of
+        # these forces an update to this milestone's docs.
         self.assertIn(
-            "claim_count and direct_support_count >= claim_count",
+            "direct_support_count >= claim_count",
             source,
-            "B08 trigger condition removed from verification_card.py",
+            "B08 count predicate removed from verification_card.py",
+        )
+        self.assertIn(
+            "confidence_score >= 60", source,
+            "B08 score gate (M11.0c) removed from verification_card.py",
+        )
+        self.assertIn(
+            "_STRONG_VERIFICATION_STRENGTHS", source,
+            "B08 strength gate (M11.0c) constant removed",
         )
         self.assertIn(
             "confidence_score >= 85", source,
@@ -694,7 +727,10 @@ class CliSmokeTests(unittest.TestCase):
         rc, stdout, _ = _run_cli_subprocess("--branch-table")
         self.assertEqual(rc, 0)
         self.assertIn("B08_direct_support_only", stdout)
-        self.assertIn("verified_without_strict_checks", stdout)
+        # M11.0c: B08 was moved from verified_without_strict_checks
+        # to verified_with_strict_checks (gates added). The branch
+        # table now lists B08 in the strict bucket alongside B13.
+        self.assertIn("verified_with_strict_checks", stdout)
         self.assertIn("truth_claim=False", stdout)
 
     def test_branch_table_json(self):

@@ -219,3 +219,115 @@ B08 branch using the data collected here. The fix must:
 - Be backed by new unit tests that pin the weak-evidence-verified
   patterns identified here as `draft_unverified` or
   `draft_needs_context`.
+
+## M11.0c — B08 Conservative Fix Applied
+
+Following M11.0b diagnostic findings (21 weak-evidence verified rows
+attributed to B08 in 100 sampled rows), B08 was modified to enforce
+score and `verification_strength` gates. **No other branch in
+`_verdict_label` was modified.**
+
+### Change
+
+Before:
+```python
+if claim_count and direct_support_count >= claim_count:
+    return "draft_verified"
+```
+
+After:
+```python
+if (claim_count
+    and direct_support_count >= claim_count
+    and confidence_score >= 60
+    and verification_strength in _STRONG_VERIFICATION_STRENGTHS):
+    return "draft_verified"
+```
+
+The new module-level constant lives at the top of
+`verification_card.py`:
+
+```python
+_STRONG_VERIFICATION_STRENGTHS = frozenset({"medium", "high"})
+```
+
+The exact strings `"medium"` and `"high"` come from
+`policy_confidence._verification_strength`, which emits one of
+`"high"` / `"medium"` / `"low"` / `"none"` based on
+`policy_confidence_score` bands (`>=75` → high, `>=50` → medium,
+`>=25` → low, else `"none"`; with an additional override forcing
+`"none"` when no official document is usable).
+
+### Effect on M11.0b sample (100 rows)
+
+- 21 weak-evidence rows that were B08-verified now fall through to
+  conservative branches (most commonly B12 → `draft_unverified`,
+  because B12's trigger
+  `not official_sources or verification_strength == "none"` matches
+  exactly the bad-pattern shape).
+- 7 good-evidence rows (score ≥ 61, strength ∈ {medium, high})
+  continue to receive `draft_verified` via the gated B08.
+- No other branch's behaviour changes.
+- The npm regression test (`tests/regression.test.js`) was not
+  modified and still passes.
+
+### Legacy data
+
+Existing `analysis_results` rows are **NOT** retroactively rewritten.
+Their stored `verdict_label` values remain as originally written.
+The fix applies only to new analyses. Operator review of the 21
+affected rows is the appropriate next step (out of scope for M11.0c).
+
+After re-running the diagnostic against the current DB, the catalog
+will show B08 as `verified_with_strict_checks` and any new attribution
+of the bad-pattern rows will surface `attribution_confidence="low"`
+(the stored label `draft_verified` cannot be produced by any branch
+given those inputs under the post-M11.0c source).
+
+### Why "medium" and "high" only
+
+M11.0b data showed 21 bad-pattern rows with `strength="none"` and 0
+bad rows with `strength in {medium, high}`. The 7 good rows all had
+`strength in {medium, high}`. The threshold is empirical, not
+arbitrary. Update `_STRONG_VERIFICATION_STRENGTHS` only after
+re-running M11.0b diagnostic with new data.
+
+### Diagnostic catalog parity after M11.0c
+
+The catalog entry for B08 in `verdict_label_diagnostic.py` was
+updated to match:
+
+- `risk_classification`: `verified_without_strict_checks` →
+  `verified_with_strict_checks`
+- `trigger_summary`: now includes the score-gate and
+  strong-strength clause verbatim from the source
+- `line_range`: updated to `"478-484"` to reflect the new lines
+  occupied by the gated `if`-block
+
+Additionally `_branch_trigger_matches` was updated to evaluate the
+new gated predicate, so the diagnostic's branch attribution stays
+consistent with the post-M11.0c source.
+
+The `RISK_VERIFIED_LOOSE = "verified_without_strict_checks"`
+constant remains exposed even though no branch currently maps to
+it. This is intentional: any future regression that drops the gates
+will be visible as a branch entering the loose bucket again, which
+the existing operational profile (`verdict-label-diagnostic`) will
+surface.
+
+### Operational profile
+
+`scripts/run_operational_checks.py --profile verdict-label-diagnostic`
+now also runs `tests/test_verdict_label_b08_fix.py`, which pins:
+
+- Bad-pattern lockdown (8 representative
+  `(score, strength)` tuples)
+- Good-pattern preservation (7 representative tuples)
+- Boundary cases at score=59/60/100
+- The exact ID-105 regression
+- Other branches unaffected (B01, B02, B04, B13, B14)
+- Constant integrity (frozenset, contains medium/high, excludes
+  weak/none/low)
+- Catalog parity (B08 risk is strict, no branch is loose)
+- Static safety (no network/OpenAI imports in
+  `verification_card.py`, signature unchanged)

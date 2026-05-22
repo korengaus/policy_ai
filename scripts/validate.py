@@ -94,6 +94,8 @@ def _commands() -> List[List[str]]:
         [python, "scripts/diagnose_verdict_labels.py", "--help"],
         [python, "scripts/diagnose_verdict_labels.py", "--branch-table"],
         [python, "tests/test_verdict_label_diagnostic.py"],
+        # M11.0c — B08 conservative fix pin tests (offline, fast).
+        [python, "tests/test_verdict_label_b08_fix.py"],
         [npm, "test"],
     ]
 
