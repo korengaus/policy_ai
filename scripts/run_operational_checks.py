@@ -69,6 +69,7 @@ PROFILES = (
     "review-token-gate",
     "source-registry",
     "source-crawler",
+    "source-enable",
     "full",
 )
 
@@ -463,6 +464,74 @@ def _source_crawler_consistency_step() -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Phase 2 M10.3 — source-enable profile.
+#
+# Dry-run only. The enable workflow never writes during this profile:
+# step 3 uses --dry-run against the disabled seed entry; step 4 runs
+# the offline tests. Steps:
+#   1) scripts/validate_source_registry.py --json       (schema)
+#   2) scripts/enable_registry_source.py --list         (status smoke)
+#   3) scripts/enable_registry_source.py --source-id <id> --justification ... --dry-run
+#   4) tests/test_enable_registry_source.py             (offline tests)
+#
+# No network. No OpenAI. The seed registry is never modified — the
+# dry-run step only reports what would change.
+# ---------------------------------------------------------------------------
+
+
+SOURCE_ENABLE_PROBE_SOURCE_ID = "kr_law_open_data_candidate"
+SOURCE_ENABLE_PROBE_JUSTIFICATION = (
+    "operator dry run test justification text"
+)
+
+
+def _source_enable_list_step() -> dict:
+    return {
+        "name": "enable_registry_source(--list)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "enable_registry_source.py"),
+            "--list",
+        ],
+        "parser": _parse_enable_list_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _source_enable_dry_run_step() -> dict:
+    return {
+        "name": "enable_registry_source(dry_run)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "enable_registry_source.py"),
+            "--source-id", SOURCE_ENABLE_PROBE_SOURCE_ID,
+            "--justification", SOURCE_ENABLE_PROBE_JUSTIFICATION,
+            "--dry-run",
+        ],
+        "parser": _parse_enable_dry_run_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _source_enable_tests_step() -> dict:
+    return {
+        "name": "test_enable_registry_source",
+        "command": [
+            _python(),
+            str(ROOT / "tests" / "test_enable_registry_source.py"),
+        ],
+        "parser": _parse_enable_tests_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
 def _historical_dry_run_step() -> dict:
     return {
         "name": "historical_dry_run",
@@ -571,6 +640,15 @@ def _resolve_steps(args: argparse.Namespace) -> List[dict]:
         steps.append(_source_crawler_help_step())
         steps.append(_source_crawler_dry_run_step())
         steps.append(_source_crawler_consistency_step())
+
+    if profile == "source-enable":
+        # M10.3 — operator enable workflow. Fully offline. The
+        # dry-run probe never writes; the test suite uses temp
+        # registries so the real seed is never modified.
+        steps.append(_source_registry_validate_step())
+        steps.append(_source_enable_list_step())
+        steps.append(_source_enable_dry_run_step())
+        steps.append(_source_enable_tests_step())
 
     if profile == "full":
         if not args.skip_render and not args.skip_semantic_canary:
@@ -1054,6 +1132,92 @@ def _parse_fetch_dry_run_output(
             "safety_refusal_detected": has_safety_refusal,
             "truth_note_detected": has_truth_note,
             "no_network": no_network,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# M10.3 — source-enable profile parsers.
+# ---------------------------------------------------------------------------
+
+
+def _parse_enable_list_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``enable_registry_source.py --list`` must exit 0, surface at
+    least one source_id row, and carry the documented safety note."""
+    has_header = "Registry Source Status" in stdout
+    has_total = "Total:" in stdout
+    has_safety = (
+        "does NOT imply truth" in stdout
+        or "does not imply truth" in stdout
+    )
+    ok = exit_code == 0 and has_header and has_total and has_safety
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"enable_registry_source(--list): exit_code={exit_code} "
+            f"header_detected={has_header} total_line_detected={has_total} "
+            f"safety_note_detected={has_safety}"
+        ),
+        "metrics": {
+            "header_detected": has_header,
+            "total_line_detected": has_total,
+            "safety_note_detected": has_safety,
+            "exit_code_ok": exit_code == 0,
+        },
+    }
+
+
+def _parse_enable_dry_run_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """Dry-run against the disabled seed entry must:
+        * exit 0 (the spec keeps dry-run idempotently 0)
+        * surface 'DRY RUN' header
+        * surface the proposed default_enabled True transition
+        * surface the safety note
+    """
+    has_dry_run = "DRY RUN" in stdout
+    has_transition = "default_enabled: False -> True" in stdout
+    has_safety = (
+        "does NOT imply truth" in stdout
+        or "does not imply truth" in stdout
+    )
+    ok = exit_code == 0 and has_dry_run and has_transition and has_safety
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"enable_registry_source(dry_run): exit_code={exit_code} "
+            f"dry_run_detected={has_dry_run} "
+            f"transition_detected={has_transition} "
+            f"safety_note_detected={has_safety}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "dry_run_detected": has_dry_run,
+            "transition_detected": has_transition,
+            "safety_note_detected": has_safety,
+        },
+    }
+
+
+def _parse_enable_tests_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``tests/test_enable_registry_source.py`` is a unittest runner —
+    exit 0 with an 'OK' line means the suite passed."""
+    has_ok = "\nOK" in (stdout + "\n" + stderr)
+    ok = exit_code == 0 and has_ok
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"test_enable_registry_source: exit_code={exit_code} "
+            f"ok_detected={has_ok}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "ok_detected": has_ok,
         },
     }
 

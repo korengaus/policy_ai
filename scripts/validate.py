@@ -40,7 +40,8 @@ def _commands() -> List[List[str]]:
     npm = _npm_executable()
     return [
         [python, "-m", "compileall", "api_server.py", "database.py", "job_manager.py",
-         "source_crawler.py", "scripts/fetch_registry_source.py"],
+         "source_crawler.py", "scripts/fetch_registry_source.py",
+         "scripts/enable_registry_source.py"],
         [python, "tests/test_jobs.py"],
         [python, "tests/test_postgres_dual_write.py"],
         [python, "tests/test_ai_reasoner_status.py"],
@@ -70,6 +71,10 @@ def _commands() -> List[List[str]]:
         # M10.2 — static crawler + operator CLI (dry-run only).
         [python, "scripts/fetch_registry_source.py", "--help"],
         [python, "tests/test_source_crawler.py"],
+        # M10.3 — operator enable workflow CLI (offline, list smoke + tests).
+        [python, "scripts/enable_registry_source.py", "--help"],
+        [python, "scripts/enable_registry_source.py", "--list"],
+        [python, "tests/test_enable_registry_source.py"],
         [npm, "test"],
     ]
 

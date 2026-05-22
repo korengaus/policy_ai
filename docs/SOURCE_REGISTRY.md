@@ -554,3 +554,135 @@ truth_claim: False
 The exit code in this example is `1` because the safety check
 refused. Both `--dry-run` and `--save` reserve exit `0` for "fetch
 would actually proceed" / "fetch succeeded".
+
+## Operator Enable Workflow
+
+Use `scripts/enable_registry_source.py` (Phase 2 M10.3) to enable a
+registry entry so that `scripts/fetch_registry_source.py --save` will
+accept it. The CLI is fully offline — it never fetches, scrapes,
+contacts any external service, or touches the database. Every enable
+requires an explicit operator justification (>= 20 characters) and a
+typed `YES` confirmation; the file write is atomic
+(`tmp + os.replace`) so a crashed run can never leave a half-written
+registry.
+
+### Usage
+
+```
+python scripts/enable_registry_source.py --list
+python scripts/enable_registry_source.py --list --json
+python scripts/enable_registry_source.py --source-id <id> --justification "<reason>" --dry-run
+python scripts/enable_registry_source.py --source-id <id> --justification "<reason>"
+python scripts/enable_registry_source.py --source-id <id> --justification "<reason>" --yes
+python scripts/enable_registry_source.py --source-id <id> --justification "<reason>" --allow-browser
+```
+
+`--list` prints every registry entry with its current `default_enabled`
++ `operator_review_required` flags so the operator can confirm the
+current safe state before making any change.
+
+### Pre-checks before any enable
+
+All pre-checks must pass before the CLI proposes a state change. The
+order below matches the implementation:
+
+1. `--source-id` must be a non-empty string and the entry must exist
+   in the registry.
+2. The registry record's `source_id` must match the CLI argument
+   (registry-consistency sanity check).
+3. The registry record's `truth_claim` must be `false` — the CLI
+   refuses any entry with `truth_claim=true` and never writes one.
+4. `capture_method='browser_required'` is refused unless the operator
+   passes `--allow-browser` to acknowledge that the M10.2 static
+   crawler cannot service this entry.
+5. `--justification` must be at least 20 characters (whitespace
+   stripped).
+
+If any pre-check fails the CLI exits 1, no file is written, and the
+refusal reason is surfaced in both human and JSON output.
+
+If the targeted entry is already enabled
+(`default_enabled=true` + `operator_review_required=false`) the CLI
+exits 0 idempotently without writing.
+
+### What the enable writes
+
+The enable mutates only the targeted source entry, leaves every other
+entry and every top-level field exactly as-is, and writes the file
+atomically. The fields it changes:
+
+- `default_enabled: true`
+- `operator_review_required: false`
+- `operator_review_required_justification: "<the supplied --justification>"`
+- `operator_enable_record: { justification, enabled_at, cli_version }`
+- `truth_claim: false` (re-asserted; never flipped to `true`)
+
+`operator_enable_record.enabled_at` is an ISO 8601 UTC timestamp;
+`cli_version` matches `scripts/enable_registry_source.CLI_VERSION`
+(currently `"1.0"`).
+
+### Confirmation prompt
+
+When `--yes` is not passed, the CLI prints a state-transition preview
+and then waits for the operator to type exactly `YES`. Any other input
+(including blank lines, `Y`, `yes`, or `NO`) aborts with exit 1 and
+no file write. The prompt is bypassed entirely under `--dry-run`.
+
+### Important safety notes
+
+These notes appear in every output mode (human + `--json`):
+
+- Enabling a source does **not** imply truth or guarantee accuracy
+  of any content fetched from it.
+- Fetch results remain raw artifacts requiring separate human review
+  before any verification use.
+- Enabling only authorizes operator-triggered fetches via
+  `scripts/fetch_registry_source.py --save`. The analysis pipeline
+  does not auto-fetch enabled sources.
+
+The CLI is also pinned by tests to:
+
+- Use atomic write (`tmp + os.replace`) so partial writes are
+  impossible.
+- Refuse to set `truth_claim=true`.
+- Stay out of the analysis pipeline — `main.py`, `api_server.py`,
+  and `scheduler.py` do not import the CLI.
+- Avoid any network / browser / OpenAI imports
+  (`requests`, `httpx`, `urllib.request`, `socket`, `playwright`,
+  `browser_use`, `openclaw`, `selenium`, `openai`, `anthropic`).
+
+### Exit codes (strict)
+
+- `0` — success (enabled, already-enabled idempotent, dry-run, or
+  `--list` exited cleanly)
+- `1` — pre-check failure, source not found, confirmation refused,
+  or file write error
+- `2` — CLI usage error (missing required flags, unrecognized args)
+
+### JSON output shape
+
+Stable top-level keys for the `--list` payload:
+`cli_version`, `mode` (`"list"`), `registry_path`, `processed_at`,
+`sources`, `summary`, `safety_notes`.
+
+Stable top-level keys for the enable / dry-run payload:
+`cli_version`, `mode` (`"enable"` | `"dry_run"`), `processed_at`,
+`registry_path`, `source_id`, `source_found`, `already_enabled`,
+`justification`, `refusal_reason`, `current_state`, `proposed_state`,
+`written`, `truth_claim` (always `false`), `safety_notes`.
+
+### Operational profile
+
+`scripts/run_operational_checks.py --profile source-enable` (M10.3)
+chains four **offline** checks:
+
+1. `scripts/validate_source_registry.py --json` — schema check.
+2. `scripts/enable_registry_source.py --list` — status smoke.
+3. `scripts/enable_registry_source.py --source-id kr_law_open_data_candidate --justification "operator dry run test justification text" --dry-run`
+   — expected dry-run summary (exit 0; nothing is written).
+4. `tests/test_enable_registry_source.py` — full offline test suite.
+
+The profile never hits Render, never calls OpenAI, never starts a
+server, and never modifies `data/source_registry.json`. The dry-run
+step's tests use temp registry copies so the real seed is never
+written.
