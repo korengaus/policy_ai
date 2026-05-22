@@ -810,3 +810,157 @@ the caller's input — defense-in-depth against future regressions.
 
 The profile never hits Render, never calls OpenAI, never starts a
 server, and never modifies the source `source_fetch_artifacts` table.
+
+## Evidence Candidate Linker
+
+Use `scripts/link_artifact_evidence.py` (Phase 2 M10.5) to produce
+keyword-match evidence candidates from extracted artifact text against
+stored analysis claims. Reads from `artifact_text_extractions` and
+`analysis_results`; writes (only with `--save`) to the new
+`artifact_evidence_candidates` table. Fully offline — no HTTP, no
+browser, no OpenAI, no embeddings. The source
+`artifact_text_extractions`, `source_fetch_artifacts`, and
+`analysis_results` tables are never mutated.
+
+### Usage
+
+```
+python scripts/link_artifact_evidence.py --list-extractions
+python scripts/link_artifact_evidence.py --list-candidates
+python scripts/link_artifact_evidence.py --list-candidates --analysis-id <id>
+python scripts/link_artifact_evidence.py --analysis-id <id> --dry-run
+python scripts/link_artifact_evidence.py --analysis-id <id> --save
+python scripts/link_artifact_evidence.py --analysis-id <id> --source-id <id> --min-score 0.25 --json
+```
+
+`--dry-run` and `--save` are mutually exclusive. `--db-path <path>`
+retargets both reads and writes to a different SQLite file (used by
+tests and by an operator working against an isolated DB).
+`--min-score` is clamped to `[0.0, 1.0]` (default `0.15`).
+
+### What the linker produces
+
+Each `EvidenceCandidate` carries the following fields (stable wire
+shape, mirrored on the `artifact_evidence_candidates` row):
+
+- `extraction_id` — id of the source `artifact_text_extractions` row
+- `source_id` — copied from the extraction row
+- `url` — copied from the extraction row
+- `analysis_id` — `analysis_results.id` (stored as TEXT so future
+  non-integer identifiers are supported without a migration)
+- `claim_text` — the single claim being matched (one candidate per
+  claim per extraction)
+- `match_score` — `len(claim_tokens ∩ text_tokens) / len(claim_tokens)`
+  in `[0.0, 1.0]`
+- `matched_tokens` — list of overlapping tokens (JSON-encoded as TEXT
+  on disk; decoded back to a list by `_row_to_evidence_candidate`)
+- `supporting_passage` — best-matching 500-char window from
+  `main_text` (the window with the highest distinct-claim-token count)
+- `candidate_timestamp` — ISO 8601 UTC
+- `truth_claim` — **always** `False`
+- `official_source_candidate` — mirrored from the extraction row
+- `operator_review_required` — **always** `True`
+- `notes` — always `"keyword overlap only — requires human review"`
+
+### Important safety notes
+
+These notes appear in every output mode (human + `--json`):
+
+- These are unreviewed keyword-match candidates only.
+- `truth_claim=False` — candidates do not imply truth of any
+  content.
+- `operator_review_required=True` — all candidates require human
+  review before any verification use.
+- Candidates do not feed into the live analysis pipeline or affect
+  any verdict.
+
+The module is pinned by tests to:
+
+- Force `truth_claim=False` and `operator_review_required=True` on
+  every candidate AND on every persisted row, even when the caller
+  hands over a dict that says otherwise.
+- Never modify `source_fetch_artifacts`, `artifact_text_extractions`,
+  or `analysis_results`.
+- Stay out of the analysis pipeline — `main.py`, `api_server.py`,
+  and `scheduler.py` do not import the linker or its CLI.
+- Avoid every network / browser / OpenAI / embedding import
+  (`requests`, `httpx`, `urllib.request`, `socket`, `playwright`,
+  `browser_use`, `openclaw`, `selenium`, `openai`, `anthropic`).
+
+### Matching contract
+
+The linker uses a deliberately simple token-overlap score so the
+operator can reason about it without consulting an embedding model:
+
+1. Tokenize both the claim and `main_text` on Unicode-aware `\W+`
+   boundaries, lowercase, drop tokens shorter than `MIN_TOKEN_LEN`
+   (2).
+2. `match_score = |claim_tokens ∩ text_tokens| / |claim_tokens|`.
+   When the claim has no usable tokens the score is `0.0`.
+3. Produce one `EvidenceCandidate` per `(extraction, claim)` pair
+   whose score is `>= --min-score`.
+4. The supporting passage is the 500-char window (100-char stride)
+   from `main_text` that contains the most distinct claim tokens.
+
+The linker considers `claim_text` (primary), plus each entry in the
+JSON-encoded `claims` and `normalized_claims` lists when present.
+Entries that are plain strings or `{text, claim, claim_text,
+normalized, normalized_text}` dicts are accepted; anything else is
+silently skipped.
+
+### Database table
+
+```
+CREATE TABLE IF NOT EXISTS artifact_evidence_candidates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    extraction_id INTEGER NOT NULL,
+    source_id TEXT NOT NULL,
+    url TEXT NOT NULL,
+    analysis_id TEXT NOT NULL,
+    claim_text TEXT NOT NULL,
+    match_score REAL NOT NULL DEFAULT 0.0,
+    matched_tokens TEXT,
+    supporting_passage TEXT,
+    candidate_timestamp TEXT NOT NULL,
+    truth_claim INTEGER NOT NULL DEFAULT 0,
+    official_source_candidate INTEGER NOT NULL DEFAULT 0,
+    operator_review_required INTEGER NOT NULL DEFAULT 1,
+    notes TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_artifact_evidence_candidates_analysis
+    ON artifact_evidence_candidates(analysis_id);
+CREATE INDEX IF NOT EXISTS idx_artifact_evidence_candidates_extraction
+    ON artifact_evidence_candidates(extraction_id);
+```
+
+Created idempotently via `_ensure_artifact_evidence_candidates_table`
+from `init_db()` (or the standalone
+`init_artifact_evidence_candidates_table()`). The `truth_claim`
+column is forced to `0` and `operator_review_required` is forced to
+`1` on every `save_evidence_candidate` call regardless of the
+caller's input — defense-in-depth against future regressions.
+
+### Exit codes
+
+- `0` — candidates were produced (or a list mode succeeded)
+- `1` — no extractions found, no analysis found, DB error, or every
+  `(extraction, claim)` pair scored below `--min-score`
+- `2` — CLI usage error (missing required flags, conflicting flags,
+  unrecognized args)
+
+### Operational profile
+
+`scripts/run_operational_checks.py --profile source-linker` (M10.5)
+chains four **offline** checks:
+
+1. `scripts/validate_source_registry.py --json` — schema check.
+2. `scripts/link_artifact_evidence.py --help` — CLI smoke.
+3. `scripts/link_artifact_evidence.py --list-extractions` — read-only
+   smoke that confirms the four safety notes are still surfaced.
+4. `tests/test_artifact_evidence_linker.py` — full offline test suite
+   (uses temp SQLite files; the real `policy_ai.db` is never
+   touched).
+
+The profile never hits Render, never calls OpenAI, never starts a
+server, and never modifies any input table.

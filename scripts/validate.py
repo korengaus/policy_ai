@@ -42,7 +42,8 @@ def _commands() -> List[List[str]]:
         [python, "-m", "compileall", "api_server.py", "database.py", "job_manager.py",
          "source_crawler.py", "scripts/fetch_registry_source.py",
          "scripts/enable_registry_source.py",
-         "artifact_extractor.py", "scripts/extract_artifact_text.py"],
+         "artifact_extractor.py", "scripts/extract_artifact_text.py",
+         "artifact_evidence_linker.py", "scripts/link_artifact_evidence.py"],
         [python, "tests/test_jobs.py"],
         [python, "tests/test_postgres_dual_write.py"],
         [python, "tests/test_ai_reasoner_status.py"],
@@ -79,6 +80,9 @@ def _commands() -> List[List[str]]:
         # M10.4 — artifact text extractor + operator CLI (offline tests).
         [python, "scripts/extract_artifact_text.py", "--help"],
         [python, "tests/test_artifact_extractor.py"],
+        # M10.5 — evidence candidate linker + operator CLI (offline tests).
+        [python, "scripts/link_artifact_evidence.py", "--help"],
+        [python, "tests/test_artifact_evidence_linker.py"],
         [npm, "test"],
     ]
 

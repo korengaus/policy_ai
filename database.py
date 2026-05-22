@@ -46,6 +46,7 @@ def init_db():
         _ensure_review_tables(connection)
         _ensure_source_fetch_artifacts_table(connection)
         _ensure_artifact_text_extractions_table(connection)
+        _ensure_artifact_evidence_candidates_table(connection)
         connection.commit()
 
 
@@ -1108,6 +1109,215 @@ def get_extraction_results(source_id: str = None, artifact_id: int = None,
     finally:
         connection.close()
     return [_row_to_extraction_result(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 M10.5 — artifact_evidence_candidates table.
+#
+# Stores keyword-overlap evidence candidates produced by
+# ``artifact_evidence_linker.find_evidence_candidates`` against rows
+# in ``artifact_text_extractions`` and ``analysis_results``. The
+# registry contract still holds: ``truth_claim`` is forced to 0 and
+# ``operator_review_required`` is forced to 1 on every persisted row,
+# regardless of the caller's input. Candidates never feed the verdict
+# path — they exist purely as raw, reviewable artifacts for operators.
+# ---------------------------------------------------------------------------
+
+
+def _ensure_artifact_evidence_candidates_table(connection):
+    """Idempotent. Safe to call repeatedly."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS artifact_evidence_candidates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            extraction_id INTEGER NOT NULL,
+            source_id TEXT NOT NULL,
+            url TEXT NOT NULL,
+            analysis_id TEXT NOT NULL,
+            claim_text TEXT NOT NULL,
+            match_score REAL NOT NULL DEFAULT 0.0,
+            matched_tokens TEXT,
+            supporting_passage TEXT,
+            candidate_timestamp TEXT NOT NULL,
+            truth_claim INTEGER NOT NULL DEFAULT 0,
+            official_source_candidate INTEGER NOT NULL DEFAULT 0,
+            operator_review_required INTEGER NOT NULL DEFAULT 1,
+            notes TEXT,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_artifact_evidence_candidates_analysis "
+        "ON artifact_evidence_candidates(analysis_id)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_artifact_evidence_candidates_extraction "
+        "ON artifact_evidence_candidates(extraction_id)"
+    )
+
+
+def init_artifact_evidence_candidates_table(db_path: str = None):
+    """Public idempotent initializer. Independent of init_db() so tests
+    and the operator CLI can call it without touching analysis_results."""
+    connection = _open_connection(db_path)
+    try:
+        _ensure_artifact_evidence_candidates_table(connection)
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def _row_to_evidence_candidate(row) -> dict:
+    """SQLite row → evidence-candidate dict. Maps the integer
+    truth_claim / official_source_candidate / operator_review_required
+    columns back to booleans so callers don't have to remember the
+    SQLite-boolean convention. ``matched_tokens`` stays as the stored
+    JSON string — callers decide whether to decode it."""
+    if row is None:
+        return {}
+    out = {k: row[k] for k in row.keys()}
+    # truth_claim is stored as 0 and surfaced as a bool. The registry
+    # contract is that this field is always False; re-assert here as a
+    # defensive measure against any future row corruption.
+    out["truth_claim"] = bool(out.get("truth_claim", 0))
+    out["official_source_candidate"] = bool(
+        out.get("official_source_candidate", 0)
+    )
+    # operator_review_required is stored as 1 and surfaced as a bool.
+    # The contract is that candidates always require review — defensive
+    # re-assertion the same way.
+    out["operator_review_required"] = bool(
+        out.get("operator_review_required", 1)
+    )
+    try:
+        out["match_score"] = float(out.get("match_score") or 0.0)
+    except (TypeError, ValueError):
+        out["match_score"] = 0.0
+    return out
+
+
+def save_evidence_candidate(candidate_dict: dict, db_path: str = None) -> int:
+    """Persist one evidence candidate and return the inserted row id.
+
+    ``candidate_dict`` matches the shape returned by
+    ``artifact_evidence_linker.candidate_to_dict``. Missing fields
+    default safely. ``truth_claim`` is always stored as 0 and
+    ``operator_review_required`` as 1 regardless of the input
+    (defensive against future regressions in the linker that might
+    try to flip either flag).
+    """
+    if not isinstance(candidate_dict, dict):
+        raise ValueError("candidate_dict must be a dict")
+    if candidate_dict.get("extraction_id") is None:
+        raise ValueError("candidate_dict.extraction_id is required")
+    if not candidate_dict.get("source_id"):
+        raise ValueError("candidate_dict.source_id is required")
+    if not candidate_dict.get("url"):
+        raise ValueError("candidate_dict.url is required")
+    if not candidate_dict.get("analysis_id"):
+        raise ValueError("candidate_dict.analysis_id is required")
+    if not candidate_dict.get("claim_text"):
+        raise ValueError("candidate_dict.claim_text is required")
+    if not candidate_dict.get("candidate_timestamp"):
+        raise ValueError("candidate_dict.candidate_timestamp is required")
+    created_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    matched_tokens_raw = candidate_dict.get("matched_tokens")
+    if isinstance(matched_tokens_raw, (list, tuple)):
+        matched_tokens_text = json.dumps(
+            list(matched_tokens_raw), ensure_ascii=False,
+        )
+    elif matched_tokens_raw is None:
+        matched_tokens_text = json.dumps([], ensure_ascii=False)
+    else:
+        matched_tokens_text = str(matched_tokens_raw)
+    try:
+        match_score = float(candidate_dict.get("match_score") or 0.0)
+    except (TypeError, ValueError):
+        match_score = 0.0
+    connection = _open_connection(db_path)
+    try:
+        _ensure_artifact_evidence_candidates_table(connection)
+        cursor = connection.execute(
+            """
+            INSERT INTO artifact_evidence_candidates (
+                extraction_id, source_id, url, analysis_id,
+                claim_text, match_score, matched_tokens,
+                supporting_passage, candidate_timestamp,
+                truth_claim, official_source_candidate,
+                operator_review_required, notes, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(candidate_dict.get("extraction_id") or 0),
+                str(candidate_dict.get("source_id")),
+                str(candidate_dict.get("url")),
+                str(candidate_dict.get("analysis_id")),
+                str(candidate_dict.get("claim_text")),
+                match_score,
+                matched_tokens_text,
+                candidate_dict.get("supporting_passage"),
+                str(candidate_dict.get("candidate_timestamp")),
+                # truth_claim is forced to 0 — the registry contract.
+                0,
+                1 if candidate_dict.get("official_source_candidate") else 0,
+                # operator_review_required is forced to 1 — the
+                # candidate contract.
+                1,
+                candidate_dict.get("notes"),
+                created_at,
+            ),
+        )
+        connection.commit()
+        return int(cursor.lastrowid)
+    finally:
+        connection.close()
+
+
+def get_evidence_candidates(
+    analysis_id: str = None,
+    source_id: str = None,
+    extraction_id: int = None,
+    db_path: str = None,
+    limit: int = 50,
+) -> list:
+    """Return evidence candidates (newest first), optionally filtered
+    by any combination of ``analysis_id``, ``source_id``, and
+    ``extraction_id``. ``limit`` is clamped to ``[1, 500]``."""
+    try:
+        capped_limit = max(1, min(int(limit or 50), 500))
+    except (TypeError, ValueError):
+        capped_limit = 50
+    connection = _open_connection(db_path)
+    try:
+        _ensure_artifact_evidence_candidates_table(connection)
+        clauses: list = []
+        params: list = []
+        if analysis_id is not None and str(analysis_id):
+            clauses.append("analysis_id = ?")
+            params.append(str(analysis_id))
+        if source_id:
+            clauses.append("source_id = ?")
+            params.append(str(source_id))
+        if extraction_id is not None:
+            try:
+                clauses.append("extraction_id = ?")
+                params.append(int(extraction_id))
+            except (TypeError, ValueError):
+                pass
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(capped_limit)
+        rows = connection.execute(
+            f"""
+            SELECT * FROM artifact_evidence_candidates{where}
+            ORDER BY candidate_timestamp DESC, id DESC
+            LIMIT ?
+            """,
+            tuple(params),
+        ).fetchall()
+    finally:
+        connection.close()
+    return [_row_to_evidence_candidate(r) for r in rows]
 
 
 def _open_connection(db_path):

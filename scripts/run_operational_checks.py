@@ -71,6 +71,7 @@ PROFILES = (
     "source-crawler",
     "source-enable",
     "source-extractor",
+    "source-linker",
     "full",
 )
 
@@ -573,6 +574,63 @@ def _source_extractor_tests_step() -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Phase 2 M10.5 — source-linker profile.
+#
+# Fully offline. The linker never touches the network, never calls
+# OpenAI, and never modifies source_fetch_artifacts /
+# artifact_text_extractions / analysis_results. Steps:
+#   1) scripts/validate_source_registry.py --json     (schema)
+#   2) scripts/link_artifact_evidence.py --help       (CLI smoke)
+#   3) scripts/link_artifact_evidence.py --list-extractions  (read-only smoke)
+#   4) tests/test_artifact_evidence_linker.py         (offline tests)
+# ---------------------------------------------------------------------------
+
+
+def _source_linker_help_step() -> dict:
+    return {
+        "name": "link_artifact_evidence(--help)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "link_artifact_evidence.py"),
+            "--help",
+        ],
+        "parser": _parse_link_help_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _source_linker_list_extractions_step() -> dict:
+    return {
+        "name": "link_artifact_evidence(--list-extractions)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "link_artifact_evidence.py"),
+            "--list-extractions",
+        ],
+        "parser": _parse_link_list_extractions_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _source_linker_tests_step() -> dict:
+    return {
+        "name": "test_artifact_evidence_linker",
+        "command": [
+            _python(),
+            str(ROOT / "tests" / "test_artifact_evidence_linker.py"),
+        ],
+        "parser": _parse_linker_tests_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
 def _historical_dry_run_step() -> dict:
     return {
         "name": "historical_dry_run",
@@ -698,6 +756,16 @@ def _resolve_steps(args: argparse.Namespace) -> List[dict]:
         steps.append(_source_registry_validate_step())
         steps.append(_source_extractor_help_step())
         steps.append(_source_extractor_tests_step())
+
+    if profile == "source-linker":
+        # M10.5 — evidence candidate linker. Fully offline. The
+        # linker reads from artifact_text_extractions + analysis_results
+        # and writes only to artifact_evidence_candidates. Tests use
+        # temp SQLite files so the real policy_ai.db is never touched.
+        steps.append(_source_registry_validate_step())
+        steps.append(_source_linker_help_step())
+        steps.append(_source_linker_list_extractions_step())
+        steps.append(_source_linker_tests_step())
 
     if profile == "full":
         if not args.skip_render and not args.skip_semantic_canary:
@@ -1306,6 +1374,85 @@ def _parse_extractor_tests_output(
         "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
         "summary": (
             f"test_artifact_extractor: exit_code={exit_code} "
+            f"ok_detected={has_ok}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "ok_detected": has_ok,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# M10.5 — source-linker profile parsers.
+# ---------------------------------------------------------------------------
+
+
+def _parse_link_help_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``link_artifact_evidence.py --help`` must exit 0 and surface
+    the documented header text."""
+    ok = (
+        exit_code == 0
+        and "evidence candidates" in stdout
+        and "Exit codes" in stdout
+    )
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"link_artifact_evidence --help: exit_code={exit_code} "
+            f"help_text_detected={ok}"
+        ),
+    }
+
+
+def _parse_link_list_extractions_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``link_artifact_evidence.py --list-extractions`` must exit 0
+    and surface the safety footer. The number of rows depends on the
+    operator's local DB — we only assert read-only success."""
+    has_header = "artifact_text_extractions" in stdout
+    has_safety_truth = "truth_claim=False" in stdout
+    has_safety_review = "operator_review_required=True" in stdout
+    has_safety_no_pipeline = (
+        "do not feed into the live analysis pipeline" in stdout
+    )
+    ok = (
+        exit_code == 0 and has_header and has_safety_truth
+        and has_safety_review and has_safety_no_pipeline
+    )
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"link_artifact_evidence(--list-extractions): "
+            f"exit_code={exit_code} header_detected={has_header} "
+            f"truth_note_detected={has_safety_truth} "
+            f"review_note_detected={has_safety_review} "
+            f"no_pipeline_note_detected={has_safety_no_pipeline}"
+        ),
+        "metrics": {
+            "exit_code_ok": exit_code == 0,
+            "header_detected": has_header,
+            "truth_note_detected": has_safety_truth,
+            "review_note_detected": has_safety_review,
+            "no_pipeline_note_detected": has_safety_no_pipeline,
+        },
+    }
+
+
+def _parse_linker_tests_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``tests/test_artifact_evidence_linker.py`` is a unittest runner
+    — exit 0 with an 'OK' line means the suite passed."""
+    has_ok = "\nOK" in (stdout + "\n" + stderr)
+    ok = exit_code == 0 and has_ok
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"test_artifact_evidence_linker: exit_code={exit_code} "
             f"ok_detected={has_ok}"
         ),
         "metrics": {
