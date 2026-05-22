@@ -70,6 +70,7 @@ PROFILES = (
     "source-registry",
     "source-crawler",
     "source-enable",
+    "source-extractor",
     "full",
 )
 
@@ -532,6 +533,46 @@ def _source_enable_tests_step() -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Phase 2 M10.4 — source-extractor profile.
+#
+# Fully offline. The extractor never touches the network, never calls
+# OpenAI, and never modifies source_fetch_artifacts. Steps:
+#   1) scripts/validate_source_registry.py --json   (schema)
+#   2) scripts/extract_artifact_text.py --help      (CLI smoke)
+#   3) tests/test_artifact_extractor.py             (offline tests)
+# ---------------------------------------------------------------------------
+
+
+def _source_extractor_help_step() -> dict:
+    return {
+        "name": "extract_artifact_text(--help)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "extract_artifact_text.py"),
+            "--help",
+        ],
+        "parser": _parse_extract_help_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _source_extractor_tests_step() -> dict:
+    return {
+        "name": "test_artifact_extractor",
+        "command": [
+            _python(),
+            str(ROOT / "tests" / "test_artifact_extractor.py"),
+        ],
+        "parser": _parse_extractor_tests_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
 def _historical_dry_run_step() -> dict:
     return {
         "name": "historical_dry_run",
@@ -649,6 +690,14 @@ def _resolve_steps(args: argparse.Namespace) -> List[dict]:
         steps.append(_source_enable_list_step())
         steps.append(_source_enable_dry_run_step())
         steps.append(_source_enable_tests_step())
+
+    if profile == "source-extractor":
+        # M10.4 — text extraction pipeline. Fully offline. The
+        # test suite uses temp SQLite files so the real policy_ai.db
+        # is never touched.
+        steps.append(_source_registry_validate_step())
+        steps.append(_source_extractor_help_step())
+        steps.append(_source_extractor_tests_step())
 
     if profile == "full":
         if not args.skip_render and not args.skip_semantic_canary:
@@ -1213,6 +1262,50 @@ def _parse_enable_tests_output(
         "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
         "summary": (
             f"test_enable_registry_source: exit_code={exit_code} "
+            f"ok_detected={has_ok}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "ok_detected": has_ok,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# M10.4 — source-extractor profile parsers.
+# ---------------------------------------------------------------------------
+
+
+def _parse_extract_help_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``extract_artifact_text.py --help`` must exit 0 and surface the
+    documented header text."""
+    ok = (
+        exit_code == 0
+        and "Extract structured text" in stdout
+        and "Exit codes" in stdout
+    )
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"extract_artifact_text --help: exit_code={exit_code} "
+            f"help_text_detected={ok}"
+        ),
+    }
+
+
+def _parse_extractor_tests_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``tests/test_artifact_extractor.py`` is a unittest runner —
+    exit 0 with an 'OK' line means the suite passed."""
+    has_ok = "\nOK" in (stdout + "\n" + stderr)
+    ok = exit_code == 0 and has_ok
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"test_artifact_extractor: exit_code={exit_code} "
             f"ok_detected={has_ok}"
         ),
         "metrics": {

@@ -686,3 +686,127 @@ The profile never hits Render, never calls OpenAI, never starts a
 server, and never modifies `data/source_registry.json`. The dry-run
 step's tests use temp registry copies so the real seed is never
 written.
+
+## Text Extraction Pipeline
+
+Use `scripts/extract_artifact_text.py` (Phase 2 M10.4) to extract
+structured text from rows in `source_fetch_artifacts`. Reads from the
+local SQLite DB and writes (only with `--save`) to the new
+`artifact_text_extractions` table. Fully offline — no HTTP, no
+browser, no OpenAI. The source `source_fetch_artifacts` table is
+never mutated.
+
+### Usage
+
+```
+python scripts/extract_artifact_text.py --list-artifacts
+python scripts/extract_artifact_text.py --list-artifacts --source-id <id>
+python scripts/extract_artifact_text.py --source-id <id> --dry-run
+python scripts/extract_artifact_text.py --source-id <id> --save
+python scripts/extract_artifact_text.py --artifact-id <int> --dry-run --json
+```
+
+`--dry-run` and `--save` are mutually exclusive. With neither flag the
+extractor still runs in a read-only mode (results are printed; nothing
+is written). `--db-path <path>` retargets both the read and the write
+to a different SQLite file (used by tests and by an operator working
+against an isolated DB).
+
+### What extraction produces
+
+Each `ExtractionResult` carries the following fields (stable wire
+shape, mirrored on the `artifact_text_extractions` row):
+
+- `artifact_id` — id of the source `source_fetch_artifacts` row
+- `source_id` — copied from the source row
+- `url` — copied from the source row
+- `extraction_timestamp` — ISO 8601 UTC
+- `extraction_duration_ms` — wall-clock ms for the BeautifulSoup pass
+- `success` — bool; `False` when the source row had no `raw_html` or
+  the fetch itself was unsuccessful
+- `error` — short reason string when `success=False`
+- `title` — text inside the page `<title>` tag, stripped
+- `main_text` — cleaned body text after `script` / `style` / `nav` /
+  `footer` / `header` are stripped, truncated to 50 000 chars
+- `sections` — JSON-encoded list of `{heading, text}` pairs derived
+  from the document's `h1` / `h2` / `h3` structure
+- `word_count` — whitespace-split word count of `main_text`
+- `language_hint` — `"ko"` (Hangul mass > 20% of non-whitespace
+  characters), `"en"` (ASCII alpha > 60%), or `"unknown"`
+- `truth_claim` — **always** `False`
+- `official_source_candidate` — mirrored from the source row
+
+### Important safety notes
+
+These notes appear in every output mode (human + `--json`):
+
+- `truth_claim=False` — extraction results do not imply truth of
+  any content.
+- Extraction results are raw text artifacts requiring separate human
+  review.
+- This extractor never feeds the analysis pipeline or verdict logic;
+  extractions are stored as raw artifacts only.
+
+The module is pinned by tests to:
+
+- Force `truth_claim=False` even when the source row carries
+  `truth_claim=True`.
+- Never modify `source_fetch_artifacts`.
+- Stay out of the analysis pipeline — `main.py`, `api_server.py`,
+  and `scheduler.py` do not import the extractor or its CLI.
+- Avoid every network / browser / OpenAI import
+  (`requests`, `httpx`, `urllib.request`, `socket`, `playwright`,
+  `browser_use`, `openclaw`, `selenium`, `openai`, `anthropic`).
+
+### Database table
+
+```
+CREATE TABLE IF NOT EXISTS artifact_text_extractions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    artifact_id INTEGER NOT NULL,
+    source_id TEXT NOT NULL,
+    url TEXT NOT NULL,
+    extraction_timestamp TEXT NOT NULL,
+    extraction_duration_ms INTEGER,
+    success INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    title TEXT,
+    main_text TEXT,
+    sections TEXT,
+    word_count INTEGER,
+    language_hint TEXT,
+    truth_claim INTEGER NOT NULL DEFAULT 0,
+    official_source_candidate INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_artifact_text_extractions_artifact
+    ON artifact_text_extractions(artifact_id);
+```
+
+Created idempotently via `_ensure_artifact_text_extractions_table`
+from `init_db()` (or the standalone
+`init_artifact_text_extractions_table()`). The `truth_claim` column
+is forced to `0` on every `save_extraction_result` call regardless of
+the caller's input — defense-in-depth against future regressions.
+
+### Exit codes
+
+- `0` — extractions attempted successfully (some individual rows may
+  have `success=False`; that's reported, not fatal)
+- `1` — DB error, no artifacts found, or every extraction failed
+- `2` — CLI usage error (missing required flags, conflicting flags,
+  unrecognized args)
+
+### Operational profile
+
+`scripts/run_operational_checks.py --profile source-extractor`
+(M10.4) chains three **offline** checks:
+
+1. `scripts/validate_source_registry.py --json` — schema check.
+2. `scripts/extract_artifact_text.py --help` — CLI smoke.
+3. `tests/test_artifact_extractor.py` — full offline test suite
+   (uses temp SQLite files; the real `policy_ai.db` is never
+   touched).
+
+The profile never hits Render, never calls OpenAI, never starts a
+server, and never modifies the source `source_fetch_artifacts` table.

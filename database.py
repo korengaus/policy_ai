@@ -45,6 +45,7 @@ def init_db():
         _ensure_embedding_cache_table(connection)
         _ensure_review_tables(connection)
         _ensure_source_fetch_artifacts_table(connection)
+        _ensure_artifact_text_extractions_table(connection)
         connection.commit()
 
 
@@ -936,6 +937,190 @@ def get_fetch_artifacts(source_id: str = None, limit: int = 50) -> list:
                 (capped_limit,),
             ).fetchall()
     return [_row_to_fetch_artifact(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 M10.4 — artifact_text_extractions table.
+#
+# Stores the cleaned title / main_text / sections produced by
+# ``artifact_extractor.extract_text_from_artifact`` against rows in
+# ``source_fetch_artifacts``. The registry contract still holds:
+# ``truth_claim`` is forced to 0 on every persisted row regardless of
+# the caller's input. Extraction results never feed the verdict path —
+# they exist purely as raw, reviewable artifacts.
+# ---------------------------------------------------------------------------
+
+
+def _ensure_artifact_text_extractions_table(connection):
+    """Idempotent. Safe to call repeatedly."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS artifact_text_extractions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            artifact_id INTEGER NOT NULL,
+            source_id TEXT NOT NULL,
+            url TEXT NOT NULL,
+            extraction_timestamp TEXT NOT NULL,
+            extraction_duration_ms INTEGER,
+            success INTEGER NOT NULL DEFAULT 0,
+            error TEXT,
+            title TEXT,
+            main_text TEXT,
+            sections TEXT,
+            word_count INTEGER,
+            language_hint TEXT,
+            truth_claim INTEGER NOT NULL DEFAULT 0,
+            official_source_candidate INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_artifact_text_extractions_artifact "
+        "ON artifact_text_extractions(artifact_id)"
+    )
+
+
+def init_artifact_text_extractions_table():
+    """Public idempotent initializer. Independent of init_db() so tests
+    and the operator CLI can call it without touching analysis_results."""
+    with get_connection() as connection:
+        _ensure_artifact_text_extractions_table(connection)
+        connection.commit()
+
+
+def _row_to_extraction_result(row) -> dict:
+    """SQLite row → extraction-result dict. Maps the integer success /
+    truth_claim / official_source_candidate columns back to booleans
+    so callers don't have to remember the SQLite-boolean convention."""
+    if row is None:
+        return {}
+    out = {k: row[k] for k in row.keys()}
+    out["success"] = bool(out.get("success", 0))
+    # truth_claim is stored as 0 and surfaced as a bool. The registry
+    # contract is that this field is always False; we re-assert here
+    # as a defensive measure against any future row corruption.
+    out["truth_claim"] = bool(out.get("truth_claim", 0))
+    out["official_source_candidate"] = bool(
+        out.get("official_source_candidate", 0)
+    )
+    return out
+
+
+def save_extraction_result(result_dict: dict, db_path: str = None) -> int:
+    """Persist one extraction artifact and return the inserted row id.
+
+    ``result_dict`` matches the shape returned by
+    ``artifact_extractor.extraction_result_to_dict``. Missing fields
+    default safely. ``truth_claim`` is always stored as 0 regardless
+    of the input (defensive against future regressions in the
+    extractor that might try to set it true).
+
+    When ``db_path`` is provided the write goes to that SQLite file
+    directly (used by the CLI's ``--db-path`` flag and by tests that
+    want isolated DBs without monkey-patching the module-level
+    ``DB_PATH``).
+    """
+    if not isinstance(result_dict, dict):
+        raise ValueError("result_dict must be a dict")
+    if result_dict.get("artifact_id") is None:
+        raise ValueError("result_dict.artifact_id is required")
+    if not result_dict.get("source_id"):
+        raise ValueError("result_dict.source_id is required")
+    if not result_dict.get("url"):
+        raise ValueError("result_dict.url is required")
+    if not result_dict.get("extraction_timestamp"):
+        raise ValueError("result_dict.extraction_timestamp is required")
+    created_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    connection = _open_connection(db_path)
+    try:
+        _ensure_artifact_text_extractions_table(connection)
+        cursor = connection.execute(
+            """
+            INSERT INTO artifact_text_extractions (
+                artifact_id, source_id, url, extraction_timestamp,
+                extraction_duration_ms, success, error,
+                title, main_text, sections, word_count, language_hint,
+                truth_claim, official_source_candidate, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(result_dict.get("artifact_id") or 0),
+                str(result_dict.get("source_id")),
+                str(result_dict.get("url")),
+                str(result_dict.get("extraction_timestamp")),
+                result_dict.get("extraction_duration_ms"),
+                1 if result_dict.get("success") else 0,
+                result_dict.get("error"),
+                result_dict.get("title"),
+                result_dict.get("main_text"),
+                result_dict.get("sections"),
+                result_dict.get("word_count"),
+                result_dict.get("language_hint"),
+                # truth_claim is forced to 0 — the registry contract.
+                0,
+                1 if result_dict.get("official_source_candidate") else 0,
+                created_at,
+            ),
+        )
+        connection.commit()
+        return int(cursor.lastrowid)
+    finally:
+        connection.close()
+
+
+def get_extraction_results(source_id: str = None, artifact_id: int = None,
+                           db_path: str = None, limit: int = 50) -> list:
+    """Return extraction artifacts (newest first), optionally filtered
+    by ``source_id`` and/or ``artifact_id``. ``limit`` is clamped to
+    ``[1, 500]``.
+
+    When ``db_path`` is provided the read goes to that SQLite file
+    directly (used by the CLI's ``--db-path`` flag and by tests)."""
+    try:
+        capped_limit = max(1, min(int(limit or 50), 500))
+    except (TypeError, ValueError):
+        capped_limit = 50
+    connection = _open_connection(db_path)
+    try:
+        _ensure_artifact_text_extractions_table(connection)
+        clauses = []
+        params: list = []
+        if source_id:
+            clauses.append("source_id = ?")
+            params.append(str(source_id))
+        if artifact_id is not None:
+            try:
+                clauses.append("artifact_id = ?")
+                params.append(int(artifact_id))
+            except (TypeError, ValueError):
+                pass
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(capped_limit)
+        rows = connection.execute(
+            f"""
+            SELECT * FROM artifact_text_extractions{where}
+            ORDER BY extraction_timestamp DESC, id DESC
+            LIMIT ?
+            """,
+            tuple(params),
+        ).fetchall()
+    finally:
+        connection.close()
+    return [_row_to_extraction_result(r) for r in rows]
+
+
+def _open_connection(db_path):
+    """Internal helper: open a sqlite3 connection at ``db_path`` (or
+    the module-level ``DB_PATH`` when ``db_path`` is None). Returns a
+    plain ``sqlite3.Connection`` with the standard row_factory; the
+    caller is responsible for closing it."""
+    if db_path is None:
+        connection = sqlite3.connect(DB_PATH)
+    else:
+        connection = sqlite3.connect(str(db_path))
+    connection.row_factory = sqlite3.Row
+    return connection
 
 
 def embedding_cache_stats() -> dict:

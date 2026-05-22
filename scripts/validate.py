@@ -41,7 +41,8 @@ def _commands() -> List[List[str]]:
     return [
         [python, "-m", "compileall", "api_server.py", "database.py", "job_manager.py",
          "source_crawler.py", "scripts/fetch_registry_source.py",
-         "scripts/enable_registry_source.py"],
+         "scripts/enable_registry_source.py",
+         "artifact_extractor.py", "scripts/extract_artifact_text.py"],
         [python, "tests/test_jobs.py"],
         [python, "tests/test_postgres_dual_write.py"],
         [python, "tests/test_ai_reasoner_status.py"],
@@ -75,6 +76,9 @@ def _commands() -> List[List[str]]:
         [python, "scripts/enable_registry_source.py", "--help"],
         [python, "scripts/enable_registry_source.py", "--list"],
         [python, "tests/test_enable_registry_source.py"],
+        # M10.4 — artifact text extractor + operator CLI (offline tests).
+        [python, "scripts/extract_artifact_text.py", "--help"],
+        [python, "tests/test_artifact_extractor.py"],
         [npm, "test"],
     ]
 
