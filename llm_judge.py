@@ -1,0 +1,531 @@
+"""LLM Judge (M13.1a) — infrastructure only, no pipeline connection.
+
+The Judge is a constrained reasoning step that REVIEWS a deterministic
+verdict produced by :func:`verification_card._verdict_label` and can:
+
+* ``confirm`` — accept the verdict as-is.
+* ``downgrade`` — replace with a strictly more conservative label.
+* ``flag_for_review`` — escalate to the human review queue without
+  changing the stored label.
+
+The Judge CANNOT:
+
+* Upgrade a label (e.g. ``draft_needs_context`` → ``draft_verified``
+  is mechanically refused by :func:`validate_judge_response_json`).
+* Emit any label outside the documented ``draft_*`` set.
+* Bypass schema validation — any malformed response falls back to
+  ``confirm`` with the failure reason recorded.
+* Run during M13.1a's CI / validation — tests use mocked providers
+  and the production provider chain is stubs that always report
+  ``is_available() == False``.
+
+Designed for M13.1b connection to ``analyze_pipeline`` behind a feature
+flag. M13.1a only provides infrastructure plus a dry-run CLI so
+operators can observe what the Judge WOULD do against stored
+verdicts. The module is **not** imported by ``main.py`` /
+``api_server.py`` / any pipeline entry point — that contract is
+pinned by static tests in ``tests/test_llm_judge.py``.
+
+Safety invariants
+-----------------
+
+* ``truth_claim`` is always ``False`` in every serialised output.
+* ``operator_review_required`` is always ``True`` in every serialised
+  output.
+* No network I/O, no OpenAI / Anthropic imports at module level.
+* No public function raises — failures return
+  :func:`_safe_confirm_fallback`.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import time
+from dataclasses import dataclass, field
+from typing import Optional
+
+
+log = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Label set and conservatism ordering.
+#
+# The rank table mirrors the descriptive M11.0b ordering documented in
+# ``docs/VERDICT_LABEL_DIAGNOSTIC.md``. Lower rank = more conservative.
+# ``is_downgrade`` and the schema validator both consult this table; the
+# Judge can never produce a label whose rank is higher than the input's
+# rank.
+# ---------------------------------------------------------------------------
+
+
+LABEL_SEVERITY_RANK = {
+    "draft_unverified": 0,
+    "draft_needs_context": 1,
+    "draft_needs_review": 1,
+    "draft_needs_official_confirmation": 1,
+    "draft_disputed": 1,
+    "draft_high_risk_review": 1,
+    "draft_likely_true": 2,
+    "draft_verified": 3,
+}
+
+
+ALLOWED_JUDGE_ACTIONS = frozenset({"confirm", "downgrade", "flag_for_review"})
+
+
+# Used by the dry-run CLI when an operator passes ``--simulate-downgrade``
+# without specifying a target label. Kept here (not in the CLI) so the
+# Judge module owns the safe default.
+DEFAULT_DOWNGRADE_FALLBACK = "draft_needs_review"
+
+
+def _max_rank() -> int:
+    return max(LABEL_SEVERITY_RANK.values())
+
+
+def is_downgrade(from_label: str, to_label: str) -> bool:
+    """Returns True iff ``to_label`` is *strictly* more conservative than
+    ``from_label`` per :data:`LABEL_SEVERITY_RANK`.
+
+    Equality is **not** a downgrade — a same-rank lateral move is
+    refused by the schema validator. Unknown labels are treated as
+    ``_max_rank() + 1`` so any change to a known label appears as a
+    downgrade target (forcing explicit handling rather than silently
+    accepting unknown labels).
+    """
+    unknown = _max_rank() + 1
+    from_rank = LABEL_SEVERITY_RANK.get(from_label, unknown)
+    to_rank = LABEL_SEVERITY_RANK.get(to_label, unknown)
+    return to_rank < from_rank
+
+
+# ---------------------------------------------------------------------------
+# Provider abstraction.
+#
+# Stubs in M13.1a — both return ``is_available() == False`` and the
+# fallback path in ``run_judge`` produces a safe-confirm verdict. M13.1b
+# will replace these with real Anthropic / OpenAI clients behind a
+# feature flag. Importantly, no LLM SDK is imported at module load —
+# real implementations will lazy-import inside ``call`` so the M13.1a
+# module stays free of any anthropic / openai dependency.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class LLMRequest:
+    """One Judge query."""
+
+    system_prompt: str
+    user_prompt: str
+    model: str
+    max_tokens: int = 800
+    temperature: float = 0.0
+
+
+@dataclass
+class LLMResponse:
+    """One provider response."""
+
+    raw_text: str
+    model: str
+    provider: str
+    success: bool
+    error: Optional[str] = None
+    latency_ms: int = 0
+
+
+class ReasoningProvider:
+    """Abstract base — concrete implementations land in M13.1b."""
+
+    name: str = "abstract"
+
+    def is_available(self) -> bool:
+        return False
+
+    def call(self, request: LLMRequest) -> LLMResponse:
+        raise NotImplementedError
+
+
+class StubAnthropicProvider(ReasoningProvider):
+    """Placeholder for the M13.1b Anthropic implementation."""
+
+    name = "anthropic_stub"
+
+    def is_available(self) -> bool:
+        return False
+
+    def call(self, request: LLMRequest) -> LLMResponse:
+        return LLMResponse(
+            raw_text="",
+            model=request.model,
+            provider=self.name,
+            success=False,
+            error=(
+                "stub provider — M13.1a infrastructure only, "
+                "no real calls"
+            ),
+        )
+
+
+class StubOpenAIProvider(ReasoningProvider):
+    """Placeholder for the M13.1b OpenAI fallback implementation."""
+
+    name = "openai_stub"
+
+    def is_available(self) -> bool:
+        return False
+
+    def call(self, request: LLMRequest) -> LLMResponse:
+        return LLMResponse(
+            raw_text="",
+            model=request.model,
+            provider=self.name,
+            success=False,
+            error=(
+                "stub provider — M13.1a infrastructure only, "
+                "no real calls"
+            ),
+        )
+
+
+def get_default_provider_chain() -> list:
+    """Returns the provider chain in priority order. M13.1a returns
+    stubs; M13.1b will swap in real implementations behind a feature
+    flag without changing the chain shape."""
+    return [StubAnthropicProvider(), StubOpenAIProvider()]
+
+
+# ---------------------------------------------------------------------------
+# Judge prompt and schema.
+#
+# The system prompt is in Korean because the platform operates on
+# Korean policy / news claims. The user prompt is a template populated
+# from a :class:`JudgeInput` so the operator gets a deterministic
+# rendering for the dry-run CLI's diff display.
+# ---------------------------------------------------------------------------
+
+
+JUDGE_SYSTEM_PROMPT_KO = """\
+당신은 한국 정책/뉴스 검증 플랫폼의 LLM Judge입니다.
+
+당신의 역할:
+- 결정론적 검증 시스템이 이미 산출한 draft_* 라벨을 검토합니다.
+- 라벨을 더 보수적으로 변경(downgrade)하거나, 사람 검토(flag_for_review)를 요청하거나, 그대로 confirm 할 수 있습니다.
+- 라벨을 더 강한 방향으로 변경(upgrade)할 수 없습니다.
+- 어떤 새로운 사실도 만들지 마십시오. 제공된 evidence만 사용하십시오.
+
+라벨 보수성 순서 (낮을수록 보수적):
+- 0: draft_unverified
+- 1: draft_needs_context / draft_needs_review / draft_needs_official_confirmation / draft_disputed / draft_high_risk_review
+- 2: draft_likely_true
+- 3: draft_verified
+
+출력은 반드시 JSON 형식이어야 하며, 다음 스키마를 따라야 합니다:
+{
+  "action": "confirm" | "downgrade" | "flag_for_review",
+  "new_label": "<draft_* label if action is downgrade, else null>",
+  "reason_ko": "<한국어로 짧은 사유 (최대 200자)>",
+  "evidence_gaps": ["<누락된 증거 항목 리스트, 0~5개>"]
+}
+
+규칙:
+- action='downgrade'일 때만 new_label을 채우십시오. new_label은 현재 라벨보다 *반드시* 보수적이어야 합니다 (downgrade-only).
+- evidence가 약하거나 모순되거나 공식 출처가 없으면 downgrade하십시오.
+- 판단이 불확실하면 flag_for_review를 선택하십시오. 라벨을 임의로 바꾸지 마십시오.
+- 어떠한 경우에도 truth_claim을 True로 가정하지 마십시오.
+"""
+
+
+JUDGE_USER_PROMPT_TEMPLATE_KO = """\
+다음은 검토 대상 분석입니다.
+
+[현재 라벨]
+{current_label}
+
+[현재 신뢰도 점수]
+{policy_confidence_score}
+
+[검증 강도]
+{verification_strength}
+
+[주장 텍스트]
+{claim_text}
+
+[공식 출처 개수]
+{official_sources_count}
+
+[근거 요약]
+{evidence_summary}
+
+[모순 신호 요약]
+{contradiction_summary}
+
+[편향/프레이밍 신호 요약]
+{bias_framing_summary}
+
+위 정보를 바탕으로 JSON 응답을 출력하십시오.
+다른 텍스트는 출력하지 마십시오.
+"""
+
+
+# ---------------------------------------------------------------------------
+# Dataclasses
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class JudgeInput:
+    """Inputs to one Judge invocation. All fields default to safe
+    placeholders so a partially-populated SQLite row never crashes the
+    prompt builder."""
+
+    current_label: str
+    policy_confidence_score: Optional[int] = None
+    verification_strength: Optional[str] = None
+    claim_text: Optional[str] = None
+    official_sources_count: int = 0
+    evidence_summary: Optional[str] = None
+    contradiction_summary: Optional[str] = None
+    bias_framing_summary: Optional[str] = None
+
+
+@dataclass
+class JudgeVerdict:
+    """The Judge's decision on one input.
+
+    ``truth_claim`` and ``operator_review_required`` are kept on the
+    dataclass for completeness but the canonical safety values are
+    re-asserted at serialisation time in :func:`judge_verdict_to_dict`.
+    """
+
+    action: str
+    new_label: Optional[str] = None
+    reason_ko: str = ""
+    evidence_gaps: list = field(default_factory=list)
+    raw_response: Optional[str] = None
+    provider_used: Optional[str] = None
+    model: Optional[str] = None
+    latency_ms: int = 0
+    fell_back: bool = False
+    fallback_reason: Optional[str] = None
+    # Safety pins — always False / True regardless of LLM output.
+    truth_claim: bool = False
+    operator_review_required: bool = True
+
+
+# ---------------------------------------------------------------------------
+# Validators
+# ---------------------------------------------------------------------------
+
+
+def _safe_confirm_fallback(reason: str) -> JudgeVerdict:
+    """The single shared fallback path. Returned whenever the LLM is
+    unavailable, the response is malformed, the schema is invalid, or
+    the model tried to upgrade."""
+    return JudgeVerdict(
+        action="confirm",
+        new_label=None,
+        reason_ko=f"LLM 폴백: {reason}"[:200],
+        evidence_gaps=[],
+        fell_back=True,
+        fallback_reason=reason,
+    )
+
+
+def validate_judge_response_json(
+    text: str, current_label: str,
+) -> JudgeVerdict:
+    """Parses and validates the LLM's JSON response.
+
+    Returns a :class:`JudgeVerdict`. On ANY failure — empty text, parse
+    error, wrong type, invalid action, missing or invalid new_label,
+    or a refused upgrade attempt — returns :func:`_safe_confirm_fallback`
+    with the failure reason recorded. NEVER raises.
+
+    This function is the security boundary: even if the LLM returns the
+    string ``"upgrade"`` or wraps an upgrade attempt inside a
+    ``downgrade`` action, the validator refuses and the operator sees
+    ``confirm`` instead.
+    """
+    if not text or not str(text).strip():
+        return _safe_confirm_fallback("empty response")
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        return _safe_confirm_fallback(f"json parse error: {exc.msg}")
+    except Exception as exc:  # noqa: BLE001 — never propagate
+        return _safe_confirm_fallback(f"unexpected parse error: {exc}")
+
+    if not isinstance(data, dict):
+        return _safe_confirm_fallback("response not a JSON object")
+
+    action = data.get("action")
+    if action not in ALLOWED_JUDGE_ACTIONS:
+        return _safe_confirm_fallback(f"invalid action: {action!r}")
+
+    reason_raw = data.get("reason_ko") or data.get("reason") or ""
+    if not isinstance(reason_raw, str):
+        reason_raw = str(reason_raw)
+    reason = reason_raw[:200]
+
+    evidence_gaps_raw = data.get("evidence_gaps") or []
+    if not isinstance(evidence_gaps_raw, list):
+        evidence_gaps_raw = []
+    evidence_gaps = [str(g)[:100] for g in evidence_gaps_raw[:5]]
+
+    new_label = data.get("new_label")
+    if action == "downgrade":
+        if not new_label or new_label not in LABEL_SEVERITY_RANK:
+            return _safe_confirm_fallback(
+                f"downgrade with invalid new_label: {new_label!r}"
+            )
+        if not is_downgrade(current_label, new_label):
+            # CRITICAL: model tried to upgrade or move laterally.
+            return _safe_confirm_fallback(
+                f"refused upgrade attempt: {current_label} -> {new_label}"
+            )
+    else:
+        new_label = None
+
+    return JudgeVerdict(
+        action=action,
+        new_label=new_label,
+        reason_ko=reason,
+        evidence_gaps=evidence_gaps,
+        raw_response=text,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Judge entry point
+# ---------------------------------------------------------------------------
+
+
+DEFAULT_JUDGE_MODEL = "claude-sonnet-4-5"
+
+
+def build_judge_request(
+    judge_input: JudgeInput, model: str = DEFAULT_JUDGE_MODEL,
+) -> LLMRequest:
+    """Construct the :class:`LLMRequest` for one Judge query.
+
+    Long fields are truncated so a runaway article body cannot blow up
+    the token budget when M13.1b wires in real providers. The Judge is
+    intentionally short-context — its job is to react to the summary
+    fields produced by the deterministic pipeline, not to re-read the
+    article.
+    """
+    claim_text = (judge_input.claim_text or "정보 없음")[:1000]
+    evidence_summary = (judge_input.evidence_summary or "정보 없음")[:800]
+    contradiction_summary = (
+        judge_input.contradiction_summary or "정보 없음"
+    )[:400]
+    bias_framing_summary = (
+        judge_input.bias_framing_summary or "정보 없음"
+    )[:400]
+    score_value = (
+        judge_input.policy_confidence_score
+        if judge_input.policy_confidence_score is not None
+        else "정보 없음"
+    )
+    user_prompt = JUDGE_USER_PROMPT_TEMPLATE_KO.format(
+        current_label=judge_input.current_label,
+        policy_confidence_score=score_value,
+        verification_strength=judge_input.verification_strength or "정보 없음",
+        claim_text=claim_text,
+        official_sources_count=judge_input.official_sources_count,
+        evidence_summary=evidence_summary,
+        contradiction_summary=contradiction_summary,
+        bias_framing_summary=bias_framing_summary,
+    )
+    return LLMRequest(
+        system_prompt=JUDGE_SYSTEM_PROMPT_KO,
+        user_prompt=user_prompt,
+        model=model,
+        max_tokens=800,
+        temperature=0.0,
+    )
+
+
+def run_judge(
+    judge_input: JudgeInput,
+    providers: Optional[list] = None,
+    model: str = DEFAULT_JUDGE_MODEL,
+) -> JudgeVerdict:
+    """Invoke the Judge against the provider chain.
+
+    NEVER raises. On any failure — provider unavailable, provider
+    crash, provider returns ``success=False``, malformed JSON,
+    schema-invalid output, or refused upgrade — returns the safe
+    confirm fallback with a descriptive ``fallback_reason``.
+
+    A provider that crashes is treated as a transport failure and the
+    chain advances to the next provider. A provider that *succeeds*
+    but returns content the validator rejects is treated as a *content
+    failure*: the chain does NOT advance (the model spoke, it just
+    spoke badly), so the operator sees the validator's verdict.
+    """
+    if providers is None:
+        providers = get_default_provider_chain()
+
+    request = build_judge_request(judge_input, model=model)
+
+    last_error = None
+    for provider in providers:
+        if not provider.is_available():
+            last_error = f"{provider.name} unavailable"
+            continue
+        try:
+            start = time.time()
+            response = provider.call(request)
+            latency_ms = int((time.time() - start) * 1000)
+        except Exception as exc:  # noqa: BLE001
+            last_error = f"{provider.name} crashed: {exc}"
+            continue
+
+        if response is None or not response.success:
+            err = (response.error if response is not None else "no response")
+            last_error = f"{provider.name} returned error: {err}"
+            continue
+
+        verdict = validate_judge_response_json(
+            response.raw_text, judge_input.current_label,
+        )
+        verdict.provider_used = response.provider
+        verdict.model = response.model
+        verdict.latency_ms = latency_ms
+        return verdict
+
+    return _safe_confirm_fallback(last_error or "no available provider")
+
+
+# ---------------------------------------------------------------------------
+# Serialisation
+# ---------------------------------------------------------------------------
+
+
+def judge_verdict_to_dict(verdict: JudgeVerdict) -> dict:
+    """Serialise a :class:`JudgeVerdict` for storage / display.
+
+    ``truth_claim`` is always False; ``operator_review_required`` is
+    always True. These values are re-asserted here even if the
+    in-memory dataclass somehow carried different values, so any
+    downstream consumer sees the canonical safety state.
+    """
+    return {
+        "action": verdict.action,
+        "new_label": verdict.new_label,
+        "reason_ko": verdict.reason_ko,
+        "evidence_gaps": list(verdict.evidence_gaps or []),
+        "raw_response": verdict.raw_response,
+        "provider_used": verdict.provider_used,
+        "model": verdict.model,
+        "latency_ms": verdict.latency_ms,
+        "fell_back": verdict.fell_back,
+        "fallback_reason": verdict.fallback_reason,
+        "truth_claim": False,
+        "operator_review_required": True,
+    }

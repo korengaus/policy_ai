@@ -414,3 +414,19 @@ M13.0 added GitHub Actions CI. The verdict label diagnostic tests
 `scripts/validate.py`. Any future change to `_verdict_label` or
 `VERDICT_LABEL_BRANCHES` will be caught by the existing pinning
 tests before merge.
+
+## M13.1a — LLM Judge Infrastructure (this PR)
+
+M13.1a adds LLM Judge infrastructure as a standalone module
+(`llm_judge.py`) plus a dry-run CLI
+(`scripts/dry_run_llm_judge.py`). The Judge is NOT connected to
+`analyze_pipeline` in M13.1a. It mirrors the descriptive M11.0b label
+ordering as a concrete `LABEL_SEVERITY_RANK` table so any
+LLM-proposed downgrade can be mechanically validated.
+
+The Judge cannot upgrade a label — the validator refuses any
+`new_label` whose rank is not strictly lower than the current
+label's rank. Equality (a lateral move within the same rank) is
+also refused.
+
+See `docs/LLM_JUDGE.md` for full details.

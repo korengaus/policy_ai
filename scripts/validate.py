@@ -60,7 +60,9 @@ def _commands() -> List[List[str]]:
          # M12.0a — Postgres dual-write foundation.
          "postgres_storage.py", "scripts/check_postgres_health.py",
          # M12.0b — Postgres backfill.
-         "postgres_backfill.py", "scripts/run_postgres_backfill.py"],
+         "postgres_backfill.py", "scripts/run_postgres_backfill.py",
+         # M13.1a — LLM Judge infrastructure (dry-run only).
+         "llm_judge.py", "scripts/dry_run_llm_judge.py"],
         [python, "tests/test_jobs.py"],
         [python, "tests/test_postgres_dual_write.py"],
         [python, "tests/test_ai_reasoner_status.py"],
@@ -121,6 +123,10 @@ def _commands() -> List[List[str]]:
         [python, "scripts/run_postgres_backfill.py", "--help"],
         [python, "scripts/run_postgres_backfill.py", "--status"],
         [python, "tests/test_postgres_backfill.py"],
+        # M13.1a — LLM Judge dry-run CLI + tests.
+        [python, "scripts/dry_run_llm_judge.py", "--help"],
+        [python, "scripts/dry_run_llm_judge.py", "--status"],
+        [python, "tests/test_llm_judge.py"],
         [npm, "test"],
     ]
 

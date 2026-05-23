@@ -78,6 +78,7 @@ PROFILES = (
     "korean-constants",
     "postgres-dual-write",
     "postgres-backfill",
+    "llm-judge-dry-run",
     "full",
 )
 
@@ -1026,6 +1027,65 @@ def _postgres_backfill_tests_step() -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Phase 2 M13.1a — llm-judge-dry-run profile.
+#
+# Fully offline. Exercises the Judge CLI's --help / --status smokes
+# plus a --simulate-confirm round trip against a temp SQLite source so
+# the simulation pipeline is verified end-to-end. The profile uses
+# stub providers and built-in fake providers; no real LLM API call is
+# ever made and the Judge is NOT connected to analyze_pipeline in
+# M13.1a. Steps:
+#   1) scripts/dry_run_llm_judge.py --help     (CLI smoke)
+#   2) scripts/dry_run_llm_judge.py --status   (provider chain report)
+#   3) tests/test_llm_judge.py                 (offline tests, 59 cases)
+# ---------------------------------------------------------------------------
+
+
+def _llm_judge_help_step() -> dict:
+    return {
+        "name": "dry_run_llm_judge(--help)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "dry_run_llm_judge.py"),
+            "--help",
+        ],
+        "parser": _parse_llm_judge_help_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _llm_judge_status_step() -> dict:
+    return {
+        "name": "dry_run_llm_judge(--status)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "dry_run_llm_judge.py"),
+            "--status",
+        ],
+        "parser": _parse_llm_judge_status_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _llm_judge_tests_step() -> dict:
+    return {
+        "name": "test_llm_judge",
+        "command": [
+            _python(),
+            str(ROOT / "tests" / "test_llm_judge.py"),
+        ],
+        "parser": _parse_llm_judge_tests_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
 def _historical_dry_run_step() -> dict:
     return {
         "name": "historical_dry_run",
@@ -1228,6 +1288,17 @@ def _resolve_steps(args: argparse.Namespace) -> List[dict]:
         steps.append(_postgres_backfill_help_step())
         steps.append(_postgres_backfill_status_step())
         steps.append(_postgres_backfill_tests_step())
+
+    if profile == "llm-judge-dry-run":
+        # M13.1a — LLM Judge dry-run. Fully offline. The Judge is NOT
+        # connected to analyze_pipeline in M13.1a; --status reports
+        # both stub providers as unavailable; the tests exercise the
+        # validator, the run_judge orchestration, the CLI simulation
+        # flags, and the upgrade-refusal contract end-to-end with
+        # built-in fake providers. No real LLM API call is made.
+        steps.append(_llm_judge_help_step())
+        steps.append(_llm_judge_status_step())
+        steps.append(_llm_judge_tests_step())
 
     if profile == "full":
         if not args.skip_render and not args.skip_semantic_canary:
@@ -2481,6 +2552,83 @@ def _parse_postgres_backfill_tests_output(
         "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
         "summary": (
             f"test_postgres_backfill: exit_code={exit_code} "
+            f"ok_detected={has_ok}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "ok_detected": has_ok,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# M13.1a — llm-judge-dry-run profile parsers.
+# ---------------------------------------------------------------------------
+
+
+def _parse_llm_judge_help_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``dry_run_llm_judge.py --help`` must exit 0 and surface
+    the documented header text + the Exit codes section."""
+    ok = (
+        exit_code == 0
+        and "dry_run_llm_judge" in stdout
+        and "Exit codes" in stdout
+    )
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"dry_run_llm_judge --help: exit_code={exit_code} "
+            f"help_text_detected={ok}"
+        ),
+    }
+
+
+def _parse_llm_judge_status_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``--status`` must exit 0, list both stub providers, and
+    surface the M13.1a safety footer (no pipeline connection)."""
+    has_header = "LLM Judge Provider Status" in stdout
+    has_anthropic_stub = "anthropic_stub" in stdout
+    has_openai_stub = "openai_stub" in stdout
+    has_safety = "NOT connected to analyze_pipeline" in stdout
+    ok = (
+        exit_code == 0
+        and has_header
+        and has_anthropic_stub
+        and has_openai_stub
+        and has_safety
+    )
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"dry_run_llm_judge --status: exit_code={exit_code} "
+            f"header={has_header} anthropic_stub={has_anthropic_stub} "
+            f"openai_stub={has_openai_stub} safety_footer={has_safety}"
+        ),
+        "metrics": {
+            "exit_code": exit_code,
+            "header_detected": has_header,
+            "anthropic_stub_detected": has_anthropic_stub,
+            "openai_stub_detected": has_openai_stub,
+            "safety_footer_detected": has_safety,
+        },
+    }
+
+
+def _parse_llm_judge_tests_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``tests/test_llm_judge.py`` is a unittest runner —
+    exit 0 with an ``OK`` line means the suite passed."""
+    has_ok = "\nOK" in (stdout + "\n" + stderr)
+    ok = exit_code == 0 and has_ok
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"test_llm_judge: exit_code={exit_code} "
             f"ok_detected={has_ok}"
         ),
         "metrics": {
