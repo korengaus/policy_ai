@@ -738,5 +738,5 @@ def resolve_google_news_url(google_news_url: str) -> str:
         return google_news_url
 
     except Exception as error:
-        log.error("원문 URL 변환 실패:", error)
+        log.error(f'원문 URL 변환 실패: {error}')
         return google_news_url

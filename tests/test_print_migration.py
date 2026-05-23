@@ -484,5 +484,123 @@ class RuntimeSmokeTests(unittest.TestCase):
         self.assertIsInstance(attr, logging.Logger)
 
 
+# ---------------------------------------------------------------------------
+# M14.0b hotfix — multi-arg log call detection pin.
+#
+# print("a", "b") used to migrate to log.info("a", "b"). That's broken
+# because logging.Logger treats positional args as %-format arguments:
+# log.info("a", "b") attempts ``"a" % ("b",)`` and raises TypeError.
+# The hotfix rewrote every such call to ``log.info(f"a b")`` (or an
+# equivalent f-string). This pin guards against any future migration
+# regressing back to the multi-arg form.
+# ---------------------------------------------------------------------------
+
+
+_HOTFIX_TARGET_FILES = (
+    # All 13 originally-migrated files (M14.0b + M14.0c)
+    "main.py",
+    "official_crawler.py",
+    "verification_card.py",
+    "news_collector.py",
+    "article_extractor.py",
+    "evidence_comparator.py",
+    "policy_decision.py",
+    "policy_confidence.py",
+    "policy_impact.py",
+    "bias_framing_agent.py",
+    "evidence_extraction_agent.py",
+    "contradiction_agent.py",
+    "official_source_body.py",
+)
+
+
+# %s %d %r %f %(name)s — Python old-style format specifiers
+_PERCENT_FORMAT_RE = re.compile(
+    r"%[#0\- +]?[\d.]*[diouxXeEfFgGsra%]|%\([^)]+\)[diouxXeEfFgGsra]"
+)
+
+
+def _first_arg_has_percent_format(call_node: ast.Call) -> bool:
+    """True iff ``call_node.args[0]`` is a string literal (or f-string
+    whose literal parts) containing a %-format specifier. Such calls
+    use the stdlib logging pattern and must NOT be rewritten."""
+    if not call_node.args:
+        return False
+    first = call_node.args[0]
+    if isinstance(first, ast.Constant) and isinstance(first.value, str):
+        return bool(_PERCENT_FORMAT_RE.search(first.value))
+    if isinstance(first, ast.JoinedStr):
+        text = "".join(
+            v.value for v in first.values
+            if isinstance(v, ast.Constant) and isinstance(v.value, str)
+        )
+        return bool(_PERCENT_FORMAT_RE.search(text))
+    return False
+
+
+class MultiArgLogCallHotfixPin(unittest.TestCase):
+    """Every ``log.X(...)`` call in the migrated files must either:
+
+    * have at most one positional argument, OR
+    * use %-format on the first argument (stdlib logging pattern).
+
+    A multi-arg call with no %-format would raise TypeError at runtime
+    because ``logging.Logger`` treats positional args as
+    %-substitutions: ``log.info("a", "b")`` triggers ``"a" % ("b",)``
+    which fails with ``not all arguments converted``.
+
+    The bug surfaced in Render logs after M14.0b's mechanical
+    migration; the hotfix rewrote 92 such calls across 7 files. This
+    pin guards against regression.
+    """
+
+    LOG_METHODS = ("info", "warning", "error", "debug", "exception")
+    LOG_VARS = ("log", "logger")
+
+    def _is_log_call(self, node: ast.Call) -> bool:
+        func = node.func
+        if not isinstance(func, ast.Attribute):
+            return False
+        if func.attr not in self.LOG_METHODS:
+            return False
+        if not isinstance(func.value, ast.Name):
+            return False
+        return func.value.id in self.LOG_VARS
+
+    def test_no_multi_arg_log_calls_without_percent_format(self):
+        offenders = []
+        for filename in _HOTFIX_TARGET_FILES:
+            path = _PROJECT_ROOT / filename
+            raw = path.read_bytes()
+            if raw.startswith(b"\xef\xbb\xbf"):
+                raw = raw[3:]
+            tree = ast.parse(raw.decode("utf-8"))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                if not self._is_log_call(node):
+                    continue
+                if len(node.args) <= 1:
+                    continue
+                if _first_arg_has_percent_format(node):
+                    continue
+                offenders.append({
+                    "file": filename,
+                    "line": node.lineno,
+                    "col": node.col_offset,
+                    "method": node.func.attr,
+                    "n_args": len(node.args),
+                })
+        self.assertFalse(
+            offenders,
+            msg=(
+                "Multi-arg log.X() calls without %-format detected. "
+                "These crash at runtime with TypeError. Fix by "
+                "combining args into a single f-string. Offenders: "
+                f"{offenders}"
+            ),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

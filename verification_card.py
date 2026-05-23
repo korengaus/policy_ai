@@ -701,45 +701,32 @@ def build_verification_card(
 
 def print_verification_card(card: dict):
     log.info("\n----- Verification card -----")
-    log.info("claim_text:", card.get("claim_text"))
+    log.info(f"claim_text: {card.get('claim_text')}")
     log.info("claims:")
     for claim in card.get("claims") or []:
-        log.info("-", claim)
+        log.info(f'- {claim}')
     log.info("normalized_claims:")
     for claim in card.get("normalized_claims") or []:
-        log.info(
-            "-",
-            claim.get("actor"),
-            "|",
-            claim.get("action"),
-            "|",
-            claim.get("target"),
-            "|",
-            claim.get("status"),
-            "|",
-            claim.get("claim_type"),
-            "|",
-            claim.get("uncertainty_level"),
-        )
-    log.info("source_queries:", len(card.get("source_queries") or []))
-    log.info("source_candidates:", len(card.get("source_candidates") or []))
-    log.info("source_reliability_summary:", card.get("source_reliability_summary"))
-    log.info("evidence_snippets:", len(card.get("evidence_snippets") or []))
-    log.info("claim_evidence_quality_summary:", card.get("claim_evidence_quality_summary"))
-    log.info("evidence_quality_summary:", card.get("evidence_quality_summary"))
-    log.info("evidence_extraction_summary:", card.get("evidence_extraction_summary"))
-    log.info("contradiction_checks:", len(card.get("contradiction_checks") or []))
-    log.info("contradiction_summary:", card.get("contradiction_summary"))
-    log.info("bias_framing_analysis:", len(card.get("bias_framing_analysis") or []))
-    log.info("bias_framing_summary:", card.get("bias_framing_summary"))
-    log.debug("debug_summary:", card.get("debug_summary"))
-    log.info("verdict_label:", card.get("verdict_label"))
-    log.info("verdict_confidence:", card.get("verdict_confidence"))
-    log.info("source_reliability_score:", card.get("source_reliability_score"))
-    log.info("source_reliability_reason:", card.get("source_reliability_reason"))
-    log.info("evidence_summary:", card.get("evidence_summary"))
+        log.info(f"- {claim.get('actor')} | {claim.get('action')} | {claim.get('target')} | {claim.get('status')} | {claim.get('claim_type')} | {claim.get('uncertainty_level')}")
+    log.info(f"source_queries: {len(card.get('source_queries') or [])}")
+    log.info(f"source_candidates: {len(card.get('source_candidates') or [])}")
+    log.info(f"source_reliability_summary: {card.get('source_reliability_summary')}")
+    log.info(f"evidence_snippets: {len(card.get('evidence_snippets') or [])}")
+    log.info(f"claim_evidence_quality_summary: {card.get('claim_evidence_quality_summary')}")
+    log.info(f"evidence_quality_summary: {card.get('evidence_quality_summary')}")
+    log.info(f"evidence_extraction_summary: {card.get('evidence_extraction_summary')}")
+    log.info(f"contradiction_checks: {len(card.get('contradiction_checks') or [])}")
+    log.info(f"contradiction_summary: {card.get('contradiction_summary')}")
+    log.info(f"bias_framing_analysis: {len(card.get('bias_framing_analysis') or [])}")
+    log.info(f"bias_framing_summary: {card.get('bias_framing_summary')}")
+    log.debug(f"debug_summary: {card.get('debug_summary')}")
+    log.info(f"verdict_label: {card.get('verdict_label')}")
+    log.info(f"verdict_confidence: {card.get('verdict_confidence')}")
+    log.info(f"source_reliability_score: {card.get('source_reliability_score')}")
+    log.info(f"source_reliability_reason: {card.get('source_reliability_reason')}")
+    log.info(f"evidence_summary: {card.get('evidence_summary')}")
     log.info("missing_context:")
     for item in card.get("missing_context") or []:
-        log.info("-", item)
-    log.info("last_checked_at:", card.get("last_checked_at"))
-    log.info("review_status:", card.get("review_status"))
+        log.info(f'- {item}')
+    log.info(f"last_checked_at: {card.get('last_checked_at')}")
+    log.info(f"review_status: {card.get('review_status')}")

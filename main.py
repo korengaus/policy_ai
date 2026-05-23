@@ -219,7 +219,7 @@ def _get_cached_analysis_report(
         }
     )
     report_path = save_run_report(report, run_started_at)
-    log.info("\nSaved cached run report:", report_path)
+    log.info(f'\nSaved cached run report: {report_path}')
     report["report_path"] = str(report_path)
     return report
 
@@ -330,55 +330,48 @@ def print_ai_results(ai_result: dict):
 
     if not ai_result.get("ai_available"):
         log.info("AI reasoning unavailable")
-        log.info("reason:", ai_result.get("error"))
+        log.info(f"reason: {ai_result.get('error')}")
         log.info(ai_result.get("fallback_message"))
         return
 
-    log.info("summary:", ai_result.get("one_line_summary"))
-    log.info("policy signal:", ai_result.get("policy_signal_detected"))
-    log.info("main issue:", ai_result.get("main_policy_issue"))
-    log.info("execution probability:", str(ai_result.get("execution_probability")) + "%")
-    log.info("execution stage:", ai_result.get("execution_stage"))
-    log.info("market impact:", ai_result.get("market_impact_level"))
-    log.info("signal change:", ai_result.get("signal_change"))
-    log.info("official source needed:", ai_result.get("official_source_needed"))
-    log.info("official evidence found:", ai_result.get("official_evidence_found"))
-    log.info("official evidence summary:", ai_result.get("official_evidence_summary"))
-    log.info("official comparison status:", ai_result.get("official_comparison_status"))
-    log.info("official support score:", ai_result.get("official_support_score"))
-    log.info("official verification note:", ai_result.get("official_verification_note"))
+    log.info(f"summary: {ai_result.get('one_line_summary')}")
+    log.info(f"policy signal: {ai_result.get('policy_signal_detected')}")
+    log.info(f"main issue: {ai_result.get('main_policy_issue')}")
+    log.info(f"execution probability: {str(ai_result.get('execution_probability')) + '%'}")
+    log.info(f"execution stage: {ai_result.get('execution_stage')}")
+    log.info(f"market impact: {ai_result.get('market_impact_level')}")
+    log.info(f"signal change: {ai_result.get('signal_change')}")
+    log.info(f"official source needed: {ai_result.get('official_source_needed')}")
+    log.info(f"official evidence found: {ai_result.get('official_evidence_found')}")
+    log.info(f"official evidence summary: {ai_result.get('official_evidence_summary')}")
+    log.info(f"official comparison status: {ai_result.get('official_comparison_status')}")
+    log.info(f"official support score: {ai_result.get('official_support_score')}")
+    log.info(f"official verification note: {ai_result.get('official_verification_note')}")
 
     log.info("\nrecommended official sources:")
     for source in ai_result.get("recommended_official_sources", []):
         if isinstance(source, dict):
-            log.info(
-                "-",
-                source.get("source_name"),
-                "|",
-                source.get("source_type"),
-                "|",
-                source.get("search_url") or source.get("official_search_url"),
-            )
+            log.info(f"- {source.get('source_name')} | {source.get('source_type')} | {source.get('search_url') or source.get('official_search_url')}")
         else:
-            log.info("-", source)
+            log.info(f'- {source}')
 
     log.info("\nmemory comparison:")
     log.info(ai_result.get("memory_comparison"))
 
     log.info("\naffected groups:")
     for group in ai_result.get("affected_groups", []):
-        log.info("-", group)
+        log.info(f'- {group}')
 
     log.info("\nwhy it matters:")
     log.info(ai_result.get("why_it_matters"))
 
     log.info("\nevidence sentences:")
     for sentence in ai_result.get("evidence_sentences", []):
-        log.info("-", sentence)
+        log.info(f'- {sentence}')
 
     log.info("\nrisk factors:")
     for risk in ai_result.get("risk_factors", []):
-        log.info("-", risk)
+        log.info(f'- {risk}')
 
     log.info("\nfinal judgment:")
     log.info(ai_result.get("final_judgment"))
@@ -425,20 +418,20 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
             "news_results": [],
         }
         report_path = save_run_report(report, run_started_at)
-        log.info("\nSaved run report:", report_path)
+        log.info(f'\nSaved run report: {report_path}')
         report["report_path"] = str(report_path)
         return report
 
     for i, news in enumerate(news_results, start=1):
         log.info(f"\n========== News {i} ==========")
-        log.info("title:", news["title"])
-        log.info("published:", news["published"])
-        log.info("Google News link:", news["google_link"])
-        log.info("summary:", news["summary"])
+        log.info(f"title: {news['title']}")
+        log.info(f"published: {news['published']}")
+        log.info(f"Google News link: {news['google_link']}")
+        log.info(f"summary: {news['summary']}")
 
         log.info("\n----- Resolve original URL -----")
         original_url = resolve_google_news_url(news["google_link"])
-        log.info("original URL:", original_url)
+        log.info(f'original URL: {original_url}')
 
         article_id = make_article_id(news["title"], original_url)
         existing_ids = {article.get("article_id") for article in memory.get("articles", [])}
@@ -715,7 +708,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
             )
 
             log.info("\n----- Topic classification -----")
-            log.info("topic:", topic)
+            log.info(f'topic: {topic}')
 
             memory = update_memory_with_result(
                 memory=memory,
@@ -813,7 +806,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
 
         if not ai_result.get("ai_available"):
             log.info("\n----- Topic classification -----")
-            log.info("topic:", topic)
+            log.info(f'topic: {topic}')
 
         log.info("\n" + "=" * 80)
 
@@ -840,7 +833,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
         report_items=report_items,
     )
     report_path = save_run_report(report, run_started_at)
-    log.info("\nSaved run report:", report_path)
+    log.info(f'\nSaved run report: {report_path}')
     report["report_path"] = str(report_path)
     return report
 

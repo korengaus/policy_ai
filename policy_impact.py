@@ -220,13 +220,13 @@ def analyze_policy_impact(
 
 def print_policy_impact(policy_impact: dict):
     log.info("\n----- Policy impact -----")
-    log.info("affected_groups:", ", ".join(policy_impact.get("affected_groups") or []))
-    log.info("affected_sectors:", ", ".join(policy_impact.get("affected_sectors") or []))
-    log.info("impact_level:", policy_impact.get("impact_level"))
-    log.info("impact_direction:", policy_impact.get("impact_direction"))
-    log.info("market_sensitivity:", policy_impact.get("market_sensitivity"))
-    log.info("consumer_sensitivity:", policy_impact.get("consumer_sensitivity"))
-    log.info("business_sensitivity:", policy_impact.get("business_sensitivity"))
+    log.info(f"affected_groups: {', '.join(policy_impact.get('affected_groups') or [])}")
+    log.info(f"affected_sectors: {', '.join(policy_impact.get('affected_sectors') or [])}")
+    log.info(f"impact_level: {policy_impact.get('impact_level')}")
+    log.info(f"impact_direction: {policy_impact.get('impact_direction')}")
+    log.info(f"market_sensitivity: {policy_impact.get('market_sensitivity')}")
+    log.info(f"consumer_sensitivity: {policy_impact.get('consumer_sensitivity')}")
+    log.info(f"business_sensitivity: {policy_impact.get('business_sensitivity')}")
     log.info("impact_reasons:")
     for reason in policy_impact.get("impact_reasons") or []:
-        log.info("-", reason)
+        log.info(f'- {reason}')

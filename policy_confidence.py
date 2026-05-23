@@ -192,14 +192,14 @@ def calculate_policy_confidence(
 
 def print_policy_confidence(policy_confidence: dict):
     log.info("\n----- Policy confidence -----")
-    log.info("policy_confidence_score:", policy_confidence.get("policy_confidence_score"))
-    log.info("verification_strength:", policy_confidence.get("verification_strength"))
-    log.info("risk_level:", policy_confidence.get("risk_level"))
-    log.info("action_priority:", policy_confidence.get("action_priority"))
-    log.info("confidence_evidence_source:", policy_confidence.get("confidence_evidence_source"))
-    log.info("confidence_evidence_title:", policy_confidence.get("confidence_evidence_title"))
-    log.info("confidence_evidence_url:", policy_confidence.get("confidence_evidence_url"))
-    log.info("confidence_evidence_grade:", policy_confidence.get("confidence_evidence_grade"))
+    log.info(f"policy_confidence_score: {policy_confidence.get('policy_confidence_score')}")
+    log.info(f"verification_strength: {policy_confidence.get('verification_strength')}")
+    log.info(f"risk_level: {policy_confidence.get('risk_level')}")
+    log.info(f"action_priority: {policy_confidence.get('action_priority')}")
+    log.info(f"confidence_evidence_source: {policy_confidence.get('confidence_evidence_source')}")
+    log.info(f"confidence_evidence_title: {policy_confidence.get('confidence_evidence_title')}")
+    log.info(f"confidence_evidence_url: {policy_confidence.get('confidence_evidence_url')}")
+    log.info(f"confidence_evidence_grade: {policy_confidence.get('confidence_evidence_grade')}")
     log.info("confidence_reasons:")
     for reason in policy_confidence.get("confidence_reasons") or []:
-        log.info("-", reason)
+        log.info(f'- {reason}')

@@ -464,22 +464,16 @@ def compare_news_with_official_evidence(
 
 def print_evidence_comparison(evidence_comparison: dict):
     log.info("\n----- News vs official evidence comparison -----")
-    log.info("comparison_status:", evidence_comparison.get("comparison_status"))
-    log.info("support_score:", evidence_comparison.get("support_score"))
-    log.info("semantic_support_score:", evidence_comparison.get("semantic_support_score"))
-    log.info("matched_keywords:", ", ".join(evidence_comparison.get("matched_keywords", [])))
-    log.info("missing_keywords:", ", ".join(evidence_comparison.get("missing_keywords", [])))
-    log.info("conflict_signals:", ", ".join(evidence_comparison.get("conflict_signals", [])))
-    log.info(
-        "semantic_matched_concepts:",
-        ", ".join(evidence_comparison.get("semantic_matched_concepts", [])),
-    )
-    log.info(
-        "semantic_missing_concepts:",
-        ", ".join(evidence_comparison.get("semantic_missing_concepts", [])),
-    )
-    log.info("evidence_quality:", evidence_comparison.get("evidence_quality"))
-    log.info("verification_level:", evidence_comparison.get("verification_level"))
-    log.info("relevance_filter_summary:", evidence_comparison.get("relevance_filter_summary"))
-    log.info("comparison_summary:", evidence_comparison.get("comparison_summary"))
-    log.info("recommended_next_action:", evidence_comparison.get("recommended_next_action"))
+    log.info(f"comparison_status: {evidence_comparison.get('comparison_status')}")
+    log.info(f"support_score: {evidence_comparison.get('support_score')}")
+    log.info(f"semantic_support_score: {evidence_comparison.get('semantic_support_score')}")
+    log.info(f"matched_keywords: {', '.join(evidence_comparison.get('matched_keywords', []))}")
+    log.info(f"missing_keywords: {', '.join(evidence_comparison.get('missing_keywords', []))}")
+    log.info(f"conflict_signals: {', '.join(evidence_comparison.get('conflict_signals', []))}")
+    log.info(f"semantic_matched_concepts: {', '.join(evidence_comparison.get('semantic_matched_concepts', []))}")
+    log.info(f"semantic_missing_concepts: {', '.join(evidence_comparison.get('semantic_missing_concepts', []))}")
+    log.info(f"evidence_quality: {evidence_comparison.get('evidence_quality')}")
+    log.info(f"verification_level: {evidence_comparison.get('verification_level')}")
+    log.info(f"relevance_filter_summary: {evidence_comparison.get('relevance_filter_summary')}")
+    log.info(f"comparison_summary: {evidence_comparison.get('comparison_summary')}")
+    log.info(f"recommended_next_action: {evidence_comparison.get('recommended_next_action')}")
