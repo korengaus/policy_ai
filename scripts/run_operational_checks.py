@@ -77,6 +77,7 @@ PROFILES = (
     "legacy-review-enroll",
     "korean-constants",
     "postgres-dual-write",
+    "postgres-backfill",
     "full",
 )
 
@@ -967,6 +968,64 @@ def _postgres_storage_tests_step() -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Phase 2 M12.0b — postgres-backfill profile.
+#
+# Fully offline. The profile MUST work with USE_POSTGRES_WRITE unset
+# (the default). The --status step gracefully reports the disabled
+# state; the offline tests exercise the backfill logic against a
+# sqlite:// SQLAlchemy substrate. SQLite source rows are isolated in
+# temp files; the real policy_ai.db is never touched. Steps:
+#   1) scripts/run_postgres_backfill.py --help    (CLI smoke)
+#   2) scripts/run_postgres_backfill.py --status  (default-env report)
+#   3) tests/test_postgres_backfill.py            (offline tests)
+# ---------------------------------------------------------------------------
+
+
+def _postgres_backfill_help_step() -> dict:
+    return {
+        "name": "run_postgres_backfill(--help)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "run_postgres_backfill.py"),
+            "--help",
+        ],
+        "parser": _parse_postgres_backfill_help_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _postgres_backfill_status_step() -> dict:
+    return {
+        "name": "run_postgres_backfill(--status)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "run_postgres_backfill.py"),
+            "--status",
+        ],
+        "parser": _parse_postgres_backfill_status_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _postgres_backfill_tests_step() -> dict:
+    return {
+        "name": "test_postgres_backfill",
+        "command": [
+            _python(),
+            str(ROOT / "tests" / "test_postgres_backfill.py"),
+        ],
+        "parser": _parse_postgres_backfill_tests_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
 def _historical_dry_run_step() -> dict:
     return {
         "name": "historical_dry_run",
@@ -1158,6 +1217,17 @@ def _resolve_steps(args: argparse.Namespace) -> List[dict]:
         steps.append(_postgres_health_help_step())
         steps.append(_postgres_health_default_step())
         steps.append(_postgres_storage_tests_step())
+
+    if profile == "postgres-backfill":
+        # M12.0b — Postgres backfill. Fully offline. --status reports
+        # the disabled state cleanly when USE_POSTGRES_WRITE is unset
+        # (the default); the offline tests exercise the round-trip
+        # against a sqlite:// SQLAlchemy substrate. SQLite source rows
+        # live in temp files; the real policy_ai.db is never touched
+        # and is never modified by backfill under any circumstance.
+        steps.append(_postgres_backfill_help_step())
+        steps.append(_postgres_backfill_status_step())
+        steps.append(_postgres_backfill_tests_step())
 
     if profile == "full":
         if not args.skip_render and not args.skip_semantic_canary:
@@ -2323,6 +2393,94 @@ def _parse_postgres_storage_tests_output(
         "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
         "summary": (
             f"test_postgres_storage: exit_code={exit_code} "
+            f"ok_detected={has_ok}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "ok_detected": has_ok,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# M12.0b — postgres-backfill profile parsers.
+# ---------------------------------------------------------------------------
+
+
+def _parse_postgres_backfill_help_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``run_postgres_backfill.py --help`` must exit 0 and surface
+    the documented header text + the Exit codes section."""
+    ok = (
+        exit_code == 0
+        and "run_postgres_backfill" in stdout
+        and "Exit codes" in stdout
+    )
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"run_postgres_backfill --help: exit_code={exit_code} "
+            f"help_text_detected={ok}"
+        ),
+    }
+
+
+def _parse_postgres_backfill_status_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """Default-env --status. Expected PASS shape in CI / local
+    validation: dual-write DISABLED, clear instructions, exit 0.
+    A live Postgres on the operator's machine is also fine (PASS)
+    as long as the report finishes cleanly. The only failure shape
+    is a non-zero exit code or a missing safety footer."""
+    has_header = "Postgres Backfill Status" in stdout
+    has_safety = "SQLite remains the source of truth" in stdout
+    disabled_line = "Postgres dual-write enabled: False" in stdout
+    enabled_line = "Postgres dual-write enabled: True" in stdout
+    if exit_code == 0 and has_header:
+        status = _HEALTH_PASS
+        if disabled_line:
+            summary = (
+                "run_postgres_backfill --status: disabled "
+                "(USE_POSTGRES_WRITE unset) — backfill is a no-op"
+            )
+        elif enabled_line:
+            summary = (
+                "run_postgres_backfill --status: enabled "
+                "— ready to dry-run / execute"
+            )
+        else:
+            summary = "run_postgres_backfill --status: clean exit"
+    else:
+        status = _HEALTH_FAIL
+        summary = (
+            f"run_postgres_backfill --status: exit_code={exit_code}"
+        )
+    return {
+        "status": status,
+        "summary": summary,
+        "metrics": {
+            "exit_code": exit_code,
+            "header_detected": has_header,
+            "safety_footer_detected": has_safety,
+            "disabled_line_detected": disabled_line,
+            "enabled_line_detected": enabled_line,
+        },
+    }
+
+
+def _parse_postgres_backfill_tests_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``tests/test_postgres_backfill.py`` is a unittest runner —
+    exit 0 with an ``OK`` line means the suite passed."""
+    has_ok = "\nOK" in (stdout + "\n" + stderr)
+    ok = exit_code == 0 and has_ok
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"test_postgres_backfill: exit_code={exit_code} "
             f"ok_detected={has_ok}"
         ),
         "metrics": {

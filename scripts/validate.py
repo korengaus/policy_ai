@@ -53,7 +53,9 @@ def _commands() -> List[List[str]]:
          "scripts/enroll_legacy_weak_verified.py",
          "korean_constants.py",
          # M12.0a — Postgres dual-write foundation.
-         "postgres_storage.py", "scripts/check_postgres_health.py"],
+         "postgres_storage.py", "scripts/check_postgres_health.py",
+         # M12.0b — Postgres backfill.
+         "postgres_backfill.py", "scripts/run_postgres_backfill.py"],
         [python, "tests/test_jobs.py"],
         [python, "tests/test_postgres_dual_write.py"],
         [python, "tests/test_ai_reasoner_status.py"],
@@ -110,6 +112,10 @@ def _commands() -> List[List[str]]:
         # M12.0a — Postgres dual-write foundation.
         [python, "scripts/check_postgres_health.py", "--help"],
         [python, "tests/test_postgres_storage.py"],
+        # M12.0b — Postgres backfill CLI + tests.
+        [python, "scripts/run_postgres_backfill.py", "--help"],
+        [python, "scripts/run_postgres_backfill.py", "--status"],
+        [python, "tests/test_postgres_backfill.py"],
         [npm, "test"],
     ]
 

@@ -159,3 +159,92 @@ The new infrastructure is exercised by:
 
 All of these run offline. No real Postgres is required for the
 validation suite to pass.
+
+## M12.0b — Backfill Script (this PR)
+
+M12.0b adds `postgres_backfill.py` and `scripts/run_postgres_backfill.py`
+to copy existing SQLite rows into the M12.0a mirror tables. The
+backfill is:
+
+- Idempotent (re-running is safe)
+- Per-table selectable (`--table <name>`)
+- Dry-run by default
+- SQLite-read-only (never modifies the source)
+- Bounded by `--limit <N>` as an operator safety cap
+
+### When to run backfill
+
+After a Postgres instance is provisioned and `DATABASE_URL` +
+`USE_POSTGRES_WRITE=true` are set. Backfill is a **manual operator
+step**, not automatic. M12.0b does not enable dual-write on Render and
+does not run backfill on Render — the operator decides when both
+events happen.
+
+### Order of operations
+
+1. Provision Postgres (Render Postgres, Neon, etc.).
+2. Set env vars in your local shell first:
+
+   ```
+   USE_POSTGRES_WRITE=true
+   DATABASE_URL=postgresql+psycopg://user:pass@host:port/dbname
+   ```
+
+3. `python scripts/check_postgres_health.py` — confirm connectivity.
+4. `python scripts/run_postgres_backfill.py --status` — check counts.
+5. `python scripts/run_postgres_backfill.py --dry-run` — preview.
+6. `python scripts/run_postgres_backfill.py --execute --yes` — run.
+
+Only after local backfill succeeds should the Render env vars be set.
+
+### Idempotency strategies
+
+| Table                            | Strategy             | Conflict columns                       |
+|----------------------------------|----------------------|----------------------------------------|
+| analysis_results                 | skip_existing_id     | -                                      |
+| jobs                             | skip_existing_unique | id (text PK, not autoincrement)        |
+| embedding_cache                  | upsert_by_columns    | text_hash, provider, model             |
+| review_tasks                     | upsert_by_columns    | idempotency_key                        |
+| review_decisions                 | skip_existing_unique | decision_id (text PK)                  |
+| source_fetch_artifacts           | skip_existing_id     | -                                      |
+| artifact_text_extractions        | skip_existing_id     | -                                      |
+| artifact_evidence_candidates     | skip_existing_id     | -                                      |
+| verdict_producer_comparisons     | upsert_by_columns    | input_hash                             |
+| verdict_label_attributions       | upsert_by_columns    | analysis_id                            |
+
+Note: `jobs` and `review_decisions` use TEXT primary keys (not the
+integer autoincrement that the `skip_existing_id` strategy targets),
+so they use `skip_existing_unique` against the PK column for the same
+"already there?" semantics.
+
+### Coexistence with M1 dual-write
+
+M1 (`db/postgres.py`) writes to a separate normalised schema
+(`stories`, `claims`, `verdicts`, `audit_log`). M12.0b backfill does
+**NOT** touch the M1 tables. A separate M1 backfill would be a
+different milestone if/when needed. M12.0b imports nothing from
+`db.postgres` and the static-source tests in
+`tests/test_postgres_backfill.py` pin that contract.
+
+### Failure modes
+
+- Postgres unreachable → backfill exits with error 1, SQLite untouched.
+- One bad row → logged, counted in `rows_errored`, the loop continues.
+- Re-run safe → idempotency via primary key or UNIQUE constraint.
+- Backfill never modifies SQLite under any circumstance (pinned by
+  `test_backfill_never_modifies_sqlite`).
+
+### Validation (M12.0b)
+
+The new infrastructure is exercised by:
+
+- `python scripts/run_postgres_backfill.py --help`
+- `python scripts/run_postgres_backfill.py --status`
+- `python tests/test_postgres_backfill.py`
+- `python scripts/validate.py`
+- `python scripts/run_operational_checks.py --profile postgres-backfill`
+- `npm test` (regression — still byte-identical)
+
+All offline. No real Postgres is required for the validation suite to
+pass. Actual backfill execution is gated on operator intent
+(`--execute --yes`) and a provisioned `DATABASE_URL`.
