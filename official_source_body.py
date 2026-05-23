@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import os
 import re
 from collections import Counter
+from typing import Optional
 from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
+from requests.structures import CaseInsensitiveDict
 
 from text_utils import decode_response_text, sanitize_text
 from official_metadata import (
@@ -212,6 +215,212 @@ def _extract_body_text(html: str) -> tuple[str, str]:
     return sanitize_text(body.get_text(" ", strip=True)), "body_text"
 
 
+# ---------------------------------------------------------------------------
+# M13.3d — opt-in HTTP cache integration.
+#
+# When BOTH ``HTTP_CACHE_ENABLED=true`` (M13.3a master flag) AND
+# ``OFFICIAL_SOURCE_BODY_CACHE_ENABLED=true`` are set AND the URL's
+# domain is in the same allow-list as ``official_crawler``,
+# :func:`fetch_official_source_body` first checks a module-local cache
+# and returns a synthetic ``requests.Response`` on hit; on miss it
+# performs the original fetch and stores the bytes (200-only,
+# ≤5 MB, ``Cache-Control`` permitting).
+#
+# Cache-off path is byte-identical to pre-M13.3d: the wrapper delegates
+# straight to :func:`_do_fetch_official_source_body_raw` which is the
+# original :func:`requests.get` invocation hoisted into a helper.
+#
+# Conservative defaults:
+#     * Domain allow-list: imported lazily from
+#       ``official_crawler.GOV_CACHE_ALLOWED_DOMAINS`` (20 Korean
+#       ``.go.kr`` / ``.or.kr`` domains).
+#     * TTL: 1800 seconds (30 minutes) — government document bodies
+#       change less frequently than listings.
+#     * Body cap: 5 MB.
+#     * Separate cache instance from the M13.3b crawler cache so the
+#       two have independent eviction state (per the M13.3d brief).
+# ---------------------------------------------------------------------------
+
+
+_DEFAULT_OFFICIAL_SOURCE_BODY_CACHE_TTL_SECONDS = 1800  # 30 minutes
+_OFFICIAL_SOURCE_BODY_CACHE_MAX_BODY_BYTES = 5 * 1024 * 1024
+
+
+_REQUEST_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Connection": "close",
+}
+
+
+def is_official_source_body_cache_enabled() -> bool:
+    """True iff BOTH ``HTTP_CACHE_ENABLED=true`` (master flag, M13.3a)
+    AND ``OFFICIAL_SOURCE_BODY_CACHE_ENABLED`` is a truthy value
+    (case-insensitive). Any other value → False, so a typo never
+    silently enables the cache.
+    """
+    try:
+        from http_cache import is_http_cache_enabled
+    except Exception:  # noqa: BLE001 — never block fetches on cache infra
+        return False
+    if not is_http_cache_enabled():
+        return False
+    raw = os.environ.get(
+        "OFFICIAL_SOURCE_BODY_CACHE_ENABLED", "",
+    ).strip(" \t").lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def _get_official_source_body_cache_ttl_seconds() -> int:
+    """Default 1800s (30 min). Override via
+    ``OFFICIAL_SOURCE_BODY_CACHE_TTL_SECONDS`` env."""
+    raw = os.environ.get(
+        "OFFICIAL_SOURCE_BODY_CACHE_TTL_SECONDS", "",
+    ).strip(" \t")
+    if not raw:
+        return _DEFAULT_OFFICIAL_SOURCE_BODY_CACHE_TTL_SECONDS
+    try:
+        value = int(raw)
+    except ValueError:
+        return _DEFAULT_OFFICIAL_SOURCE_BODY_CACHE_TTL_SECONDS
+    return value if value > 0 else _DEFAULT_OFFICIAL_SOURCE_BODY_CACHE_TTL_SECONDS
+
+
+_BODY_CACHE = None  # type: Optional[object]
+
+
+def _get_body_cache():
+    """Process-local cache singleton, distinct from the
+    :func:`http_cache.get_default_cache` instance so eviction state
+    is independent of the M13.3b crawler cache."""
+    global _BODY_CACHE
+    if _BODY_CACHE is None:
+        from http_cache import HttpCache
+        _BODY_CACHE = HttpCache(
+            max_entries=500,
+            default_ttl_seconds=_DEFAULT_OFFICIAL_SOURCE_BODY_CACHE_TTL_SECONDS,
+        )
+    return _BODY_CACHE
+
+
+def _reset_body_cache_for_tests() -> None:
+    """Drop the module-local cache singleton. Used by the M13.3d
+    test suite to keep cases independent."""
+    global _BODY_CACHE
+    if _BODY_CACHE is not None:
+        try:
+            _BODY_CACHE.clear()
+        except Exception:  # noqa: BLE001
+            pass
+    _BODY_CACHE = None
+
+
+def _do_fetch_official_source_body_raw(url: str, timeout: int):
+    """The original pre-M13.3d ``requests.get`` invocation, hoisted
+    so the cache-off path is literally the original code. Do NOT
+    modify this function — that is the byte-identicality contract."""
+    return requests.get(
+        url,
+        timeout=timeout,
+        allow_redirects=True,
+        headers=_REQUEST_HEADERS,
+    )
+
+
+def _response_from_cache_entry(entry, url: str):
+    """Construct a ``requests.Response`` that behaves identically to
+    the live one for the attributes consumed downstream
+    (``status_code``, ``content``, ``headers``, ``url``, encoding via
+    :func:`text_utils.decode_response_text`)."""
+    response = requests.Response()
+    response._content = entry.body  # noqa: SLF001 — public-via-property attribute
+    response.status_code = entry.status_code
+    response.headers = CaseInsensitiveDict(entry.headers or {})
+    response.url = url
+    response.reason = "OK" if entry.status_code == 200 else ""
+    return response
+
+
+def _fetch_with_cache(url: str, timeout: int):
+    """Cache-gated wrapper around :func:`_do_fetch_official_source_body_raw`.
+
+    Cache-on activates only when all of the following hold:
+
+    * ``OFFICIAL_SOURCE_BODY_CACHE_ENABLED`` is truthy.
+    * ``HTTP_CACHE_ENABLED=true`` (M13.3a master flag).
+    * The URL's domain is in
+      :data:`official_crawler.GOV_CACHE_ALLOWED_DOMAINS`.
+
+    Otherwise this function delegates straight to the raw fetcher so
+    the byte-identicality guarantee holds.
+    """
+    if not is_official_source_body_cache_enabled():
+        return _do_fetch_official_source_body_raw(url, timeout)
+
+    try:
+        from http_cache import extract_domain
+        from official_crawler import GOV_CACHE_ALLOWED_DOMAINS
+    except Exception:  # noqa: BLE001 — cache infra must never block fetches
+        return _do_fetch_official_source_body_raw(url, timeout)
+
+    if extract_domain(url) not in GOV_CACHE_ALLOWED_DOMAINS:
+        return _do_fetch_official_source_body_raw(url, timeout)
+
+    cache = _get_body_cache()
+
+    entry = cache.get(url)
+    if entry is not None:
+        log.info(
+            "official_source_body_cache_event",
+            extra={
+                "url": url,
+                "status_code": entry.status_code,
+                "cache_hit": True,
+                "body_bytes": entry.bytes_size,
+            },
+        )
+        return _response_from_cache_entry(entry, url)
+
+    response = _do_fetch_official_source_body_raw(url, timeout)
+
+    try:
+        body_bytes = response.content or b""
+        if (
+            response.status_code == 200
+            and len(body_bytes) <= _OFFICIAL_SOURCE_BODY_CACHE_MAX_BODY_BYTES
+        ):
+            cache.put(
+                url=url,
+                body=body_bytes,
+                status_code=response.status_code,
+                headers=dict(response.headers),
+                ttl_seconds=_get_official_source_body_cache_ttl_seconds(),
+            )
+    except Exception as exc:  # noqa: BLE001 — cache must not affect fetches
+        log.warning(
+            "official_source_body_cache_put_failed",
+            extra={"url": url, "error": str(exc)},
+        )
+
+    log.info(
+        "official_source_body_cache_event",
+        extra={
+            "url": url,
+            "status_code": response.status_code,
+            "cache_hit": False,
+            "body_bytes": (
+                len(response.content) if response.content else 0
+            ),
+        },
+    )
+    return response
+
+
 def fetch_official_source_body(url: str, timeout: int = 10) -> dict:
     result = {
         "url": url or "",
@@ -229,21 +438,7 @@ def fetch_official_source_body(url: str, timeout: int = 10) -> dict:
         return result
 
     try:
-        response = requests.get(
-            url,
-            timeout=timeout,
-            allow_redirects=True,
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/124.0 Safari/537.36"
-                ),
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
-                "Connection": "close",
-            },
-        )
+        response = _fetch_with_cache(url, timeout)
         result["status_code"] = response.status_code
         content_type = response.headers.get("content-type", "").lower()
         if response.status_code >= 400:

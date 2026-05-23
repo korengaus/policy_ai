@@ -82,6 +82,7 @@ PROFILES = (
     "frontend-build",
     "http-cache",
     "official-crawler-cache",
+    "extended-cache",
     "cache-measurement-dry",
     "structured-logging",
     "print-migration",
@@ -1250,6 +1251,36 @@ def _official_crawler_cache_underlying_tests_step() -> dict:
     }
 
 
+def _official_source_body_cache_tests_step() -> dict:
+    """M13.3d — cache integration in official_source_body."""
+    return {
+        "name": "test_official_source_body_cache",
+        "command": [
+            _python(),
+            str(ROOT / "tests" / "test_official_source_body_cache.py"),
+        ],
+        "parser": _parse_official_source_body_cache_tests_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _news_collector_cache_tests_step() -> dict:
+    """M13.3d — cache integration on the Google News RSS path only."""
+    return {
+        "name": "test_news_collector_cache",
+        "command": [
+            _python(),
+            str(ROOT / "tests" / "test_news_collector_cache.py"),
+        ],
+        "parser": _parse_news_collector_cache_tests_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Phase 2 M13.3c — cache-measurement-dry profile.
 #
@@ -1863,6 +1894,18 @@ def _resolve_steps(args: argparse.Namespace) -> List[dict]:
         # covered by tests/test_http_cache.py::FetchWithCacheTests.
         steps.append(_official_crawler_cache_tests_step())
         steps.append(_official_crawler_cache_underlying_tests_step())
+
+    if profile == "extended-cache":
+        # M13.3d — cache expansion to official_source_body +
+        # news_collector. Fully offline. Each module has its own
+        # CacheOffByteIdentityTests regression pin (default-disabled,
+        # byte-identical to pre-M13.3d behaviour). M13.3a + M13.3b
+        # regression suites re-run here so a single profile covers
+        # the whole cache surface.
+        steps.append(_http_cache_tests_step())
+        steps.append(_official_crawler_cache_tests_step())
+        steps.append(_official_source_body_cache_tests_step())
+        steps.append(_news_collector_cache_tests_step())
 
     if profile == "cache-measurement-dry":
         # M13.3c — cache measurement + activation tooling.
@@ -3453,6 +3496,44 @@ def _parse_official_crawler_cache_tests_output(
         "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
         "summary": (
             f"test_official_crawler_cache: exit_code={exit_code} "
+            f"ok_detected={has_ok}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "ok_detected": has_ok,
+        },
+    }
+
+
+def _parse_official_source_body_cache_tests_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """M13.3d — cache integration in official_source_body."""
+    has_ok = "\nOK" in (stdout + "\n" + stderr)
+    ok = exit_code == 0 and has_ok
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"test_official_source_body_cache: exit_code={exit_code} "
+            f"ok_detected={has_ok}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "ok_detected": has_ok,
+        },
+    }
+
+
+def _parse_news_collector_cache_tests_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """M13.3d — cache integration on the Google News RSS path."""
+    has_ok = "\nOK" in (stdout + "\n" + stderr)
+    ok = exit_code == 0 and has_ok
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"test_news_collector_cache: exit_code={exit_code} "
             f"ok_detected={has_ok}"
         ),
         "metrics": {

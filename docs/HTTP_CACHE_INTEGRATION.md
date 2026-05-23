@@ -185,3 +185,24 @@ the cache on Render and verify it once enabled:
 The activation itself remains an operator decision via Render env
 vars. M13.3c is purely tooling and documentation; no production code
 that runs during a normal `analyze_pipeline` call was modified.
+
+## M13.3d — Cache Expansion to official_source_body + news_collector
+
+M13.3d follows the M13.3b pattern for two additional modules:
+
+- `official_source_body.fetch_official_source_body` — gated by
+  `OFFICIAL_SOURCE_BODY_CACHE_ENABLED`. Caches Korean government
+  document bodies (.go.kr / .or.kr) with a 30-minute TTL. Same domain
+  allow-list as `official_crawler` (lazy-imported to keep a single
+  source of truth).
+- `news_collector._parse_google_news_rss` — gated by
+  `NEWS_COLLECTOR_CACHE_ENABLED`. Caches the `news.google.com` RSS
+  fetch only, with a 5-minute TTL. Naver / Daum fallbacks are NOT
+  routed through the cache.
+
+Both modules ship with their own `CacheOffByteIdentityTests` pin so
+the default-off state is byte-identical to pre-M13.3d behaviour.
+
+See `docs/CACHE_EXPANSION.md` for the activation procedure,
+rollback steps, the full flag matrix, and the verification
+pins.

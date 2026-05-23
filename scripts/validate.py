@@ -158,6 +158,12 @@ def _commands() -> List[List[str]]:
         # (feature-flagged, default off). The byte-identicality
         # regression pin lives in CacheOffByteIdentityTests.
         [python, "tests/test_official_crawler_cache.py"],
+        # M13.3d — cache expansion to official_source_body +
+        # news_collector. Each has its own feature flag and its own
+        # CacheOffByteIdentityTests regression pin.
+        [python, "-m", "compileall", "official_source_body.py", "news_collector.py"],
+        [python, "tests/test_official_source_body_cache.py"],
+        [python, "tests/test_news_collector_cache.py"],
         # M13.3c — cache measurement + activation tooling.
         # --help smokes confirm the scripts load and parse args;
         # the unit tests exercise the parser, verdict thresholds,

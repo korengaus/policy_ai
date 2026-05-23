@@ -111,13 +111,22 @@ PRESERVED_REAL_ERRORS: tuple[tuple[str, str], ...] = (
 )
 
 
-# Total log call count across the 13 migrated files post-M14.4.
-# This number is invariant — M14.4 only shifted levels, never added
-# or removed a call. If you change it, you've broken the M14.4
-# contract.
-EXPECTED_TOTAL_LOG_CALLS = 254
+# Total log call count across the 13 migrated files.
+#
+# Baseline lineage:
+#   * M14.0c (after print() migration): 254
+#   * M14.4 (reclassification only): 254 (invariant — only levels shifted)
+#   * M13.3d (cache instrumentation added 2× log.info + 1× log.warning
+#     in official_source_body and 2× log.info + 2× log.warning in
+#     news_collector): 254 + 7 = 261
+#
+# Any future milestone that legitimately adds log calls bumps this
+# expected count; the contract M14.4 actually pins is the *level
+# distribution*, not the absolute count.
+EXPECTED_TOTAL_LOG_CALLS = 261
 
 # Post-M14.4: 12 (down from 17 pre-M14.4 — 5 reclassifications).
+# M13.3d added log.info / log.warning calls only — no new log.error.
 EXPECTED_TOTAL_LOG_ERRORS = 12
 
 

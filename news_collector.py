@@ -1,12 +1,14 @@
 import feedparser
 import hashlib
 import json
+import os
 import re
 import requests
 from bs4 import BeautifulSoup
 from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from typing import Optional
 from urllib.parse import quote, urljoin, urlparse
 from googlenewsdecoder import gnewsdecoder
 
@@ -619,6 +621,184 @@ def search_daum_news_fallback(query: str, max_results: int = 3) -> tuple[list[di
         return [], str(error)
 
 
+# ---------------------------------------------------------------------------
+# M13.3d — opt-in HTTP cache for the Google News RSS fetch only.
+#
+# When BOTH ``HTTP_CACHE_ENABLED=true`` (M13.3a master flag) AND
+# ``NEWS_COLLECTOR_CACHE_ENABLED`` is truthy AND the RSS URL's host is
+# ``news.google.com``, :func:`_parse_google_news_rss` first checks a
+# module-local cache. On hit, the cached raw bytes are re-parsed via
+# ``feedparser.parse(bytes)``. On miss, the bytes are fetched via
+# ``requests.get`` (so we can persist them) and then parsed.
+#
+# Cache-off path is byte-identical to pre-M13.3d:
+# ``_parse_google_news_rss`` falls back to ``feedparser.parse(rss_url)``
+# which is the original call. The wrapper adds zero observable effect
+# when either flag is off or the URL is not a Google News RSS URL.
+#
+# Naver / Daum / direct fallbacks live in different functions
+# (``search_naver_news_fallback``, ``search_daum_news_fallback``) and
+# are NOT touched by M13.3d — those are rare error paths where
+# freshness matters more than latency.
+#
+# Conservative defaults:
+#     * Host allow-list: exactly ``news.google.com`` (not generalised).
+#     * TTL: 300 seconds (5 minutes) — RSS feeds update fast.
+#     * Body cap: 2 MB (Google News RSS is small; reject anything huge).
+#     * Separate cache instance from the M13.3b/M13.3d crawler caches.
+# ---------------------------------------------------------------------------
+
+
+_GOOGLE_NEWS_RSS_HOST = "news.google.com"
+_DEFAULT_RSS_CACHE_TTL_SECONDS = 300  # 5 minutes
+_NEWS_COLLECTOR_CACHE_MAX_BODY_BYTES = 2 * 1024 * 1024
+
+
+def is_news_collector_cache_enabled() -> bool:
+    """True iff BOTH ``HTTP_CACHE_ENABLED=true`` (master flag, M13.3a)
+    AND ``NEWS_COLLECTOR_CACHE_ENABLED`` is truthy (case-insensitive).
+    Any other value → False, so a typo never silently enables the cache.
+    """
+    try:
+        from http_cache import is_http_cache_enabled
+    except Exception:  # noqa: BLE001 — never block fetches on cache infra
+        return False
+    if not is_http_cache_enabled():
+        return False
+    raw = os.environ.get(
+        "NEWS_COLLECTOR_CACHE_ENABLED", "",
+    ).strip(" \t").lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def _get_rss_cache_ttl_seconds() -> int:
+    """Default 300s (5 min). Override via
+    ``NEWS_COLLECTOR_CACHE_TTL_SECONDS`` env."""
+    raw = os.environ.get(
+        "NEWS_COLLECTOR_CACHE_TTL_SECONDS", "",
+    ).strip(" \t")
+    if not raw:
+        return _DEFAULT_RSS_CACHE_TTL_SECONDS
+    try:
+        value = int(raw)
+    except ValueError:
+        return _DEFAULT_RSS_CACHE_TTL_SECONDS
+    return value if value > 0 else _DEFAULT_RSS_CACHE_TTL_SECONDS
+
+
+_RSS_CACHE = None  # type: Optional[object]
+
+
+def _get_rss_cache():
+    """Process-local RSS cache singleton, distinct from any other
+    HttpCache instance so eviction state is independent."""
+    global _RSS_CACHE
+    if _RSS_CACHE is None:
+        from http_cache import HttpCache
+        _RSS_CACHE = HttpCache(
+            max_entries=200,
+            default_ttl_seconds=_DEFAULT_RSS_CACHE_TTL_SECONDS,
+        )
+    return _RSS_CACHE
+
+
+def _reset_rss_cache_for_tests() -> None:
+    """Drop the module-local RSS cache singleton."""
+    global _RSS_CACHE
+    if _RSS_CACHE is not None:
+        try:
+            _RSS_CACHE.clear()
+        except Exception:  # noqa: BLE001
+            pass
+    _RSS_CACHE = None
+
+
+def _parse_google_news_rss(rss_url: str):
+    """Cache-gated wrapper around ``feedparser.parse(rss_url)``.
+
+    Cache-on activates only when all of the following hold:
+
+    * ``NEWS_COLLECTOR_CACHE_ENABLED`` is truthy.
+    * ``HTTP_CACHE_ENABLED=true`` (M13.3a master flag).
+    * ``urlparse(rss_url).netloc`` equals ``news.google.com``.
+
+    Otherwise this function delegates straight to
+    ``feedparser.parse(rss_url)`` so the byte-identicality guarantee
+    holds. Naver / Daum / direct-URL paths must NOT route through
+    here; they call ``feedparser`` (or ``requests.get``) directly.
+    """
+    if not is_news_collector_cache_enabled():
+        return feedparser.parse(rss_url)
+
+    try:
+        from http_cache import extract_domain
+    except Exception:  # noqa: BLE001
+        return feedparser.parse(rss_url)
+
+    if extract_domain(rss_url) != _GOOGLE_NEWS_RSS_HOST:
+        return feedparser.parse(rss_url)
+
+    cache = _get_rss_cache()
+
+    entry = cache.get(rss_url)
+    if entry is not None:
+        log.info(
+            "news_collector_cache_event",
+            extra={
+                "url": rss_url,
+                "status_code": entry.status_code,
+                "cache_hit": True,
+                "body_bytes": entry.bytes_size,
+            },
+        )
+        return feedparser.parse(entry.body)
+
+    # Miss — fetch raw bytes via requests so we can persist them. Any
+    # network exception falls back to feedparser's own fetch (which is
+    # what the cache-off path would do anyway) — never propagate cache
+    # plumbing errors to the caller.
+    try:
+        response = requests.get(
+            rss_url, headers=REQUEST_HEADERS, timeout=10,
+        )
+        body_bytes = response.content or b""
+    except Exception as exc:  # noqa: BLE001 — cache fetch must not break the pipeline
+        log.warning(
+            "news_collector_cache_fetch_failed",
+            extra={"url": rss_url, "error": str(exc)},
+        )
+        return feedparser.parse(rss_url)
+
+    try:
+        if (
+            response.status_code == 200
+            and len(body_bytes) <= _NEWS_COLLECTOR_CACHE_MAX_BODY_BYTES
+        ):
+            cache.put(
+                url=rss_url,
+                body=body_bytes,
+                status_code=response.status_code,
+                headers=dict(response.headers),
+                ttl_seconds=_get_rss_cache_ttl_seconds(),
+            )
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "news_collector_cache_put_failed",
+            extra={"url": rss_url, "error": str(exc)},
+        )
+
+    log.info(
+        "news_collector_cache_event",
+        extra={
+            "url": rss_url,
+            "status_code": response.status_code,
+            "cache_hit": False,
+            "body_bytes": len(body_bytes),
+        },
+    )
+    return feedparser.parse(body_bytes)
+
+
 def search_google_news_rss_with_meta(query: str, max_results: int = 3):
     cached = _cached_news_response(query, max_results)
     if cached is not None:
@@ -630,7 +810,7 @@ def search_google_news_rss_with_meta(query: str, max_results: int = 3):
         f"q={encoded_query}&hl=ko&gl=KR&ceid=KR:ko"
     )
 
-    feed = feedparser.parse(rss_url)
+    feed = _parse_google_news_rss(rss_url)
     raw_results = _stable_sort_news([_entry_to_news(entry) for entry in feed.entries])
     raw_rss_count = len(raw_results)
     recent_results = [
