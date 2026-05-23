@@ -128,6 +128,14 @@ def _commands() -> List[List[str]]:
         # M11.1 — legacy weak-verified review-queue enrollment.
         [python, "scripts/enroll_legacy_weak_verified.py", "--help"],
         [python, "tests/test_legacy_review_enrollment.py"],
+        # M11.3 — read-only audit of the M11.1 candidate list. Compile
+        # + --help smoke confirms the script loads; the test suite
+        # pins idempotency, atomic-write, Korean round-trip, and the
+        # read-only contract (no review_tasks ever created by the
+        # audit script).
+        [python, "-m", "compileall", "scripts/audit_legacy_enrollment.py"],
+        [python, "scripts/audit_legacy_enrollment.py", "--help"],
+        [python, "tests/test_audit_legacy_enrollment.py"],
         # M11.2 — centralized Korean keyword constants (read-move refactor).
         [python, "tests/test_korean_constants.py"],
         # M12.0a — Postgres dual-write foundation.

@@ -1636,3 +1636,14 @@ through the same UI and decision flow as any other task. The CLI
 never auto-approves, never auto-publishes, and never modifies
 `analysis_results`. See `docs/VERDICT_LABEL_DIAGNOSTIC.md` for the
 full operator workflow.
+
+## Legacy Weak-Verified Enrollment
+
+Historical stories that should have been routed to the reviewer queue
+but weren't are identified by `scripts/audit_legacy_enrollment.py` (M11.3)
+and enrolled by `scripts/enroll_legacy_weak_verified.py` (M11.1). The
+M11.3 audit produces a read-only JSON report under `reports/` listing
+every candidate; the operator reviews that JSON, then runs the M11.1
+`--enroll --yes` flow to perform the actual enrollment. See
+`docs/LEGACY_ENROLLMENT_RUNBOOK.md` for the full operator procedure
+including pre-run checks, post-enroll verification, and rollback.

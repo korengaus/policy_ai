@@ -75,6 +75,7 @@ PROFILES = (
     "verdict-comparison",
     "verdict-label-diagnostic",
     "legacy-review-enroll",
+    "legacy-enrollment-audit",
     "korean-constants",
     "postgres-dual-write",
     "postgres-backfill",
@@ -872,6 +873,38 @@ def _legacy_review_enroll_tests_step() -> dict:
             str(ROOT / "tests" / "test_legacy_review_enrollment.py"),
         ],
         "parser": _parse_enroll_tests_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _audit_legacy_enrollment_help_step() -> dict:
+    """M11.3 — read-only audit CLI --help smoke."""
+    return {
+        "name": "audit_legacy_enrollment --help",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "audit_legacy_enrollment.py"),
+            "--help",
+        ],
+        "parser": _parse_audit_legacy_enrollment_help_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _audit_legacy_enrollment_tests_step() -> dict:
+    """M11.3 — audit script test suite (idempotency, atomic-write,
+    read-only contract, Korean round-trip)."""
+    return {
+        "name": "test_audit_legacy_enrollment",
+        "command": [
+            _python(),
+            str(ROOT / "tests" / "test_audit_legacy_enrollment.py"),
+        ],
+        "parser": _parse_audit_legacy_enrollment_tests_output,
         "hits_render": False,
         "may_call_openai": False,
         "optional": False,
@@ -1806,6 +1839,18 @@ def _resolve_steps(args: argparse.Namespace) -> List[dict]:
         steps.append(_verdict_label_diag_summary_step())
         steps.append(_verdict_label_diag_tests_step())
         steps.append(_verdict_label_b08_fix_tests_step())
+
+    if profile == "legacy-enrollment-audit":
+        # M11.3 — read-only audit step for the M11.1 candidate set.
+        # Bundles the M11.1 regression suite (so the upstream contract
+        # this audit depends on stays intact) and the M11.3 audit
+        # tests (which pin idempotency, atomic-write, Korean
+        # round-trip, and the read-only no-review_tasks-write
+        # contract). NO DB writes during this profile; tests use
+        # temp DBs under ignore_cleanup_errors=True.
+        steps.append(_legacy_review_enroll_tests_step())
+        steps.append(_audit_legacy_enrollment_help_step())
+        steps.append(_audit_legacy_enrollment_tests_step())
 
     if profile == "legacy-review-enroll":
         # M11.1 — read-mostly enrollment of legacy weak-verified rows.
@@ -3002,6 +3047,45 @@ def _parse_enroll_tests_output(
         "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
         "summary": (
             f"test_legacy_review_enrollment: exit_code={exit_code} "
+            f"ok_detected={has_ok}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "ok_detected": has_ok,
+        },
+    }
+
+
+def _parse_audit_legacy_enrollment_help_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """M11.3 — audit CLI --help smoke. Pass iff exit 0 and the help
+    text mentions the M11.3 milestone."""
+    combined = stdout + "\n" + stderr
+    ok = exit_code == 0 and "M11.3" in combined
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"audit_legacy_enrollment --help: exit_code={exit_code} "
+            f"mentions_M11_3={'M11.3' in combined}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "help_mentions_milestone": "M11.3" in combined,
+        },
+    }
+
+
+def _parse_audit_legacy_enrollment_tests_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """M11.3 audit script test suite. Pass iff exit 0 + unittest 'OK'."""
+    has_ok = "\nOK" in (stdout + "\n" + stderr)
+    ok = exit_code == 0 and has_ok
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"test_audit_legacy_enrollment: exit_code={exit_code} "
             f"ok_detected={has_ok}"
         ),
         "metrics": {
