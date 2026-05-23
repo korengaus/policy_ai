@@ -370,11 +370,81 @@ class ModuleLevelStaticChecks(unittest.TestCase):
             )
 
     def test_uses_bytes_io(self):
-        """Build script must use read_bytes/write_bytes (not
-        read_text/write_text) so Windows newline translation cannot
-        violate byte-identicality."""
-        self.assertIn("read_bytes", self.source)
-        self.assertIn("write_bytes", self.source)
+        """Build script must use ``read_bytes`` / ``write_bytes`` and
+        MUST NOT call ``read_text`` / ``write_text`` anywhere — Windows
+        ``open(..., encoding='utf-8')`` defaults to universal newline
+        translation (``\\n`` -> ``\\r\\n`` on write) which would
+        silently violate the M13.2a byte-identical guarantee.
+
+        The check uses ``ast`` instead of substring matching so a future
+        edit that happens to *mention* ``read_text`` in a comment
+        without actually calling it still passes, while a real call site
+        is caught. M13.2a hotfix: substring matching was the previous
+        implementation and was demonstrably insufficient when the bug
+        was line-ending-related rather than text-mode-related; the AST
+        form is the canonical pin going forward.
+        """
+        import ast
+
+        tree = ast.parse(self.source)
+        forbidden_methods = {"read_text", "write_text"}
+        required_methods = {"read_bytes", "write_bytes"}
+        forbidden_hits = []
+        seen_required = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if not isinstance(func, ast.Attribute):
+                continue
+            name = func.attr
+            if name in forbidden_methods:
+                forbidden_hits.append(
+                    f"line {node.lineno}: call to .{name}(...)"
+                )
+            if name in required_methods:
+                seen_required.add(name)
+        self.assertFalse(
+            forbidden_hits,
+            msg=(
+                "build_index.py contains forbidden text-mode I/O call(s): "
+                + "; ".join(forbidden_hits)
+            ),
+        )
+        missing_required = required_methods - seen_required
+        self.assertFalse(
+            missing_required,
+            msg=(
+                "build_index.py must call "
+                + ", ".join(sorted(required_methods))
+                + f" but is missing: {sorted(missing_required)}"
+            ),
+        )
+
+    def test_marker_is_bytes_literal(self):
+        """``CSS_MARKER`` must be a bytes literal — a Python str would
+        force decode/encode round-trips on every build and re-open the
+        newline-translation surface."""
+        import ast
+
+        tree = ast.parse(self.source)
+        marker_value = None
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign):
+                continue
+            targets = [t for t in node.targets if isinstance(t, ast.Name)]
+            if not any(t.id == "CSS_MARKER" for t in targets):
+                continue
+            if isinstance(node.value, ast.Constant):
+                marker_value = node.value.value
+                break
+        self.assertIsNotNone(
+            marker_value, msg="CSS_MARKER assignment not found",
+        )
+        self.assertIsInstance(
+            marker_value, bytes,
+            msg=f"CSS_MARKER must be bytes literal, got {type(marker_value).__name__}",
+        )
 
 
 # ---------------------------------------------------------------------------

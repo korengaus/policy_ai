@@ -1,0 +1,45 @@
+# Repo-wide default: text files use LF on disk in the working tree and
+# in the repo. Overrides the operator's core.autocrlf so checkouts agree
+# on Windows, macOS, and Linux CI runners.
+* text=auto eol=lf
+
+# Frontend build inputs and the served artifact MUST be LF — required
+# by frontend/build_index.py's byte-identical --check. Without these
+# pins, an operator with core.autocrlf=true on Windows can stage a
+# CRLF working-tree file while git stores LF in the index, and CI
+# fails because the assembled bytes from template+css no longer match
+# the served artifact.
+web/index.html              text eol=lf
+frontend/template.html      text eol=lf
+frontend/styles/main.css    text eol=lf
+frontend/dist_checksum.txt  text eol=lf
+
+# Source code
+*.py    text eol=lf
+*.js    text eol=lf
+*.html  text eol=lf
+*.css   text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.toml  text eol=lf
+*.ini   text eol=lf
+*.txt   text eol=lf
+*.cfg   text eol=lf
+
+# Binary — never normalize these.
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.woff      binary
+*.woff2     binary
+*.ttf       binary
+*.eot       binary
+*.otf       binary
+*.pdf       binary
+*.db        binary
+*.sqlite    binary
+*.sqlite3   binary
