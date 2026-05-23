@@ -62,7 +62,9 @@ def _commands() -> List[List[str]]:
          # M12.0b — Postgres backfill.
          "postgres_backfill.py", "scripts/run_postgres_backfill.py",
          # M13.1a — LLM Judge infrastructure (dry-run only).
-         "llm_judge.py", "scripts/dry_run_llm_judge.py"],
+         "llm_judge.py", "scripts/dry_run_llm_judge.py",
+         # M13.2a — frontend build pipeline.
+         "frontend/build_index.py"],
         [python, "tests/test_jobs.py"],
         [python, "tests/test_postgres_dual_write.py"],
         [python, "tests/test_ai_reasoner_status.py"],
@@ -127,6 +129,11 @@ def _commands() -> List[List[str]]:
         [python, "scripts/dry_run_llm_judge.py", "--help"],
         [python, "scripts/dry_run_llm_judge.py", "--status"],
         [python, "tests/test_llm_judge.py"],
+        # M13.2a — frontend build pipeline. --check enforces the
+        # byte-identical guarantee between frontend/ source and the
+        # committed web/index.html artifact. Drift here fails CI.
+        [python, "frontend/build_index.py", "--check"],
+        [python, "tests/test_frontend_build.py"],
         [npm, "test"],
     ]
 

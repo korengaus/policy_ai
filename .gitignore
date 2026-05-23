@@ -13,3 +13,13 @@ policy_ai.db
 .ruff_cache/
 node_modules/
 .github/workflows/*.log
+
+# M13.2a — Frontend build pipeline.
+# Both of these ARE committed (they are the deployed artifact and the
+# drift-detection signal). Listed here as a deliberate non-ignore so a
+# future "ignore everything generated" sweep does not accidentally drop
+# them.
+#   - frontend/dist_checksum.txt   IS committed (CI verifies it)
+#   - web/index.html               IS committed (it's the deployed page)
+# Nothing else under frontend/ is auto-generated, so no new ignore rules
+# are required.

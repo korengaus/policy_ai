@@ -79,6 +79,7 @@ PROFILES = (
     "postgres-dual-write",
     "postgres-backfill",
     "llm-judge-dry-run",
+    "frontend-build",
     "full",
 )
 
@@ -1086,6 +1087,65 @@ def _llm_judge_tests_step() -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Phase 2 M13.2a — frontend-build profile.
+#
+# Fully offline. Verifies the build pipeline's byte-identical
+# guarantee between frontend/ source and the committed web/index.html
+# artifact. --status is read-only; --check is read-only; both refuse
+# to write any file. The repo-level integration test in
+# tests/test_frontend_build.py is the canonical "no drift" pin.
+# Steps:
+#   1) frontend/build_index.py --status   (paths + checksums; no writes)
+#   2) frontend/build_index.py --check    (byte-identical guarantee)
+#   3) tests/test_frontend_build.py       (synthetic + repo-level tests)
+# ---------------------------------------------------------------------------
+
+
+def _frontend_build_status_step() -> dict:
+    return {
+        "name": "frontend_build(--status)",
+        "command": [
+            _python(),
+            str(ROOT / "frontend" / "build_index.py"),
+            "--status",
+        ],
+        "parser": _parse_frontend_build_status_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _frontend_build_check_step() -> dict:
+    return {
+        "name": "frontend_build(--check)",
+        "command": [
+            _python(),
+            str(ROOT / "frontend" / "build_index.py"),
+            "--check",
+        ],
+        "parser": _parse_frontend_build_check_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _frontend_build_tests_step() -> dict:
+    return {
+        "name": "test_frontend_build",
+        "command": [
+            _python(),
+            str(ROOT / "tests" / "test_frontend_build.py"),
+        ],
+        "parser": _parse_frontend_build_tests_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
 def _historical_dry_run_step() -> dict:
     return {
         "name": "historical_dry_run",
@@ -1299,6 +1359,17 @@ def _resolve_steps(args: argparse.Namespace) -> List[dict]:
         steps.append(_llm_judge_help_step())
         steps.append(_llm_judge_status_step())
         steps.append(_llm_judge_tests_step())
+
+    if profile == "frontend-build":
+        # M13.2a — frontend build pipeline. Fully offline. --status
+        # and --check are both read-only; the offline tests exercise
+        # idempotency, marker validation, --check pass/fail paths,
+        # and the canonical repo-level integration check. The build
+        # script depends on stdlib only — no bundler, no npm
+        # dependency, no Node tool chain.
+        steps.append(_frontend_build_status_step())
+        steps.append(_frontend_build_check_step())
+        steps.append(_frontend_build_tests_step())
 
     if profile == "full":
         if not args.skip_render and not args.skip_semantic_canary:
@@ -2629,6 +2700,91 @@ def _parse_llm_judge_tests_output(
         "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
         "summary": (
             f"test_llm_judge: exit_code={exit_code} "
+            f"ok_detected={has_ok}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "ok_detected": has_ok,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# M13.2a — frontend-build profile parsers.
+# ---------------------------------------------------------------------------
+
+
+def _parse_frontend_build_status_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``frontend/build_index.py --status`` is read-only and must
+    exit 0 with the documented label set."""
+    has_template = "Template:" in stdout
+    has_css = "CSS:" in stdout
+    has_served = "Served HTML:" in stdout
+    has_checksum_label = "Checksum" in stdout
+    ok = (
+        exit_code == 0
+        and has_template
+        and has_css
+        and has_served
+        and has_checksum_label
+    )
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"frontend_build --status: exit_code={exit_code} "
+            f"template={has_template} css={has_css} "
+            f"served={has_served} checksum={has_checksum_label}"
+        ),
+        "metrics": {
+            "exit_code": exit_code,
+            "template_label": has_template,
+            "css_label": has_css,
+            "served_label": has_served,
+            "checksum_label": has_checksum_label,
+        },
+    }
+
+
+def _parse_frontend_build_check_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``--check`` exit 0 with ``matches build output exactly`` means
+    the byte-identical guarantee holds. Anything else is a drift and
+    must surface as a runner-level FAIL."""
+    matches_line = "matches build output exactly" in stdout
+    drift_signal = (
+        "does not match" in stderr
+        or "First diff at byte" in stderr
+        or "does not exist" in stderr
+    )
+    ok = exit_code == 0 and matches_line and not drift_signal
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"frontend_build --check: exit_code={exit_code} "
+            f"matches={matches_line} drift_signal={drift_signal}"
+        ),
+        "metrics": {
+            "exit_code": exit_code,
+            "matches_line_detected": matches_line,
+            "drift_signal_detected": drift_signal,
+        },
+    }
+
+
+def _parse_frontend_build_tests_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``tests/test_frontend_build.py`` is a unittest runner —
+    exit 0 with an ``OK`` line means the suite passed."""
+    has_ok = "\nOK" in (stdout + "\n" + stderr)
+    ok = exit_code == 0 and has_ok
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"test_frontend_build: exit_code={exit_code} "
             f"ok_detected={has_ok}"
         ),
         "metrics": {
