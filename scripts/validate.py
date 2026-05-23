@@ -128,6 +128,11 @@ def _commands() -> List[List[str]]:
         # M11.1 — legacy weak-verified review-queue enrollment.
         [python, "scripts/enroll_legacy_weak_verified.py", "--help"],
         [python, "tests/test_legacy_review_enrollment.py"],
+        # M11.4b — dead-duplicate removal pin. AST-level uniqueness +
+        # signature + behavioral pins for verification_card.
+        # _missing_context_specific. The dead L491 copy was deleted;
+        # this test catches any future re-introduction.
+        [python, "tests/test_verification_card_dedup.py"],
         # M11.3 — read-only audit of the M11.1 candidate list. Compile
         # + --help smoke confirms the script loads; the test suite
         # pins idempotency, atomic-write, Korean round-trip, and the

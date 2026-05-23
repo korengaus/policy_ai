@@ -192,3 +192,48 @@ confirm the diagnosis-only outcome did not perturb anything:
 - Removing dead code branches in `evidence_comparator` (future M11.5)
 - Source-file modifications to either duplicate — deferred pending
   operator adjudication of Duplicate 1's behavioral divergence.
+
+## Resolution (M11.4b)
+
+**Duplicate 1 (`_missing_context_specific` in verification_card.py):**
+
+- L491 (first, dead — shadowed by L530) was deleted. ~37 lines of
+  function body + the 2 blank-line separator that followed it were
+  removed; the two blank lines preceding the deleted function now
+  serve as the PEP 8 separator before the surviving definition.
+- L530 (second, active — what Python was already executing) is now
+  the sole definition. It moved up to L491 after the deletion but is
+  otherwise byte-for-byte unchanged.
+- Production behavior is unchanged: L530 was the only version ever
+  called at runtime. Render and the Render baseline smoke should
+  return byte-identical results before and after this PR.
+- Uniqueness pinned by
+  `tests/test_verification_card_dedup.py::UniquenessTests::test_missing_context_specific_defined_exactly_once`.
+- Behavioral contract pinned by 3 further classes in the same file:
+  - `SignatureTests` — pins the L530 signature.
+  - `StrictUrlAcceptanceTests` — pins that ONLY `selected_document_url`
+    counts as a usable detail URL (the L530 strict rule; the dead L491
+    also accepted `official_search_url` / `search_url`).
+  - `KoreanMessagePinTests` — pins three L530 user-facing strings:
+    the `weak_official_match` message, the `excluded_non_policy_page`
+    message, and the default fallback "최종 공개 전에는…" phrasing.
+
+**Duplicate 2 (`_official_adjusted_evidence_quality` cross-module):**
+
+- Audit misclassification confirmed in M11.4. The functions in
+  `verification_card.py` and `pipeline_debug.py` have different names
+  (`_official_adjusted_evidence_quality` vs
+  `_official_adjusted_quality_summary`) and different signatures
+  (dict-with-flag vs. bool-direct). They are not duplicates in any
+  literal sense.
+- No action needed. Closed.
+
+### M11.4b verification
+
+- All 11 cases in `tests/test_verification_card_dedup.py` pass.
+- The 3 verdict regression suites stay green:
+  `test_verdict_label_b08_fix` (24), `test_verdict_label_diagnostic` (42),
+  `test_verdict_producer_comparison` (37).
+- `scripts/validate.py` adds the new dedup test to its run set.
+- `npm test` remains byte-identical (frontend / build / regression
+  unchanged).

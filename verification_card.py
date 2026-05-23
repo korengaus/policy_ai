@@ -498,45 +498,6 @@ def _missing_context_specific(
         if not official_evidence_results:
             missing.append("공식기관 후보를 찾지 못했습니다.")
         else:
-            has_url = any(
-                result.get("selected_document_url")
-                or result.get("official_search_url")
-                or result.get("search_url")
-                for result in official_evidence_results or []
-            )
-            has_body = any(
-                int(result.get("document_text_length") or len(str(result.get("document_text_snippet") or ""))) >= 300
-                for result in official_evidence_results or []
-            )
-            if not has_url:
-                missing.append("공식기관 후보는 있으나 확인 가능한 상세 URL이 부족합니다.")
-            elif any(result.get("error") for result in official_evidence_results or []):
-                missing.append("공식기관 URL은 확인됐지만 본문 수집에 실패했습니다.")
-            elif has_body:
-                missing.append("공식기관 본문은 수집됐지만 핵심 주장과의 직접 일치가 부족합니다.")
-            else:
-                missing.append("공식기관 후보는 확인되었지만 실제 본문 또는 상세 문서 본문은 아직 수집되지 않았습니다.")
-    if evidence_comparison.get("verification_level") in {"weak_official_match", "low_confidence_match"}:
-        missing.append("공식문서와 뉴스 주장 사이의 정책명, 대상, 시행 여부 직접 확인이 필요합니다.")
-    if evidence_comparison.get("verification_level") == "excluded_non_policy_page":
-        missing.append("수집된 공식문서가 목록, 안내, 민원 문서로 제외되었습니다.")
-    if official_sources and any(result.get("error") for result in official_evidence_results or []):
-        missing.append("일부 공식기관 검색 또는 상세문서 접근에 실패했습니다.")
-    if not missing:
-        missing.append("최종 공개 전 사람 검토와 원문 재확인이 필요합니다.")
-    return missing
-
-
-def _missing_context_specific(
-    official_sources: list[dict],
-    evidence_comparison: dict,
-    official_evidence_results: list[dict],
-) -> list[str]:
-    missing = []
-    if not official_sources:
-        if not official_evidence_results:
-            missing.append("공식기관 후보를 찾지 못했습니다.")
-        else:
             has_detail_url = any(result.get("selected_document_url") for result in official_evidence_results or [])
             has_body = any(
                 int(result.get("document_text_length") or len(str(result.get("document_text_snippet") or ""))) >= 300
