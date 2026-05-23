@@ -165,3 +165,131 @@ Request ID propagation: VERIFIED
 
 This runs as part of `scripts/validate.py` and the
 `structured-logging` operational profile.
+
+## M14.3b — Background Worker Propagation (this milestone)
+
+M14.3a set `request_id` in the HTTP handler's context. M14.3b extends
+this to background job workers so the request_id flows from:
+
+```
+HTTP request → api_server middleware → job_manager.enqueue helpers
+            → worker thread → analyze_pipeline → all 13 logger files
+```
+
+### How it works
+
+1. When code calls `job_manager.submit_in_context(pool, func, *args)`
+   (or `job_manager.run_in_thread_with_context(func, *args)`), the
+   current contextvars context is captured via
+   `request_context.capture_context()`.
+2. The captured context is passed to the worker as a closure variable.
+3. When the worker starts running, it is invoked inside the captured
+   context via `request_context.run_in_captured_context(ctx, func, ...)`.
+4. Inside the captured context, every `log.X(...)` call automatically
+   picks up the original request_id via `get_request_id()`.
+
+### Two propagation helpers
+
+| Helper | When to use |
+|---|---|
+| `job_manager.submit_in_context(executor, func, *args, **kwargs)` | Submitting a job to an existing `concurrent.futures.Executor` (returns a `Future`). |
+| `job_manager.run_in_thread_with_context(func, *args, **kwargs)` | Synchronous spawn-and-join into a fresh `threading.Thread` (returns the result, re-raises exceptions). |
+
+Both are thin wrappers over `request_context.capture_context()` +
+`request_context.run_in_captured_context()`, which are the underlying
+primitives. Use the primitives directly if you have a custom worker
+runtime (e.g., a `multiprocessing.Pool` with `initializer=` — though
+that case crosses process boundaries and would require additional
+plumbing not provided here).
+
+### The api_server hot path already propagates
+
+The production `/jobs/analyze` path is:
+
+```
+asyncio.create_task(_execute_job(...))
+  → coroutine
+  → asyncio.to_thread(_run_pipeline_for_job, ...)
+  → sync function on default executor
+  → analyze_pipeline(...)
+```
+
+Both `asyncio.create_task` (since Python 3.7) and `asyncio.to_thread`
+(Python 3.9+) copy the current contextvars context automatically. So
+request_id already reaches the worker thread *without* any explicit
+plumbing on the api_server side. The M14.3b helpers exist for:
+
+1. **Defensive coverage** — a future refactor that swaps
+   `asyncio.to_thread` for a custom executor would silently drop
+   context. The pinning tests in
+   `tests/test_job_request_id_propagation.py` and
+   `tests/test_end_to_end_request_id_through_job.py` make this
+   regression visible.
+2. **Non-asyncio entry points** — `scheduler.py`, batch tools, the
+   LLM judge worker pool planned for M13.1b, ad-hoc operator scripts.
+3. **Self-documenting intent** — `submit_in_context` says exactly what
+   it does at the submit site; `executor.submit(func, ...)` is
+   ambiguous about context behavior.
+
+### Concurrency isolation
+
+`contextvars` are designed for exactly this: capturing one request's
+state and resuming it in another execution context (thread, asyncio
+task, etc.) without leakage. Multiple concurrent requests' workers see
+different `request_id`s, even when they run on the same thread pool.
+
+The pin
+`tests/test_job_request_id_propagation.py::ConcurrentJobIsolationTests::test_five_concurrent_jobs_each_see_own_request_id`
+enqueues 5 jobs with 5 distinct request_ids, gates them behind a
+single `threading.Event` so they race, then asserts every worker
+observed its own ID. A naive implementation that captured the context
+at module import time, or that mutated a shared global, would fail
+this test.
+
+A second pin
+`...::ConcurrentJobIsolationTests::test_thread_pool_reuse_does_not_leak_rid`
+catches the more subtle bug of *thread-pool worker reuse leakage*: the
+same worker thread executes two consecutive jobs; the second job must
+NOT inherit the first job's request_id from the thread's prior context.
+
+### What still works without request_id
+
+- `scheduler.py` runs `analyze_pipeline` without any HTTP context.
+  Workers invoked from scheduler emit logs with no `request_id` field
+  — same as pre-M14.3a behavior.
+- CLI scripts, local testing, ad-hoc subprocess calls: all unchanged.
+
+The pin
+`tests/test_end_to_end_request_id_through_job.py::EndToEndPropagationTests::test_no_rid_at_request_time_no_rid_in_log`
+confirms this: when no request_id is set at submit time, the worker's
+JSON log line omits the `request_id` key entirely (byte-identical to
+pre-M14.3a output, same as the M14.3a BackwardCompatibilityPin).
+
+### Backward compatibility
+
+| Pin | What it guards against |
+|---|---|
+| `BackwardCompatibilityPin::test_pipeline_call_without_request_id_works` | Adding a hard dependency on request_id being set |
+| `BackwardCompatibilityPin::test_submit_in_context_without_rid_works` | The submit path crashing when context is empty |
+| `WorkerDoesNotLeakBackToCallerTests::test_worker_set_does_not_leak` | A naive impl that runs the worker in the caller's context |
+| `SubmitInContextBasicTests::test_submit_captures_at_submit_time_not_at_call_time` | A naive impl that captures context lazily at worker-start instead of at submit |
+
+### What's NOT done (M14.3c — future)
+
+- **Outbound HTTP headers**: when the worker calls OpenAI, news
+  sources, or government sites, those outbound requests don't yet
+  include `X-Request-ID` in their headers. M14.3c will add optional
+  outbound propagation for tracing across services.
+
+### Rollback
+
+To revert M14.3b:
+
+1. Revert the M14.3b commit.
+2. Run `python scripts/validate.py` + `npm test` to confirm green.
+3. No data migration needed — the helpers are pure in-memory plumbing.
+
+`api_server.py` was not modified in M14.3b, so the production hot
+path continues to propagate request_id via the Python stdlib's
+built-in asyncio context-copying. The M14.3a middleware and the
+JSON formatter integration are independent of the M14.3b helpers.

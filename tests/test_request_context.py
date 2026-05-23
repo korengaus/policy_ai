@@ -380,5 +380,102 @@ class BackwardCompatibilityPin(unittest.TestCase):
         self.assertEqual(payload["extra"]["foo"], "bar")
 
 
+# ---------------------------------------------------------------------------
+# M14.3b — capture_context / run_in_captured_context primitives
+# ---------------------------------------------------------------------------
+
+
+class CaptureAndRunInContextTests(unittest.TestCase):
+    """Verify the M14.3b primitives that worker submission relies on."""
+
+    def setUp(self):
+        self._token = request_context.set_request_id(None)
+
+    def tearDown(self):
+        request_context.reset_request_id(self._token)
+
+    def test_capture_context_returns_context_type(self):
+        import contextvars as _contextvars
+        ctx = request_context.capture_context()
+        self.assertIsInstance(ctx, _contextvars.Context)
+
+    def test_run_in_captured_context_sees_captured_request_id(self):
+        observed = []
+
+        def worker():
+            observed.append(request_context.get_request_id())
+
+        with request_context.request_id_scope("rid-captured-abc"):
+            ctx = request_context.capture_context()
+
+        # Outside the scope: caller's request_id is back to None.
+        self.assertIsNone(request_context.get_request_id())
+
+        # Inside ctx.run: still sees the captured value.
+        request_context.run_in_captured_context(ctx, worker)
+        self.assertEqual(observed, ["rid-captured-abc"])
+
+    def test_run_in_captured_context_with_no_request_id(self):
+        """No request_id set at capture time → worker sees None.
+
+        This is the backward-compat path (scheduler.py / CLI tools).
+        """
+        observed = []
+
+        def worker():
+            observed.append(request_context.get_request_id())
+
+        ctx = request_context.capture_context()
+        request_context.run_in_captured_context(ctx, worker)
+        self.assertEqual(observed, [None])
+
+    def test_run_in_captured_context_passes_args_and_kwargs(self):
+        captured = {}
+
+        def worker(positional, *, keyword):
+            captured["positional"] = positional
+            captured["keyword"] = keyword
+            captured["rid"] = request_context.get_request_id()
+            return "ok"
+
+        with request_context.request_id_scope("rid-args-test"):
+            ctx = request_context.capture_context()
+
+        result = request_context.run_in_captured_context(
+            ctx, worker, 42, keyword="hello",
+        )
+        self.assertEqual(result, "ok")
+        self.assertEqual(captured["positional"], 42)
+        self.assertEqual(captured["keyword"], "hello")
+        self.assertEqual(captured["rid"], "rid-args-test")
+
+    def test_run_in_captured_context_propagates_exception(self):
+        def worker():
+            raise ValueError("boom from worker")
+
+        with request_context.request_id_scope("rid-exc"):
+            ctx = request_context.capture_context()
+
+        with self.assertRaises(ValueError) as cm:
+            request_context.run_in_captured_context(ctx, worker)
+        self.assertIn("boom from worker", str(cm.exception))
+
+    def test_worker_mutation_does_not_leak_to_caller(self):
+        """Setting request_id inside the worker only mutates the
+        captured copy of the context — the caller's live context
+        is untouched."""
+        with request_context.request_id_scope("outer-rid") as _outer:
+            ctx = request_context.capture_context()
+
+            def worker():
+                request_context.set_request_id("inner-rid")
+                return request_context.get_request_id()
+
+            inner_observed = request_context.run_in_captured_context(ctx, worker)
+            self.assertEqual(inner_observed, "inner-rid")
+            # Caller's request_id unchanged.
+            self.assertEqual(request_context.get_request_id(), "outer-rid")
+
+
 if __name__ == "__main__":
     unittest.main()

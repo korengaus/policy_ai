@@ -1510,6 +1510,40 @@ def _print_migration_m14_0c_tests_step() -> dict:
     }
 
 
+def _job_request_id_propagation_tests_step() -> dict:
+    """M14.3b — pin that workers spawned via submit_in_context /
+    run_in_thread_with_context inherit the caller's request_id, with
+    concurrent isolation. Fully offline."""
+    return {
+        "name": "test_job_request_id_propagation",
+        "command": [
+            _python(),
+            str(ROOT / "tests" / "test_job_request_id_propagation.py"),
+        ],
+        "parser": _parse_job_request_id_propagation_tests_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _end_to_end_request_id_through_job_tests_step() -> dict:
+    """M14.3b — simulates the full middleware → submit → worker → JSON
+    log path and asserts request_id flows through. Fully offline; no
+    real FastAPI server or analyze_pipeline call."""
+    return {
+        "name": "test_end_to_end_request_id_through_job",
+        "command": [
+            _python(),
+            str(ROOT / "tests" / "test_end_to_end_request_id_through_job.py"),
+        ],
+        "parser": _parse_end_to_end_request_id_tests_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
 def _log_level_reclassification_tests_step() -> dict:
     """M14.4 — AST pins that no log.error is a field-name reporter, that
     reclassified false-positives are now log.info, and that real errors
@@ -1858,6 +1892,10 @@ def _resolve_steps(args: argparse.Namespace) -> List[dict]:
         steps.append(_structured_logging_tests_step())
         steps.append(_request_context_tests_step())
         steps.append(_api_request_id_middleware_tests_step())
+        # M14.3b — worker context propagation pins. Run after
+        # request_context tests because they share the same primitives.
+        steps.append(_job_request_id_propagation_tests_step())
+        steps.append(_end_to_end_request_id_through_job_tests_step())
 
     if profile == "print-migration":
         # M14.0b + M14.0c — print() -> structured logging migration on
@@ -3778,6 +3816,45 @@ def _parse_api_request_id_middleware_tests_output(
         "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
         "summary": (
             f"test_api_request_id_middleware: exit_code={exit_code} "
+            f"ok_detected={has_ok}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "ok_detected": has_ok,
+        },
+    }
+
+
+def _parse_job_request_id_propagation_tests_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """M14.3b worker-context propagation pin. Includes the 5-job
+    concurrent-isolation killer test."""
+    has_ok = "\nOK" in (stdout + "\n" + stderr)
+    ok = exit_code == 0 and has_ok
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"test_job_request_id_propagation: exit_code={exit_code} "
+            f"ok_detected={has_ok}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "ok_detected": has_ok,
+        },
+    }
+
+
+def _parse_end_to_end_request_id_tests_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """M14.3b middleware → submit → worker → JSON log end-to-end."""
+    has_ok = "\nOK" in (stdout + "\n" + stderr)
+    ok = exit_code == 0 and has_ok
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"test_end_to_end_request_id_through_job: exit_code={exit_code} "
             f"ok_detected={has_ok}"
         ),
         "metrics": {

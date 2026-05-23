@@ -184,6 +184,15 @@ def _commands() -> List[List[str]]:
         # JSON output when the ContextVar is unset.
         [python, "tests/test_request_context.py"],
         [python, "tests/test_api_request_id_middleware.py"],
+        # M14.3b — worker context propagation. Compile + the two
+        # propagation/end-to-end suites. The compileall ensures
+        # job_manager still imports cleanly after the helpers were
+        # added; the propagation suite pins concurrent isolation;
+        # the end-to-end suite pins the middleware → worker JSON
+        # log line path.
+        [python, "-m", "compileall", "job_manager.py"],
+        [python, "tests/test_job_request_id_propagation.py"],
+        [python, "tests/test_end_to_end_request_id_through_job.py"],
         # M14.0a — structured logging foundation. --help and --status
         # are read-only smokes; the test suite pins module-adoption
         # for the 10 M13.x modules, legacy-isolation for 18 untouched

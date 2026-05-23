@@ -329,3 +329,90 @@ def get_default_job_timeout_seconds() -> int:
     except (TypeError, ValueError):
         raw = 600
     return max(30, min(raw, 3600))
+
+
+# ---------------------------------------------------------------------------
+# M14.3b — context propagation helpers for worker submission.
+#
+# These wrappers capture the current contextvars context (including the
+# request_id set by api_server's M14.3a middleware) at submit time, then
+# execute the target callable inside that context on the worker thread.
+# Without explicit capture, concurrent.futures.ThreadPoolExecutor.submit()
+# and bare threading.Thread() targets run in the default empty context,
+# losing request_id.
+#
+# Python's asyncio.create_task() and asyncio.to_thread() both already
+# propagate context automatically in Python 3.9+, so api_server.py's
+# current path (create_task -> coroutine -> asyncio.to_thread -> sync
+# _run_pipeline_for_job) does NOT lose request_id under concurrent load.
+# These helpers make the propagation contract explicit for any future
+# caller that uses concurrent.futures directly — scheduler.py batch
+# extensions, the LLM judge worker pool planned for M13.1b, ad-hoc
+# operator tools, etc.
+#
+# Importing request_context inside the functions keeps job_manager
+# import-light at module load and avoids a hard dependency on
+# request_context for legacy callers that never use these helpers.
+# ---------------------------------------------------------------------------
+
+
+def submit_in_context(executor, func, *args, **kwargs):
+    """Submit ``func(*args, **kwargs)`` to ``executor`` (a
+    :class:`concurrent.futures.Executor`), capturing the current
+    contextvars context so the worker sees the originating request's
+    ``request_id``.
+
+    Returns the standard :class:`concurrent.futures.Future`.
+    Exceptions inside ``func`` are re-raised when ``.result()`` is
+    called, exactly as with plain ``executor.submit``.
+
+    Usage::
+
+        from concurrent.futures import ThreadPoolExecutor
+        from job_manager import submit_in_context
+
+        with ThreadPoolExecutor() as pool:
+            future = submit_in_context(pool, run_pipeline, query, max_news)
+            result = future.result()
+    """
+    from request_context import capture_context, run_in_captured_context
+    ctx = capture_context()
+    return executor.submit(run_in_captured_context, ctx, func, *args, **kwargs)
+
+
+def run_in_thread_with_context(func, *args, **kwargs):
+    """Run ``func(*args, **kwargs)`` synchronously in a fresh
+    :class:`threading.Thread`, propagating the current contextvars
+    context to the worker thread.
+
+    Blocks until the thread completes. Returns the callable's return
+    value, or re-raises its exception. The captured context is
+    immutable from the caller's perspective: any
+    :func:`set_request_id` inside ``func`` only mutates the worker
+    thread's copy.
+
+    Use this for tests and for simple non-asyncio job runners. For
+    HTTP request handlers, prefer ``asyncio.to_thread`` (which also
+    propagates context in Python 3.9+).
+    """
+    import threading
+
+    from request_context import capture_context, run_in_captured_context
+
+    ctx = capture_context()
+    container = {"result": None, "error": None}
+
+    def _target():
+        try:
+            container["result"] = run_in_captured_context(
+                ctx, func, *args, **kwargs,
+            )
+        except BaseException as error:  # noqa: BLE001 — re-raised below
+            container["error"] = error
+
+    thread = threading.Thread(target=_target, daemon=True)
+    thread.start()
+    thread.join()
+    if container["error"] is not None:
+        raise container["error"]
+    return container["result"]
