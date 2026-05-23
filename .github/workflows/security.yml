@@ -1,0 +1,45 @@
+name: Security
+
+# Phase 2 M13.0 — advisory pip-audit run.
+#
+# Reports known CVEs against the pinned Python dependencies in
+# requirements.txt. Advisory only — a finding annotates the PR but
+# does NOT block merge. A weekly cron run keeps the audit alive even
+# when nobody is opening PRs against main.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    # Weekly Monday 09:00 UTC scan.
+    - cron: "0 9 * * 1"
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pip-audit:
+    name: pip-audit (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Run pip-audit
+        run: |
+          pip-audit -r requirements.txt --strict || \
+            echo "::warning::pip-audit found advisories (advisory only in M13.0)"

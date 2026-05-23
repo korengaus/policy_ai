@@ -1,0 +1,6 @@
+# Phase 2 M13.0 — Code owners.
+#
+# All changes require operator review. Extend this list as more
+# contributors join (one path-pattern per line; later patterns win
+# when multiple match).
+*       @korengaus

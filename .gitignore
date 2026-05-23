@@ -7,3 +7,9 @@ policy_memory.json
 policy_ai.db
 .cache/
 .claude/settings.local.json
+
+# M13.0 — CI artifacts (also created locally when debugging workflows).
+.pytest_cache/
+.ruff_cache/
+node_modules/
+.github/workflows/*.log

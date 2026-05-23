@@ -7,6 +7,11 @@ failure, and exits with the failing command's return code.
 Works on Windows PowerShell and Linux/macOS shells alike — commands are
 launched via ``subprocess`` with ``shell=False`` so quoting is consistent
 across platforms.
+
+NOTE (M13.0): This script defines the canonical local validation flow.
+``.github/workflows/ci.yml`` runs this script as the primary CI check.
+If a check belongs in CI, add it here. Do not duplicate logic in the
+workflow YAML — CI must mirror local.
 """
 
 from __future__ import annotations

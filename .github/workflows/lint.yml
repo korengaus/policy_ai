@@ -1,0 +1,43 @@
+name: Lint
+
+# Phase 2 M13.0 — advisory ruff lint.
+#
+# Findings are reported as GitHub annotations on PRs but do NOT block
+# merging. A later milestone may promote this to required by removing
+# ``continue-on-error`` and updating branch protection. Until then a
+# noisy ruff finding stays out of the way of real code review.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ruff:
+    name: Ruff (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff (advisory)
+        run: |
+          # Allow ruff to fail without breaking the workflow; report findings
+          ruff check . --output-format=github || \
+            echo "::warning::Ruff found issues (advisory only in M13.0)"

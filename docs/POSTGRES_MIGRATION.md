@@ -248,3 +248,13 @@ The new infrastructure is exercised by:
 All offline. No real Postgres is required for the validation suite to
 pass. Actual backfill execution is gated on operator intent
 (`--execute --yes`) and a provisioned `DATABASE_URL`.
+
+## CI integration (M13.0)
+
+M13.0 added GitHub Actions CI that runs the full Python test suite +
+npm regression on every PR. The Postgres dual-write tests (M12.0a/b)
+run in CI using `sqlite://` SQLAlchemy substrate — no real Postgres
+is required or used. When M12.0c provisions a real Render Postgres,
+a separate opt-in integration job may be added to run against a test
+Postgres instance. For now CI is fully offline. See
+`docs/CI_OVERVIEW.md` for the env-var safety contract.

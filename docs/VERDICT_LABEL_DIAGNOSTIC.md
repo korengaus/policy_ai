@@ -406,3 +406,11 @@ metadata. Until a decision is recorded, the enrolled task stays
 - The `legacy-review-enroll` operational profile never invokes
   `--enroll`; it only exercises `--help`, `--check-status`,
   `--list`, `--dry-run`, and the offline test suite.
+
+## CI integration (M13.0)
+
+M13.0 added GitHub Actions CI. The verdict label diagnostic tests
+(M11.0a/b/c) and the B08 fix tests run in CI on every PR via
+`scripts/validate.py`. Any future change to `_verdict_label` or
+`VERDICT_LABEL_BRANCHES` will be caught by the existing pinning
+tests before merge.

@@ -1,8 +1,26 @@
-name: ci
+name: CI
+
+# Phase 2 M13.0 — CI mirrors the local validation flow:
+#
+#     python scripts/validate.py
+#     npm test
+#     python scripts/run_operational_checks.py --profile quick
+#
+# If those commands pass locally, CI must pass too. validate.py owns the
+# canonical test list; anything that belongs in CI gets added to
+# validate.py rather than this workflow. The workflow only sets the env
+# vars that influence behaviour to known-safe defaults and runs the
+# canonical commands.
+#
+# Manual smoke against a deployed Render instance is preserved as a
+# separate ``smoke-deployed`` job that only fires on workflow_dispatch
+# with an explicit base URL — never on PRs or push.
 
 on:
-  push:
   pull_request:
+    branches: [main]
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       smoke_base_url:
@@ -10,23 +28,34 @@ on:
         required: false
         default: ""
 
-# Phase 2 M4: CI runs compile + offline unit/regression suites on every push and
-# PR. Smoke testing against a live deployment is gated behind workflow_dispatch
-# so normal CI does not trigger real news crawling or external network calls.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  validate:
-    name: compile + tests
+  python-tests:
+    name: Python Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       CI: "true"
       PYTHONUTF8: "1"
-      # Keep Postgres dual-write disabled by default so the suite runs without
-      # any DATABASE_URL; test_postgres_dual_write.py exercises the isolation
-      # logic with mocks.
-      USE_POSTGRES_WRITE: "false"
+      # Explicit empty values — validate.py's M12.0a determinism guard
+      # accepts unset / empty / "false" / "0" / "no" / "off" and refuses
+      # to run otherwise.
+      USE_POSTGRES_WRITE: ""
+      DATABASE_URL: ""
+      # Hard-disable any path that could reach OpenAI / external networks.
+      OPENAI_API_KEY: ""
+      SEMANTIC_MATCHING_ENABLED: "false"
+      EMBEDDING_PROVIDER: "disabled"
+      # Review API stays disabled at the workflow level; individual test
+      # files toggle it locally via os.environ context managers when
+      # needed.
+      REVIEW_API_ENABLED: "false"
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -36,10 +65,18 @@ jobs:
           cache: "pip"
           cache-dependency-path: requirements.txt
 
-      - name: Set up Node
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+
+      - name: Cache npm
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
 
       - name: Install Python dependencies
         run: |
@@ -47,229 +84,70 @@ jobs:
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           fi
-          # pytest is not in requirements.txt but the suites are plain
-          # unittest scripts; they run directly via `python tests/...py`.
-          # Install it anyway so contributors can swap to `pytest` locally.
-          pip install pytest
 
       - name: Install Node dependencies
         run: |
           if [ -f package-lock.json ]; then
-            npm ci
+            npm ci --no-audit --no-fund
           else
             npm install --no-audit --no-fund
           fi
 
-      - name: Compile Python modules
-        run: python -m compileall api_server.py database.py job_manager.py
+      - name: Run validate.py (canonical Python + npm test suite)
+        run: python scripts/validate.py
 
-      - name: Run async job tests
-        run: python tests/test_jobs.py
-
-      - name: Run Postgres dual-write isolation tests
-        run: python tests/test_postgres_dual_write.py
-
-      - name: Run AI reasoner status tests
-        run: python tests/test_ai_reasoner_status.py
-
-      - name: Run semantic matching tests
-        # Phase 2 M5: deterministic provider + no network. The flag remains
-        # off-by-default for the rest of the suite; the test module sets it
-        # locally via environment overrides when it needs the enabled path.
-        env:
-          SEMANTIC_MATCHING_ENABLED: "false"
-          EMBEDDING_PROVIDER: "disabled"
-        run: python tests/test_semantic_matching.py
-
-      - name: Run semantic activation tests
-        # Phase 2 M5.5: probe script + provider hardening. The activation
-        # tests subprocess-invoke scripts/probe_semantic_matching.py with the
-        # deterministic provider; no OpenAI key or network is needed.
-        env:
-          SEMANTIC_MATCHING_ENABLED: "false"
-          EMBEDDING_PROVIDER: "disabled"
-          OPENAI_API_KEY: ""
-        run: python tests/test_semantic_activation.py
-
-      - name: Probe semantic matching (deterministic dry-run)
-        # Sanity check that the probe script's deterministic path also runs
-        # cleanly inside CI. No network, no API key.
-        env:
-          SEMANTIC_MATCHING_ENABLED: "false"
-          EMBEDDING_PROVIDER: "disabled"
-        run: |
-          python scripts/probe_semantic_matching.py \
-            --provider deterministic --max-cases 2
-
-      - name: Probe semantic matching (openai no-network guard)
-        # Confirms the OpenAI path reports unavailable without making a live
-        # call when --no-network is set, regardless of env state.
-        env:
-          SEMANTIC_MATCHING_ENABLED: "false"
-          EMBEDDING_PROVIDER: "disabled"
-          OPENAI_API_KEY: ""
-        run: |
-          python scripts/probe_semantic_matching.py \
-            --provider openai --no-network --fail-on-unavailable \
-            --max-cases 1 || test $? -eq 2
-
-      - name: Run semantic calibration tests
-        # Phase 2 M5.6: calibration helper + evaluator script tests. The
-        # evaluator runs the deterministic provider only; no network and no
-        # OpenAI key are required.
-        env:
-          SEMANTIC_MATCHING_ENABLED: "false"
-          EMBEDDING_PROVIDER: "disabled"
-          OPENAI_API_KEY: ""
-        run: python tests/test_semantic_calibration.py
-
-      - name: Evaluate semantic calibration (deterministic dry-run)
-        # Calibration evaluator smoke. Intentionally does NOT pass
-        # --fail-on-regression: the deterministic provider is known to
-        # over-score number/date/eligibility-mismatch cases, and that signal
-        # is the whole point of M5.6. Operators must inspect the scorecard
-        # before enabling real embeddings.
-        env:
-          SEMANTIC_MATCHING_ENABLED: "false"
-          EMBEDDING_PROVIDER: "disabled"
-        run: |
-          python scripts/evaluate_semantic_calibration.py \
-            --provider deterministic --max-cases 3
-
-      - name: Run semantic fact guardrail tests
-        # Phase 2 M5.7: critical-fact guardrails are pure stdlib and run
-        # entirely offline. No env config required.
-        env:
-          SEMANTIC_MATCHING_ENABLED: "false"
-          EMBEDDING_PROVIDER: "disabled"
-          OPENAI_API_KEY: ""
-        run: python tests/test_semantic_fact_guardrails.py
-
-      - name: Run semantic provider comparison tests
-        # Phase 2 M5.8: comparison + threshold tooling. Tests subprocess
-        # the comparison script with --no-network so no live OpenAI call
-        # can happen. No API key is required.
-        env:
-          SEMANTIC_MATCHING_ENABLED: "false"
-          EMBEDDING_PROVIDER: "disabled"
-          OPENAI_API_KEY: ""
-        run: python tests/test_semantic_provider_comparison.py
-
-      - name: Compare semantic providers (deterministic + disabled smoke)
-        # Run the comparison driver against the deterministic provider only,
-        # confirming the offline path. Live OpenAI comparison is intentionally
-        # not part of CI — it requires explicit operator confirmation.
-        env:
-          SEMANTIC_MATCHING_ENABLED: "false"
-          EMBEDDING_PROVIDER: "disabled"
-          OPENAI_API_KEY: ""
-        run: |
-          python scripts/compare_semantic_providers.py \
-            --providers deterministic,disabled --max-cases 3 --no-network
-
-      - name: Run semantic real-claim batch tests
-        # Phase 2 M6.2: anonymized real-claim-like evaluation batch. Tests
-        # subprocess the evaluator script with --no-network so no live
-        # OpenAI call can happen. No API key is required. Live OpenAI
-        # against the real-claim batch is intentionally local-only and
-        # gated behind --live-confirm-token LIVE_OPENAI_OK.
-        env:
-          SEMANTIC_MATCHING_ENABLED: "false"
-          EMBEDDING_PROVIDER: "disabled"
-          OPENAI_API_KEY: ""
-        run: python tests/test_semantic_real_claim_batch.py
-
-      - name: Run historical claim batch builder tests
-        # Phase 2 M7.0: anonymized historical claim batch builder. Tests
-        # subprocess the builder script with synthetic policy_analysis
-        # fixtures under tempdirs — no real reports/, no real SQLite, no
-        # network, no OpenAI key.
-        env:
-          SEMANTIC_MATCHING_ENABLED: "false"
-          EMBEDDING_PROVIDER: "disabled"
-          OPENAI_API_KEY: ""
-        run: python tests/test_historical_claim_batch_builder.py
-
-      - name: Run semantic canary metrics tests
-        # Phase 2 M7.2: pure-stdlib canary monitoring helper. Tests run
-        # against synthetic payload dicts — no live server, no OpenAI,
-        # no Render. Verdict isolation pinned by VerdictIsolationTests.
-        env:
-          SEMANTIC_MATCHING_ENABLED: "false"
-          EMBEDDING_PROVIDER: "disabled"
-          OPENAI_API_KEY: ""
-        run: python tests/test_semantic_canary_metrics.py
-
-      - name: Run smoke_semantic_canary script tests
-        # Phase 2 M7.2: smoke script + env checker. Tests run --help and
-        # subprocess the env-checker against synthetic env overrides; no
-        # live server is started, no OpenAI key is required. Live canary
-        # runs are intentionally NOT part of CI.
-        env:
-          SEMANTIC_MATCHING_ENABLED: "false"
-          EMBEDDING_PROVIDER: "disabled"
-          OPENAI_API_KEY: ""
-        run: python tests/test_smoke_semantic_canary.py
-
-      - name: Run operational checks runner tests
-        # Phase 2 M7.5: operational automation runner. Tests use an
-        # injected fake subprocess runner so no real Render or OpenAI
-        # call happens in CI. The runner itself is NOT executed against
-        # Render in CI — only its argparser, profile resolution, output
-        # parsers, and orchestration logic are exercised.
-        env:
-          SEMANTIC_MATCHING_ENABLED: "false"
-          EMBEDDING_PROVIDER: "disabled"
-          OPENAI_API_KEY: ""
-        run: python tests/test_operational_checks_runner.py
-
-      - name: Run reviewer workflow tests
-        # Phase 2 M8.0: pure-helpers test for the review vocabulary,
-        # status transition matrix, ID generation, and snapshot extraction.
-        # No database, no FastAPI, no network — entirely stdlib.
-        env:
-          SEMANTIC_MATCHING_ENABLED: "false"
-          EMBEDDING_PROVIDER: "disabled"
-          OPENAI_API_KEY: ""
-        run: python tests/test_review_workflow.py
-
-      - name: Run reviewer API tests
-        # Phase 2 M8.0: review API surface tests using FastAPI TestClient
-        # + a temp SQLite DB. The safety gate is enabled inside the test
-        # suite via REVIEW_API_ENABLED=true + a dummy token; the real
-        # Render env stays disabled. No live server, no live OpenAI.
-        env:
-          SEMANTIC_MATCHING_ENABLED: "false"
-          EMBEDDING_PROVIDER: "disabled"
-          OPENAI_API_KEY: ""
-          # The review-API env vars are set inside the test suite via
-          # _env() context managers; CI keeps them unset at the workflow
-          # level so other test files see the production default.
-        run: python tests/test_review_api.py
-
-      - name: Evaluate semantic real-claim batch (deterministic dry-run)
-        # Real-claim batch evaluator smoke. Deterministic provider only,
-        # --no-network to enforce offline, --max-cases 3 to keep CI fast.
-        # No --fail-on-regression here for the same reason the calibration
-        # smoke skips it: the deterministic surrogate's score distribution
-        # is signal, not a regression gate.
-        env:
-          SEMANTIC_MATCHING_ENABLED: "false"
-          EMBEDDING_PROVIDER: "disabled"
-          OPENAI_API_KEY: ""
-        run: |
-          python scripts/evaluate_real_claim_batch.py \
-            --provider deterministic --no-network --max-cases 3
-
-      - name: Run JS regression + localStorage tests
+      - name: Run npm test (regression — explicit re-run for dashboard clarity)
         run: npm test
 
-      # Optional manual smoke test. Only fires on workflow_dispatch when the
-      # user provides a non-empty smoke_base_url. We never run this on push or
-      # pull_request because it would exercise the real pipeline (news fetch,
-      # external sites) on the target deployment.
-      - name: Smoke test deployed async job (manual only)
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.smoke_base_url != '' }}
+      - name: Run quick operational profile
+        run: python scripts/run_operational_checks.py --profile quick --no-default-reports
+
+      - name: Upload operational reports as artifact (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: operational-reports-${{ github.run_id }}
+          path: reports/operational_check_*.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ---------------------------------------------------------------------
+  # Optional manual smoke against a deployed instance.
+  #
+  # Only fires on workflow_dispatch with a non-empty smoke_base_url. The
+  # job is intentionally separate from python-tests so PRs and push runs
+  # never touch a live deployment, never crawl real news sources, and
+  # never call OpenAI.
+  # ---------------------------------------------------------------------
+  smoke-deployed:
+    name: Smoke (deployed, manual only)
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.smoke_base_url != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: python-tests
+    env:
+      CI: "true"
+      PYTHONUTF8: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+
+      - name: Smoke test deployed async job
         run: |
           python scripts/smoke_async_job.py \
             --base-url "${{ github.event.inputs.smoke_base_url }}" \
