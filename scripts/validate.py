@@ -64,7 +64,9 @@ def _commands() -> List[List[str]]:
          # M13.1a — LLM Judge infrastructure (dry-run only).
          "llm_judge.py", "scripts/dry_run_llm_judge.py",
          # M13.2a — frontend build pipeline.
-         "frontend/build_index.py"],
+         "frontend/build_index.py",
+         # M13.3a — shared HTTP cache infrastructure (disabled by default).
+         "http_cache.py", "scripts/check_http_cache.py"],
         [python, "tests/test_jobs.py"],
         [python, "tests/test_postgres_dual_write.py"],
         [python, "tests/test_ai_reasoner_status.py"],
@@ -134,6 +136,13 @@ def _commands() -> List[List[str]]:
         # committed web/index.html artifact. Drift here fails CI.
         [python, "frontend/build_index.py", "--check"],
         [python, "tests/test_frontend_build.py"],
+        # M13.3a — shared HTTP cache infrastructure. --help and
+        # --status are read-only smokes; the tests pin the cache's
+        # safety contract (never raises, never integrated with the
+        # pipeline, no real HTTP traffic).
+        [python, "scripts/check_http_cache.py", "--help"],
+        [python, "scripts/check_http_cache.py", "--status"],
+        [python, "tests/test_http_cache.py"],
         [npm, "test"],
     ]
 

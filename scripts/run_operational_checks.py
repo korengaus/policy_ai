@@ -80,6 +80,7 @@ PROFILES = (
     "postgres-backfill",
     "llm-judge-dry-run",
     "frontend-build",
+    "http-cache",
     "full",
 )
 
@@ -1146,6 +1147,63 @@ def _frontend_build_tests_step() -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Phase 2 M13.3a — http-cache profile.
+#
+# Fully offline. --help and --status are read-only smokes; the tests
+# pin the cache's safety contract (never raises, never integrated with
+# the pipeline, no real HTTP traffic). The cache is disabled by default
+# and dormant in production until M13.3b wires up specific call sites.
+# Steps:
+#   1) scripts/check_http_cache.py --help    (CLI smoke)
+#   2) scripts/check_http_cache.py --status  (default-env report)
+#   3) tests/test_http_cache.py              (offline tests, 70 cases)
+# ---------------------------------------------------------------------------
+
+
+def _http_cache_help_step() -> dict:
+    return {
+        "name": "check_http_cache(--help)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "check_http_cache.py"),
+            "--help",
+        ],
+        "parser": _parse_http_cache_help_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _http_cache_status_step() -> dict:
+    return {
+        "name": "check_http_cache(--status)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "check_http_cache.py"),
+        ],
+        "parser": _parse_http_cache_status_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _http_cache_tests_step() -> dict:
+    return {
+        "name": "test_http_cache",
+        "command": [
+            _python(),
+            str(ROOT / "tests" / "test_http_cache.py"),
+        ],
+        "parser": _parse_http_cache_tests_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
 def _historical_dry_run_step() -> dict:
     return {
         "name": "historical_dry_run",
@@ -1370,6 +1428,17 @@ def _resolve_steps(args: argparse.Namespace) -> List[dict]:
         steps.append(_frontend_build_status_step())
         steps.append(_frontend_build_check_step())
         steps.append(_frontend_build_tests_step())
+
+    if profile == "http-cache":
+        # M13.3a — shared HTTP cache foundation. Fully offline.
+        # --help and --status are read-only smokes; the offline tests
+        # cover feature flag, key stability, Cache-Control refusals,
+        # LRU eviction, thread safety, singleton lifecycle, the CLI,
+        # and the pipeline-isolation pin that guarantees no production
+        # module imports http_cache in M13.3a.
+        steps.append(_http_cache_help_step())
+        steps.append(_http_cache_status_step())
+        steps.append(_http_cache_tests_step())
 
     if profile == "full":
         if not args.skip_render and not args.skip_semantic_canary:
@@ -2785,6 +2854,94 @@ def _parse_frontend_build_tests_output(
         "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
         "summary": (
             f"test_frontend_build: exit_code={exit_code} "
+            f"ok_detected={has_ok}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "ok_detected": has_ok,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# M13.3a — http-cache profile parsers.
+# ---------------------------------------------------------------------------
+
+
+def _parse_http_cache_help_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``check_http_cache.py --help`` must exit 0 and surface the
+    documented header text and Exit codes section."""
+    ok = (
+        exit_code == 0
+        and "check_http_cache" in stdout
+        and "Exit codes" in stdout
+    )
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"check_http_cache --help: exit_code={exit_code} "
+            f"help_text_detected={ok}"
+        ),
+    }
+
+
+def _parse_http_cache_status_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``--status`` (default mode) must exit 0 and surface the
+    safety footer asserting the M13.3a non-integration claim."""
+    has_header = "HTTP Cache Status" in stdout
+    has_safety_footer = (
+        "M13.3a infrastructure only" in stdout
+        and "NOT integrated" in stdout
+    )
+    disabled_line = "Enabled:                False" in stdout
+    enabled_line = "Enabled:                True" in stdout
+    if exit_code == 0 and has_header and has_safety_footer:
+        status = _HEALTH_PASS
+        if disabled_line:
+            summary = (
+                "check_http_cache --status: disabled "
+                "(HTTP_CACHE_ENABLED unset) -- dormant in production"
+            )
+        elif enabled_line:
+            summary = (
+                "check_http_cache --status: enabled (operator opt-in)"
+            )
+        else:
+            summary = "check_http_cache --status: clean exit"
+    else:
+        status = _HEALTH_FAIL
+        summary = (
+            f"check_http_cache --status: exit_code={exit_code} "
+            f"header={has_header} safety_footer={has_safety_footer}"
+        )
+    return {
+        "status": status,
+        "summary": summary,
+        "metrics": {
+            "exit_code": exit_code,
+            "header_detected": has_header,
+            "safety_footer_detected": has_safety_footer,
+            "disabled_line_detected": disabled_line,
+            "enabled_line_detected": enabled_line,
+        },
+    }
+
+
+def _parse_http_cache_tests_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``tests/test_http_cache.py`` is a unittest runner —
+    exit 0 with an ``OK`` line means the suite passed."""
+    has_ok = "\nOK" in (stdout + "\n" + stderr)
+    ok = exit_code == 0 and has_ok
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"test_http_cache: exit_code={exit_code} "
             f"ok_detected={has_ok}"
         ),
         "metrics": {
