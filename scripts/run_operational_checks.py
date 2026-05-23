@@ -76,6 +76,7 @@ PROFILES = (
     "verdict-label-diagnostic",
     "legacy-review-enroll",
     "korean-constants",
+    "postgres-dual-write",
     "full",
 )
 
@@ -907,6 +908,65 @@ def _korean_constants_tests_step() -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Phase 2 M12.0a — postgres-dual-write profile.
+#
+# Fully offline. The profile MUST work with USE_POSTGRES_WRITE unset
+# (the default). When USE_POSTGRES_WRITE=true is set during validation
+# the health-check step will still exit 0 (it reports "enabled but
+# unable to connect") UNLESS a real Postgres is reachable. To keep the
+# profile portable across CI and local environments, the runner does
+# not require a live Postgres — only the offline tests + the
+# read-only CLI smokes. Steps:
+#   1) scripts/check_postgres_health.py --help    (CLI smoke)
+#   2) scripts/check_postgres_health.py           (default-env report)
+#   3) tests/test_postgres_storage.py             (offline tests)
+# ---------------------------------------------------------------------------
+
+
+def _postgres_health_help_step() -> dict:
+    return {
+        "name": "check_postgres_health(--help)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "check_postgres_health.py"),
+            "--help",
+        ],
+        "parser": _parse_postgres_health_help_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _postgres_health_default_step() -> dict:
+    return {
+        "name": "check_postgres_health(default)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "check_postgres_health.py"),
+        ],
+        "parser": _parse_postgres_health_default_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _postgres_storage_tests_step() -> dict:
+    return {
+        "name": "test_postgres_storage",
+        "command": [
+            _python(),
+            str(ROOT / "tests" / "test_postgres_storage.py"),
+        ],
+        "parser": _parse_postgres_storage_tests_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
 def _historical_dry_run_step() -> dict:
     return {
         "name": "historical_dry_run",
@@ -1087,6 +1147,17 @@ def _resolve_steps(args: argparse.Namespace) -> List[dict]:
         # equivalence, and the import-graph anti-reintroduction guard.
         steps.append(_korean_constants_compile_step())
         steps.append(_korean_constants_tests_step())
+
+    if profile == "postgres-dual-write":
+        # M12.0a — Postgres dual-write foundation. Fully offline. The
+        # default-env health check reports "disabled" (USE_POSTGRES_WRITE
+        # unset) which is the expected state during validation; the
+        # offline tests exercise the feature-flag, schema parity, and
+        # SQLite-isolation invariants without needing a real Postgres.
+        # SQLite remains the sole source of truth in this milestone.
+        steps.append(_postgres_health_help_step())
+        steps.append(_postgres_health_default_step())
+        steps.append(_postgres_storage_tests_step())
 
     if profile == "full":
         if not args.skip_render and not args.skip_semantic_canary:
@@ -2159,6 +2230,99 @@ def _parse_korean_constants_tests_output(
         "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
         "summary": (
             f"test_korean_constants: exit_code={exit_code} "
+            f"ok_detected={has_ok}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "ok_detected": has_ok,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# M12.0a — postgres-dual-write profile parsers.
+# ---------------------------------------------------------------------------
+
+
+def _parse_postgres_health_help_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``check_postgres_health.py --help`` must exit 0 and surface
+    the documented header text."""
+    ok = (
+        exit_code == 0
+        and "check_postgres_health" in stdout
+        and "Exit codes" in stdout
+    )
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"check_postgres_health --help: exit_code={exit_code} "
+            f"help_text_detected={ok}"
+        ),
+    }
+
+
+def _parse_postgres_health_default_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """Default-env health report. The expected shape in CI / local
+    validation runs is dual-write DISABLED — that's a clean PASS.
+    A live Postgres on the operator's machine is fine too (PASS).
+    The only failure shape is "enabled but cannot connect" (exit 1)
+    or any exit code other than 0/1.
+    """
+    has_header = "Postgres Dual-Write Health" in stdout
+    has_safety_footer = "SQLite remains the source of truth" in stdout
+    disabled_line = "dual_write_enabled:    False" in stdout
+    enabled_line = "dual_write_enabled:    True" in stdout
+    if exit_code == 0 and has_header and has_safety_footer:
+        status = _HEALTH_PASS
+        if disabled_line:
+            summary = (
+                "check_postgres_health: disabled (USE_POSTGRES_WRITE "
+                "unset) — SQLite remains the sole source of truth"
+            )
+        elif enabled_line:
+            summary = (
+                "check_postgres_health: enabled and reachable "
+                "(SQLite still sole source of truth)"
+            )
+        else:
+            summary = "check_postgres_health: clean exit, status unclear"
+    elif exit_code == 1:
+        status = _HEALTH_FAIL
+        summary = (
+            "check_postgres_health: dual-write enabled but cannot "
+            "connect (operator action needed)"
+        )
+    else:
+        status = _HEALTH_FAIL
+        summary = f"check_postgres_health: exit_code={exit_code}"
+    return {
+        "status": status,
+        "summary": summary,
+        "metrics": {
+            "exit_code": exit_code,
+            "header_detected": has_header,
+            "safety_footer_detected": has_safety_footer,
+            "disabled_line_detected": disabled_line,
+            "enabled_line_detected": enabled_line,
+        },
+    }
+
+
+def _parse_postgres_storage_tests_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``tests/test_postgres_storage.py`` is a unittest runner —
+    exit 0 with an ``OK`` line means the suite passed."""
+    has_ok = "\nOK" in (stdout + "\n" + stderr)
+    ok = exit_code == 0 and has_ok
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"test_postgres_storage: exit_code={exit_code} "
             f"ok_detected={has_ok}"
         ),
         "metrics": {

@@ -6,6 +6,43 @@ from pathlib import Path
 from text_utils import sanitize_data, sanitize_text
 
 
+# ---------------------------------------------------------------------------
+# Phase 2 M12.0a — Postgres dual-write shim.
+#
+# Each public write function in this module calls one of these helpers
+# AFTER its SQLite write succeeds. The helpers are no-ops when the
+# USE_POSTGRES_WRITE env var is unset / "false" — they return False
+# without attempting any connection, and they never raise. Postgres
+# failures must never break the SQLite write path or alter return
+# values, so every call site wraps the helper in a defensive try/except
+# (belt-and-braces; the helpers already swallow internally).
+#
+# SQLite remains the sole source of truth. See ``docs/POSTGRES_MIGRATION.md``.
+# ---------------------------------------------------------------------------
+
+
+def _mirror_write_safe(table_name: str, row_dict: dict) -> None:
+    """Best-effort mirror write. Logs but never propagates failure."""
+    try:
+        from postgres_storage import mirror_write
+
+        mirror_write(table_name, row_dict)
+    except Exception:  # noqa: BLE001 — Postgres failures must not surface
+        pass
+
+
+def _mirror_upsert_safe(
+    table_name: str, row_dict: dict, conflict_columns: list,
+) -> None:
+    """Best-effort mirror upsert. Logs but never propagates failure."""
+    try:
+        from postgres_storage import mirror_upsert
+
+        mirror_upsert(table_name, row_dict, conflict_columns)
+    except Exception:  # noqa: BLE001 — Postgres failures must not surface
+        pass
+
+
 DB_PATH = Path("policy_ai.db")
 
 
@@ -236,6 +273,98 @@ def save_analysis_result(result: dict, query: str):
     verification_card = result.get("verification_card") or {}
     created_at = datetime.now(timezone.utc).isoformat()
 
+    # M12.0a — build the value tuple once so the SQLite INSERT and the
+    # Postgres mirror_write share an identical payload. Order matches
+    # the column list in the INSERT below. Refactoring to a single
+    # source removes drift risk between the two write paths.
+    values = (
+        query,
+        result.get("title"),
+        original_url,
+        result.get("topic"),
+        final_decision.get("policy_alert_level"),
+        _serialize_market_signal(final_decision.get("market_signal")),
+        policy_confidence.get("policy_confidence_score"),
+        policy_confidence.get("verification_strength"),
+        policy_confidence.get("risk_level"),
+        policy_confidence.get("action_priority"),
+        policy_impact.get("impact_level"),
+        policy_impact.get("impact_direction"),
+        policy_impact.get("market_sensitivity"),
+        policy_impact.get("consumer_sensitivity"),
+        policy_impact.get("business_sensitivity"),
+        verification_card.get("claim_text") or result.get("claim_text"),
+        verification_card.get("verdict_label") or result.get("verdict_label"),
+        verification_card.get("verdict_confidence") or result.get("verdict_confidence"),
+        _serialize_json_value(
+            verification_card.get("evidence_sources")
+            or result.get("evidence_sources")
+        ),
+        verification_card.get("source_reliability_score")
+        or result.get("source_reliability_score"),
+        verification_card.get("source_reliability_reason")
+        or result.get("source_reliability_reason"),
+        verification_card.get("evidence_summary") or result.get("evidence_summary"),
+        _serialize_json_value(
+            verification_card.get("missing_context")
+            or result.get("missing_context")
+        ),
+        verification_card.get("last_checked_at") or result.get("last_checked_at"),
+        verification_card.get("review_status") or result.get("review_status"),
+        _serialize_json_value(
+            verification_card.get("claims") or result.get("claims")
+        ),
+        _serialize_json_value(
+            verification_card.get("normalized_claims")
+            or result.get("normalized_claims")
+        ),
+        _serialize_json_value(
+            verification_card.get("source_candidates")
+            or result.get("source_candidates")
+        ),
+        _serialize_json_value(
+            verification_card.get("source_queries")
+            or result.get("source_queries")
+        ),
+        _serialize_json_value(
+            verification_card.get("source_reliability_summary")
+            or result.get("source_reliability_summary")
+        ),
+        _serialize_json_value(
+            verification_card.get("evidence_snippets")
+            or result.get("evidence_snippets")
+        ),
+        _serialize_json_value(
+            verification_card.get("claim_evidence_map")
+            or result.get("claim_evidence_map")
+        ),
+        _serialize_json_value(
+            verification_card.get("evidence_extraction_summary")
+            or result.get("evidence_extraction_summary")
+        ),
+        _serialize_json_value(
+            verification_card.get("contradiction_checks")
+            or result.get("contradiction_checks")
+        ),
+        _serialize_json_value(
+            verification_card.get("contradiction_summary")
+            or result.get("contradiction_summary")
+        ),
+        _serialize_json_value(
+            verification_card.get("bias_framing_analysis")
+            or result.get("bias_framing_analysis")
+        ),
+        _serialize_json_value(
+            verification_card.get("bias_framing_summary")
+            or result.get("bias_framing_summary")
+        ),
+        _serialize_json_value(
+            verification_card.get("debug_summary")
+            or result.get("debug_summary")
+        ),
+        created_at,
+    )
+
     with get_connection() as connection:
         cursor = connection.execute(
             """
@@ -281,98 +410,34 @@ def save_analysis_result(result: dict, query: str):
                 created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (
-                query,
-                result.get("title"),
-                original_url,
-                result.get("topic"),
-                final_decision.get("policy_alert_level"),
-                _serialize_market_signal(final_decision.get("market_signal")),
-                policy_confidence.get("policy_confidence_score"),
-                policy_confidence.get("verification_strength"),
-                policy_confidence.get("risk_level"),
-                policy_confidence.get("action_priority"),
-                policy_impact.get("impact_level"),
-                policy_impact.get("impact_direction"),
-                policy_impact.get("market_sensitivity"),
-                policy_impact.get("consumer_sensitivity"),
-                policy_impact.get("business_sensitivity"),
-                verification_card.get("claim_text") or result.get("claim_text"),
-                verification_card.get("verdict_label") or result.get("verdict_label"),
-                verification_card.get("verdict_confidence") or result.get("verdict_confidence"),
-                _serialize_json_value(
-                    verification_card.get("evidence_sources")
-                    or result.get("evidence_sources")
-                ),
-                verification_card.get("source_reliability_score")
-                or result.get("source_reliability_score"),
-                verification_card.get("source_reliability_reason")
-                or result.get("source_reliability_reason"),
-                verification_card.get("evidence_summary") or result.get("evidence_summary"),
-                _serialize_json_value(
-                    verification_card.get("missing_context")
-                    or result.get("missing_context")
-                ),
-                verification_card.get("last_checked_at") or result.get("last_checked_at"),
-                verification_card.get("review_status") or result.get("review_status"),
-                _serialize_json_value(
-                    verification_card.get("claims")
-                    or result.get("claims")
-                ),
-                _serialize_json_value(
-                    verification_card.get("normalized_claims")
-                    or result.get("normalized_claims")
-                ),
-                _serialize_json_value(
-                    verification_card.get("source_candidates")
-                    or result.get("source_candidates")
-                ),
-                _serialize_json_value(
-                    verification_card.get("source_queries")
-                    or result.get("source_queries")
-                ),
-                _serialize_json_value(
-                    verification_card.get("source_reliability_summary")
-                    or result.get("source_reliability_summary")
-                ),
-                _serialize_json_value(
-                    verification_card.get("evidence_snippets")
-                    or result.get("evidence_snippets")
-                ),
-                _serialize_json_value(
-                    verification_card.get("claim_evidence_map")
-                    or result.get("claim_evidence_map")
-                ),
-                _serialize_json_value(
-                    verification_card.get("evidence_extraction_summary")
-                    or result.get("evidence_extraction_summary")
-                ),
-                _serialize_json_value(
-                    verification_card.get("contradiction_checks")
-                    or result.get("contradiction_checks")
-                ),
-                _serialize_json_value(
-                    verification_card.get("contradiction_summary")
-                    or result.get("contradiction_summary")
-                ),
-                _serialize_json_value(
-                    verification_card.get("bias_framing_analysis")
-                    or result.get("bias_framing_analysis")
-                ),
-                _serialize_json_value(
-                    verification_card.get("bias_framing_summary")
-                    or result.get("bias_framing_summary")
-                ),
-                _serialize_json_value(
-                    verification_card.get("debug_summary")
-                    or result.get("debug_summary")
-                ),
-                created_at,
-            ),
+            values,
         )
         connection.commit()
 
-    return {"saved": True, "duplicate": False, "id": cursor.lastrowid}
+    row_id = cursor.lastrowid
+
+    # M12.0a — mirror to Postgres. No-op when USE_POSTGRES_WRITE is
+    # unset. The column order here matches the INSERT above exactly.
+    _ANALYSIS_RESULTS_COLUMN_ORDER = (
+        "query", "title", "original_url", "topic", "policy_alert_level",
+        "market_signal", "policy_confidence_score", "verification_strength",
+        "risk_level", "action_priority", "impact_level", "impact_direction",
+        "market_sensitivity", "consumer_sensitivity", "business_sensitivity",
+        "claim_text", "verdict_label", "verdict_confidence",
+        "evidence_sources", "source_reliability_score",
+        "source_reliability_reason", "evidence_summary", "missing_context",
+        "last_checked_at", "review_status", "claims", "normalized_claims",
+        "source_candidates", "source_queries", "source_reliability_summary",
+        "evidence_snippets", "claim_evidence_map",
+        "evidence_extraction_summary", "contradiction_checks",
+        "contradiction_summary", "bias_framing_analysis",
+        "bias_framing_summary", "debug_summary", "created_at",
+    )
+    row_dict = dict(zip(_ANALYSIS_RESULTS_COLUMN_ORDER, values))
+    row_dict["id"] = row_id
+    _mirror_write_safe("analysis_results", row_dict)
+
+    return {"saved": True, "duplicate": False, "id": row_id}
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -492,6 +557,24 @@ def save_cached_embedding(
     except sqlite3.Error as error:
         _embedding_logger.warning("embedding_cache write failed: %s", error)
         return False
+
+    # M12.0a — mirror to Postgres. INSERT OR REPLACE on the SQLite side
+    # maps to ON CONFLICT (text_hash, provider, model) DO UPDATE on the
+    # Postgres side via the UNIQUE constraint declared in
+    # postgres_storage.py.
+    _mirror_upsert_safe(
+        "embedding_cache",
+        {
+            "text_hash": text_hash,
+            "provider": provider,
+            "model": model or "",
+            "dimensions": len(vector),
+            "vector_json": vector_json,
+            "text_preview": preview,
+            "created_at": created_at,
+        },
+        ["text_hash", "provider", "model"],
+    )
     return True
 
 
@@ -633,6 +716,7 @@ def create_review_task(*, task_id: str, result_id, job_id, item_index: int,
         return existing, True
     snapshot_json = json.dumps(snapshot or {}, ensure_ascii=False)
     was_existing = False
+    insert_succeeded = False
     with get_connection() as connection:
         _ensure_review_tables(connection)
         try:
@@ -666,12 +750,43 @@ def create_review_task(*, task_id: str, result_id, job_id, item_index: int,
                 ),
             )
             connection.commit()
+            insert_succeeded = True
         except sqlite3.IntegrityError:
             # A concurrent writer beat us to it — fetch the canonical row.
             existing = get_review_task_by_idempotency_key(idempotency_key)
             if existing:
                 return existing, True
             raise
+
+    if insert_succeeded:
+        # M12.0a — mirror to Postgres. Use upsert against idempotency_key
+        # because that's the SQLite UNIQUE constraint that gates which
+        # row wins; on the very unlikely event the Postgres side already
+        # has a row with this idempotency_key (e.g. resumed dual-write
+        # after a partial outage), ON CONFLICT DO UPDATE keeps the
+        # mirror eventually consistent with SQLite.
+        _mirror_upsert_safe(
+            "review_tasks",
+            {
+                "task_id": task_id,
+                "result_id": str(result_id) if result_id is not None else None,
+                "job_id": str(job_id) if job_id is not None else None,
+                "item_index": int(item_index or 0),
+                "status": status,
+                "query": query,
+                "claim_text": claim_text,
+                "title": title,
+                "url": url,
+                "final_decision": final_decision,
+                "policy_confidence": policy_confidence,
+                "human_review_required": 1 if human_review_required else 0,
+                "snapshot_json": snapshot_json,
+                "created_at": created_at,
+                "updated_at": updated_at,
+                "idempotency_key": idempotency_key,
+            },
+            ["idempotency_key"],
+        )
     return (get_review_task(task_id) or {}), was_existing
 
 
@@ -764,6 +879,26 @@ def record_review_decision(*, decision_id: str, task_id: str, decision: str,
             ),
         )
         connection.commit()
+
+    # M12.0a — mirror to Postgres. Append-only table; mirror_write (not
+    # upsert) matches the SQLite contract that review_decisions is
+    # never UPDATEd in place.
+    _mirror_write_safe(
+        "review_decisions",
+        {
+            "decision_id": decision_id,
+            "task_id": task_id,
+            "decision": decision,
+            "reviewer_id": reviewer_id,
+            "comment": comment,
+            "public_note": public_note,
+            "previous_status": previous_status,
+            "new_status": new_status,
+            "created_at": created_at,
+            "metadata_json": metadata_json,
+            "decision_source": decision_source,
+        },
+    )
     return get_review_decision(decision_id) or {}
 
 
@@ -877,6 +1012,22 @@ def save_fetch_artifact(fetch_result: dict) -> int:
     if not fetch_result.get("fetch_timestamp"):
         raise ValueError("fetch_result.fetch_timestamp is required")
     created_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    row_values = (
+        str(fetch_result.get("source_id")),
+        str(fetch_result.get("url")),
+        str(fetch_result.get("fetch_timestamp")),
+        fetch_result.get("status_code"),
+        fetch_result.get("content_type"),
+        1 if fetch_result.get("success") else 0,
+        fetch_result.get("error"),
+        fetch_result.get("text_content"),
+        fetch_result.get("raw_html"),
+        fetch_result.get("fetch_duration_ms"),
+        # truth_claim is forced to 0 — the registry contract.
+        0,
+        1 if fetch_result.get("official_source_candidate") else 0,
+        created_at,
+    )
     with get_connection() as connection:
         _ensure_source_fetch_artifacts_table(connection)
         cursor = connection.execute(
@@ -889,25 +1040,32 @@ def save_fetch_artifact(fetch_result: dict) -> int:
                 created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (
-                str(fetch_result.get("source_id")),
-                str(fetch_result.get("url")),
-                str(fetch_result.get("fetch_timestamp")),
-                fetch_result.get("status_code"),
-                fetch_result.get("content_type"),
-                1 if fetch_result.get("success") else 0,
-                fetch_result.get("error"),
-                fetch_result.get("text_content"),
-                fetch_result.get("raw_html"),
-                fetch_result.get("fetch_duration_ms"),
-                # truth_claim is forced to 0 — the registry contract.
-                0,
-                1 if fetch_result.get("official_source_candidate") else 0,
-                created_at,
-            ),
+            row_values,
         )
         connection.commit()
-        return int(cursor.lastrowid)
+        row_id = int(cursor.lastrowid)
+
+    # M12.0a — mirror to Postgres.
+    _mirror_write_safe(
+        "source_fetch_artifacts",
+        {
+            "id": row_id,
+            "source_id": row_values[0],
+            "url": row_values[1],
+            "fetch_timestamp": row_values[2],
+            "status_code": row_values[3],
+            "content_type": row_values[4],
+            "success": row_values[5],
+            "error": row_values[6],
+            "text_content": row_values[7],
+            "raw_html": row_values[8],
+            "fetch_duration_ms": row_values[9],
+            "truth_claim": row_values[10],
+            "official_source_candidate": row_values[11],
+            "created_at": row_values[12],
+        },
+    )
+    return row_id
 
 
 def get_fetch_artifacts(source_id: str = None, limit: int = 50) -> list:
@@ -1035,6 +1193,24 @@ def save_extraction_result(result_dict: dict, db_path: str = None) -> int:
     if not result_dict.get("extraction_timestamp"):
         raise ValueError("result_dict.extraction_timestamp is required")
     created_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    row_values = (
+        int(result_dict.get("artifact_id") or 0),
+        str(result_dict.get("source_id")),
+        str(result_dict.get("url")),
+        str(result_dict.get("extraction_timestamp")),
+        result_dict.get("extraction_duration_ms"),
+        1 if result_dict.get("success") else 0,
+        result_dict.get("error"),
+        result_dict.get("title"),
+        result_dict.get("main_text"),
+        result_dict.get("sections"),
+        result_dict.get("word_count"),
+        result_dict.get("language_hint"),
+        # truth_claim is forced to 0 — the registry contract.
+        0,
+        1 if result_dict.get("official_source_candidate") else 0,
+        created_at,
+    )
     connection = _open_connection(db_path)
     try:
         _ensure_artifact_text_extractions_table(connection)
@@ -1047,29 +1223,40 @@ def save_extraction_result(result_dict: dict, db_path: str = None) -> int:
                 truth_claim, official_source_candidate, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (
-                int(result_dict.get("artifact_id") or 0),
-                str(result_dict.get("source_id")),
-                str(result_dict.get("url")),
-                str(result_dict.get("extraction_timestamp")),
-                result_dict.get("extraction_duration_ms"),
-                1 if result_dict.get("success") else 0,
-                result_dict.get("error"),
-                result_dict.get("title"),
-                result_dict.get("main_text"),
-                result_dict.get("sections"),
-                result_dict.get("word_count"),
-                result_dict.get("language_hint"),
-                # truth_claim is forced to 0 — the registry contract.
-                0,
-                1 if result_dict.get("official_source_candidate") else 0,
-                created_at,
-            ),
+            row_values,
         )
         connection.commit()
-        return int(cursor.lastrowid)
+        row_id = int(cursor.lastrowid)
     finally:
         connection.close()
+
+    # M12.0a — mirror to Postgres. Honoured only when db_path was None
+    # (i.e. the real DB_PATH). Tests that pass a custom db_path are
+    # exercising isolated SQLite files; mirroring those to a shared
+    # Postgres would corrupt the mirror's ids.
+    if db_path is None:
+        _mirror_write_safe(
+            "artifact_text_extractions",
+            {
+                "id": row_id,
+                "artifact_id": row_values[0],
+                "source_id": row_values[1],
+                "url": row_values[2],
+                "extraction_timestamp": row_values[3],
+                "extraction_duration_ms": row_values[4],
+                "success": row_values[5],
+                "error": row_values[6],
+                "title": row_values[7],
+                "main_text": row_values[8],
+                "sections": row_values[9],
+                "word_count": row_values[10],
+                "language_hint": row_values[11],
+                "truth_claim": row_values[12],
+                "official_source_candidate": row_values[13],
+                "created_at": row_values[14],
+            },
+        )
+    return row_id
 
 
 def get_extraction_results(source_id: str = None, artifact_id: int = None,
@@ -1237,6 +1424,24 @@ def save_evidence_candidate(candidate_dict: dict, db_path: str = None) -> int:
         match_score = float(candidate_dict.get("match_score") or 0.0)
     except (TypeError, ValueError):
         match_score = 0.0
+    row_values = (
+        int(candidate_dict.get("extraction_id") or 0),
+        str(candidate_dict.get("source_id")),
+        str(candidate_dict.get("url")),
+        str(candidate_dict.get("analysis_id")),
+        str(candidate_dict.get("claim_text")),
+        match_score,
+        matched_tokens_text,
+        candidate_dict.get("supporting_passage"),
+        str(candidate_dict.get("candidate_timestamp")),
+        # truth_claim is forced to 0 — the registry contract.
+        0,
+        1 if candidate_dict.get("official_source_candidate") else 0,
+        # operator_review_required is forced to 1 — the candidate contract.
+        1,
+        candidate_dict.get("notes"),
+        created_at,
+    )
     connection = _open_connection(db_path)
     try:
         _ensure_artifact_evidence_candidates_table(connection)
@@ -1250,30 +1455,37 @@ def save_evidence_candidate(candidate_dict: dict, db_path: str = None) -> int:
                 operator_review_required, notes, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (
-                int(candidate_dict.get("extraction_id") or 0),
-                str(candidate_dict.get("source_id")),
-                str(candidate_dict.get("url")),
-                str(candidate_dict.get("analysis_id")),
-                str(candidate_dict.get("claim_text")),
-                match_score,
-                matched_tokens_text,
-                candidate_dict.get("supporting_passage"),
-                str(candidate_dict.get("candidate_timestamp")),
-                # truth_claim is forced to 0 — the registry contract.
-                0,
-                1 if candidate_dict.get("official_source_candidate") else 0,
-                # operator_review_required is forced to 1 — the
-                # candidate contract.
-                1,
-                candidate_dict.get("notes"),
-                created_at,
-            ),
+            row_values,
         )
         connection.commit()
-        return int(cursor.lastrowid)
+        row_id = int(cursor.lastrowid)
     finally:
         connection.close()
+
+    # M12.0a — mirror to Postgres. Skip when db_path is custom (test
+    # SQLite files use their own id-space).
+    if db_path is None:
+        _mirror_write_safe(
+            "artifact_evidence_candidates",
+            {
+                "id": row_id,
+                "extraction_id": row_values[0],
+                "source_id": row_values[1],
+                "url": row_values[2],
+                "analysis_id": row_values[3],
+                "claim_text": row_values[4],
+                "match_score": row_values[5],
+                "matched_tokens": row_values[6],
+                "supporting_passage": row_values[7],
+                "candidate_timestamp": row_values[8],
+                "truth_claim": row_values[9],
+                "official_source_candidate": row_values[10],
+                "operator_review_required": row_values[11],
+                "notes": row_values[12],
+                "created_at": row_values[13],
+            },
+        )
+    return row_id
 
 
 def get_evidence_candidates(
@@ -1454,6 +1666,33 @@ def save_producer_comparison(comparison_dict: dict, db_path: str = None) -> int:
             return str(value)
 
     created_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    row_values = (
+        str(comparison_dict.get("analysis_id")),
+        str(comparison_dict.get("source")),
+        str(comparison_dict.get("input_hash")),
+        comparison_dict.get("producer1_label"),
+        comparison_dict.get("producer1_score"),
+        _ensure_extra_text(comparison_dict.get("producer1_extra")),
+        comparison_dict.get("producer2_label"),
+        comparison_dict.get("producer2_alert_level"),
+        comparison_dict.get("producer2_score"),
+        _ensure_extra_text(comparison_dict.get("producer2_extra")),
+        comparison_dict.get("producer3_label"),
+        _ensure_extra_text(comparison_dict.get("producer3_extra")),
+        1 if comparison_dict.get("all_three_agree") else 0,
+        1 if comparison_dict.get("p1_p2_agree") else 0,
+        1 if comparison_dict.get("p1_p3_agree") else 0,
+        1 if comparison_dict.get("p2_p3_agree") else 0,
+        comparison_dict.get("disagreement_pattern"),
+        comparison_dict.get("most_conservative_label"),
+        str(comparison_dict.get("comparison_timestamp")),
+        comparison_dict.get("notes"),
+        # truth_claim is forced to 0 — the registry contract.
+        0,
+        # operator_review_required is forced to 1 — the measurement contract.
+        1,
+        created_at,
+    )
     connection = _open_connection(db_path)
     try:
         _ensure_verdict_producer_comparisons_table(connection)
@@ -1471,39 +1710,47 @@ def save_producer_comparison(comparison_dict: dict, db_path: str = None) -> int:
                 truth_claim, operator_review_required, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (
-                str(comparison_dict.get("analysis_id")),
-                str(comparison_dict.get("source")),
-                str(comparison_dict.get("input_hash")),
-                comparison_dict.get("producer1_label"),
-                comparison_dict.get("producer1_score"),
-                _ensure_extra_text(comparison_dict.get("producer1_extra")),
-                comparison_dict.get("producer2_label"),
-                comparison_dict.get("producer2_alert_level"),
-                comparison_dict.get("producer2_score"),
-                _ensure_extra_text(comparison_dict.get("producer2_extra")),
-                comparison_dict.get("producer3_label"),
-                _ensure_extra_text(comparison_dict.get("producer3_extra")),
-                1 if comparison_dict.get("all_three_agree") else 0,
-                1 if comparison_dict.get("p1_p2_agree") else 0,
-                1 if comparison_dict.get("p1_p3_agree") else 0,
-                1 if comparison_dict.get("p2_p3_agree") else 0,
-                comparison_dict.get("disagreement_pattern"),
-                comparison_dict.get("most_conservative_label"),
-                str(comparison_dict.get("comparison_timestamp")),
-                comparison_dict.get("notes"),
-                # truth_claim is forced to 0 — the registry contract.
-                0,
-                # operator_review_required is forced to 1 — the
-                # measurement contract.
-                1,
-                created_at,
-            ),
+            row_values,
         )
         connection.commit()
-        return int(cursor.lastrowid)
+        row_id = int(cursor.lastrowid)
     finally:
         connection.close()
+
+    # M12.0a — mirror to Postgres. INSERT OR REPLACE on the SQLite side
+    # maps to ON CONFLICT (input_hash) DO UPDATE on the PG side.
+    if db_path is None:
+        _mirror_upsert_safe(
+            "verdict_producer_comparisons",
+            {
+                "id": row_id,
+                "analysis_id": row_values[0],
+                "source": row_values[1],
+                "input_hash": row_values[2],
+                "producer1_label": row_values[3],
+                "producer1_score": row_values[4],
+                "producer1_extra": row_values[5],
+                "producer2_label": row_values[6],
+                "producer2_alert_level": row_values[7],
+                "producer2_score": row_values[8],
+                "producer2_extra": row_values[9],
+                "producer3_label": row_values[10],
+                "producer3_extra": row_values[11],
+                "all_three_agree": row_values[12],
+                "p1_p2_agree": row_values[13],
+                "p1_p3_agree": row_values[14],
+                "p2_p3_agree": row_values[15],
+                "disagreement_pattern": row_values[16],
+                "most_conservative_label": row_values[17],
+                "comparison_timestamp": row_values[18],
+                "notes": row_values[19],
+                "truth_claim": row_values[20],
+                "operator_review_required": row_values[21],
+                "created_at": row_values[22],
+            },
+            ["input_hash"],
+        )
+    return row_id
 
 
 def get_producer_comparisons(
@@ -1675,6 +1922,29 @@ def save_verdict_label_attribution(
             return str(value)
 
     created_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    row_values = (
+        str(attribution_dict.get("analysis_id")),
+        attribution_dict.get("stored_verdict_label"),
+        attribution_dict.get("stored_verdict_confidence"),
+        attribution_dict.get("stored_policy_alert_level"),
+        attribution_dict.get("stored_policy_confidence_score"),
+        attribution_dict.get("stored_verification_strength"),
+        attribution_dict.get("stored_claim_text"),
+        attribution_dict.get("stored_evidence_summary"),
+        _ensure_text(attribution_dict.get("reconstructed_inputs")),
+        attribution_dict.get("attributed_branch_id"),
+        attribution_dict.get("attribution_confidence"),
+        attribution_dict.get("attribution_reason"),
+        1 if attribution_dict.get("is_weak_evidence_verified") else 0,
+        _ensure_text(attribution_dict.get("weak_evidence_signals")),
+        str(attribution_dict.get("diagnostic_timestamp")),
+        attribution_dict.get("notes"),
+        # truth_claim is forced to 0 — the registry contract.
+        0,
+        # operator_review_required is forced to 1 — the diagnostic contract.
+        1,
+        created_at,
+    )
     connection = _open_connection(db_path)
     try:
         _ensure_verdict_label_attributions_table(connection)
@@ -1694,35 +1964,43 @@ def save_verdict_label_attribution(
                 truth_claim, operator_review_required, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (
-                str(attribution_dict.get("analysis_id")),
-                attribution_dict.get("stored_verdict_label"),
-                attribution_dict.get("stored_verdict_confidence"),
-                attribution_dict.get("stored_policy_alert_level"),
-                attribution_dict.get("stored_policy_confidence_score"),
-                attribution_dict.get("stored_verification_strength"),
-                attribution_dict.get("stored_claim_text"),
-                attribution_dict.get("stored_evidence_summary"),
-                _ensure_text(attribution_dict.get("reconstructed_inputs")),
-                attribution_dict.get("attributed_branch_id"),
-                attribution_dict.get("attribution_confidence"),
-                attribution_dict.get("attribution_reason"),
-                1 if attribution_dict.get("is_weak_evidence_verified") else 0,
-                _ensure_text(attribution_dict.get("weak_evidence_signals")),
-                str(attribution_dict.get("diagnostic_timestamp")),
-                attribution_dict.get("notes"),
-                # truth_claim is forced to 0 — the registry contract.
-                0,
-                # operator_review_required is forced to 1 — the
-                # diagnostic contract.
-                1,
-                created_at,
-            ),
+            row_values,
         )
         connection.commit()
-        return int(cursor.lastrowid)
+        row_id = int(cursor.lastrowid)
     finally:
         connection.close()
+
+    # M12.0a — mirror to Postgres. INSERT OR REPLACE on the SQLite side
+    # maps to ON CONFLICT (analysis_id) DO UPDATE on the PG side.
+    if db_path is None:
+        _mirror_upsert_safe(
+            "verdict_label_attributions",
+            {
+                "id": row_id,
+                "analysis_id": row_values[0],
+                "stored_verdict_label": row_values[1],
+                "stored_verdict_confidence": row_values[2],
+                "stored_policy_alert_level": row_values[3],
+                "stored_policy_confidence_score": row_values[4],
+                "stored_verification_strength": row_values[5],
+                "stored_claim_text": row_values[6],
+                "stored_evidence_summary": row_values[7],
+                "reconstructed_inputs": row_values[8],
+                "attributed_branch_id": row_values[9],
+                "attribution_confidence": row_values[10],
+                "attribution_reason": row_values[11],
+                "is_weak_evidence_verified": row_values[12],
+                "weak_evidence_signals": row_values[13],
+                "diagnostic_timestamp": row_values[14],
+                "notes": row_values[15],
+                "truth_claim": row_values[16],
+                "operator_review_required": row_values[17],
+                "created_at": row_values[18],
+            },
+            ["analysis_id"],
+        )
+    return row_id
 
 
 def get_verdict_label_attributions(

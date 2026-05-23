@@ -38,6 +38,7 @@ def _npm_executable() -> str:
 def _commands() -> List[List[str]]:
     python = sys.executable or "python"
     npm = _npm_executable()
+    _assert_dual_write_disabled_for_determinism()
     return [
         [python, "-m", "compileall", "api_server.py", "database.py", "job_manager.py",
          "source_crawler.py", "scripts/fetch_registry_source.py",
@@ -50,7 +51,9 @@ def _commands() -> List[List[str]]:
          "scripts/diagnose_verdict_labels.py",
          "legacy_review_enrollment.py",
          "scripts/enroll_legacy_weak_verified.py",
-         "korean_constants.py"],
+         "korean_constants.py",
+         # M12.0a — Postgres dual-write foundation.
+         "postgres_storage.py", "scripts/check_postgres_health.py"],
         [python, "tests/test_jobs.py"],
         [python, "tests/test_postgres_dual_write.py"],
         [python, "tests/test_ai_reasoner_status.py"],
@@ -104,8 +107,29 @@ def _commands() -> List[List[str]]:
         [python, "tests/test_legacy_review_enrollment.py"],
         # M11.2 — centralized Korean keyword constants (read-move refactor).
         [python, "tests/test_korean_constants.py"],
+        # M12.0a — Postgres dual-write foundation.
+        [python, "scripts/check_postgres_health.py", "--help"],
+        [python, "tests/test_postgres_storage.py"],
         [npm, "test"],
     ]
+
+
+def _assert_dual_write_disabled_for_determinism() -> None:
+    """M12.0a — validate.py must run with dual-write disabled so the
+    test suite is byte-deterministic regardless of operator env. If
+    ``USE_POSTGRES_WRITE`` is set to anything other than an explicit
+    "false"/empty value, refuse to start; the operator has likely left
+    a local DATABASE_URL pointed at a real Postgres and a deterministic
+    validation run is no longer guaranteed.
+    """
+    raw = os.environ.get("USE_POSTGRES_WRITE", "").strip().lower()
+    if raw not in ("", "false", "0", "no", "off"):
+        raise SystemExit(
+            "[validate] refusing to run with USE_POSTGRES_WRITE="
+            f"{raw!r}. Set USE_POSTGRES_WRITE=false (or unset it) to "
+            "keep validation runs deterministic; the dual-write tests "
+            "exercise the toggle internally."
+        )
 
 
 def _format_command(cmd: List[str]) -> str:
