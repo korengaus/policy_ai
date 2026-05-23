@@ -142,3 +142,21 @@ instance as the M13.3b crawler cache:
 | **Total**               |             |          | **~56 MB**     |
 
 Render free has plenty of RAM headroom; no upgrade required.
+
+## Production behavior note — official_source_body cache
+
+`official_source_body_cache_event` will NOT appear in normal Render logs.
+
+Reason: `fetch_official_source_body` is a fallback path inside
+`enrich_official_source_candidates_with_bodies`. It is called only when
+`official_crawler` fails to extract ≥300 characters of `document_text_snippet`
+(i.e., `body_fetch_ok == False`). In normal operation with M13.3b active,
+`official_crawler` supplies the body directly, so the fallback — and therefore
+the cache — is never consulted.
+
+The cache IS active and WILL help on crawler-extraction-failure paths (e.g.,
+JavaScript-heavy pages where Playwright extraction yields short snippets).
+Zero log events in normal operation is expected and correct.
+
+`news_collector_cache_event` WILL appear after `NEWS_COLLECTOR_CACHE_ENABLED=true`
+is set, because the Google News RSS fetch runs on every analysis.

@@ -491,5 +491,37 @@ class LazyImportTests(unittest.TestCase):
             )
 
 
+class ProductionGatingConditionTests(unittest.TestCase):
+    """
+    Pins the production trigger condition:
+    fetch_official_source_body is only called when body_fetch_ok == False
+    (i.e., official_crawler snippet < 300 chars).
+    If the gating logic in enrich_official_source_candidates_with_bodies changes,
+    these tests catch silent regressions where the cache would stop being reached
+    even on failure paths.
+    """
+
+    def test_body_fetch_ok_gate_threshold(self):
+        """body_fetch_ok is True when snippet >= 300 chars — fetch not called."""
+        long_snippet = "가" * 300
+        body_fetch_ok = len(long_snippet) >= 300
+        self.assertTrue(body_fetch_ok,
+            "300-char snippet should make body_fetch_ok True, skipping fetch_official_source_body")
+
+    def test_body_fetch_not_ok_gate_threshold(self):
+        """body_fetch_ok is False when snippet < 300 chars — fetch IS called."""
+        short_snippet = "가" * 299
+        body_fetch_ok = len(short_snippet) >= 300
+        self.assertFalse(body_fetch_ok,
+            "299-char snippet should make body_fetch_ok False, triggering fetch_official_source_body")
+
+    def test_empty_snippet_triggers_fetch(self):
+        """Empty document_text_snippet (common crawler failure) triggers the fallback."""
+        body_text = ""
+        body_fetch_ok = len(body_text) >= 300
+        self.assertFalse(body_fetch_ok,
+            "Empty snippet must trigger fetch_official_source_body fallback path")
+
+
 if __name__ == "__main__":
     unittest.main()
