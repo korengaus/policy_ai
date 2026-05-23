@@ -140,6 +140,97 @@ def _check_korean_preservation(line_text: str, record: dict) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
+# M14.3a — additional sample that demonstrates request_id propagation.
+# ---------------------------------------------------------------------------
+
+
+_REQUEST_ID_SAMPLE_RID = "a3f9b2c1d4e5"
+
+
+def _verify_local_request_id() -> dict:
+    """Spin up a small Python -c subprocess that imports
+    request_context + structured_logging, enters a
+    ``request_id_scope`` with a known RID, and emits one INFO line.
+    Parses the captured stderr and asserts the JSON record includes
+    the expected ``request_id`` field."""
+    inline = (
+        "import structured_logging\n"
+        "from request_context import request_id_scope\n"
+        "structured_logging.configure_logging(force=True)\n"
+        "log = structured_logging.get_logger("
+        "'structured_logging.sample')\n"
+        f"with request_id_scope('{_REQUEST_ID_SAMPLE_RID}'):\n"
+        "    log.info('Sample with request ID')\n"
+    )
+    cmd = [sys.executable, "-c", inline]
+    env = dict(os.environ)
+    env["LOG_FORMAT"] = "json"
+    env["PYTHONIOENCODING"] = "utf-8"
+    try:
+        completed = subprocess.run(
+            cmd, capture_output=True, text=False, timeout=20, env=env,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "passed": False,
+            "reason": f"subprocess error: {exc}",
+        }
+    if completed.returncode != 0:
+        return {
+            "passed": False,
+            "reason": (
+                f"subprocess exit_code={completed.returncode}; "
+                "stderr_tail="
+                + completed.stderr[-400:].decode("utf-8", errors="replace")
+            ),
+        }
+    try:
+        stderr_text = completed.stderr.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        return {"passed": False, "reason": f"stderr decode failed: {exc}"}
+    lines = [ln for ln in stderr_text.splitlines() if ln.strip()]
+    if not lines:
+        return {
+            "passed": False,
+            "reason": "request_id subprocess produced no stderr",
+        }
+    raw = lines[-1]
+    try:
+        record = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return {
+            "passed": False,
+            "reason": f"json parse error on request_id line: {exc.msg}",
+            "raw": raw[:200],
+        }
+    errors = _validate_record(record)
+    if errors:
+        return {
+            "passed": False,
+            "reason": "; ".join(errors),
+            "raw": raw[:200],
+        }
+    rid = record.get("request_id")
+    if rid != _REQUEST_ID_SAMPLE_RID:
+        return {
+            "passed": False,
+            "reason": (
+                f"request_id field missing or wrong "
+                f"(expected {_REQUEST_ID_SAMPLE_RID!r}, got {rid!r})"
+            ),
+            "raw": raw[:200],
+        }
+    return {
+        "passed": True,
+        "ts": record.get("ts"),
+        "level": record.get("level"),
+        "module": record.get("module"),
+        "request_id": rid,
+        "msg": record.get("msg"),
+    }
+
+
+# ---------------------------------------------------------------------------
 # --local mode: subprocess + capture
 # ---------------------------------------------------------------------------
 
@@ -260,19 +351,34 @@ def _verify_local() -> dict:
             ),
             "lines": [],
             "subprocess_rc": rc,
+            "request_id_check": None,
         }
+
+    # M14.3a — run an additional subprocess that emits a log line
+    # inside a request_id_scope; assert the JSON output carries the
+    # request_id field. This is the operative proof that the
+    # M14.3a contextvars infrastructure is wired correctly into the
+    # JSON formatter in the operator's current environment.
+    rid_check = _verify_local_request_id()
+    overall_passed = all_passed and rid_check.get("passed", False)
+    if not all_passed:
+        reason = "one or more lines failed schema validation"
+    elif not rid_check.get("passed", False):
+        reason = (
+            "request_id propagation check failed: "
+            + (rid_check.get("reason") or "unknown")
+        )
+    else:
+        reason = "all lines valid; request_id propagation verified"
 
     return {
         "mode": "local",
-        "passed": all_passed,
-        "reason": (
-            "all lines valid"
-            if all_passed
-            else "one or more lines failed schema validation"
-        ),
+        "passed": overall_passed,
+        "reason": reason,
         "lines": line_results,
         "subprocess_rc": rc,
         "lines_total": len(raw_lines),
+        "request_id_check": rid_check,
     }
 
 
@@ -407,6 +513,28 @@ def _render_local_human(result: dict) -> str:
             if entry.get("raw"):
                 lines.append(f"  raw: {entry['raw']}")
         lines.append("")
+    # M14.3a — render the request_id subprocess result as a 5th line
+    # so operators can see at a glance that request_id propagation
+    # is working in their environment.
+    rid_check = result.get("request_id_check")
+    if rid_check is not None:
+        next_index = len(result.get("lines", [])) + 1
+        if rid_check.get("passed"):
+            lines.append(f"Line {next_index}: VALID JSON (with request_id)")
+            lines.append(f"  ts: {rid_check.get('ts')}")
+            lines.append(f"  level: {rid_check.get('level')}")
+            lines.append(f"  module: {rid_check.get('module')}")
+            lines.append(f"  request_id: {rid_check.get('request_id')}")
+            lines.append(f"  msg: \"{rid_check.get('msg')}\"")
+            lines.append("")
+            lines.append("Request ID propagation: VERIFIED")
+        else:
+            lines.append(
+                f"Line {next_index}: request_id check FAILED"
+            )
+            lines.append(f"  reason: {rid_check.get('reason')}")
+        lines.append("")
+
     lines.append(
         "[Safety] M14.2 verification is local-only. Render activation "
         "is a separate operator step. See "

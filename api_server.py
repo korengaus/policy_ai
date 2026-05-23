@@ -33,6 +33,11 @@ from db.postgres import (
 )
 import job_manager
 from main import analyze_pipeline
+from request_context import (
+    new_request_id,
+    reset_request_id,
+    set_request_id,
+)
 import review_auth
 import review_workflow
 from text_utils import sanitize_data
@@ -90,6 +95,57 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# M14.3a — per-request correlation. Generate (or accept) a request ID,
+# inject it into the contextvars context so structured_logging's
+# JsonFormatter automatically includes it in every log line emitted
+# during the request, then echo it back in the response so the client
+# can correlate. The middleware is purely additive: no business logic
+# is touched and the context is reset in a ``finally`` block so an
+# exception inside a handler does not leak the ID to subsequent
+# unrelated requests.
+
+
+_REQUEST_ID_CHARS = frozenset(
+    "0123456789"
+    "abcdefghijklmnopqrstuvwxyz"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "_-"
+)
+
+
+def _is_valid_request_id(rid: str) -> bool:
+    """Accept URL-safe trace IDs: ASCII alphanumerics, underscores,
+    and hyphens, length 8–64. Permits hex / UUID forms ("abc12345",
+    "550e8400-e29b-41d4-a716-446655440000") AND human-readable
+    client-supplied traces ("my-trace-123abc", "client_session_42").
+
+    Rejects anything that would be unsafe to echo into a response
+    header or surface in logs: empty, too short, too long, spaces,
+    newlines, slashes, quotes, non-ASCII characters, path traversal
+    payloads, etc.
+    """
+    if not rid:
+        return False
+    if len(rid) > 64 or len(rid) < 8:
+        return False
+    return all(c in _REQUEST_ID_CHARS for c in rid)
+
+
+@app.middleware("http")
+async def request_id_middleware(request, call_next):
+    incoming = (request.headers.get("x-request-id") or "").strip()
+    rid = incoming if _is_valid_request_id(incoming) else new_request_id()
+    token = set_request_id(rid)
+    try:
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = rid
+        return response
+    finally:
+        reset_request_id(token)
+
+
 app.mount("/web", StaticFiles(directory="web"), name="web")
 
 

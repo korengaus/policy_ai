@@ -72,6 +72,8 @@ def _commands() -> List[List[str]]:
          "structured_logging.py", "scripts/check_logging.py",
          # M14.2 — JSON logging production activation tooling.
          "scripts/check_json_logging.py",
+         # M14.3a — request ID propagation infrastructure.
+         "request_context.py",
          # M13.3c — cache measurement + activation tooling.
          "scripts/measure_cache_impact.py",
          "scripts/check_cache_activation.py"],
@@ -173,6 +175,11 @@ def _commands() -> List[List[str]]:
         # M14.2 — JSON logging production activation tooling.
         [python, "scripts/check_json_logging.py", "--help"],
         [python, "tests/test_check_json_logging.py"],
+        # M14.3a — request ID propagation (contextvars + FastAPI
+        # middleware). Backward-compatible: no request_id field in
+        # JSON output when the ContextVar is unset.
+        [python, "tests/test_request_context.py"],
+        [python, "tests/test_api_request_id_middleware.py"],
         # M14.0a — structured logging foundation. --help and --status
         # are read-only smokes; the test suite pins module-adoption
         # for the 10 M13.x modules, legacy-isolation for 18 untouched

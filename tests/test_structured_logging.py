@@ -337,6 +337,49 @@ class JsonOutputShapeTests(unittest.TestCase):
             # No \u-escaped form in the raw line.
             self.assertNotIn("\\u", lines[0])
 
+    # ------------------------------------------------------------------
+    # M14.3a — request_id field appears when ContextVar is set, omitted
+    # otherwise. Backward-compat pin against the M14.0a JSON shape.
+    # ------------------------------------------------------------------
+
+    def test_request_id_omitted_when_context_unset(self):
+        with _EnvScope():
+            _set_env(LOG_FORMAT="json")
+            import request_context
+
+            request_context.clear_request_id()
+            lines = _emit_and_capture(
+                "policy_ai.test.rid_omitted",
+                lambda log: log.info("plain"),
+            )
+            payload = json.loads(lines[0])
+            self.assertNotIn(
+                "request_id", payload,
+                msg=(
+                    "JsonFormatter must omit request_id when the "
+                    "ContextVar is unset (M14.3a backward compat)."
+                ),
+            )
+
+    def test_request_id_included_when_context_set(self):
+        with _EnvScope():
+            _set_env(LOG_FORMAT="json")
+            import request_context
+
+            def emit(log):
+                with request_context.request_id_scope("rid-shape-test"):
+                    log.info("inside scope")
+
+            lines = _emit_and_capture(
+                "policy_ai.test.rid_included", emit,
+            )
+            payload = json.loads(lines[0])
+            self.assertEqual(
+                payload.get("request_id"), "rid-shape-test",
+            )
+            # Korean preservation must survive the new field too.
+            self.assertNotIn("\\u", lines[0])
+
     def test_exception_serialized_to_exc_key(self):
         with _EnvScope():
             _set_env(LOG_FORMAT="json")

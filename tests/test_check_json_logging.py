@@ -179,7 +179,18 @@ class KoreanPreservationTests(unittest.TestCase):
 
 def _build_canned_subprocess(stderr_bytes: bytes, returncode: int = 0):
     """Return a callable suitable for patching ``subprocess.run`` in
-    the verifier module."""
+    the verifier module.
+
+    ``--local`` mode now performs TWO subprocess calls:
+
+    * the original ``check_logging.py --emit-sample`` (4-line stderr)
+    * the M14.3a ``python -c '...'`` request_id probe (1-line stderr)
+
+    The same canned stderr is returned for both. Tests that want the
+    main-subprocess path to PASS but the request_id probe to FAIL
+    (or vice versa) can pass per-call distinct stderrs via
+    :func:`_build_dual_canned_subprocess`.
+    """
     class _Completed:
         def __init__(self):
             self.stdout = b""
@@ -190,6 +201,41 @@ def _build_canned_subprocess(stderr_bytes: bytes, returncode: int = 0):
         return _Completed()
 
     return fake_run
+
+
+def _build_dual_canned_subprocess(
+    main_stderr: bytes,
+    rid_stderr: bytes,
+    main_rc: int = 0,
+    rid_rc: int = 0,
+):
+    """Distinguish between the two subprocess calls in --local mode.
+
+    Heuristic: the M14.3a request_id probe uses ``python -c`` (the
+    second positional argument is ``-c``). Anything else is treated
+    as the main check_logging.py invocation.
+    """
+    class _Completed:
+        def __init__(self, stderr, rc):
+            self.stdout = b""
+            self.stderr = stderr
+            self.returncode = rc
+
+    def fake_run(cmd, *args, **kwargs):
+        if isinstance(cmd, (list, tuple)) and len(cmd) >= 2 and cmd[1] == "-c":
+            return _Completed(rid_stderr, rid_rc)
+        return _Completed(main_stderr, main_rc)
+
+    return fake_run
+
+
+# A canned good record for the request_id probe — the M14.3a hard-
+# coded sample RID is "a3f9b2c1d4e5".
+_GOOD_RID_LINE = (
+    b'{"ts": "2026-05-23T14:32:01.234800+00:00", '
+    b'"level": "INFO", "module": "structured_logging.sample", '
+    b'"request_id": "a3f9b2c1d4e5", "msg": "Sample with request ID"}\n'
+)
 
 
 _GOOD_LINES = (
@@ -216,12 +262,13 @@ class LocalModeMockedSubprocessTests(unittest.TestCase):
     def test_four_valid_json_lines_passes(self):
         with patch.object(
             self.module.subprocess, "run",
-            _build_canned_subprocess(_GOOD_LINES),
+            _build_dual_canned_subprocess(_GOOD_LINES, _GOOD_RID_LINE),
         ):
             rc, out, _ = _invoke_main(self.module, ["--local"])
         self.assertEqual(rc, 0)
         self.assertIn("PASS", out)
         self.assertIn("Korean preserved", out)
+        self.assertIn("Request ID propagation: VERIFIED", out)
 
     def test_invalid_json_line_fails(self):
         bad = _GOOD_LINES + b"this is not json\n"
@@ -282,7 +329,7 @@ class LocalModeMockedSubprocessTests(unittest.TestCase):
     def test_json_output_parses(self):
         with patch.object(
             self.module.subprocess, "run",
-            _build_canned_subprocess(_GOOD_LINES),
+            _build_dual_canned_subprocess(_GOOD_LINES, _GOOD_RID_LINE),
         ):
             rc, out, _ = _invoke_main(self.module, ["--local", "--json"])
         self.assertEqual(rc, 0)
@@ -291,6 +338,13 @@ class LocalModeMockedSubprocessTests(unittest.TestCase):
         self.assertTrue(data["passed"])
         self.assertEqual(data["lines_total"], 4)
         self.assertEqual(len(data["lines"]), 4)
+        # M14.3a — the request_id probe result is exposed in JSON
+        # output as a dedicated key.
+        self.assertIn("request_id_check", data)
+        self.assertTrue(data["request_id_check"]["passed"])
+        self.assertEqual(
+            data["request_id_check"]["request_id"], "a3f9b2c1d4e5",
+        )
 
 
 # ---------------------------------------------------------------------------

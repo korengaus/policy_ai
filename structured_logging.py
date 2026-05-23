@@ -143,8 +143,26 @@ class JsonFormatter(logging.Formatter):
                 "ts": ts,
                 "level": record.levelname,
                 "module": record.name,
-                "msg": record.getMessage(),
             }
+
+            # M14.3a — opt-in per-request correlation. Lazy import
+            # avoids a circular dependency: request_context.py may
+            # at some point depend on structured logging itself.
+            # The ImportError fallback keeps backward compatibility
+            # for environments where request_context isn't present
+            # (e.g. installations that vendored an older
+            # structured_logging.py).
+            try:
+                from request_context import get_request_id
+
+                rid = get_request_id()
+                if rid is not None:
+                    payload["request_id"] = rid
+            except ImportError:
+                pass
+
+            payload["msg"] = record.getMessage()
+
             if record.exc_info:
                 payload["exc"] = self.formatException(record.exc_info)
             elif record.exc_text:
