@@ -547,6 +547,109 @@ def reset_default_cache_for_tests() -> None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Integration helper (M13.3b) — opt-in wrapper for HTTP fetches.
+#
+# Designed to plug a cache layer in front of an arbitrary HTTP fetch
+# function without forcing the caller to reimplement the get/put
+# dance. Currently used by ``official_crawler._request_url`` (via a
+# slightly tighter inline pattern that preserves the original
+# ``requests.Response`` object on cache miss). Other M13.3c
+# integrations may use this helper directly.
+# ---------------------------------------------------------------------------
+
+
+def fetch_with_cache(
+    url: str,
+    fetch_fn,
+    headers: Optional[dict] = None,
+    ttl_seconds: Optional[int] = None,
+    allowed_domains=None,
+    max_body_bytes: int = 5 * 1024 * 1024,
+    cache: Optional["HttpCache"] = None,
+):
+    """Cache-aware wrapper around an arbitrary HTTP fetch function.
+
+    Args:
+        url: the URL to fetch.
+        fetch_fn: zero-arg callable that performs the actual HTTP GET
+            when needed. Must return a 3-tuple
+            ``(body_bytes, status_code, response_headers_dict)``.
+            Caller owns the HTTP library choice.
+        headers: optional request headers passed to
+            :func:`compute_cache_key` for key shaping.
+        ttl_seconds: explicit TTL override; if None, the cache's
+            default (env or constructor) applies.
+        allowed_domains: explicit allow-list override; if None, the
+            cache's own allow-list applies.
+        max_body_bytes: refuse to cache responses larger than this;
+            pass-through still occurs. Defaults to 5 MB.
+        cache: optional :class:`HttpCache` instance; falls back to
+            :func:`get_default_cache`.
+
+    Returns:
+        ``(body_bytes, status_code, response_headers_dict, was_cached_hit)``.
+
+    Behaviour:
+        - If cache disabled or domain not allowed: calls ``fetch_fn``
+          directly and returns its result with ``was_cached_hit=False``.
+          No cache state is touched.
+        - On cache hit: returns the cached entry's body/status/headers
+          with ``was_cached_hit=True``. ``fetch_fn`` is NOT called.
+        - On cache miss: calls ``fetch_fn``, then stores the result if
+          ``status==200``, ``body<=max_body_bytes``, and the response's
+          ``Cache-Control`` allows.
+        - On error: if ``fetch_fn`` raised, the exception propagates
+          unchanged. The cache never raises.
+    """
+    if cache is None:
+        cache = get_default_cache()
+
+    # Cache disabled — pure pass-through.
+    if not is_http_cache_enabled():
+        body, status, resp_headers = fetch_fn()
+        return body, status, resp_headers, False
+
+    # Domain gate. If the caller passed an explicit allow-list, use
+    # that; otherwise consult the cache instance's own _domain_allowed
+    # which combines allow + deny semantics.
+    if allowed_domains is not None:
+        if extract_domain(url) not in allowed_domains:
+            body, status, resp_headers = fetch_fn()
+            return body, status, resp_headers, False
+    else:
+        if not cache._domain_allowed(url):  # noqa: SLF001 — intentional probe
+            body, status, resp_headers = fetch_fn()
+            return body, status, resp_headers, False
+
+    # Try the cache.
+    entry = cache.get(url, headers)
+    if entry is not None:
+        return entry.body, entry.status_code, dict(entry.headers), True
+
+    # Miss — fetch. Any exception from fetch_fn propagates as-is.
+    body, status, resp_headers = fetch_fn()
+
+    # Decide whether to store. Only 200 responses with byte-like bodies
+    # under the size cap are persisted; Cache-Control no-store /
+    # no-cache / private are enforced inside cache.put().
+    if (
+        status == 200
+        and isinstance(body, (bytes, bytearray))
+        and len(body) <= max_body_bytes
+    ):
+        cache.put(
+            url=url,
+            body=bytes(body),
+            status_code=status,
+            headers=resp_headers,
+            ttl_seconds=ttl_seconds,
+            request_headers=headers,
+        )
+
+    return body, status, resp_headers, False
+
+
 def health_check() -> dict:
     """Small diagnostic dict used by ``scripts/check_http_cache.py``.
     Does not modify state. NEVER raises."""

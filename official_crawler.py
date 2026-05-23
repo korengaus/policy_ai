@@ -1,9 +1,11 @@
-﻿import re
+﻿import os
+import re
 from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
 from requests import RequestException, Timeout
+from requests.structures import CaseInsensitiveDict
 
 from official_site_parsers import (
     extract_links_for_site,
@@ -157,7 +159,85 @@ TITLE_SELECTOR_KEYWORDS = [
 ]
 
 
-def _request_url(url: str):
+# ---------------------------------------------------------------------------
+# M13.3b — opt-in HTTP cache integration.
+#
+# When BOTH ``HTTP_CACHE_ENABLED=true`` (M13.3a master flag) AND
+# ``OFFICIAL_CRAWLER_CACHE_ENABLED=true`` are set AND the URL's domain
+# is in ``GOV_CACHE_ALLOWED_DOMAINS``, ``_request_url`` first checks the
+# process-local cache and returns a synthetic ``requests.Response`` on
+# hit; on miss it performs the original fetch and stores the bytes
+# (200-only, ≤5 MB, ``Cache-Control`` permitting).
+#
+# Cache-off path is byte-identical to pre-M13.3b: ``_request_url``
+# simply delegates to :func:`_do_request_url_raw` which is the original
+# function body verbatim. The same pin lives in
+# ``tests/test_official_crawler_cache.py::CacheOffByteIdentityTests``.
+#
+# Conservative defaults:
+#     * Domain allow-list: 20 Korean ``.go.kr`` / ``.or.kr`` domains.
+#     * TTL: 600 seconds (10 minutes) — far below M13.3a's 1-hour
+#       default because government notices may update.
+#     * Body cap: 5 MB.
+# ---------------------------------------------------------------------------
+
+
+GOV_CACHE_ALLOWED_DOMAINS = frozenset({
+    "fsc.go.kr",
+    "fss.or.kr",
+    "court.go.kr",
+    "gov.kr",
+    "korea.kr",
+    "moel.go.kr",
+    "mohw.go.kr",
+    "moef.go.kr",
+    "molit.go.kr",
+    "msit.go.kr",
+    "moe.go.kr",
+    "me.go.kr",
+    "moj.go.kr",
+    "mois.go.kr",
+    "mfds.go.kr",
+    "kostat.go.kr",
+    "law.go.kr",
+    "assembly.go.kr",
+    "epeople.go.kr",
+    "data.go.kr",
+})
+
+
+_OFFICIAL_CRAWLER_CACHE_MAX_BODY_BYTES = 5 * 1024 * 1024
+
+
+def _is_official_crawler_cache_enabled() -> bool:
+    """Returns True iff env ``OFFICIAL_CRAWLER_CACHE_ENABLED == 'true'``
+    (case-insensitive, spaces/tabs stripped)."""
+    return os.environ.get(
+        "OFFICIAL_CRAWLER_CACHE_ENABLED", "",
+    ).strip(" \t").lower() == "true"
+
+
+def _get_official_crawler_cache_ttl_seconds() -> int:
+    """Default 600s (10 min). Conservative — government notices may
+    update. Override via ``OFFICIAL_CRAWLER_CACHE_TTL_SECONDS``."""
+    raw = os.environ.get(
+        "OFFICIAL_CRAWLER_CACHE_TTL_SECONDS", "",
+    ).strip(" \t")
+    if not raw:
+        return 600
+    try:
+        value = int(raw)
+    except ValueError:
+        return 600
+    return value if value > 0 else 600
+
+
+def _do_request_url_raw(url: str):
+    """The original pre-M13.3b body of :func:`_request_url`, hoisted
+    verbatim so the cache-off path is literally the original code.
+    Do NOT modify this function — that is the byte-identicality
+    contract. Any change here must also pass the
+    ``CacheOffByteIdentityTests`` regression pin."""
     last_error = None
 
     for _ in range(2):
@@ -171,6 +251,117 @@ def _request_url(url: str):
             last_error = exc
 
     raise last_error
+
+
+def _response_from_cache_entry(entry, url: str):
+    """Construct a ``requests.Response`` that behaves identically to
+    the live one for the attributes consumed by the four callers
+    (``status_code``, ``raise_for_status``, ``content``, ``encoding``,
+    ``apparent_encoding``, ``text``, ``headers``, ``url``).
+
+    Other ``requests.Response`` attributes — ``elapsed``, ``cookies``,
+    ``request``, ``history`` — are left at their default empty / None
+    values; no current call site touches them.
+    """
+    response = requests.Response()
+    response._content = entry.body  # noqa: SLF001 — public-via-property attribute
+    response.status_code = entry.status_code
+    response.headers = CaseInsensitiveDict(entry.headers or {})
+    response.url = url
+    response.reason = "OK" if entry.status_code == 200 else ""
+    return response
+
+
+def _request_url(url: str):
+    """Cache-gated wrapper around :func:`_do_request_url_raw`.
+
+    The cache-on path activates only when ALL of the following hold:
+
+    * ``OFFICIAL_CRAWLER_CACHE_ENABLED=true`` (this milestone's flag).
+    * ``HTTP_CACHE_ENABLED=true`` (M13.3a master flag).
+    * The URL's domain is in :data:`GOV_CACHE_ALLOWED_DOMAINS`.
+
+    Otherwise this function delegates straight to
+    :func:`_do_request_url_raw` so the byte-identicality guarantee
+    holds.
+    """
+    if not _is_official_crawler_cache_enabled():
+        return _do_request_url_raw(url)
+
+    # M13.3a's master flag must also be set, and the domain must be in
+    # the conservative allow-list. Both are cheap stdlib lookups; we do
+    # them here so a stray flag set on the official-crawler side alone
+    # cannot bypass the master cache toggle.
+    try:
+        from http_cache import (
+            extract_domain,
+            get_default_cache,
+            is_http_cache_enabled,
+        )
+        from structured_logging import get_logger
+    except Exception:  # noqa: BLE001 — defensive; cache infra must never block fetches
+        return _do_request_url_raw(url)
+
+    if not is_http_cache_enabled():
+        return _do_request_url_raw(url)
+    if extract_domain(url) not in GOV_CACHE_ALLOWED_DOMAINS:
+        return _do_request_url_raw(url)
+
+    cache = get_default_cache()
+    log = get_logger(__name__)
+
+    # Try the cache first. ``cache.get`` already never raises.
+    entry = cache.get(url)
+    if entry is not None:
+        log.info(
+            "official_crawler_cache_event",
+            extra={
+                "url": url,
+                "status_code": entry.status_code,
+                "cache_hit": True,
+                "body_bytes": entry.bytes_size,
+            },
+        )
+        return _response_from_cache_entry(entry, url)
+
+    # Miss — perform the original fetch. Any network exception
+    # propagates unchanged.
+    response = _do_request_url_raw(url)
+
+    # Store only safe responses. Eligibility: HTTP 200 + body in bytes
+    # form + body under the size cap. ``cache.put`` additionally
+    # enforces Cache-Control: no-store / no-cache / private refusal.
+    try:
+        body_bytes = response.content or b""
+        if (
+            response.status_code == 200
+            and len(body_bytes) <= _OFFICIAL_CRAWLER_CACHE_MAX_BODY_BYTES
+        ):
+            cache.put(
+                url=url,
+                body=body_bytes,
+                status_code=response.status_code,
+                headers=dict(response.headers),
+                ttl_seconds=_get_official_crawler_cache_ttl_seconds(),
+            )
+    except Exception as exc:  # noqa: BLE001 — cache must not affect fetches
+        log.warning(
+            "official_crawler_cache_put_failed",
+            extra={"url": url, "error": str(exc)},
+        )
+
+    log.info(
+        "official_crawler_cache_event",
+        extra={
+            "url": url,
+            "status_code": response.status_code,
+            "cache_hit": False,
+            "body_bytes": (
+                len(response.content) if response.content else 0
+            ),
+        },
+    )
+    return response
 
 
 def _response_text(response) -> str:

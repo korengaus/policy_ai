@@ -902,5 +902,272 @@ class CliTests(unittest.TestCase):
         self.assertTrue(data["success"])
 
 
+# ---------------------------------------------------------------------------
+# M13.3b — fetch_with_cache helper tests.
+# ---------------------------------------------------------------------------
+
+
+class _FetchRecorder:
+    """Closure-friendly fake fetch_fn. Records call count + returns a
+    canned tuple; can be configured to raise on demand."""
+
+    def __init__(
+        self,
+        body: bytes = b"payload",
+        status: int = 200,
+        headers=None,
+        raise_exc: Exception = None,
+    ):
+        self.body = body
+        self.status = status
+        self.headers = dict(headers or {})
+        self.raise_exc = raise_exc
+        self.calls = 0
+
+    def __call__(self):
+        self.calls += 1
+        if self.raise_exc is not None:
+            raise self.raise_exc
+        return self.body, self.status, dict(self.headers)
+
+
+class FetchWithCacheTests(unittest.TestCase):
+    """Tests for the M13.3b ``fetch_with_cache`` helper added to
+    http_cache.py."""
+
+    def setUp(self):
+        http_cache.reset_default_cache_for_tests()
+
+    def tearDown(self):
+        http_cache.reset_default_cache_for_tests()
+        os.environ.pop("HTTP_CACHE_ENABLED", None)
+
+    def test_pass_through_when_cache_disabled(self):
+        os.environ.pop("HTTP_CACHE_ENABLED", None)
+        recorder = _FetchRecorder(body=b"x")
+        body, status, headers, hit = http_cache.fetch_with_cache(
+            "https://example.gov.kr/x",
+            recorder,
+        )
+        self.assertEqual(body, b"x")
+        self.assertEqual(status, 200)
+        self.assertFalse(hit)
+        self.assertEqual(recorder.calls, 1)
+
+    def test_pass_through_when_domain_not_allowed(self):
+        os.environ["HTTP_CACHE_ENABLED"] = "true"
+        cache = http_cache.HttpCache(
+            allowed_domains={"only-this.gov.kr"},
+        )
+        recorder = _FetchRecorder(body=b"x")
+        _, _, _, hit_first = http_cache.fetch_with_cache(
+            "https://other.example.com/x",
+            recorder,
+            cache=cache,
+        )
+        _, _, _, hit_second = http_cache.fetch_with_cache(
+            "https://other.example.com/x",
+            recorder,
+            cache=cache,
+        )
+        self.assertFalse(hit_first)
+        self.assertFalse(hit_second)
+        self.assertEqual(recorder.calls, 2)
+
+    def test_cache_hit_on_second_call(self):
+        os.environ["HTTP_CACHE_ENABLED"] = "true"
+        cache = http_cache.HttpCache()
+        recorder = _FetchRecorder(body=b"x", status=200)
+        body1, _, _, hit1 = http_cache.fetch_with_cache(
+            "https://example.gov.kr/a", recorder, cache=cache,
+        )
+        body2, _, _, hit2 = http_cache.fetch_with_cache(
+            "https://example.gov.kr/a", recorder, cache=cache,
+        )
+        self.assertFalse(hit1)
+        self.assertTrue(hit2)
+        self.assertEqual(body1, body2)
+        self.assertEqual(recorder.calls, 1)
+
+    def test_fetch_exception_propagates(self):
+        os.environ["HTTP_CACHE_ENABLED"] = "true"
+        cache = http_cache.HttpCache()
+        recorder = _FetchRecorder(
+            raise_exc=ConnectionError("net down"),
+        )
+        with self.assertRaises(ConnectionError):
+            http_cache.fetch_with_cache(
+                "https://example.gov.kr/x", recorder, cache=cache,
+            )
+        self.assertEqual(cache.size(), 0)
+
+    def test_non_200_not_cached(self):
+        os.environ["HTTP_CACHE_ENABLED"] = "true"
+        cache = http_cache.HttpCache()
+        recorder = _FetchRecorder(body=b"", status=404)
+        http_cache.fetch_with_cache(
+            "https://example.gov.kr/notfound", recorder, cache=cache,
+        )
+        http_cache.fetch_with_cache(
+            "https://example.gov.kr/notfound", recorder, cache=cache,
+        )
+        self.assertEqual(recorder.calls, 2)
+        self.assertEqual(cache.size(), 0)
+
+    def test_oversize_body_not_cached(self):
+        os.environ["HTTP_CACHE_ENABLED"] = "true"
+        cache = http_cache.HttpCache()
+        big = b"x" * (6 * 1024 * 1024)  # 6 MB > 5 MB default cap
+        recorder = _FetchRecorder(body=big, status=200)
+        http_cache.fetch_with_cache(
+            "https://example.gov.kr/big",
+            recorder,
+            cache=cache,
+            max_body_bytes=5 * 1024 * 1024,
+        )
+        http_cache.fetch_with_cache(
+            "https://example.gov.kr/big",
+            recorder,
+            cache=cache,
+            max_body_bytes=5 * 1024 * 1024,
+        )
+        self.assertEqual(recorder.calls, 2)
+        self.assertEqual(cache.size(), 0)
+
+    def test_no_store_response_not_cached(self):
+        os.environ["HTTP_CACHE_ENABLED"] = "true"
+        cache = http_cache.HttpCache()
+        recorder = _FetchRecorder(
+            body=b"x", status=200,
+            headers={"Cache-Control": "no-store"},
+        )
+        http_cache.fetch_with_cache(
+            "https://example.gov.kr/ns", recorder, cache=cache,
+        )
+        http_cache.fetch_with_cache(
+            "https://example.gov.kr/ns", recorder, cache=cache,
+        )
+        self.assertEqual(recorder.calls, 2)
+        self.assertEqual(cache.size(), 0)
+
+    def test_explicit_ttl_expires(self):
+        os.environ["HTTP_CACHE_ENABLED"] = "true"
+        cache = http_cache.HttpCache()
+        recorder = _FetchRecorder(body=b"x", status=200)
+        http_cache.fetch_with_cache(
+            "https://example.gov.kr/ttl",
+            recorder, cache=cache,
+            ttl_seconds=10,
+        )
+        # Force expiry without sleeping.
+        with cache._lock:  # noqa: SLF001
+            for entry in cache._store.values():
+                entry.expires_at = time.time() - 1.0
+        http_cache.fetch_with_cache(
+            "https://example.gov.kr/ttl", recorder, cache=cache,
+        )
+        self.assertEqual(recorder.calls, 2)
+
+    def test_custom_allow_list_parameter(self):
+        os.environ["HTTP_CACHE_ENABLED"] = "true"
+        cache = http_cache.HttpCache()  # empty allow-list
+        recorder_gov = _FetchRecorder(body=b"g", status=200)
+        recorder_com = _FetchRecorder(body=b"c", status=200)
+        allow = frozenset({"example.gov.kr"})
+        http_cache.fetch_with_cache(
+            "https://example.gov.kr/x",
+            recorder_gov, cache=cache,
+            allowed_domains=allow,
+        )
+        http_cache.fetch_with_cache(
+            "https://example.gov.kr/x",
+            recorder_gov, cache=cache,
+            allowed_domains=allow,
+        )
+        http_cache.fetch_with_cache(
+            "https://example.com/x",
+            recorder_com, cache=cache,
+            allowed_domains=allow,
+        )
+        http_cache.fetch_with_cache(
+            "https://example.com/x",
+            recorder_com, cache=cache,
+            allowed_domains=allow,
+        )
+        # gov cached after first; com always passes through.
+        self.assertEqual(recorder_gov.calls, 1)
+        self.assertEqual(recorder_com.calls, 2)
+
+    def test_was_cached_hit_signal_transitions(self):
+        os.environ["HTTP_CACHE_ENABLED"] = "true"
+        cache = http_cache.HttpCache()
+        recorder = _FetchRecorder(body=b"x", status=200)
+        _, _, _, h1 = http_cache.fetch_with_cache(
+            "https://example.gov.kr/x", recorder, cache=cache,
+        )
+        _, _, _, h2 = http_cache.fetch_with_cache(
+            "https://example.gov.kr/x", recorder, cache=cache,
+        )
+        # Force expiry.
+        with cache._lock:  # noqa: SLF001
+            for entry in cache._store.values():
+                entry.expires_at = time.time() - 1.0
+        _, _, _, h3 = http_cache.fetch_with_cache(
+            "https://example.gov.kr/x", recorder, cache=cache,
+        )
+        self.assertEqual([h1, h2, h3], [False, True, False])
+
+    def test_per_call_cache_override_does_not_touch_singleton(self):
+        os.environ["HTTP_CACHE_ENABLED"] = "true"
+        singleton_before = http_cache.get_default_cache().size()
+        private = http_cache.HttpCache()
+        recorder = _FetchRecorder(body=b"x", status=200)
+        http_cache.fetch_with_cache(
+            "https://example.gov.kr/private",
+            recorder, cache=private,
+        )
+        self.assertEqual(private.size(), 1)
+        self.assertEqual(
+            http_cache.get_default_cache().size(),
+            singleton_before,
+        )
+
+    def test_non_bytes_body_passes_through_not_cached(self):
+        os.environ["HTTP_CACHE_ENABLED"] = "true"
+        cache = http_cache.HttpCache()
+
+        class _StringRecorder:
+            calls = 0
+
+            def __call__(self):
+                _StringRecorder.calls += 1
+                return "<html>not bytes</html>", 200, {}
+
+        body, _, _, hit = http_cache.fetch_with_cache(
+            "https://example.gov.kr/str",
+            _StringRecorder(), cache=cache,
+        )
+        self.assertEqual(body, "<html>not bytes</html>")
+        self.assertFalse(hit)
+        self.assertEqual(cache.size(), 0)
+
+    def test_headers_in_cache_key_split_by_accept_language(self):
+        os.environ["HTTP_CACHE_ENABLED"] = "true"
+        cache = http_cache.HttpCache()
+        recorder = _FetchRecorder(body=b"x", status=200)
+        http_cache.fetch_with_cache(
+            "https://example.gov.kr/h",
+            recorder, cache=cache,
+            headers={"Accept-Language": "ko"},
+        )
+        http_cache.fetch_with_cache(
+            "https://example.gov.kr/h",
+            recorder, cache=cache,
+            headers={"Accept-Language": "en"},
+        )
+        # Different content-affecting headers -> different keys.
+        self.assertEqual(recorder.calls, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

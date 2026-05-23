@@ -81,6 +81,7 @@ PROFILES = (
     "llm-judge-dry-run",
     "frontend-build",
     "http-cache",
+    "official-crawler-cache",
     "structured-logging",
     "full",
 )
@@ -1206,6 +1207,47 @@ def _http_cache_tests_step() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Phase 2 M13.3b — official-crawler-cache profile.
+#
+# Fully offline. The integration tests use unittest.mock to patch
+# requests.get so no real HTTP traffic occurs. The byte-identicality
+# regression pin (CacheOffByteIdentityTests) is the most important
+# assertion: with both feature flags unset, _request_url's return
+# value is *identical* to the underlying requests.get call. Steps:
+#   1) tests/test_official_crawler_cache.py  (integration tests)
+#   2) tests/test_http_cache.py              (incl. FetchWithCacheTests)
+# ---------------------------------------------------------------------------
+
+
+def _official_crawler_cache_tests_step() -> dict:
+    return {
+        "name": "test_official_crawler_cache",
+        "command": [
+            _python(),
+            str(ROOT / "tests" / "test_official_crawler_cache.py"),
+        ],
+        "parser": _parse_official_crawler_cache_tests_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _official_crawler_cache_underlying_tests_step() -> dict:
+    return {
+        "name": "test_http_cache(fetch_with_cache)",
+        "command": [
+            _python(),
+            str(ROOT / "tests" / "test_http_cache.py"),
+        ],
+        "parser": _parse_http_cache_tests_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Phase 2 M14.0a — structured-logging profile.
 #
 # Fully offline. --help and --status are read-only smokes;
@@ -1516,6 +1558,17 @@ def _resolve_steps(args: argparse.Namespace) -> List[dict]:
         steps.append(_http_cache_help_step())
         steps.append(_http_cache_status_step())
         steps.append(_http_cache_tests_step())
+
+    if profile == "official-crawler-cache":
+        # M13.3b — HTTP cache integration into official_crawler.
+        # Fully offline (requests.get patched with a fake). The
+        # byte-identicality pin in CacheOffByteIdentityTests is the
+        # contract that guarantees the cache-off default keeps
+        # _request_url unchanged compared to the pre-M13.3b code.
+        # The fetch_with_cache helper added to http_cache.py is
+        # covered by tests/test_http_cache.py::FetchWithCacheTests.
+        steps.append(_official_crawler_cache_tests_step())
+        steps.append(_official_crawler_cache_underlying_tests_step())
 
     if profile == "structured-logging":
         # M14.0a — structured logging foundation. Fully offline.
@@ -3031,6 +3084,30 @@ def _parse_http_cache_tests_output(
         "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
         "summary": (
             f"test_http_cache: exit_code={exit_code} "
+            f"ok_detected={has_ok}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "ok_detected": has_ok,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# M13.3b — official-crawler-cache profile parsers.
+# ---------------------------------------------------------------------------
+
+
+def _parse_official_crawler_cache_tests_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``tests/test_official_crawler_cache.py`` is a unittest runner."""
+    has_ok = "\nOK" in (stdout + "\n" + stderr)
+    ok = exit_code == 0 and has_ok
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"test_official_crawler_cache: exit_code={exit_code} "
             f"ok_detected={has_ok}"
         ),
         "metrics": {

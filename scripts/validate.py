@@ -146,6 +146,10 @@ def _commands() -> List[List[str]]:
         [python, "scripts/check_http_cache.py", "--help"],
         [python, "scripts/check_http_cache.py", "--status"],
         [python, "tests/test_http_cache.py"],
+        # M13.3b — HTTP cache integration into official_crawler
+        # (feature-flagged, default off). The byte-identicality
+        # regression pin lives in CacheOffByteIdentityTests.
+        [python, "tests/test_official_crawler_cache.py"],
         # M14.0a — structured logging foundation. --help and --status
         # are read-only smokes; the test suite pins module-adoption
         # for the 10 M13.x modules, legacy-isolation for 18 untouched
