@@ -70,6 +70,8 @@ def _commands() -> List[List[str]]:
          "http_cache.py", "scripts/check_http_cache.py",
          # M14.0a — structured logging foundation (opt-in via LOG_FORMAT).
          "structured_logging.py", "scripts/check_logging.py",
+         # M14.2 — JSON logging production activation tooling.
+         "scripts/check_json_logging.py",
          # M13.3c — cache measurement + activation tooling.
          "scripts/measure_cache_impact.py",
          "scripts/check_cache_activation.py"],
@@ -168,6 +170,9 @@ def _commands() -> List[List[str]]:
         # M14.0c — completes the migration on the remaining 8 files.
         # Subprocess-invokes verdict test suites to prove invariance.
         [python, "tests/test_print_migration_m14_0c.py"],
+        # M14.2 — JSON logging production activation tooling.
+        [python, "scripts/check_json_logging.py", "--help"],
+        [python, "tests/test_check_json_logging.py"],
         # M14.0a — structured logging foundation. --help and --status
         # are read-only smokes; the test suite pins module-adoption
         # for the 10 M13.x modules, legacy-isolation for 18 untouched

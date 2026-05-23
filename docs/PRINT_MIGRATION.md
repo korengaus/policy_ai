@@ -248,3 +248,27 @@ Until the operator sets `LOG_FORMAT=json` on Render, the platform
 serves the same operator-visible log lines as pre-migration. No
 behaviour change is observable. The migration is fully reversible
 via `git revert` for any single milestone (M14.0b or M14.0c).
+
+## M14.2 — Production Activation Tooling (this milestone)
+
+M14.2 adds tooling and a guide for activating `LOG_FORMAT=json` on
+Render and verifying the result. The activation itself remains an
+operator decision via Render env vars — M14.2 does not change
+`render.yaml` and does not call any Render API.
+
+Added in M14.2:
+
+- `scripts/check_json_logging.py` — two-mode verifier
+  (`--local` subprocesses `check_logging.py --emit-sample` with
+  `LOG_FORMAT=json` and parses each captured stderr line as JSON;
+  `--base-url` hits `/health`, optionally runs `smoke_async_job`,
+  and tells the operator what to look for in the Render log
+  viewer).
+- `tests/test_check_json_logging.py` — 28 cases: CLI parsing,
+  schema validation helpers, mocked-subprocess paths for both
+  modes, Korean preservation, env-var non-mutation pin.
+- `docs/JSON_LOGGING_ACTIVATION_GUIDE.md` — step-by-step operator
+  guide (Steps 1–6), grep pattern cheat sheet, rollback procedure.
+
+See `docs/JSON_LOGGING_ACTIVATION_GUIDE.md` for the activation
+procedure.

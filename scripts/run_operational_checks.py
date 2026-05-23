@@ -85,6 +85,7 @@ PROFILES = (
     "cache-measurement-dry",
     "structured-logging",
     "print-migration",
+    "json-logging-verification",
     "full",
 )
 
@@ -1474,6 +1475,62 @@ def _print_migration_m14_0c_tests_step() -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Phase 2 M14.2 — json-logging-verification profile.
+#
+# Tooling-only profile. The --help smoke confirms the CLI parses
+# args; the --local mode subprocesses check_logging.py to actually
+# verify JSON output works on the current machine; the unit tests
+# pin schema, Korean preservation, base-url mode behaviour, and the
+# env-var non-mutation contract. NO real Render call happens during
+# this profile.
+# ---------------------------------------------------------------------------
+
+
+def _check_json_logging_help_step() -> dict:
+    return {
+        "name": "check_json_logging(--help)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "check_json_logging.py"),
+            "--help",
+        ],
+        "parser": _parse_check_json_logging_help_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _check_json_logging_local_step() -> dict:
+    return {
+        "name": "check_json_logging(--local)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "check_json_logging.py"),
+            "--local",
+        ],
+        "parser": _parse_check_json_logging_local_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _check_json_logging_tests_step() -> dict:
+    return {
+        "name": "test_check_json_logging",
+        "command": [
+            _python(),
+            str(ROOT / "tests" / "test_check_json_logging.py"),
+        ],
+        "parser": _parse_check_json_logging_tests_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
 def _historical_dry_run_step() -> dict:
     return {
         "name": "historical_dry_run",
@@ -1758,6 +1815,18 @@ def _resolve_steps(args: argparse.Namespace) -> List[dict]:
         steps.append(_print_migration_tests_step())
         steps.append(_print_migration_m14_0c_tests_step())
         steps.append(_structured_logging_tests_step())
+
+    if profile == "json-logging-verification":
+        # M14.2 — JSON logging production activation tooling.
+        # Fully offline. --help confirms the CLI loads; --local
+        # actually subprocesses check_logging.py and verifies the
+        # JSON schema on the current machine; the unit tests pin
+        # validation logic, base-url mode behaviour, and the
+        # env-var non-mutation contract. The script does NOT
+        # touch Render and does NOT modify any env var after exit.
+        steps.append(_check_json_logging_help_step())
+        steps.append(_check_json_logging_local_step())
+        steps.append(_check_json_logging_tests_step())
 
     if profile == "full":
         if not args.skip_render and not args.skip_semantic_canary:
@@ -3506,6 +3575,71 @@ def _parse_print_migration_m14_0c_tests_output(
         "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
         "summary": (
             f"test_print_migration_m14_0c: exit_code={exit_code} "
+            f"ok_detected={has_ok}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "ok_detected": has_ok,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# M14.2 — json-logging-verification profile parsers.
+# ---------------------------------------------------------------------------
+
+
+def _parse_check_json_logging_help_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    ok = (
+        exit_code == 0
+        and "check_json_logging" in stdout
+        and "Exit codes" in stdout
+    )
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"check_json_logging --help: exit_code={exit_code} "
+            f"help_text_detected={ok}"
+        ),
+    }
+
+
+def _parse_check_json_logging_local_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``check_json_logging.py --local`` must exit 0 and surface the
+    'PASS' marker. Anything else indicates the JSON schema isn't
+    being produced as M14.0a guaranteed."""
+    has_header = "JSON Logging Verification (local)" in stdout
+    has_pass = "Result: PASS" in stdout
+    ok = exit_code == 0 and has_header and has_pass
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"check_json_logging --local: exit_code={exit_code} "
+            f"header={has_header} pass={has_pass}"
+        ),
+        "metrics": {
+            "exit_code": exit_code,
+            "header_detected": has_header,
+            "pass_marker_detected": has_pass,
+        },
+    }
+
+
+def _parse_check_json_logging_tests_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``tests/test_check_json_logging.py`` is a unittest runner —
+    exit 0 + ``OK`` line means the suite passed."""
+    has_ok = "\nOK" in (stdout + "\n" + stderr)
+    ok = exit_code == 0 and has_ok
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"test_check_json_logging: exit_code={exit_code} "
             f"ok_detected={has_ok}"
         ),
         "metrics": {
