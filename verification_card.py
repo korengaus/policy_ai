@@ -77,6 +77,10 @@ def _now_iso() -> str:
 # call sites iterate only, so behaviour is unchanged.
 from korean_constants import POLICY_ACTION_KEYWORDS
 
+from structured_logging import get_logger
+
+log = get_logger(__name__)
+
 
 def _split_sentences(text: str) -> list[str]:
     normalized = re.sub(r"\s+", " ", text or "").strip()
@@ -696,14 +700,14 @@ def build_verification_card(
 
 
 def print_verification_card(card: dict):
-    print("\n----- Verification card -----")
-    print("claim_text:", card.get("claim_text"))
-    print("claims:")
+    log.info("\n----- Verification card -----")
+    log.info("claim_text:", card.get("claim_text"))
+    log.info("claims:")
     for claim in card.get("claims") or []:
-        print("-", claim)
-    print("normalized_claims:")
+        log.info("-", claim)
+    log.info("normalized_claims:")
     for claim in card.get("normalized_claims") or []:
-        print(
+        log.info(
             "-",
             claim.get("actor"),
             "|",
@@ -717,25 +721,25 @@ def print_verification_card(card: dict):
             "|",
             claim.get("uncertainty_level"),
         )
-    print("source_queries:", len(card.get("source_queries") or []))
-    print("source_candidates:", len(card.get("source_candidates") or []))
-    print("source_reliability_summary:", card.get("source_reliability_summary"))
-    print("evidence_snippets:", len(card.get("evidence_snippets") or []))
-    print("claim_evidence_quality_summary:", card.get("claim_evidence_quality_summary"))
-    print("evidence_quality_summary:", card.get("evidence_quality_summary"))
-    print("evidence_extraction_summary:", card.get("evidence_extraction_summary"))
-    print("contradiction_checks:", len(card.get("contradiction_checks") or []))
-    print("contradiction_summary:", card.get("contradiction_summary"))
-    print("bias_framing_analysis:", len(card.get("bias_framing_analysis") or []))
-    print("bias_framing_summary:", card.get("bias_framing_summary"))
-    print("debug_summary:", card.get("debug_summary"))
-    print("verdict_label:", card.get("verdict_label"))
-    print("verdict_confidence:", card.get("verdict_confidence"))
-    print("source_reliability_score:", card.get("source_reliability_score"))
-    print("source_reliability_reason:", card.get("source_reliability_reason"))
-    print("evidence_summary:", card.get("evidence_summary"))
-    print("missing_context:")
+    log.info("source_queries:", len(card.get("source_queries") or []))
+    log.info("source_candidates:", len(card.get("source_candidates") or []))
+    log.info("source_reliability_summary:", card.get("source_reliability_summary"))
+    log.info("evidence_snippets:", len(card.get("evidence_snippets") or []))
+    log.info("claim_evidence_quality_summary:", card.get("claim_evidence_quality_summary"))
+    log.info("evidence_quality_summary:", card.get("evidence_quality_summary"))
+    log.info("evidence_extraction_summary:", card.get("evidence_extraction_summary"))
+    log.info("contradiction_checks:", len(card.get("contradiction_checks") or []))
+    log.info("contradiction_summary:", card.get("contradiction_summary"))
+    log.info("bias_framing_analysis:", len(card.get("bias_framing_analysis") or []))
+    log.info("bias_framing_summary:", card.get("bias_framing_summary"))
+    log.debug("debug_summary:", card.get("debug_summary"))
+    log.info("verdict_label:", card.get("verdict_label"))
+    log.info("verdict_confidence:", card.get("verdict_confidence"))
+    log.info("source_reliability_score:", card.get("source_reliability_score"))
+    log.info("source_reliability_reason:", card.get("source_reliability_reason"))
+    log.info("evidence_summary:", card.get("evidence_summary"))
+    log.info("missing_context:")
     for item in card.get("missing_context") or []:
-        print("-", item)
-    print("last_checked_at:", card.get("last_checked_at"))
-    print("review_status:", card.get("review_status"))
+        log.info("-", item)
+    log.info("last_checked_at:", card.get("last_checked_at"))
+    log.info("review_status:", card.get("review_status"))

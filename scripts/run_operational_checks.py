@@ -84,6 +84,7 @@ PROFILES = (
     "official-crawler-cache",
     "cache-measurement-dry",
     "structured-logging",
+    "print-migration",
     "full",
 )
 
@@ -1397,6 +1398,57 @@ def _structured_logging_tests_step() -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Phase 2 M14.0b — print-migration profile.
+#
+# Tooling-only profile. The print() -> structured logging migration
+# touched 5 production files (main.py, official_crawler.py,
+# verification_card.py, news_collector.py, article_extractor.py).
+# This profile pins:
+#   * Zero remaining print() calls in those 5 files (AST + token).
+#   * get_logger imported + module-level logger init present.
+#   * Log-call count >= pre-migration print count per file.
+#   * 8 deferred files retain their pre-M14.0b print counts.
+# It also re-runs the structured logging tests so the M14.0a
+# foundation is exercised alongside the new migration pin.
+# ---------------------------------------------------------------------------
+
+
+def _print_migration_tests_step() -> dict:
+    return {
+        "name": "test_print_migration",
+        "command": [
+            _python(),
+            str(ROOT / "tests" / "test_print_migration.py"),
+        ],
+        "parser": _parse_print_migration_tests_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _print_migration_compileall_step() -> dict:
+    """Confirm the 5 migrated source files still compile cleanly."""
+    targets = [
+        str(ROOT / name) for name in (
+            "main.py",
+            "official_crawler.py",
+            "verification_card.py",
+            "news_collector.py",
+            "article_extractor.py",
+        )
+    ]
+    return {
+        "name": "compileall(migrated 5 files)",
+        "command": [_python(), "-m", "compileall", *targets],
+        "parser": _parse_compileall_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
 def _historical_dry_run_step() -> dict:
     return {
         "name": "historical_dry_run",
@@ -1667,6 +1719,17 @@ def _resolve_steps(args: argparse.Namespace) -> List[dict]:
         steps.append(_structured_logging_help_step())
         steps.append(_structured_logging_status_step())
         steps.append(_structured_logging_emit_sample_step())
+        steps.append(_structured_logging_tests_step())
+
+    if profile == "print-migration":
+        # M14.0b — print() -> structured logging migration on top 5
+        # files (189 of 251 prints). Fully offline. The compileall
+        # step confirms the 5 migrated files still parse; the
+        # migration test pins zero remaining print() in targets +
+        # unchanged counts in the 8 deferred files; the structured
+        # logging tests re-run as a regression check.
+        steps.append(_print_migration_compileall_step())
+        steps.append(_print_migration_tests_step())
         steps.append(_structured_logging_tests_step())
 
     if profile == "full":
@@ -3375,6 +3438,47 @@ def _parse_structured_logging_emit_sample_output(
             "info_detected": has_info,
             "warning_detected": has_warning,
             "error_detected": has_error,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# M14.0b — print-migration profile parsers.
+# ---------------------------------------------------------------------------
+
+
+def _parse_print_migration_tests_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``tests/test_print_migration.py`` is a unittest runner —
+    exit 0 with an ``OK`` line means the suite passed."""
+    has_ok = "\nOK" in (stdout + "\n" + stderr)
+    ok = exit_code == 0 and has_ok
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"test_print_migration: exit_code={exit_code} "
+            f"ok_detected={has_ok}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "ok_detected": has_ok,
+        },
+    }
+
+
+def _parse_compileall_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``python -m compileall`` exits 0 on success and 1 on any
+    syntax error. Output to stdout / stderr is purely informational."""
+    return {
+        "status": _HEALTH_PASS if exit_code == 0 else _HEALTH_FAIL,
+        "summary": (
+            f"compileall: exit_code={exit_code}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
         },
     }
 

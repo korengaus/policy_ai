@@ -54,6 +54,10 @@ from verification_card import build_verification_card, print_verification_card
 from pipeline_debug import build_pipeline_debug_summary
 from text_utils import sanitize_data, sanitize_text
 
+from structured_logging import get_logger
+
+log = get_logger(__name__)
+
 
 REPORTS_DIR = Path("reports")
 ANALYSIS_CACHE_PATH = Path(".cache") / "analysis_result_cache.json"
@@ -109,7 +113,7 @@ def _load_analysis_cache() -> dict:
         if ANALYSIS_CACHE_PATH.exists():
             return json.loads(ANALYSIS_CACHE_PATH.read_text(encoding="utf-8"))
     except Exception as error:
-        print(f"[AnalysisCache] read failed: {error}")
+        log.error(f"[AnalysisCache] read failed: {error}")
     return {}
 
 
@@ -121,7 +125,7 @@ def _save_analysis_cache(cache: dict) -> None:
             encoding="utf-8",
         )
     except Exception as error:
-        print(f"[AnalysisCache] write failed: {error}")
+        log.error(f"[AnalysisCache] write failed: {error}")
 
 
 def _analysis_cache_fresh(entry: dict) -> bool:
@@ -186,7 +190,7 @@ def _get_cached_analysis_report(
     if not entry or not _analysis_cache_fresh(entry):
         return None
 
-    print(f"[AnalysisCache] Cache hit: key={analysis_cache_key}")
+    log.info(f"[AnalysisCache] Cache hit: key={analysis_cache_key}")
     report_items = _apply_analysis_cache_debug(
         entry.get("news_results") or [],
         analysis_cache_hit=True,
@@ -215,7 +219,7 @@ def _get_cached_analysis_report(
         }
     )
     report_path = save_run_report(report, run_started_at)
-    print("\nSaved cached run report:", report_path)
+    log.info("\nSaved cached run report:", report_path)
     report["report_path"] = str(report_path)
     return report
 
@@ -238,7 +242,7 @@ def _store_analysis_report(
         "news_results": sanitize_data(report_items),
     }
     _save_analysis_cache(cache)
-    print(f"[AnalysisCache] Cache stored: key={analysis_cache_key} ttl={ANALYSIS_CACHE_TTL_SECONDS}s")
+    log.info(f"[AnalysisCache] Cache stored: key={analysis_cache_key} ttl={ANALYSIS_CACHE_TTL_SECONDS}s")
 
 
 def build_report_path(run_started_at: str) -> Path:
@@ -306,48 +310,48 @@ def save_run_report(report: dict, run_started_at: str) -> Path:
 
 
 def print_rule_based_results(policy_claims: list[dict]):
-    print("\n----- Rule-based policy sentences -----")
+    log.info("\n----- Rule-based policy sentences -----")
 
     if not policy_claims:
-        print("No important policy sentences found.")
+        log.info("No important policy sentences found.")
         return
 
     for item in policy_claims:
-        print(f"- {item['sentence']}")
-        print(f"  score: {item['score']}")
-        print(f"  authority: {item['authority_label']}")
-        print(f"  strength: {item['strength_label']}")
-        print(f"  execution: {item['execution_label']}")
-        print(f"  reasons: {', '.join(item['reasons'])}")
+        log.info(f"- {item['sentence']}")
+        log.info(f"  score: {item['score']}")
+        log.info(f"  authority: {item['authority_label']}")
+        log.info(f"  strength: {item['strength_label']}")
+        log.info(f"  execution: {item['execution_label']}")
+        log.info(f"  reasons: {', '.join(item['reasons'])}")
 
 
 def print_ai_results(ai_result: dict):
-    print("\n----- AI reasoning result -----")
+    log.info("\n----- AI reasoning result -----")
 
     if not ai_result.get("ai_available"):
-        print("AI reasoning unavailable")
-        print("reason:", ai_result.get("error"))
-        print(ai_result.get("fallback_message"))
+        log.info("AI reasoning unavailable")
+        log.info("reason:", ai_result.get("error"))
+        log.info(ai_result.get("fallback_message"))
         return
 
-    print("summary:", ai_result.get("one_line_summary"))
-    print("policy signal:", ai_result.get("policy_signal_detected"))
-    print("main issue:", ai_result.get("main_policy_issue"))
-    print("execution probability:", str(ai_result.get("execution_probability")) + "%")
-    print("execution stage:", ai_result.get("execution_stage"))
-    print("market impact:", ai_result.get("market_impact_level"))
-    print("signal change:", ai_result.get("signal_change"))
-    print("official source needed:", ai_result.get("official_source_needed"))
-    print("official evidence found:", ai_result.get("official_evidence_found"))
-    print("official evidence summary:", ai_result.get("official_evidence_summary"))
-    print("official comparison status:", ai_result.get("official_comparison_status"))
-    print("official support score:", ai_result.get("official_support_score"))
-    print("official verification note:", ai_result.get("official_verification_note"))
+    log.info("summary:", ai_result.get("one_line_summary"))
+    log.info("policy signal:", ai_result.get("policy_signal_detected"))
+    log.info("main issue:", ai_result.get("main_policy_issue"))
+    log.info("execution probability:", str(ai_result.get("execution_probability")) + "%")
+    log.info("execution stage:", ai_result.get("execution_stage"))
+    log.info("market impact:", ai_result.get("market_impact_level"))
+    log.info("signal change:", ai_result.get("signal_change"))
+    log.info("official source needed:", ai_result.get("official_source_needed"))
+    log.info("official evidence found:", ai_result.get("official_evidence_found"))
+    log.info("official evidence summary:", ai_result.get("official_evidence_summary"))
+    log.info("official comparison status:", ai_result.get("official_comparison_status"))
+    log.info("official support score:", ai_result.get("official_support_score"))
+    log.info("official verification note:", ai_result.get("official_verification_note"))
 
-    print("\nrecommended official sources:")
+    log.info("\nrecommended official sources:")
     for source in ai_result.get("recommended_official_sources", []):
         if isinstance(source, dict):
-            print(
+            log.info(
                 "-",
                 source.get("source_name"),
                 "|",
@@ -356,28 +360,28 @@ def print_ai_results(ai_result: dict):
                 source.get("search_url") or source.get("official_search_url"),
             )
         else:
-            print("-", source)
+            log.info("-", source)
 
-    print("\nmemory comparison:")
-    print(ai_result.get("memory_comparison"))
+    log.info("\nmemory comparison:")
+    log.info(ai_result.get("memory_comparison"))
 
-    print("\naffected groups:")
+    log.info("\naffected groups:")
     for group in ai_result.get("affected_groups", []):
-        print("-", group)
+        log.info("-", group)
 
-    print("\nwhy it matters:")
-    print(ai_result.get("why_it_matters"))
+    log.info("\nwhy it matters:")
+    log.info(ai_result.get("why_it_matters"))
 
-    print("\nevidence sentences:")
+    log.info("\nevidence sentences:")
     for sentence in ai_result.get("evidence_sentences", []):
-        print("-", sentence)
+        log.info("-", sentence)
 
-    print("\nrisk factors:")
+    log.info("\nrisk factors:")
     for risk in ai_result.get("risk_factors", []):
-        print("-", risk)
+        log.info("-", risk)
 
-    print("\nfinal judgment:")
-    print(ai_result.get("final_judgment"))
+    log.info("\nfinal judgment:")
+    log.info(ai_result.get("final_judgment"))
 
 
 def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> dict:
@@ -406,7 +410,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
         return cached_report
 
     if not news_results:
-        print("No news found in the recent window.")
+        log.info("No news found in the recent window.")
         run_finished_at = utc_now_iso()
         report = {
             "run_started_at": run_started_at,
@@ -421,28 +425,28 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
             "news_results": [],
         }
         report_path = save_run_report(report, run_started_at)
-        print("\nSaved run report:", report_path)
+        log.info("\nSaved run report:", report_path)
         report["report_path"] = str(report_path)
         return report
 
     for i, news in enumerate(news_results, start=1):
-        print(f"\n========== News {i} ==========")
-        print("title:", news["title"])
-        print("published:", news["published"])
-        print("Google News link:", news["google_link"])
-        print("summary:", news["summary"])
+        log.info(f"\n========== News {i} ==========")
+        log.info("title:", news["title"])
+        log.info("published:", news["published"])
+        log.info("Google News link:", news["google_link"])
+        log.info("summary:", news["summary"])
 
-        print("\n----- Resolve original URL -----")
+        log.info("\n----- Resolve original URL -----")
         original_url = resolve_google_news_url(news["google_link"])
-        print("original URL:", original_url)
+        log.info("original URL:", original_url)
 
         article_id = make_article_id(news["title"], original_url)
         existing_ids = {article.get("article_id") for article in memory.get("articles", [])}
         duplicate = article_id in existing_ids
 
-        print("\n----- Fetch article body -----")
+        log.info("\n----- Fetch article body -----")
         article_body = sanitize_text(fetch_article_body(original_url, max_chars=MAX_ARTICLE_CHARS))
-        print(article_body[:1000])
+        log.info(article_body[:1000])
 
         claims = extract_verifiable_claims(
             article_body=article_body,
@@ -710,8 +714,8 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
                 ai_result=ai_result,
             )
 
-            print("\n----- Topic classification -----")
-            print("topic:", topic)
+            log.info("\n----- Topic classification -----")
+            log.info("topic:", topic)
 
             memory = update_memory_with_result(
                 memory=memory,
@@ -808,10 +812,10 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
         )
 
         if not ai_result.get("ai_available"):
-            print("\n----- Topic classification -----")
-            print("topic:", topic)
+            log.info("\n----- Topic classification -----")
+            log.info("topic:", topic)
 
-        print("\n" + "=" * 80)
+        log.info("\n" + "=" * 80)
 
     print_timeline_summary(memory)
 
@@ -836,7 +840,7 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
         report_items=report_items,
     )
     report_path = save_run_report(report, run_started_at)
-    print("\nSaved run report:", report_path)
+    log.info("\nSaved run report:", report_path)
     report["report_path"] = str(report_path)
     return report
 

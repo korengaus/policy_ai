@@ -45,6 +45,10 @@ BAD_KEYWORDS = [
 # article_extractor's marker set differs from text_utils's — see
 # docs/KOREAN_CONSTANTS.md for why they're kept distinct.
 from korean_constants import MOJIBAKE_MARKERS_ARTICLE_EXTRACTOR as MOJIBAKE_MARKERS
+
+from structured_logging import get_logger
+
+log = get_logger(__name__)
 COMMON_TEXT_PATTERN = re.compile(r"[가-힣A-Za-z0-9\s.,!?%·…~()\[\]{}<>:;\"'“”‘’/\-+_=|]")
 SPECIAL_SEQUENCE_PATTERN = re.compile(r"[^가-힣A-Za-z0-9\s.,!?%·…~()\[\]{}<>:;\"'“”‘’/\-+_=|]{2,}")
 
@@ -242,9 +246,9 @@ def _fetch_html(url: str) -> tuple[str, str, bool]:
     response.raise_for_status()
     html, encoding, fallback_used = _decode_response_content(response)
     response.encoding = encoding
-    print(f"[ArticleExtractor] encoding used: {encoding}")
+    log.info(f"[ArticleExtractor] encoding used: {encoding}")
     if fallback_used:
-        print("[ArticleExtractor] fallback encoding triggered")
+        log.info("[ArticleExtractor] fallback encoding triggered")
     return html, encoding, fallback_used
 
 
@@ -344,31 +348,31 @@ def fetch_article_body(url: str, max_chars: int = 5000) -> str:
                 break
 
         if retry_triggered:
-            print("[ArticleExtractor] encoding retry triggered")
+            log.info("[ArticleExtractor] encoding retry triggered")
 
-        print(f"[ArticleExtractor] encoding used: {best_encoding}")
+        log.info(f"[ArticleExtractor] encoding used: {best_encoding}")
         extracted = clean_extracted_text(best_extracted)
         quality_score = _text_quality_score(extracted)
-        print(f"[ArticleExtractor] text quality score: {quality_score}")
-        print(f"[ArticleExtractor] text length: {len(extracted)}")
-        print(f"[ArticleExtractor] Extracted length: {len(extracted)}")
+        log.info(f"[ArticleExtractor] text quality score: {quality_score}")
+        log.info(f"[ArticleExtractor] text length: {len(extracted)}")
+        log.info(f"[ArticleExtractor] Extracted length: {len(extracted)}")
 
         if extracted and not _is_probably_broken(extracted) and len(extracted) >= 100:
             if len(extracted) >= 300:
-                print("[ArticleExtractor] Using content for claim")
+                log.info("[ArticleExtractor] Using content for claim")
             else:
-                print("[ArticleExtractor] Fallback to title")
+                log.info("[ArticleExtractor] Fallback to title")
             return extracted[:max_chars]
 
-        print("[ArticleExtractor] Fallback to title")
-        print("[ArticleExtractor] fallback to title due to encoding")
+        log.info("[ArticleExtractor] Fallback to title")
+        log.info("[ArticleExtractor] fallback to title due to encoding")
         return ""
 
     except Exception as error:
-        print("[ArticleExtractor] encoding used: unknown")
-        print("[ArticleExtractor] text quality score: -10000")
-        print("[ArticleExtractor] text length: 0")
-        print("[ArticleExtractor] Extracted length: 0")
-        print("[ArticleExtractor] Fallback to title")
-        print("[ArticleExtractor] fallback to title due to encoding")
+        log.error("[ArticleExtractor] encoding used: unknown")
+        log.error("[ArticleExtractor] text quality score: -10000")
+        log.error("[ArticleExtractor] text length: 0")
+        log.error("[ArticleExtractor] Extracted length: 0")
+        log.error("[ArticleExtractor] Fallback to title")
+        log.error("[ArticleExtractor] fallback to title due to encoding")
         return ""

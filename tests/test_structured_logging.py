@@ -495,14 +495,14 @@ class ModuleAdoptionPin(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
+# M14.0b migrated 5 of these files (main.py, official_crawler.py,
+# verification_card.py, news_collector.py, article_extractor.py) so
+# they were removed from the legacy-isolation list. The remaining 13
+# entries are the M14.0c-deferred files plus the still-untouched
+# pipeline / storage / verdict modules.
 _LEGACY_FILES = (
     "api_server.py",
-    "main.py",
-    "official_crawler.py",
     "official_source_body.py",
-    "news_collector.py",
-    "article_extractor.py",
-    "verification_card.py",
     "policy_decision.py",
     "policy_scoring.py",
     "policy_confidence.py",

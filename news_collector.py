@@ -13,6 +13,10 @@ from googlenewsdecoder import gnewsdecoder
 from config import RECENT_DAYS
 from text_utils import decode_response_text, sanitize_data, sanitize_text
 
+from structured_logging import get_logger
+
+log = get_logger(__name__)
+
 
 REQUEST_HEADERS = {
     "User-Agent": (
@@ -144,7 +148,7 @@ def _load_news_cache() -> dict:
         if NEWS_CACHE_PATH.exists():
             return json.loads(NEWS_CACHE_PATH.read_text(encoding="utf-8"))
     except Exception as error:
-        print(f"[NewsCollector] Cache read failed: {error}")
+        log.error(f"[NewsCollector] Cache read failed: {error}")
     return {}
 
 
@@ -156,7 +160,7 @@ def _save_news_cache(cache: dict) -> None:
             encoding="utf-8",
         )
     except Exception as error:
-        print(f"[NewsCollector] Cache write failed: {error}")
+        log.error(f"[NewsCollector] Cache write failed: {error}")
 
 
 def _cache_entry_fresh(entry: dict) -> bool:
@@ -210,7 +214,7 @@ def _cached_news_response(query: str, max_results: int) -> dict | None:
             "selected_news_count": len(results),
         }
     )
-    print(f"[NewsCollector] Cache hit: key={key} selected={len(results)}")
+    log.info(f"[NewsCollector] Cache hit: key={key} selected={len(results)}")
     return {"results": results, "debug": debug}
 
 
@@ -225,7 +229,7 @@ def _store_news_response(query: str, max_results: int, results: list[dict], debu
         "debug": sanitize_data(debug or {}),
     }
     _save_news_cache(cache)
-    print(f"[NewsCollector] Cache stored: key={key} ttl={NEWS_CACHE_TTL_SECONDS}s")
+    log.info(f"[NewsCollector] Cache stored: key={key} ttl={NEWS_CACHE_TTL_SECONDS}s")
 
 
 def _query_terms(query: str) -> list[str]:
@@ -452,7 +456,7 @@ def _force_select_best(items: list[dict], source: str) -> list[dict]:
         return []
 
     best = max(unique, key=_candidate_score)
-    print("[NewsCollector] Forcing fallback selection: 1 item")
+    log.info("[NewsCollector] Forcing fallback selection: 1 item")
     forced = dict(best)
     forced["source"] = forced.get("source") or source
     forced["forced_fallback"] = True
@@ -461,7 +465,7 @@ def _force_select_best(items: list[dict], source: str) -> list[dict]:
 
 def _emergency_search_item(query: str) -> dict:
     search_url = f"https://search.naver.com/search.naver?where=news&query={quote(query)}"
-    print("[NewsCollector] Forcing fallback selection: 1 item")
+    log.info("[NewsCollector] Forcing fallback selection: 1 item")
     return _fallback_item(
         title=f"{query} 뉴스 검색 결과",
         link=search_url,
@@ -483,11 +487,11 @@ def _accept_fallback_candidate(
     max_results: int,
 ) -> bool:
     title = _normalize_spaces(title)
-    print(f"[NewsCollector] Raw candidate: {title}")
+    log.info(f"[NewsCollector] Raw candidate: {title}")
 
     valid_link, link_reason = _is_valid_news_href(href, base_url)
     if not valid_link:
-        print(f"[NewsCollector] Rejected reason: {link_reason}")
+        log.info(f"[NewsCollector] Rejected reason: {link_reason}")
         return False
 
     raw_item = _raw_fallback_candidate(title, href, summary, source, base_url)
@@ -496,16 +500,16 @@ def _accept_fallback_candidate(
 
     reject_reason = _reject_title_reason(title, query=query)
     if reject_reason:
-        print(f"[NewsCollector] Rejected reason: {reject_reason}")
+        log.info(f"[NewsCollector] Rejected reason: {reject_reason}")
         return False
 
     if not raw_item:
-        print("[NewsCollector] Rejected reason: invalid URL")
+        log.info("[NewsCollector] Rejected reason: invalid URL")
         return False
 
     items.append(raw_item)
     items[:] = _dedupe_news_items(items)
-    print(f"[NewsCollector] Accepted title: {title}")
+    log.info(f"[NewsCollector] Accepted title: {title}")
     return len(items) >= max_results
 
 
@@ -564,13 +568,13 @@ def search_naver_news_fallback(query: str, max_results: int = 3) -> tuple[list[d
                 base_url=url,
                 max_results=max_results,
             ):
-                print(f"[NewsCollector] Fallback selected: {len(items)}")
+                log.info(f"[NewsCollector] Fallback selected: {len(items)}")
                 return items[:max_results], None
 
         if not items:
             items = _force_select_best(raw_candidates, "naver_fallback")
 
-        print(f"[NewsCollector] Fallback selected: {len(items)}")
+        log.info(f"[NewsCollector] Fallback selected: {len(items)}")
         return items[:max_results], None
     except Exception as error:
         return [], str(error)
@@ -603,13 +607,13 @@ def search_daum_news_fallback(query: str, max_results: int = 3) -> tuple[list[di
                 base_url=url,
                 max_results=max_results,
             ):
-                print(f"[NewsCollector] Fallback selected: {len(items)}")
+                log.info(f"[NewsCollector] Fallback selected: {len(items)}")
                 return items[:max_results], None
 
         if not items:
             items = _force_select_best(raw_candidates, "daum_fallback")
 
-        print(f"[NewsCollector] Fallback selected: {len(items)}")
+        log.info(f"[NewsCollector] Fallback selected: {len(items)}")
         return items[:max_results], None
     except Exception as error:
         return [], str(error)
@@ -637,8 +641,8 @@ def search_google_news_rss_with_meta(query: str, max_results: int = 3):
     fallback_error = None
     no_results_reason = None
 
-    print(f"[NewsCollector] Google RSS raw count: {raw_rss_count}")
-    print(f"[NewsCollector] Recent window results: {filtered_recent_count}")
+    log.info(f"[NewsCollector] Google RSS raw count: {raw_rss_count}")
+    log.info(f"[NewsCollector] Recent window results: {filtered_recent_count}")
 
     if recent_results:
         selected = _stable_sort_news(recent_results)[:max_results]
@@ -649,30 +653,30 @@ def search_google_news_rss_with_meta(query: str, max_results: int = 3):
             item for item in raw_results if is_recent(item.get("published", ""), days=7)
         ]
         if relaxed_results:
-            print("[NewsCollector] Falling back to relaxed recent window results")
+            log.info("[NewsCollector] Falling back to relaxed recent window results")
             selected = _stable_sort_news(relaxed_results)[:max_results]
             mode = "relaxed_recent_window"
             collection_source = "google_rss"
         else:
-            print("[NewsCollector] Falling back to unfiltered RSS results")
+            log.info("[NewsCollector] Falling back to unfiltered RSS results")
             selected = _stable_sort_news(raw_results)[:max_results]
             mode = "unfiltered_fallback"
             collection_source = "google_rss" if selected else "none"
 
     if not selected and raw_rss_count == 0:
-        print("[NewsCollector] Google RSS failed, trying Naver fallback")
+        log.error("[NewsCollector] Google RSS failed, trying Naver fallback")
         fallback_source_attempted.append("naver_fallback")
         selected, fallback_error = search_naver_news_fallback(query, max_results=max_results)
-        print(f"[NewsCollector] Naver fallback count: {len(selected)}")
+        log.info(f"[NewsCollector] Naver fallback count: {len(selected)}")
         if selected:
             mode = "naver_fallback"
             collection_source = "naver_fallback"
 
     if not selected:
-        print("[NewsCollector] Trying Daum fallback")
+        log.info("[NewsCollector] Trying Daum fallback")
         fallback_source_attempted.append("daum_fallback")
         selected, daum_error = search_daum_news_fallback(query, max_results=max_results)
-        print(f"[NewsCollector] Daum fallback count: {len(selected)}")
+        log.info(f"[NewsCollector] Daum fallback count: {len(selected)}")
         if daum_error:
             fallback_error = "; ".join([error for error in [fallback_error, daum_error] if error])
         if selected:
@@ -691,8 +695,8 @@ def search_google_news_rss_with_meta(query: str, max_results: int = 3):
         no_results_reason = "News source parsing failed; using search result page as emergency fallback."
 
     selected = _stable_sort_news(selected)[:max_results]
-    print(f"[NewsCollector] Selected news count: {len(selected)}")
-    print(f"[NewsCollector] Collection source: {collection_source}")
+    log.info(f"[NewsCollector] Selected news count: {len(selected)}")
+    log.info(f"[NewsCollector] Collection source: {collection_source}")
     selected = sanitize_data(selected)
     debug = {
         "news_collection_mode": mode,
@@ -734,5 +738,5 @@ def resolve_google_news_url(google_news_url: str) -> str:
         return google_news_url
 
     except Exception as error:
-        print("원문 URL 변환 실패:", error)
+        log.error("원문 URL 변환 실패:", error)
         return google_news_url
