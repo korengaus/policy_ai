@@ -158,3 +158,30 @@ including `FetchWithCacheTests`) and
 `tests/test_official_crawler_cache.py` (21 cases including
 `CacheOffByteIdentityTests`) on every run. No real network is
 involved — `requests.get` is patched with a fake in every test.
+
+## M13.3c — Measurement & Activation Tooling
+
+M13.3c adds the tooling an operator needs to decide whether to enable
+the cache on Render and verify it once enabled:
+
+- `scripts/measure_cache_impact.py` — before/after comparison runner.
+  Wraps `scripts/smoke_async_job.py` N times in each configuration,
+  parses elapsed times, and produces a Markdown + JSON report with a
+  threshold-based verdict (`pass` / `marginal` / `investigate` /
+  `rollback_recommended`).
+- `scripts/check_cache_activation.py` — single-shot 2-run check. Runs
+  smoke twice back-to-back and infers whether the cache is active
+  from the warm/cold ratio (`OK` < 0.75 / `WARN` > 0.85 / `AMBIGUOUS`
+  in between).
+- `tests/test_measure_cache_impact.py` (22 cases) and
+  `tests/test_check_cache_activation.py` (18 cases) — no Render
+  traffic; subprocess is patched and `--simulate` provides
+  deterministic synthetic timings.
+- `docs/CACHE_ACTIVATION_GUIDE.md` — step-by-step operator guide:
+  baseline, enable on Render, verify, measure, roll back.
+- `cache-measurement-dry` operational profile — exercises both CLIs'
+  `--help` paths and the two test suites. Does NOT touch Render.
+
+The activation itself remains an operator decision via Render env
+vars. M13.3c is purely tooling and documentation; no production code
+that runs during a normal `analyze_pipeline` call was modified.

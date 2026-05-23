@@ -69,7 +69,10 @@ def _commands() -> List[List[str]]:
          # M13.3a — shared HTTP cache infrastructure (disabled by default).
          "http_cache.py", "scripts/check_http_cache.py",
          # M14.0a — structured logging foundation (opt-in via LOG_FORMAT).
-         "structured_logging.py", "scripts/check_logging.py"],
+         "structured_logging.py", "scripts/check_logging.py",
+         # M13.3c — cache measurement + activation tooling.
+         "scripts/measure_cache_impact.py",
+         "scripts/check_cache_activation.py"],
         [python, "tests/test_jobs.py"],
         [python, "tests/test_postgres_dual_write.py"],
         [python, "tests/test_ai_reasoner_status.py"],
@@ -150,6 +153,14 @@ def _commands() -> List[List[str]]:
         # (feature-flagged, default off). The byte-identicality
         # regression pin lives in CacheOffByteIdentityTests.
         [python, "tests/test_official_crawler_cache.py"],
+        # M13.3c — cache measurement + activation tooling.
+        # --help smokes confirm the scripts load and parse args;
+        # the unit tests exercise the parser, verdict thresholds,
+        # and simulate paths without hitting Render.
+        [python, "scripts/measure_cache_impact.py", "--help"],
+        [python, "scripts/check_cache_activation.py", "--help"],
+        [python, "tests/test_measure_cache_impact.py"],
+        [python, "tests/test_check_cache_activation.py"],
         # M14.0a — structured logging foundation. --help and --status
         # are read-only smokes; the test suite pins module-adoption
         # for the 10 M13.x modules, legacy-isolation for 18 untouched

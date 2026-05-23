@@ -82,6 +82,7 @@ PROFILES = (
     "frontend-build",
     "http-cache",
     "official-crawler-cache",
+    "cache-measurement-dry",
     "structured-logging",
     "full",
 )
@@ -1248,6 +1249,79 @@ def _official_crawler_cache_underlying_tests_step() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Phase 2 M13.3c — cache-measurement-dry profile.
+#
+# Tooling-only profile. The two CLIs (--help smokes) confirm the
+# scripts parse args and the test suites exercise the parser,
+# verdict thresholds, simulate paths, and failure handling without
+# ever hitting Render. The actual measurement against Render is an
+# operator step (see docs/CACHE_ACTIVATION_GUIDE.md). Steps:
+#   1) scripts/measure_cache_impact.py --help         (CLI smoke)
+#   2) scripts/check_cache_activation.py --help       (CLI smoke)
+#   3) tests/test_measure_cache_impact.py             (unit tests)
+#   4) tests/test_check_cache_activation.py           (unit tests)
+# ---------------------------------------------------------------------------
+
+
+def _measure_cache_impact_help_step() -> dict:
+    return {
+        "name": "measure_cache_impact(--help)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "measure_cache_impact.py"),
+            "--help",
+        ],
+        "parser": _parse_measure_cache_impact_help_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _check_cache_activation_help_step() -> dict:
+    return {
+        "name": "check_cache_activation(--help)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "check_cache_activation.py"),
+            "--help",
+        ],
+        "parser": _parse_check_cache_activation_help_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _measure_cache_impact_tests_step() -> dict:
+    return {
+        "name": "test_measure_cache_impact",
+        "command": [
+            _python(),
+            str(ROOT / "tests" / "test_measure_cache_impact.py"),
+        ],
+        "parser": _parse_measure_cache_impact_tests_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _check_cache_activation_tests_step() -> dict:
+    return {
+        "name": "test_check_cache_activation",
+        "command": [
+            _python(),
+            str(ROOT / "tests" / "test_check_cache_activation.py"),
+        ],
+        "parser": _parse_check_cache_activation_tests_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Phase 2 M14.0a — structured-logging profile.
 #
 # Fully offline. --help and --status are read-only smokes;
@@ -1569,6 +1643,19 @@ def _resolve_steps(args: argparse.Namespace) -> List[dict]:
         # covered by tests/test_http_cache.py::FetchWithCacheTests.
         steps.append(_official_crawler_cache_tests_step())
         steps.append(_official_crawler_cache_underlying_tests_step())
+
+    if profile == "cache-measurement-dry":
+        # M13.3c — cache measurement + activation tooling.
+        # Tooling-only profile: --help smokes confirm both CLIs
+        # parse args; the unit tests exercise the parser, verdict
+        # thresholds, simulate paths, and failure handling. NO real
+        # Render call happens during this profile. Real measurement
+        # against Render is an operator step driven by
+        # docs/CACHE_ACTIVATION_GUIDE.md.
+        steps.append(_measure_cache_impact_help_step())
+        steps.append(_check_cache_activation_help_step())
+        steps.append(_measure_cache_impact_tests_step())
+        steps.append(_check_cache_activation_tests_step())
 
     if profile == "structured-logging":
         # M14.0a — structured logging foundation. Fully offline.
@@ -3108,6 +3195,81 @@ def _parse_official_crawler_cache_tests_output(
         "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
         "summary": (
             f"test_official_crawler_cache: exit_code={exit_code} "
+            f"ok_detected={has_ok}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "ok_detected": has_ok,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# M13.3c — cache-measurement-dry profile parsers.
+# ---------------------------------------------------------------------------
+
+
+def _parse_measure_cache_impact_help_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    ok = (
+        exit_code == 0
+        and "measure_cache_impact" in stdout
+        and "Exit codes" in stdout
+    )
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"measure_cache_impact --help: exit_code={exit_code} "
+            f"help_text_detected={ok}"
+        ),
+    }
+
+
+def _parse_check_cache_activation_help_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    ok = (
+        exit_code == 0
+        and "check_cache_activation" in stdout
+        and "Exit codes" in stdout
+    )
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"check_cache_activation --help: exit_code={exit_code} "
+            f"help_text_detected={ok}"
+        ),
+    }
+
+
+def _parse_measure_cache_impact_tests_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    has_ok = "\nOK" in (stdout + "\n" + stderr)
+    ok = exit_code == 0 and has_ok
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"test_measure_cache_impact: exit_code={exit_code} "
+            f"ok_detected={has_ok}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "ok_detected": has_ok,
+        },
+    }
+
+
+def _parse_check_cache_activation_tests_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    has_ok = "\nOK" in (stdout + "\n" + stderr)
+    ok = exit_code == 0 and has_ok
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"test_check_cache_activation: exit_code={exit_code} "
             f"ok_detected={has_ok}"
         ),
         "metrics": {
