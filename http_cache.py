@@ -47,8 +47,10 @@ from dataclasses import dataclass, field
 from typing import Iterable, Optional, Tuple
 from urllib.parse import urlparse
 
+from structured_logging import get_logger
 
-log = logging.getLogger(__name__)
+
+log = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------

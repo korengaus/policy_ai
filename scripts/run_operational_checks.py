@@ -81,6 +81,7 @@ PROFILES = (
     "llm-judge-dry-run",
     "frontend-build",
     "http-cache",
+    "structured-logging",
     "full",
 )
 
@@ -1204,6 +1205,82 @@ def _http_cache_tests_step() -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Phase 2 M14.0a — structured-logging profile.
+#
+# Fully offline. --help and --status are read-only smokes;
+# --emit-sample produces a few representative log records via the
+# structured logger so operators can verify the format. The offline
+# tests cover env parsing, idempotency, JSON shape, Korean UTF-8
+# preservation, module-adoption for the 10 M13.x modules, and the
+# legacy-isolation pin for 18 untouched files. No real network, no
+# OpenAI, no DB writes.
+# Steps:
+#   1) scripts/check_logging.py --help          (CLI smoke)
+#   2) scripts/check_logging.py --status        (default-env report)
+#   3) scripts/check_logging.py --emit-sample   (sample log records)
+#   4) tests/test_structured_logging.py         (offline tests)
+# ---------------------------------------------------------------------------
+
+
+def _structured_logging_help_step() -> dict:
+    return {
+        "name": "check_logging(--help)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "check_logging.py"),
+            "--help",
+        ],
+        "parser": _parse_structured_logging_help_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _structured_logging_status_step() -> dict:
+    return {
+        "name": "check_logging(--status)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "check_logging.py"),
+        ],
+        "parser": _parse_structured_logging_status_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _structured_logging_emit_sample_step() -> dict:
+    return {
+        "name": "check_logging(--emit-sample)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "check_logging.py"),
+            "--emit-sample",
+        ],
+        "parser": _parse_structured_logging_emit_sample_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _structured_logging_tests_step() -> dict:
+    return {
+        "name": "test_structured_logging",
+        "command": [
+            _python(),
+            str(ROOT / "tests" / "test_structured_logging.py"),
+        ],
+        "parser": _parse_structured_logging_tests_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
 def _historical_dry_run_step() -> dict:
     return {
         "name": "historical_dry_run",
@@ -1439,6 +1516,18 @@ def _resolve_steps(args: argparse.Namespace) -> List[dict]:
         steps.append(_http_cache_help_step())
         steps.append(_http_cache_status_step())
         steps.append(_http_cache_tests_step())
+
+    if profile == "structured-logging":
+        # M14.0a — structured logging foundation. Fully offline.
+        # --help / --status / --emit-sample are read-only or stderr-
+        # only smokes; the offline tests pin the module-adoption
+        # contract for the 10 M13.x modules and the legacy-isolation
+        # contract for 18 untouched files. No real network. No
+        # external logging service. JSON output is opt-in.
+        steps.append(_structured_logging_help_step())
+        steps.append(_structured_logging_status_step())
+        steps.append(_structured_logging_emit_sample_step())
+        steps.append(_structured_logging_tests_step())
 
     if profile == "full":
         if not args.skip_render and not args.skip_semantic_canary:
@@ -2942,6 +3031,126 @@ def _parse_http_cache_tests_output(
         "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
         "summary": (
             f"test_http_cache: exit_code={exit_code} "
+            f"ok_detected={has_ok}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "ok_detected": has_ok,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# M14.0a — structured-logging profile parsers.
+# ---------------------------------------------------------------------------
+
+
+def _parse_structured_logging_help_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``check_logging.py --help`` must exit 0 and surface the
+    documented header text and Exit codes section."""
+    ok = (
+        exit_code == 0
+        and "check_logging" in stdout
+        and "Exit codes" in stdout
+    )
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"check_logging --help: exit_code={exit_code} "
+            f"help_text_detected={ok}"
+        ),
+    }
+
+
+def _parse_structured_logging_status_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """Default-env status. Expected PASS shape: LOG_FORMAT line plus
+    safety footer asserting the M14.0a opt-in claim."""
+    has_header = "Structured Logging Status" in stdout
+    has_format_line = "LOG_FORMAT:" in stdout
+    has_safety_footer = (
+        "M14.0a is opt-in" in stdout
+        or "JSON output enabled" in stdout
+    )
+    text_mode = "LOG_FORMAT:         text" in stdout
+    json_mode = "LOG_FORMAT:         json" in stdout
+    if exit_code == 0 and has_header and has_format_line and has_safety_footer:
+        status = _HEALTH_PASS
+        if text_mode:
+            summary = (
+                "check_logging --status: text mode (LOG_FORMAT unset)"
+            )
+        elif json_mode:
+            summary = (
+                "check_logging --status: json mode (operator opt-in)"
+            )
+        else:
+            summary = "check_logging --status: clean exit"
+    else:
+        status = _HEALTH_FAIL
+        summary = (
+            f"check_logging --status: exit_code={exit_code} "
+            f"header={has_header} format_line={has_format_line} "
+            f"safety_footer={has_safety_footer}"
+        )
+    return {
+        "status": status,
+        "summary": summary,
+        "metrics": {
+            "exit_code": exit_code,
+            "header_detected": has_header,
+            "format_line_detected": has_format_line,
+            "safety_footer_detected": has_safety_footer,
+            "text_mode_detected": text_mode,
+            "json_mode_detected": json_mode,
+        },
+    }
+
+
+def _parse_structured_logging_emit_sample_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``--emit-sample`` must exit 0 and surface INFO/WARNING/ERROR
+    records on stderr along with the human banner on stdout."""
+    has_banner = "Sample log emission" in stdout
+    has_info = "INFO" in stderr
+    has_warning = "WARNING" in stderr
+    has_error = "ERROR" in stderr
+    ok = (
+        exit_code == 0 and has_banner
+        and has_info and has_warning and has_error
+    )
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"check_logging --emit-sample: exit_code={exit_code} "
+            f"banner={has_banner} levels="
+            f"INFO={has_info} WARNING={has_warning} ERROR={has_error}"
+        ),
+        "metrics": {
+            "exit_code": exit_code,
+            "banner_detected": has_banner,
+            "info_detected": has_info,
+            "warning_detected": has_warning,
+            "error_detected": has_error,
+        },
+    }
+
+
+def _parse_structured_logging_tests_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``tests/test_structured_logging.py`` is a unittest runner —
+    exit 0 with an ``OK`` line means the suite passed."""
+    has_ok = "\nOK" in (stdout + "\n" + stderr)
+    ok = exit_code == 0 and has_ok
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"test_structured_logging: exit_code={exit_code} "
             f"ok_detected={has_ok}"
         ),
         "metrics": {

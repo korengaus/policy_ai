@@ -42,9 +42,10 @@ from sqlalchemy.exc import SQLAlchemyError
 
 import database
 import postgres_storage
+from structured_logging import get_logger
 
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 
 # Documented idempotency strategies. Anything else is rejected at spec

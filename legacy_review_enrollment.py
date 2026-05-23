@@ -66,8 +66,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from structured_logging import get_logger
 
-logger = logging.getLogger(__name__)
+
+logger = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------

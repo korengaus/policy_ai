@@ -44,6 +44,7 @@ def _commands() -> List[List[str]]:
     python = sys.executable or "python"
     npm = _npm_executable()
     _assert_dual_write_disabled_for_determinism()
+    _normalize_log_format_for_determinism()
     return [
         [python, "-m", "compileall", "api_server.py", "database.py", "job_manager.py",
          "source_crawler.py", "scripts/fetch_registry_source.py",
@@ -66,7 +67,9 @@ def _commands() -> List[List[str]]:
          # M13.2a — frontend build pipeline.
          "frontend/build_index.py",
          # M13.3a — shared HTTP cache infrastructure (disabled by default).
-         "http_cache.py", "scripts/check_http_cache.py"],
+         "http_cache.py", "scripts/check_http_cache.py",
+         # M14.0a — structured logging foundation (opt-in via LOG_FORMAT).
+         "structured_logging.py", "scripts/check_logging.py"],
         [python, "tests/test_jobs.py"],
         [python, "tests/test_postgres_dual_write.py"],
         [python, "tests/test_ai_reasoner_status.py"],
@@ -143,6 +146,13 @@ def _commands() -> List[List[str]]:
         [python, "scripts/check_http_cache.py", "--help"],
         [python, "scripts/check_http_cache.py", "--status"],
         [python, "tests/test_http_cache.py"],
+        # M14.0a — structured logging foundation. --help and --status
+        # are read-only smokes; the test suite pins module-adoption
+        # for the 10 M13.x modules, legacy-isolation for 18 untouched
+        # files, and JSON shape / Korean-text preservation.
+        [python, "scripts/check_logging.py", "--help"],
+        [python, "scripts/check_logging.py", "--status"],
+        [python, "tests/test_structured_logging.py"],
         [npm, "test"],
     ]
 
@@ -163,6 +173,25 @@ def _assert_dual_write_disabled_for_determinism() -> None:
             "keep validation runs deterministic; the dual-write tests "
             "exercise the toggle internally."
         )
+
+
+def _normalize_log_format_for_determinism() -> None:
+    """M14.0a — clear ``LOG_FORMAT`` from the environment before
+    running subprocesses so JSON-mode output cannot pollute the
+    text-parsing output parsers used by smoke checks. The structured
+    logging tests exercise the JSON toggle internally via env-scope
+    helpers; CI and validate.py runs always behave as text-mode.
+    """
+    raw = os.environ.get("LOG_FORMAT")
+    if raw and raw.strip(" \t").lower() == "json":
+        print(
+            "[validate] LOG_FORMAT=json detected -- clearing for "
+            "deterministic validation run. The structured-logging tests "
+            "exercise the JSON toggle via env-scope helpers internally."
+        )
+    # Unconditionally clear so every child subprocess sees the same
+    # baseline.
+    os.environ.pop("LOG_FORMAT", None)
 
 
 def _format_command(cmd: List[str]) -> str:

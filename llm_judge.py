@@ -45,8 +45,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
+from structured_logging import get_logger
 
-log = logging.getLogger(__name__)
+
+log = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------

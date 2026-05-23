@@ -37,8 +37,10 @@ import sqlalchemy as sa
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
+from structured_logging import get_logger
 
-log = logging.getLogger(__name__)
+
+log = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
