@@ -1510,6 +1510,23 @@ def _print_migration_m14_0c_tests_step() -> dict:
     }
 
 
+def _log_level_reclassification_tests_step() -> dict:
+    """M14.4 — AST pins that no log.error is a field-name reporter, that
+    reclassified false-positives are now log.info, and that real errors
+    remain log.error. Fully offline, no external dependencies."""
+    return {
+        "name": "test_log_level_reclassification",
+        "command": [
+            _python(),
+            str(ROOT / "tests" / "test_log_level_reclassification.py"),
+        ],
+        "parser": _parse_log_level_reclassification_tests_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Phase 2 M14.2 — json-logging-verification profile.
 #
@@ -1853,6 +1870,11 @@ def _resolve_steps(args: argparse.Namespace) -> List[dict]:
         steps.append(_print_migration_compileall_step())
         steps.append(_print_migration_tests_step())
         steps.append(_print_migration_m14_0c_tests_step())
+        # M14.4 — reclassification pin lives in the print-migration
+        # profile because it is the natural follow-on contract: after
+        # the migration moves prints to log.X, M14.4 pins that the X
+        # is correct.
+        steps.append(_log_level_reclassification_tests_step())
         steps.append(_structured_logging_tests_step())
 
     if profile == "json-logging-verification":
@@ -3614,6 +3636,26 @@ def _parse_print_migration_m14_0c_tests_output(
         "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
         "summary": (
             f"test_print_migration_m14_0c: exit_code={exit_code} "
+            f"ok_detected={has_ok}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "ok_detected": has_ok,
+        },
+    }
+
+
+def _parse_log_level_reclassification_tests_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``tests/test_log_level_reclassification.py`` is a unittest
+    runner — exit 0 + "OK" means all M14.4 pins held."""
+    has_ok = "\nOK" in (stdout + "\n" + stderr)
+    ok = exit_code == 0 and has_ok
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"test_log_level_reclassification: exit_code={exit_code} "
             f"ok_detected={has_ok}"
         ),
         "metrics": {

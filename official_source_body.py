@@ -575,7 +575,7 @@ def enrich_official_source_candidates_with_bodies(
         "official_body_matches": matched,
         "official_body_failures": dict(sorted(failures.items())),
     }
-    log.error(
+    log.info(
         "[OfficialBody] "
         f"candidates={official_count} fetched={fetched} usable={usable} "
         f"matched={matched} failures={summary['official_body_failures']}"

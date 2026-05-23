@@ -172,6 +172,10 @@ def _commands() -> List[List[str]]:
         # M14.0c — completes the migration on the remaining 8 files.
         # Subprocess-invokes verdict test suites to prove invariance.
         [python, "tests/test_print_migration_m14_0c.py"],
+        # M14.4 — log level reclassification: AST pins that no log.error
+        # call is a field-name reporter, that known false-positives are
+        # log.info, and that known real errors are still log.error.
+        [python, "tests/test_log_level_reclassification.py"],
         # M14.2 — JSON logging production activation tooling.
         [python, "scripts/check_json_logging.py", "--help"],
         [python, "tests/test_check_json_logging.py"],
