@@ -1,13 +1,14 @@
-"""Frontend build pipeline (M13.2a).
+"""Frontend build pipeline (M13.2a, extended M13.2b).
 
-Reads ``frontend/styles/main.css`` and the template at
-``frontend/template.html``, injects the CSS at the ``<!-- CSS_INJECT -->``
+Reads ``frontend/styles/main.css`` + ``frontend/scripts/main.js`` and
+the template at ``frontend/template.html``, injects the CSS at the
+``<!-- CSS_INJECT -->`` marker and the JS at the ``<!-- JS_INJECT -->``
 marker, and writes the result to ``web/index.html``. Pure Python, no
 Node bundler, stdlib-only.
 
 All file I/O is BYTE-ORIENTED (``read_bytes`` / ``write_bytes``). The
-M13.2a invariant is that the served HTML must be byte-identical to the
-pre-extraction version, and Windows ``open(..., encoding="utf-8")``
+M13.2a/b invariant is that the served HTML must be byte-identical to
+the pre-extraction version, and Windows ``open(..., encoding="utf-8")``
 defaults to universal newline translation (``\\n`` → ``\\r\\n`` on
 write) which would silently violate that guarantee. Operating on bytes
 sidesteps that entirely.
@@ -36,6 +37,7 @@ FRONTEND_DIR = Path(__file__).resolve().parent
 REPO_ROOT = FRONTEND_DIR.parent
 TEMPLATE_PATH = FRONTEND_DIR / "template.html"
 CSS_PATH = FRONTEND_DIR / "styles" / "main.css"
+JS_PATH = FRONTEND_DIR / "scripts" / "main.js"
 CHECKSUM_PATH = FRONTEND_DIR / "dist_checksum.txt"
 
 # Discovered by reading ``api_server.py`` at:
@@ -44,9 +46,12 @@ CHECKSUM_PATH = FRONTEND_DIR / "dist_checksum.txt"
 #       return FileResponse("web/index.html")
 SERVED_HTML_PATH = REPO_ROOT / "web" / "index.html"
 
-# Bytes literal — never a Python string. Avoids any UTF-8 encode/decode
-# round trip during build.
+# Bytes literals — never Python strings. Avoids any UTF-8 encode/decode
+# round trip during build. The JS marker is wrapped by ``<script>`` and
+# ``</script>`` tags inside the template, so the injected content is
+# pure JS bytes (no surrounding tags).
 CSS_MARKER = b"<!-- CSS_INJECT -->"
+JS_MARKER = b"<!-- JS_INJECT -->"
 
 
 # ---------------------------------------------------------------------------
@@ -55,39 +60,58 @@ CSS_MARKER = b"<!-- CSS_INJECT -->"
 
 
 def build_html_bytes() -> bytes:
-    """Reads template + CSS and returns the assembled HTML bytes.
+    """Reads template + CSS + JS and returns the assembled HTML bytes.
 
     Raises ``RuntimeError`` (never silently produces a degraded build)
     when:
 
     * The template file is missing.
-    * The CSS file is missing.
-    * The template does not contain the CSS marker.
-    * The template contains the marker more than once (M13.2a supports
-      exactly one CSS injection point).
+    * The CSS or JS file is missing.
+    * The template does not contain either required marker.
+    * The template contains either marker more than once (M13.2b
+      supports exactly one of each injection point).
     """
     if not TEMPLATE_PATH.exists():
         raise RuntimeError(f"Template missing: {TEMPLATE_PATH}")
     if not CSS_PATH.exists():
         raise RuntimeError(f"CSS missing: {CSS_PATH}")
+    if not JS_PATH.exists():
+        raise RuntimeError(f"JS missing: {JS_PATH}")
 
     template = TEMPLATE_PATH.read_bytes()
     css = CSS_PATH.read_bytes()
+    js = JS_PATH.read_bytes()
 
-    marker_count = template.count(CSS_MARKER)
-    if marker_count == 0:
-        raise RuntimeError(
-            f"Template missing required marker {CSS_MARKER!r}. "
-            "Refusing to build."
-        )
-    if marker_count > 1:
-        raise RuntimeError(
-            f"Template contains {marker_count} markers; M13.2a "
-            "supports exactly one CSS injection point."
-        )
+    _require_single_marker(template, CSS_MARKER, "CSS")
+    _require_single_marker(template, JS_MARKER, "JS")
 
     css_block = b"<style>" + css + b"</style>"
-    return template.replace(CSS_MARKER, css_block, 1)
+    output = template.replace(CSS_MARKER, css_block, 1)
+    # JS body is injected raw — its surrounding ``<script>``/``</script>``
+    # tags live in the template, so the file on disk contains pure JS
+    # bytes. This matches how CSS is injected as raw rules wrapped by
+    # the build-injected ``<style>`` tags.
+    output = output.replace(JS_MARKER, js, 1)
+    return output
+
+
+def _require_single_marker(template: bytes, marker: bytes, label: str) -> None:
+    """Raise unless the template contains the marker exactly once.
+
+    Refusing to build on 0 or >1 occurrences keeps the build pipeline
+    deterministic and prevents silent partial injections.
+    """
+    count = template.count(marker)
+    if count == 0:
+        raise RuntimeError(
+            f"Template missing required {label} marker {marker!r}. "
+            "Refusing to build."
+        )
+    if count > 1:
+        raise RuntimeError(
+            f"Template contains {count} {label} markers; M13.2b supports "
+            f"exactly one {label} injection point."
+        )
 
 
 def sha256_of_bytes(data: bytes) -> str:
@@ -176,6 +200,7 @@ def cmd_status() -> int:
     writes any file."""
     print(f"Template:      {TEMPLATE_PATH} (exists={TEMPLATE_PATH.exists()})")
     print(f"CSS:           {CSS_PATH} (exists={CSS_PATH.exists()})")
+    print(f"JS:            {JS_PATH} (exists={JS_PATH.exists()})")
     print(f"Served HTML:   {SERVED_HTML_PATH} (exists={SERVED_HTML_PATH.exists()})")
     print(f"Checksum file: {CHECKSUM_PATH} (exists={CHECKSUM_PATH.exists()})")
     if SERVED_HTML_PATH.exists():
@@ -198,9 +223,9 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="build_index",
         description=(
             "Assemble web/index.html from frontend/template.html + "
-            "frontend/styles/main.css. Pure Python, no bundler. "
-            "M13.2a invariant: built output is byte-identical to the "
-            "pre-extraction served HTML."
+            "frontend/styles/main.css + frontend/scripts/main.js. "
+            "Pure Python, no bundler. M13.2a/b invariant: built "
+            "output is byte-identical to the pre-extraction served HTML."
         ),
         epilog=(
             "Exit codes:\n"

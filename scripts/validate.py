@@ -141,8 +141,9 @@ def _commands() -> List[List[str]]:
         [python, "scripts/dry_run_llm_judge.py", "--help"],
         [python, "scripts/dry_run_llm_judge.py", "--status"],
         [python, "tests/test_llm_judge.py"],
-        # M13.2a — frontend build pipeline. --check enforces the
-        # byte-identical guarantee between frontend/ source and the
+        # M13.2a / M13.2b — frontend build pipeline. --check enforces
+        # the byte-identical guarantee between frontend/ source (now
+        # template.html + styles/main.css + scripts/main.js) and the
         # committed web/index.html artifact. Drift here fails CI.
         [python, "frontend/build_index.py", "--check"],
         [python, "tests/test_frontend_build.py"],

@@ -47,15 +47,26 @@ def _seed_synthetic(
     template_bytes: bytes,
     css_bytes: bytes,
     served_bytes: bytes,
+    js_bytes: bytes = None,
 ):
     """Lay out a synthetic frontend/ + served-HTML tree under ``tmp_dir``
     and return a configured build module with paths rebound to that
     tree. Always returns a module whose ``cmd_*`` functions operate on
-    the synthetic tree."""
+    the synthetic tree.
+
+    M13.2b: ``js_bytes`` defaults to ``_SYNTH_JS`` so existing M13.2a
+    tests keep round-tripping correctly with the JS marker now present
+    in the synthetic template. Tests that need to omit the JS file
+    explicitly delete it after seeding.
+    """
+    if js_bytes is None:
+        js_bytes = _SYNTH_JS
     frontend = tmp_dir / "frontend"
     (frontend / "styles").mkdir(parents=True, exist_ok=True)
+    (frontend / "scripts").mkdir(parents=True, exist_ok=True)
     (frontend / "template.html").write_bytes(template_bytes)
     (frontend / "styles" / "main.css").write_bytes(css_bytes)
+    (frontend / "scripts" / "main.js").write_bytes(js_bytes)
     served = tmp_dir / "web"
     served.mkdir(parents=True, exist_ok=True)
     (served / "index.html").write_bytes(served_bytes)
@@ -65,6 +76,7 @@ def _seed_synthetic(
     module.REPO_ROOT = tmp_dir
     module.TEMPLATE_PATH = frontend / "template.html"
     module.CSS_PATH = frontend / "styles" / "main.css"
+    module.JS_PATH = frontend / "scripts" / "main.js"
     module.CHECKSUM_PATH = frontend / "dist_checksum.txt"
     module.SERVED_HTML_PATH = served / "index.html"
     return module
@@ -92,20 +104,28 @@ _SYNTH_TEMPLATE = (
     "<!doctype html>\n"
     "<html><head><meta charset=\"utf-8\">\n"
     "<!-- CSS_INJECT -->\n"
-    "</head><body>안녕하세요</body></html>\n"
+    "</head><body>안녕하세요\n"
+    "<script>\n<!-- JS_INJECT -->\n</script>\n"
+    "</body></html>\n"
 ).encode("utf-8")
 _SYNTH_CSS = (
     "body { background: #fff; }\n"
     ".korean-class { color: red; }\n"
 ).encode("utf-8")
+_SYNTH_JS = (
+    "const greeting = '안녕하세요';\n"
+    "console.log(greeting);\n"
+).encode("utf-8")
 
 
 def _expected_synth_output() -> bytes:
-    return _SYNTH_TEMPLATE.replace(
+    output = _SYNTH_TEMPLATE.replace(
         b"<!-- CSS_INJECT -->",
         b"<style>" + _SYNTH_CSS + b"</style>",
         1,
     )
+    output = output.replace(b"<!-- JS_INJECT -->", _SYNTH_JS, 1)
+    return output
 
 
 class BuildCoreInvariantTests(unittest.TestCase):
@@ -126,9 +146,11 @@ class BuildCoreInvariantTests(unittest.TestCase):
             )
             with self.assertRaises(RuntimeError) as ctx:
                 module.build_html_bytes()
-            self.assertIn(
-                "missing required marker", str(ctx.exception).lower(),
-            )
+            # M13.2b: error message now distinguishes CSS vs JS marker.
+            # We accept the generic phrase "missing required" + "marker".
+            err = str(ctx.exception).lower()
+            self.assertIn("missing required", err)
+            self.assertIn("marker", err)
 
     def test_multiple_markers_raises(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
@@ -422,28 +444,249 @@ class ModuleLevelStaticChecks(unittest.TestCase):
         )
 
     def test_marker_is_bytes_literal(self):
-        """``CSS_MARKER`` must be a bytes literal — a Python str would
-        force decode/encode round-trips on every build and re-open the
-        newline-translation surface."""
+        """``CSS_MARKER`` and ``JS_MARKER`` must be bytes literals — a
+        Python str would force decode/encode round-trips on every build
+        and re-open the newline-translation surface."""
         import ast
 
         tree = ast.parse(self.source)
-        marker_value = None
+        marker_values: dict[str, object] = {}
         for node in ast.walk(tree):
             if not isinstance(node, ast.Assign):
                 continue
-            targets = [t for t in node.targets if isinstance(t, ast.Name)]
-            if not any(t.id == "CSS_MARKER" for t in targets):
-                continue
-            if isinstance(node.value, ast.Constant):
-                marker_value = node.value.value
-                break
-        self.assertIsNotNone(
-            marker_value, msg="CSS_MARKER assignment not found",
+            targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
+            for target in targets:
+                if target in ("CSS_MARKER", "JS_MARKER"):
+                    if isinstance(node.value, ast.Constant):
+                        marker_values[target] = node.value.value
+        for marker_name in ("CSS_MARKER", "JS_MARKER"):
+            self.assertIn(
+                marker_name, marker_values,
+                msg=f"{marker_name} assignment not found",
+            )
+            self.assertIsInstance(
+                marker_values[marker_name], bytes,
+                msg=(
+                    f"{marker_name} must be bytes literal, "
+                    f"got {type(marker_values[marker_name]).__name__}"
+                ),
+            )
+
+
+# ---------------------------------------------------------------------------
+# M13.2b — JS extraction invariants. The injection works the same way
+# as CSS (single-marker, byte-oriented, raises on missing file or
+# multiple markers), but with separate pins on the JS file's properties
+# (LF, no BOM, no embedded ``<script>`` tags) and on the marker's
+# placement inside an actual ``<script>`` tag pair in the template.
+# ---------------------------------------------------------------------------
+
+
+class JsExtractionFileShapeTests(unittest.TestCase):
+    """The on-disk JS file must be raw JS bytes — no surrounding
+    ``<script>`` tags (those live in the template), no BOM, LF
+    line endings only, non-empty for the real repo build."""
+
+    def test_main_js_exists(self):
+        path = _PROJECT_ROOT / "frontend" / "scripts" / "main.js"
+        self.assertTrue(
+            path.exists(),
+            f"M13.2b: expected {path} to exist after extraction",
         )
-        self.assertIsInstance(
-            marker_value, bytes,
-            msg=f"CSS_MARKER must be bytes literal, got {type(marker_value).__name__}",
+
+    def test_main_js_non_empty(self):
+        data = (_PROJECT_ROOT / "frontend" / "scripts" / "main.js").read_bytes()
+        self.assertGreater(
+            len(data), 100_000,
+            "main.js suspiciously small — extraction likely truncated. "
+            "The real bundle is ~314KB.",
+        )
+
+    def test_main_js_no_script_tags(self):
+        """The opening / closing ``<script>`` tags are part of the
+        template's HTML structure, not the JS body. Embedding them
+        would produce nested ``<script>`` tags in the final HTML."""
+        data = (_PROJECT_ROOT / "frontend" / "scripts" / "main.js").read_bytes()
+        self.assertNotIn(b"<script>", data)
+        self.assertNotIn(b"</script>", data)
+
+    def test_main_js_lf_line_endings(self):
+        """No CRLF anywhere in the file. CRLF in main.js would cascade
+        into the built HTML and break the byte-identical pin."""
+        data = (_PROJECT_ROOT / "frontend" / "scripts" / "main.js").read_bytes()
+        self.assertEqual(
+            data.count(b"\r\n"), 0,
+            "main.js contains CRLF — must be LF-only.",
+        )
+        self.assertEqual(
+            data.count(b"\r"), 0,
+            "main.js contains a lone CR — must be LF-only.",
+        )
+
+    def test_main_js_no_bom(self):
+        """No UTF-8 BOM at the start. A leading BOM would (a) parse
+        as a syntax error in some JS runtimes, and (b) silently break
+        the byte-identical pin."""
+        data = (_PROJECT_ROOT / "frontend" / "scripts" / "main.js").read_bytes()
+        # UTF-8 BOM is 0xEF 0xBB 0xBF
+        self.assertFalse(
+            data.startswith(b"\xef\xbb\xbf"),
+            "main.js starts with a UTF-8 BOM — must be raw bytes.",
+        )
+
+
+class JsTemplateMarkerPlacementTests(unittest.TestCase):
+    """The JS_INJECT marker must be placed inside a ``<script>`` tag
+    pair in the template, and must appear exactly once."""
+
+    def test_template_has_js_marker(self):
+        template = (_PROJECT_ROOT / "frontend" / "template.html").read_bytes()
+        self.assertEqual(
+            template.count(b"<!-- JS_INJECT -->"), 1,
+            "template.html must contain exactly one JS_INJECT marker.",
+        )
+
+    def test_js_marker_inside_script_tag_pair(self):
+        template = (_PROJECT_ROOT / "frontend" / "template.html").read_bytes()
+        marker = b"<!-- JS_INJECT -->"
+        marker_idx = template.find(marker)
+        self.assertGreater(marker_idx, 0)
+        # Walk backward to find the nearest unclosed <script>
+        prev_open = template.rfind(b"<script>", 0, marker_idx)
+        prev_close = template.rfind(b"</script>", 0, marker_idx)
+        self.assertGreater(
+            prev_open, prev_close,
+            "JS_INJECT marker must sit inside an open <script> tag.",
+        )
+        # And there must be a closing </script> after it.
+        next_close = template.find(b"</script>", marker_idx)
+        self.assertGreater(
+            next_close, marker_idx,
+            "JS_INJECT marker must be followed by a closing </script>.",
+        )
+
+    def test_template_has_exactly_one_script_block(self):
+        """The M13.2b extraction is single-block. Multiple inline
+        ``<script>`` tags in the template would mean the extraction
+        was incomplete or the template was hand-edited."""
+        template = (_PROJECT_ROOT / "frontend" / "template.html").read_bytes()
+        self.assertEqual(
+            template.count(b"<script>"), 1,
+            "template.html must have exactly one <script> tag.",
+        )
+        self.assertEqual(
+            template.count(b"</script>"), 1,
+            "template.html must have exactly one </script> tag.",
+        )
+
+
+class JsBuildInjectionBehaviourTests(unittest.TestCase):
+    """The build pipeline's JS-injection branch behaves the same way
+    as the CSS-injection branch: single marker required, missing
+    file raises, idempotent."""
+
+    def test_missing_js_file_raises(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            module = _seed_synthetic(
+                Path(tmp), _SYNTH_TEMPLATE, _SYNTH_CSS, b"",
+            )
+            module.JS_PATH.unlink()
+            with self.assertRaises(RuntimeError) as ctx:
+                module.build_html_bytes()
+            self.assertIn("js missing", str(ctx.exception).lower())
+
+    def test_js_marker_missing_raises(self):
+        template = (
+            b"<!doctype html><html><head><!-- CSS_INJECT -->"
+            b"</head><body></body></html>"
+        )
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            module = _seed_synthetic(
+                Path(tmp), template, _SYNTH_CSS, b"",
+            )
+            with self.assertRaises(RuntimeError) as ctx:
+                module.build_html_bytes()
+            self.assertIn("js marker", str(ctx.exception).lower())
+
+    def test_duplicate_js_markers_raises(self):
+        template = (
+            b"<!doctype html><html><head><!-- CSS_INJECT --></head>"
+            b"<body><script><!-- JS_INJECT --></script>"
+            b"<script><!-- JS_INJECT --></script></body></html>"
+        )
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            module = _seed_synthetic(
+                Path(tmp), template, _SYNTH_CSS, b"",
+            )
+            with self.assertRaises(RuntimeError) as ctx:
+                module.build_html_bytes()
+            err = str(ctx.exception).lower()
+            self.assertIn("js markers", err)
+            self.assertIn("exactly one", err)
+
+    def test_js_injection_is_idempotent(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            module = _seed_synthetic(
+                Path(tmp), _SYNTH_TEMPLATE, _SYNTH_CSS, b"",
+            )
+            first = module.build_html_bytes()
+            second = module.build_html_bytes()
+            self.assertEqual(first, second)
+
+    def test_js_content_appears_in_output(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            module = _seed_synthetic(
+                Path(tmp), _SYNTH_TEMPLATE, _SYNTH_CSS, b"",
+            )
+            output = module.build_html_bytes()
+            self.assertIn(b"const greeting", output)
+            self.assertIn("안녕하세요".encode("utf-8"), output)
+
+    def test_built_output_has_no_remaining_markers(self):
+        """After a successful build, neither marker may appear in the
+        final HTML — that would mean a marker leaked through."""
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            module = _seed_synthetic(
+                Path(tmp), _SYNTH_TEMPLATE, _SYNTH_CSS, b"",
+            )
+            output = module.build_html_bytes()
+            self.assertNotIn(b"<!-- CSS_INJECT -->", output)
+            self.assertNotIn(b"<!-- JS_INJECT -->", output)
+
+
+class RepoLevelJsSignatureTests(unittest.TestCase):
+    """A representative sample of function names known to live in the
+    real main.js must appear in the built output. This is a cheap
+    smoke that catches catastrophic truncation."""
+
+    def test_known_function_names_present_in_built_html(self):
+        # Function / variable names confirmed to exist near the start
+        # and end of the original inline JS body. If extraction
+        # truncated either end, at least one of these will be missing.
+        served = (_PROJECT_ROOT / "web" / "index.html").read_bytes()
+        for needle in (
+            b"const API_BASE",
+            b"serverReviewBindEvents",
+        ):
+            self.assertIn(
+                needle, served,
+                f"Expected {needle!r} in built web/index.html "
+                "(M13.2b extraction may have truncated main.js).",
+            )
+
+    def test_built_output_matches_pinned_checksum(self):
+        """The committed dist_checksum.txt must match a fresh build of
+        the real repo files. This is the canonical M13.2b byte-identical
+        invariant — drift here means the operator must rebuild."""
+        module = _load_build_module()
+        if not module.CHECKSUM_PATH.exists():
+            self.skipTest("dist_checksum.txt not committed yet")
+        stored = module.CHECKSUM_PATH.read_bytes().decode("ascii").strip()
+        fresh = hashlib.sha256(module.build_html_bytes()).hexdigest()
+        self.assertEqual(
+            stored, fresh,
+            "dist_checksum.txt does not match a fresh build. Run "
+            "`python frontend/build_index.py` and commit the rebuild.",
         )
 
 
