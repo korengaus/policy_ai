@@ -162,9 +162,12 @@ def _commands() -> List[List[str]]:
         [python, "tests/test_measure_cache_impact.py"],
         [python, "tests/test_check_cache_activation.py"],
         # M14.0b — print() -> structured logging migration on the top
-        # 5 files. AST + token pin that prints are gone and that the
-        # 8 deferred files retain their original print counts.
+        # 5 files. AST + token pin that prints are gone in the M14.0b
+        # set + in the M14.0c set (formerly 'deferred', now migrated).
         [python, "tests/test_print_migration.py"],
+        # M14.0c — completes the migration on the remaining 8 files.
+        # Subprocess-invokes verdict test suites to prove invariance.
+        [python, "tests/test_print_migration_m14_0c.py"],
         # M14.0a — structured logging foundation. --help and --status
         # are read-only smokes; the test suite pins module-adoption
         # for the 10 M13.x modules, legacy-isolation for 18 untouched

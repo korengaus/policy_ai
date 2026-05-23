@@ -1,3 +1,7 @@
+
+from structured_logging import get_logger
+
+log = get_logger(__name__)
 def _has_any(values: list[str], targets: set[str]) -> bool:
     return bool(set(values or []) & targets)
 
@@ -219,15 +223,15 @@ def make_final_decision(policy_confidence: dict, policy_impact: dict) -> dict:
 
 
 def print_final_decision(final_decision: dict):
-    print("\n----- Final decision -----")
-    print("policy_alert_level:", final_decision.get("policy_alert_level"))
-    print("final_score:", final_decision.get("final_score"))
-    print("source_trust_score:", final_decision.get("source_trust_score"))
-    print("human_feedback_adjustment:", final_decision.get("human_feedback_adjustment"))
-    print("contradiction_adjustment:", final_decision.get("contradiction_adjustment"))
-    print("market_signal:", ", ".join(final_decision.get("market_signal") or []))
-    print("action_recommendation:", final_decision.get("action_recommendation"))
-    print("decision_summary:", final_decision.get("decision_summary"))
-    print("decision_reasons:")
+    log.info("\n----- Final decision -----")
+    log.info("policy_alert_level:", final_decision.get("policy_alert_level"))
+    log.info("final_score:", final_decision.get("final_score"))
+    log.info("source_trust_score:", final_decision.get("source_trust_score"))
+    log.info("human_feedback_adjustment:", final_decision.get("human_feedback_adjustment"))
+    log.info("contradiction_adjustment:", final_decision.get("contradiction_adjustment"))
+    log.info("market_signal:", ", ".join(final_decision.get("market_signal") or []))
+    log.info("action_recommendation:", final_decision.get("action_recommendation"))
+    log.info("decision_summary:", final_decision.get("decision_summary"))
+    log.info("decision_reasons:")
     for reason in final_decision.get("decision_reasons") or []:
-        print("-", reason)
+        log.info("-", reason)

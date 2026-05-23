@@ -2,6 +2,10 @@ from datetime import datetime, timezone
 import hashlib
 import re
 
+from structured_logging import get_logger
+
+log = get_logger(__name__)
+
 
 SENSATIONAL_TERMS = [
     "충격",
@@ -302,12 +306,12 @@ def analyze_bias_framing(
 
     summary = summarize_bias_framing(analyses)
     editor_review_count = sum(1 for item in analyses if item.get("needs_editor_review"))
-    print(f"[BiasFramingAgent] checked {len(analyses)} claims")
-    print(f"[BiasFramingAgent] detected sensational: {total_sensational_count}")
-    print(f"[BiasFramingAgent] detected uncertainty: {total_uncertainty_count}")
-    print(f"[BiasFramingAgent] final score: {max(final_scores) if final_scores else 0}")
-    print(f"[BiasFramingAgent] high framing count: {summary.get('high_framing_count', 0)}")
-    print(f"[BiasFramingAgent] editor review needed: {editor_review_count}")
+    log.info(f"[BiasFramingAgent] checked {len(analyses)} claims")
+    log.info(f"[BiasFramingAgent] detected sensational: {total_sensational_count}")
+    log.info(f"[BiasFramingAgent] detected uncertainty: {total_uncertainty_count}")
+    log.info(f"[BiasFramingAgent] final score: {max(final_scores) if final_scores else 0}")
+    log.info(f"[BiasFramingAgent] high framing count: {summary.get('high_framing_count', 0)}")
+    log.info(f"[BiasFramingAgent] editor review needed: {editor_review_count}")
     return {
         "bias_framing_analysis": analyses,
         "bias_framing_summary": summary,

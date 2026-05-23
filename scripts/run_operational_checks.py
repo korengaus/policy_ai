@@ -1429,20 +1429,45 @@ def _print_migration_tests_step() -> dict:
 
 
 def _print_migration_compileall_step() -> dict:
-    """Confirm the 5 migrated source files still compile cleanly."""
+    """Confirm all 13 migrated source files still compile cleanly
+    (5 from M14.0b + 8 from M14.0c)."""
     targets = [
         str(ROOT / name) for name in (
+            # M14.0b
             "main.py",
             "official_crawler.py",
             "verification_card.py",
             "news_collector.py",
             "article_extractor.py",
+            # M14.0c
+            "evidence_comparator.py",
+            "policy_decision.py",
+            "policy_confidence.py",
+            "policy_impact.py",
+            "bias_framing_agent.py",
+            "evidence_extraction_agent.py",
+            "contradiction_agent.py",
+            "official_source_body.py",
         )
     ]
     return {
-        "name": "compileall(migrated 5 files)",
+        "name": "compileall(migrated 13 files)",
         "command": [_python(), "-m", "compileall", *targets],
         "parser": _parse_compileall_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _print_migration_m14_0c_tests_step() -> dict:
+    return {
+        "name": "test_print_migration_m14_0c",
+        "command": [
+            _python(),
+            str(ROOT / "tests" / "test_print_migration_m14_0c.py"),
+        ],
+        "parser": _parse_print_migration_m14_0c_tests_output,
         "hits_render": False,
         "may_call_openai": False,
         "optional": False,
@@ -1722,14 +1747,16 @@ def _resolve_steps(args: argparse.Namespace) -> List[dict]:
         steps.append(_structured_logging_tests_step())
 
     if profile == "print-migration":
-        # M14.0b — print() -> structured logging migration on top 5
-        # files (189 of 251 prints). Fully offline. The compileall
-        # step confirms the 5 migrated files still parse; the
-        # migration test pins zero remaining print() in targets +
-        # unchanged counts in the 8 deferred files; the structured
-        # logging tests re-run as a regression check.
+        # M14.0b + M14.0c — print() -> structured logging migration on
+        # all 13 files (251 prints total). Fully offline. The
+        # compileall step confirms every migrated file still parses;
+        # the M14.0b test pins the top-5 contract; the M14.0c test
+        # pins the remaining-8 contract AND subprocess-invokes the
+        # verdict test suites to prove verdict invariance; the
+        # structured logging tests re-run as a regression check.
         steps.append(_print_migration_compileall_step())
         steps.append(_print_migration_tests_step())
+        steps.append(_print_migration_m14_0c_tests_step())
         steps.append(_structured_logging_tests_step())
 
     if profile == "full":
@@ -3458,6 +3485,27 @@ def _parse_print_migration_tests_output(
         "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
         "summary": (
             f"test_print_migration: exit_code={exit_code} "
+            f"ok_detected={has_ok}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "ok_detected": has_ok,
+        },
+    }
+
+
+def _parse_print_migration_m14_0c_tests_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``tests/test_print_migration_m14_0c.py`` is a unittest runner;
+    it subprocess-invokes the verdict test suites so its exit reflects
+    both the migration pins AND verdict invariance."""
+    has_ok = "\nOK" in (stdout + "\n" + stderr)
+    ok = exit_code == 0 and has_ok
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"test_print_migration_m14_0c: exit_code={exit_code} "
             f"ok_detected={has_ok}"
         ),
         "metrics": {

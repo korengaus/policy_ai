@@ -40,15 +40,18 @@ MIGRATED_FILES = (
     ("article_extractor.py", 17, 0),
 )
 
+# M14.0c completed the migration of these files. They started life
+# in M14.0b as "deferred" with non-zero print counts; M14.0c brought
+# every count to zero. The pin now asserts the post-M14.0c state.
 DEFERRED_FILES = (
-    ("evidence_comparator.py", 14),
-    ("policy_decision.py", 11),
-    ("policy_confidence.py", 11),
-    ("policy_impact.py", 10),
-    ("bias_framing_agent.py", 6),
-    ("evidence_extraction_agent.py", 5),
-    ("contradiction_agent.py", 4),
-    ("official_source_body.py", 1),
+    ("evidence_comparator.py", 0),
+    ("policy_decision.py", 0),
+    ("policy_confidence.py", 0),
+    ("policy_impact.py", 0),
+    ("bias_framing_agent.py", 0),
+    ("evidence_extraction_agent.py", 0),
+    ("contradiction_agent.py", 0),
+    ("official_source_body.py", 0),
 )
 
 
@@ -357,26 +360,27 @@ class DeferredFilesUntouchedPin(unittest.TestCase):
             ),
         )
 
-    def test_deferred_files_have_no_structured_logging_import(self):
-        """M14.0b leaves the 8 deferred files alone; they should
-        still NOT import structured_logging (would imply someone
-        partially migrated them)."""
-        offenders = []
+    def test_post_m14_0c_files_all_import_structured_logging(self):
+        """M14.0c migrated all 8 originally-deferred files. Each
+        must now import structured_logging. (The M14.0b version of
+        this test asserted the opposite — left here as a flipped
+        pin under the M14.0c completion contract.)"""
+        missing = []
         for filename, _ in DEFERRED_FILES:
             path = _PROJECT_ROOT / filename
             if not path.exists():
                 continue
             text = path.read_text(encoding="utf-8")
-            if re.search(
+            if not re.search(
                 r"^(?:from\s+structured_logging\b|import\s+structured_logging\b)",
                 text, re.MULTILINE,
             ):
-                offenders.append(filename)
+                missing.append(filename)
         self.assertFalse(
-            offenders,
+            missing,
             msg=(
-                "Deferred files unexpectedly import structured_logging "
-                f"(M14.0b should have left them alone): {offenders}"
+                "Post-M14.0c migration: these files must import "
+                f"structured_logging but don't: {missing}"
             ),
         )
 

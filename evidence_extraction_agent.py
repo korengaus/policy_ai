@@ -4,6 +4,10 @@ import re
 
 from text_utils import sanitize_text
 
+from structured_logging import get_logger
+
+log = get_logger(__name__)
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -546,16 +550,16 @@ def extract_evidence_snippets(
     )
     strength_summary = _strength_summary(evidence_snippets)
     quality_summary = _quality_summary(evidence_snippets)
-    print(f"[EvidenceExtractionAgent] extracted {len(evidence_snippets)} evidence snippets")
-    print(f"[EvidenceExtractionAgent] mapped evidence to {len(claim_evidence_map)} claims")
-    print(f"[EvidenceExtractionAgent] insufficient evidence count: {insufficient_count}")
-    print(
+    log.info(f"[EvidenceExtractionAgent] extracted {len(evidence_snippets)} evidence snippets")
+    log.info(f"[EvidenceExtractionAgent] mapped evidence to {len(claim_evidence_map)} claims")
+    log.info(f"[EvidenceExtractionAgent] insufficient evidence count: {insufficient_count}")
+    log.info(
         "[EvidenceExtractionAgent] strength "
         f"strong={strength_summary['strong']} "
         f"medium={strength_summary['medium']} "
         f"weak={strength_summary['weak']}"
     )
-    print(
+    log.info(
         "[EvidenceExtractionAgent] quality "
         f"strong={quality_summary['strong']} "
         f"medium={quality_summary['medium']} "

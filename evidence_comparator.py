@@ -10,6 +10,10 @@ from korean_constants import (
     CONCEPT_SYNONYMS_COMPARATOR as CONCEPT_SYNONYMS,
 )
 
+from structured_logging import get_logger
+
+log = get_logger(__name__)
+
 
 CONFLICT_PHRASES = [
     "\ud655\uc815\ub418\uc9c0 \uc54a\uc558\ub2e4",
@@ -459,23 +463,23 @@ def compare_news_with_official_evidence(
 
 
 def print_evidence_comparison(evidence_comparison: dict):
-    print("\n----- News vs official evidence comparison -----")
-    print("comparison_status:", evidence_comparison.get("comparison_status"))
-    print("support_score:", evidence_comparison.get("support_score"))
-    print("semantic_support_score:", evidence_comparison.get("semantic_support_score"))
-    print("matched_keywords:", ", ".join(evidence_comparison.get("matched_keywords", [])))
-    print("missing_keywords:", ", ".join(evidence_comparison.get("missing_keywords", [])))
-    print("conflict_signals:", ", ".join(evidence_comparison.get("conflict_signals", [])))
-    print(
+    log.info("\n----- News vs official evidence comparison -----")
+    log.info("comparison_status:", evidence_comparison.get("comparison_status"))
+    log.info("support_score:", evidence_comparison.get("support_score"))
+    log.info("semantic_support_score:", evidence_comparison.get("semantic_support_score"))
+    log.info("matched_keywords:", ", ".join(evidence_comparison.get("matched_keywords", [])))
+    log.info("missing_keywords:", ", ".join(evidence_comparison.get("missing_keywords", [])))
+    log.info("conflict_signals:", ", ".join(evidence_comparison.get("conflict_signals", [])))
+    log.info(
         "semantic_matched_concepts:",
         ", ".join(evidence_comparison.get("semantic_matched_concepts", [])),
     )
-    print(
+    log.info(
         "semantic_missing_concepts:",
         ", ".join(evidence_comparison.get("semantic_missing_concepts", [])),
     )
-    print("evidence_quality:", evidence_comparison.get("evidence_quality"))
-    print("verification_level:", evidence_comparison.get("verification_level"))
-    print("relevance_filter_summary:", evidence_comparison.get("relevance_filter_summary"))
-    print("comparison_summary:", evidence_comparison.get("comparison_summary"))
-    print("recommended_next_action:", evidence_comparison.get("recommended_next_action"))
+    log.info("evidence_quality:", evidence_comparison.get("evidence_quality"))
+    log.info("verification_level:", evidence_comparison.get("verification_level"))
+    log.info("relevance_filter_summary:", evidence_comparison.get("relevance_filter_summary"))
+    log.info("comparison_summary:", evidence_comparison.get("comparison_summary"))
+    log.info("recommended_next_action:", evidence_comparison.get("recommended_next_action"))

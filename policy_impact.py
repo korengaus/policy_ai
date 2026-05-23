@@ -1,3 +1,7 @@
+
+from structured_logging import get_logger
+
+log = get_logger(__name__)
 GROUP_RULES = {
     "homeowners": ["\uc720\uc8fc\ud0dd\uc790", "1\uc8fc\ud0dd\uc790", "\uc8fc\ud0dd\ubcf4\uc720", "\uc8fc\ub2f4\ub300", "\uc8fc\ud0dd\ub2f4\ubcf4\ub300\ucd9c"],
     "renters": ["\uc804\uc138", "\uc804\uc138\ub300\ucd9c", "\uc804\uc138\uc790\uae08", "\uc784\ucc28", "\ubcf4\uc99d\uae08", "\uc6d4\uc138", "\uc8fc\uac70\ube44"],
@@ -215,14 +219,14 @@ def analyze_policy_impact(
 
 
 def print_policy_impact(policy_impact: dict):
-    print("\n----- Policy impact -----")
-    print("affected_groups:", ", ".join(policy_impact.get("affected_groups") or []))
-    print("affected_sectors:", ", ".join(policy_impact.get("affected_sectors") or []))
-    print("impact_level:", policy_impact.get("impact_level"))
-    print("impact_direction:", policy_impact.get("impact_direction"))
-    print("market_sensitivity:", policy_impact.get("market_sensitivity"))
-    print("consumer_sensitivity:", policy_impact.get("consumer_sensitivity"))
-    print("business_sensitivity:", policy_impact.get("business_sensitivity"))
-    print("impact_reasons:")
+    log.info("\n----- Policy impact -----")
+    log.info("affected_groups:", ", ".join(policy_impact.get("affected_groups") or []))
+    log.info("affected_sectors:", ", ".join(policy_impact.get("affected_sectors") or []))
+    log.info("impact_level:", policy_impact.get("impact_level"))
+    log.info("impact_direction:", policy_impact.get("impact_direction"))
+    log.info("market_sensitivity:", policy_impact.get("market_sensitivity"))
+    log.info("consumer_sensitivity:", policy_impact.get("consumer_sensitivity"))
+    log.info("business_sensitivity:", policy_impact.get("business_sensitivity"))
+    log.info("impact_reasons:")
     for reason in policy_impact.get("impact_reasons") or []:
-        print("-", reason)
+        log.info("-", reason)

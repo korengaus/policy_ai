@@ -4,6 +4,10 @@ import re
 
 from text_utils import sanitize_text
 
+from structured_logging import get_logger
+
+log = get_logger(__name__)
+
 
 EXPLICIT_CONTRADICTION_KEYWORDS = [
     "반박",
@@ -287,10 +291,10 @@ def run_contradiction_checks(
         )
 
     summary = summarize_contradiction_checks(checks)
-    print(f"[ContradictionAgent] checked {len(checks)} claims")
-    print(f"[ContradictionAgent] possible contradictions: {summary.get('possible_contradiction_count', 0)}")
-    print(f"[ContradictionAgent] confirmed contradictions: {summary.get('confirmed_contradiction_count', 0)}")
-    print(f"[ContradictionAgent] verdict source: {summary.get('contradiction_verdict_source')}")
+    log.info(f"[ContradictionAgent] checked {len(checks)} claims")
+    log.info(f"[ContradictionAgent] possible contradictions: {summary.get('possible_contradiction_count', 0)}")
+    log.info(f"[ContradictionAgent] confirmed contradictions: {summary.get('confirmed_contradiction_count', 0)}")
+    log.info(f"[ContradictionAgent] verdict source: {summary.get('contradiction_verdict_source')}")
     return {
         "contradiction_checks": checks,
         "contradiction_summary": summary,

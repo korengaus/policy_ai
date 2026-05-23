@@ -154,3 +154,97 @@ To later enable JSON logs on Render (separate operator decision):
 See `docs/STRUCTURED_LOGGING.md` for the broader logging architecture
 and `docs/CACHE_ACTIVATION_GUIDE.md` for how the same env-var flow
 works for `HTTP_CACHE_ENABLED`.
+
+## M14.0c — Migration completion (this PR)
+
+M14.0c migrated the remaining 8 files (62 prints), bringing the
+total to:
+
+| Phase    | Files | Prints | Status         |
+|----------|-------|--------|----------------|
+| M14.0a   | 0     | 0      | infrastructure |
+| M14.0b   | 5     | 189    | done           |
+| M14.0c   | 8     | 62     | this PR        |
+| **Total** | **13** | **251** | **complete**   |
+
+### Files migrated in M14.0c
+
+| File                            | Prints | Notes |
+|---------------------------------|--------|-------|
+| `evidence_comparator.py`        | 14     | All `log.info` |
+| `policy_decision.py`            | 11     | VERDICT LOGIC — all `log.info`, no business logic touched |
+| `policy_confidence.py`          | 11     | VERDICT LOGIC — all `log.info`, no business logic touched |
+| `policy_impact.py`              | 10     | VERDICT LOGIC — all `log.info`, no business logic touched |
+| `bias_framing_agent.py`         | 6      | All `log.info` |
+| `evidence_extraction_agent.py`  | 5      | All `log.info` |
+| `contradiction_agent.py`        | 4      | All `log.info` |
+| `official_source_body.py`       | 1      | 1 `log.error` (inside an except block) |
+
+**M14.0c level totals:** 61 `info`, 0 `warning`, 1 `error`, 0 `debug`.
+
+### Verdict invariance verified
+
+The three verdict-logic modules' migrations were proven
+non-functional by `tests/test_print_migration_m14_0c.py::M14_0C_VerdictInvariancePin`,
+which subprocess-invokes the existing verdict test suites and
+asserts each exits 0:
+
+- `tests/test_verdict_label_b08_fix.py` — 24 cases, PASS
+- `tests/test_verdict_label_diagnostic.py` — 42 cases, PASS
+- `tests/test_verdict_producer_comparison.py` — 37 cases, PASS
+- `tests/test_artifact_evidence_linker.py` — 42 cases, PASS (exercises `evidence_comparator.py`)
+
+If any verdict assertion broke after the migration, one of these
+would fail. They all pass, so verdict invariance is established.
+
+A second structural pin (`M14_0C_VerdictModuleStructuralPin`)
+checks each verdict module's top-level AST nodes: exactly one new
+`ImportFrom structured_logging` + exactly one new `Assign log = …`
+was added. No new class, function, or unrelated statement was
+introduced.
+
+### What's complete
+
+Every `print()` across the 13 originally-listed legacy modules is
+now routed through `structured_logging.get_logger`. With
+`LOG_FORMAT` unset (default), output is visually identical to
+pre-M14.0a. With `LOG_FORMAT=json` (Render env var, operator
+decision), every log line is a searchable JSON record.
+
+The pre-M14.0a inventory:
+
+```
+main.py                     62 prints
+official_crawler.py         57
+verification_card.py        27
+news_collector.py           26
+article_extractor.py        17
+evidence_comparator.py      14
+policy_decision.py          11
+policy_confidence.py        11
+policy_impact.py            10
+bias_framing_agent.py        6
+evidence_extraction_agent.py 5
+contradiction_agent.py       4
+official_source_body.py      1
+Total                      251 prints across 13 files
+```
+
+After M14.0c: **0 prints, 0 prints, 0 prints (all 13 files).**
+
+### What's NOT done (future milestones)
+
+- Adding `extra={...}` structured fields to log calls (case-by-case,
+  future milestones).
+- Request ID propagation across calls (M14.1).
+- Enabling `LOG_FORMAT=json` on Render (operator decision).
+- Migrating the few `print()` calls that may exist in test scripts
+  themselves (out of scope — tests can legitimately use `print` for
+  output the runner captures).
+
+### Render activation note
+
+Until the operator sets `LOG_FORMAT=json` on Render, the platform
+serves the same operator-visible log lines as pre-migration. No
+behaviour change is observable. The migration is fully reversible
+via `git revert` for any single milestone (M14.0b or M14.0c).

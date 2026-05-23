@@ -24,6 +24,10 @@ from korean_constants import (
     CONCEPT_GROUPS_OFFICIAL_BODY as CONCEPT_GROUPS,
 )
 
+from structured_logging import get_logger
+
+log = get_logger(__name__)
+
 
 OFFICIAL_DOMAINS = {
     "bok.or.kr",
@@ -571,7 +575,7 @@ def enrich_official_source_candidates_with_bodies(
         "official_body_matches": matched,
         "official_body_failures": dict(sorted(failures.items())),
     }
-    print(
+    log.error(
         "[OfficialBody] "
         f"candidates={official_count} fetched={fetched} usable={usable} "
         f"matched={matched} failures={summary['official_body_failures']}"

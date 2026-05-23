@@ -495,25 +495,20 @@ class ModuleAdoptionPin(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-# M14.0b migrated 5 of these files (main.py, official_crawler.py,
-# verification_card.py, news_collector.py, article_extractor.py) so
-# they were removed from the legacy-isolation list. The remaining 13
-# entries are the M14.0c-deferred files plus the still-untouched
-# pipeline / storage / verdict modules.
+# M14.0c completed migration of the remaining 8 files originally
+# listed by M14.0a. Every print-bearing module from the original
+# inventory now imports structured_logging. The legacy list now
+# contains only the still-untouched pipeline / storage modules
+# that never had print()s in the first place (so M14.0a/b/c had
+# no reason to migrate them). They remain pinned here as a guard
+# against any future PR adding the import without a clear
+# justification.
 _LEGACY_FILES = (
     "api_server.py",
-    "official_source_body.py",
-    "policy_decision.py",
     "policy_scoring.py",
-    "policy_confidence.py",
-    "policy_impact.py",
     "database.py",
     "ai_reasoner.py",
     "job_manager.py",
-    "evidence_extraction_agent.py",
-    "evidence_comparator.py",
-    "contradiction_agent.py",
-    "bias_framing_agent.py",
 )
 
 
@@ -543,22 +538,40 @@ class LegacyIsolationPin(unittest.TestCase):
         )
 
 
-class PrintsStillPresentPin(unittest.TestCase):
-    """M14.0a explicitly does NOT remove any print() call. The pin
-    confirms a representative legacy file still has at least one
-    print() — guards against an over-eager future refactor that
-    accidentally migrates print sites in this milestone."""
+class PrintMigrationCompletionPin(unittest.TestCase):
+    """Post-M14.0c: every file originally listed by the M14.0a print
+    inventory has been migrated. ``official_source_body.py`` is the
+    smallest file in that inventory (1 print, migrated to 1
+    log.error) — if it ever regrows a print(), this pin surfaces it
+    immediately.
 
-    def test_official_source_body_still_has_print(self):
+    The M14.0a version of this pin asserted ``count > 0`` because
+    M14.0a deliberately left every print alone. M14.0b/c then
+    migrated all 251 prints across 13 files. The contract for
+    M14.0c onwards is that legacy print-bearing modules stay at
+    zero prints — flipped here under the migration-completion
+    contract.
+    """
+
+    def test_official_source_body_has_no_remaining_prints(self):
         source = (
             _PROJECT_ROOT / "official_source_body.py"
         ).read_text(encoding="utf-8")
-        count = source.count("print(")
-        self.assertGreater(
-            count, 0,
+        # AST-level count: tokenize-level ``print(`` would also catch
+        # string literals containing ``print(``; AST avoids false
+        # positives.
+        tree = ast.parse(source)
+        prints = sum(
+            1 for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "print"
+        )
+        self.assertEqual(
+            prints, 0,
             msg=(
-                "official_source_body.py has zero print() calls; "
-                "M14.0a should NOT migrate any."
+                "official_source_body.py has print() calls after "
+                "M14.0c completion -- migration regressed."
             ),
         )
 
