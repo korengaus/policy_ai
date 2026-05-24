@@ -4,8 +4,12 @@ import os
 from datetime import datetime, timezone
 
 from config import MEMORY_FILE
+from structured_logging import get_logger
 from timeline import rebuild_topic_summaries
 from topic_classifier import classify_policy_topic
+
+
+log = get_logger(__name__)
 
 
 def load_policy_memory() -> dict:
@@ -26,7 +30,16 @@ def load_policy_memory() -> dict:
 
         return memory
 
-    except Exception:
+    except Exception as exc:
+        log.warning(
+            "memory_store.load_corrupt_or_missing",
+            extra={
+                "file_path": str(MEMORY_FILE),
+                "exception_type": type(exc).__name__,
+                "exception_message": str(exc)[:500],
+                "fallback_returned": "empty_dict",
+            },
+        )
         return {
             "created_at": datetime.now(timezone.utc).isoformat(),
             "last_updated_at": None,

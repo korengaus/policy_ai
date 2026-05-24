@@ -155,6 +155,15 @@ def _commands() -> List[List[str]]:
         # module still imports cleanly, and the actually-used public
         # surface is intact.
         [python, "tests/test_m11_5c_fetch_official_page_removed.py"],
+        # M11.7a — Category 2 logging sweep (HIGH-priority sites only).
+        # Adds structured `log.warning` calls to two broad-Exception
+        # boundaries previously silent: memory_store.load_policy_memory
+        # (corrupt JSON → empty memory) and
+        # official_crawler.fetch_best_official_document outer wrapper
+        # (broad pipeline-resilience swallow). Return values are
+        # byte-identical; pins assert the warning fires on the failure
+        # path AND stays silent on legitimate first-run / happy paths.
+        [python, "tests/test_m11_7a_category2_logging.py"],
         # M11.3 — read-only audit of the M11.1 candidate list. Compile
         # + --help smoke confirms the script loads; the test suite
         # pins idempotency, atomic-write, Korean round-trip, and the

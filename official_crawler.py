@@ -1374,6 +1374,18 @@ def fetch_best_official_document(search_result: dict, news_context: dict | None 
             return result
 
     except Exception as exc:
+        log.warning(
+            "official_crawler.outer_wrapper_failure",
+            extra={
+                "source_name": result.get("source_name"),
+                "site_key": result.get("site_key"),
+                "search_query_used": result.get("search_query_used"),
+                "search_url": search_url,
+                "exception_type": type(exc).__name__,
+                "exception_message": str(exc)[:500],
+                "fallback_returned": "unusable_result_dict",
+            },
+        )
         if not result.get("search_attempt_results"):
             result["search_attempt_count"] = max(result.get("search_attempt_count") or 0, 1)
             result["search_attempt_results"].append(

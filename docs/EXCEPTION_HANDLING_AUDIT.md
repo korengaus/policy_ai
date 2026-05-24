@@ -37,6 +37,7 @@ operator approves the category-specific fix strategy.
 
 ### Site 1: `memory_store.load_policy_memory`
 
+- **Status:** ✅ **RESOLVED in M11.7a** (logging only, no control-flow change). A `log.warning("memory_store.load_corrupt_or_missing", extra={...})` was added inside the except block, preserving the existing sentinel return shape. Pinned by `tests/test_m11_7a_category2_logging.py::MemoryStoreLoadPolicyMemoryWarningTests` (3 cases: corrupt JSON emits warning + sentinel returned; missing file emits NO warning; valid JSON emits NO warning).
 - **Audit line cite:** L29
 - **Current line:** L29 (unchanged since audit — this file has been stable)
 - **Surrounding context:**
@@ -330,8 +331,9 @@ except Exception as exc:
 
 #### Site 5e: outermost `fetch_best_official_document` swallow (L1402)
 
+- **Status:** ✅ **RESOLVED in M11.7a** (logging only, no control-flow change). A `log.warning("official_crawler.outer_wrapper_failure", extra={...})` was added at the top of the except block — emitting source_name, site_key, search_query_used, search_url, exception type/message, and the `unusable_result_dict` fallback marker BEFORE the existing result-mutation logic runs. Return shape preserved byte-for-byte. Pinned by `tests/test_m11_7a_category2_logging.py::OfficialCrawlerOuterWrapperWarningTests` (2 cases: forced inner failure emits warning + returns fallback dict; early-return on missing search URL emits NO warning). Note the operator picked `log.warning` for this PR; the audit-doc body below originally sketched `log.error`, but `warning` is consistent with the M11.7a Category 2 framework.
 - **Audit-mapped cite:** L1229 (alt mapping)
-- **Current line:** L1402
+- **Current line:** L1402 (audit) → **L1376** (post-M11.5c deletion of `fetch_official_page`)
 - **Surrounding context (just the except block):**
 ```python
 except Exception as exc:

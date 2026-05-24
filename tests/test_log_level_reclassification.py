@@ -119,11 +119,15 @@ PRESERVED_REAL_ERRORS: tuple[tuple[str, str], ...] = (
 #   * M13.3d (cache instrumentation added 2× log.info + 1× log.warning
 #     in official_source_body and 2× log.info + 2× log.warning in
 #     news_collector): 254 + 7 = 261
+#   * M11.7a (Category 2 logging sweep added 1× log.warning in
+#     official_crawler.fetch_best_official_document's outer except;
+#     memory_store.py is NOT in MIGRATED_FILES so its +1 warning
+#     does not count toward this pin): 261 + 1 = 262
 #
 # Any future milestone that legitimately adds log calls bumps this
 # expected count; the contract M14.4 actually pins is the *level
 # distribution*, not the absolute count.
-EXPECTED_TOTAL_LOG_CALLS = 261
+EXPECTED_TOTAL_LOG_CALLS = 262
 
 # Post-M14.4: 12 (down from 17 pre-M14.4 — 5 reclassifications).
 # M13.3d added log.info / log.warning calls only — no new log.error.
