@@ -192,8 +192,15 @@ def _commands() -> List[List[str]]:
         # + invariant pins for Constraints #11 (operator_review_required
         # ALWAYS True) and #12 (LLM cannot raise verdict). Docstring +
         # comment additions only — no logic change. Prose alignment
-        # is deferred to M11.0d-3b-2.
+        # is shipped in M11.0d-3b-2.
         [python, "tests/test_m11_0d_3b_p2_authority.py"],
+        # M11.0d-3b-2 — Strategy A FULL: Korean prose alignment to P2's
+        # authoritative policy_alert_level. main.analyze_pipeline now
+        # realigns decision_summary + action_recommendation to P2's
+        # label after calibrate_final_decision returns. Pins prose
+        # behavior + byte-identity invariants + immutable fixture
+        # hashes for the 6 M11.0d-1 snapshot files.
+        [python, "tests/test_m11_0d_3b_2_prose_alignment.py"],
         # M15.0a — job queue infrastructure (RQ + Redis). Tests run
         # fully offline using fakeredis; --help / default invocations
         # of check_job_queue.py confirm the CLI surface. /analyze

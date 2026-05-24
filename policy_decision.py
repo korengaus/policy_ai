@@ -124,12 +124,22 @@ def _policy_alert_level(policy_confidence: dict, policy_impact: dict) -> tuple[s
     return "LOW", reasons
 
 
-def _action_recommendation(
+def action_recommendation_for(
     alert_level: str,
     market_signals: list[str],
     policy_confidence: dict,
     policy_impact: dict,
 ) -> str:
+    """Public prose helper — Korean ``action_recommendation`` for the
+    given alert level + market signals.
+
+    M11.0d-3b-2: exposed as a public entry point so
+    ``main.analyze_pipeline`` can call it AFTER
+    ``calibrate_final_decision`` (P2) returns to realign prose to
+    P2's authoritative ``policy_alert_level``. Market-signal branches
+    short-circuit before the alert_level branch; when none fire, the
+    output depends on ``alert_level``.
+    """
     verification_strength = policy_confidence.get("verification_strength")
 
     if "housing_tightening_risk" in market_signals and verification_strength == "none":
@@ -149,12 +159,22 @@ def _action_recommendation(
     return "No immediate action beyond routine monitoring."
 
 
-def _decision_summary(
+def decision_summary_for(
     alert_level: str,
     market_signals: list[str],
     policy_confidence: dict,
     policy_impact: dict,
 ) -> str:
+    """Public prose helper — Korean ``decision_summary`` for the given
+    alert level + market signals.
+
+    M11.0d-3b-2: exposed as a public entry point so
+    ``main.analyze_pipeline`` can call it AFTER
+    ``calibrate_final_decision`` (P2) returns to realign prose to
+    P2's authoritative ``policy_alert_level``. Market-signal branches
+    short-circuit before the alert_level branch; when none fire, the
+    output depends on ``alert_level``.
+    """
     verification_strength = policy_confidence.get("verification_strength")
     impact_level = policy_impact.get("impact_level")
     consumer_sensitivity = int(policy_impact.get("consumer_sensitivity") or 0)
@@ -177,45 +197,48 @@ def _decision_summary(
 def make_final_decision(policy_confidence: dict, policy_impact: dict) -> dict:
     """Producer 1 (P1) — Korean prose + market signals generator.
 
-    M11.0d-3b (NARROW Strategy A): this function is now formally
+    M11.0d-3b (NARROW Strategy A): this function is formally
     **PROSE-ONLY** for the user-facing pipeline. Its returned
     ``policy_alert_level`` is OVERWRITTEN by
     ``policy_scoring.calibrate_final_decision`` (P2) at
-    ``main.py:668`` — P2 is the single source of truth for the
+    ``main.py:756`` — P2 is the single source of truth for the
     user-facing alert label.
 
-    P1's label IS still captured by ``main.py:585`` into
+    P1's label IS still captured by ``main.py`` into
     ``p1_alert_level_raw`` and surfaced in
     ``debug_summary["disagreement_signal"]`` (M11.0d-3a) for
     operator-visible producer disagreement. It is NOT a verdict.
 
+    M11.0d-3b-2 (Strategy A FULL — SHIPPED): the ``decision_summary``
+    and ``action_recommendation`` strings returned here use P1's
+    OWN ``alert_level``. ``main.analyze_pipeline`` then calls the
+    public helpers :func:`decision_summary_for` and
+    :func:`action_recommendation_for` with P2's authoritative
+    ``policy_alert_level`` immediately after
+    ``calibrate_final_decision`` returns, and OVERWRITES the two
+    prose fields on ``final_decision``. The realignment is GATED
+    on ``not official_mismatch`` so the conservative override at
+    ``main.py:735-749`` is preserved.
+
     What P1 still authoritatively contributes to the user-facing
-    output:
+    output (post-M11.0d-3b-2):
 
-      * ``decision_summary``       (Korean prose, currently
-                                    branched on P1's own label —
-                                    aligning to P2's label is
-                                    deferred to M11.0d-3b-2)
-      * ``action_recommendation``  (Korean prose — same caveat)
+      * ``decision_summary``       (Korean prose; main.py realigns
+                                    this to P2's label downstream)
+      * ``action_recommendation``  (same — realigned downstream)
       * ``market_signal``          (label-independent; safe)
-      * ``decision_reasons``       (label-independent enrichment)
-
-    The disagreement between P1's label and P2's label drives the
-    long-standing UX inconsistency the audit's §1.5 #1 finding
-    flagged. M11.0d-3b-2 is the planned follow-up that realigns
-    P1's prose to P2's label. Until that ships, accept that the
-    Korean prose may describe a different alert tier than the
-    one the user sees in ``policy_alert_level``.
+      * ``decision_reasons``       (label-independent enrichment;
+                                    P2 appends calibration reasons)
     """
     alert_level, alert_reasons = _policy_alert_level(policy_confidence, policy_impact)
     market_signals, signal_reasons = _market_signal(policy_confidence, policy_impact)
-    recommendation = _action_recommendation(
+    recommendation = action_recommendation_for(
         alert_level,
         market_signals,
         policy_confidence,
         policy_impact,
     )
-    summary = _decision_summary(
+    summary = decision_summary_for(
         alert_level,
         market_signals,
         policy_confidence,

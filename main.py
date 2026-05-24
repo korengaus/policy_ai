@@ -49,7 +49,12 @@ from evidence_comparator import (
 )
 from policy_confidence import calculate_policy_confidence, print_policy_confidence
 from policy_impact import analyze_policy_impact, print_policy_impact
-from policy_decision import make_final_decision, print_final_decision
+from policy_decision import (
+    action_recommendation_for,
+    decision_summary_for,
+    make_final_decision,
+    print_final_decision,
+)
 from policy_scoring import calibrate_final_decision
 from topic_classifier import classify_policy_topic
 from timeline import print_timeline_summary
@@ -762,6 +767,34 @@ def _process_news_item_phase_a(
         evidence_snippets=evidence_snippets,
         debug_summary=debug_summary,
     )
+
+    # M11.0d-3b-2 (Strategy A FULL): realign Korean prose to P2's
+    # authoritative policy_alert_level. P1 emits prose branched on
+    # its own label, so when P1≠P2 (~30% of analyses) the user
+    # sees prose describing one tier next to an alert card for
+    # another. We re-derive decision_summary + action_recommendation
+    # from P2's label using the public prose helpers exposed by
+    # policy_decision. Gated on `not official_mismatch` so the
+    # conservative override applied at L735-749 (which hard-sets
+    # both prose fields to the "추가 공식 출처 확인 필요" pair)
+    # survives untouched. market_signal and decision_reasons are
+    # label-independent and stay as P1+P2 left them.
+    if not verification_card.get("official_mismatch"):
+        aligned_alert_level = final_decision.get("policy_alert_level")
+        aligned_market_signals = final_decision.get("market_signal") or []
+        final_decision["action_recommendation"] = action_recommendation_for(
+            aligned_alert_level,
+            aligned_market_signals,
+            policy_confidence,
+            policy_impact,
+        )
+        final_decision["decision_summary"] = decision_summary_for(
+            aligned_alert_level,
+            aligned_market_signals,
+            policy_confidence,
+            policy_impact,
+        )
+
     print_final_decision(final_decision)
 
     # M11.0d-3a (Strategy C): record the three producer labels.

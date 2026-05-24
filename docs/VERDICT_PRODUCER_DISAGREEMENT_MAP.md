@@ -358,10 +358,42 @@ P1's prose generators `_decision_summary` and `_action_recommendation` branch on
 - BUT the prose change would alter user-visible Korean strings on Render for ~30% of analyses. That is a deliberate UX change that deserves its own milestone with explicit operator awareness — not a hidden side-effect inside a "codification" PR.
 - The NARROW path delivers the operator-visible benefit of Strategy A (formal P2 authority + Constraints #11 and #12 invariants pinned) at **zero behavior risk**, leaves M11.0d-1's snapshot pin byte-identical, and lets the operator review the exact Korean prose changes BEFORE shipping them in M11.0d-3b-2.
 
-**M11.0d-3b-2 plan (when operator decides to ship prose alignment):**
+## M11.0d-3b-2 status — Strategy A FULL SHIPPED (Korean prose alignment)
 
-1. Modify `policy_decision._decision_summary` and `policy_decision._action_recommendation` to accept the P2-derived label rather than P1's local label. Simplest implementation: change `make_final_decision` to take an optional `authoritative_alert_level` kwarg that, when provided, is used for prose; otherwise falls back to P1's own label (preserves existing call sites that don't pass P2's label).
-2. In `main.analyze_pipeline`, after `calibrate_final_decision` returns, re-derive prose via `make_final_decision(..., authoritative_alert_level=final_decision["policy_alert_level"])` OR call a new dedicated prose-only entry point.
-3. Update `tests/fixtures/m11_0d_1_regression_fixtures_snapshot.json` prose fields (label fields untouched) with an explicit M11.0d-3b-2 lineage comment.
-4. Render verification REQUIRED — Korean UI strings change for ~30% of analyses.
-5. Spot-check the strong-evidence ELS fixture: prose should switch from "정책 신뢰도와 영향도가 중간 이상…" (MEDIUM) to "공식 검증과 high 영향이 결합되어…" (HIGH).
+**Shipped:**
+
+- **Public prose helpers** in `policy_decision.py`: `decision_summary_for(alert_level, market_signals, policy_confidence, policy_impact)` and `action_recommendation_for(...)`. These were previously private (`_decision_summary` / `_action_recommendation`) — exposing them as public entry points lets `main.analyze_pipeline` call them post-calibration with P2's authoritative label.
+- **Prose-realignment step in `main.analyze_pipeline`** immediately after `calibrate_final_decision` returns and before `_build_disagreement_signal` runs. Reads `final_decision["policy_alert_level"]` (P2 authoritative) and `final_decision["market_signal"]` (label-independent), feeds them to the public helpers, OVERWRITES `final_decision["action_recommendation"]` and `final_decision["decision_summary"]`. **Gated on `not verification_card["official_mismatch"]`** so the conservative override applied at `main.py:735-749` survives untouched.
+- **16 tests** in `tests/test_m11_0d_3b_2_prose_alignment.py`: 8 behavioral pins (Pattern A, Pattern B, agreement, official_mismatch, market_signal/decision_reasons preservation), 5 byte-identity invariants (policy_alert_level on the 42-row matrix, verdict_label on the matrix, disagreement_signal triple, operator_review_required ALWAYS True, truth_claim ALWAYS False), 3 immutability pins (conservative Korean wording in web/index.html, SHA256 hashes of all 6 M11.0d-1 fixture files, export consistency).
+
+**Zero change to:**
+
+- `policy_alert_level` (P2 still authoritative)
+- `verdict_label` (P3 untouched)
+- `disagreement_signal` (M11.0d-3a wiring preserved)
+- `operator_review_required` (still ALWAYS True)
+- `truth_claim` (still ALWAYS False)
+- All 6 M11.0d-1 snapshot fixtures — byte-identical (pinned by SHA256 in the new test file).
+- `tests/regression.test.js` — UNTOUCHED. It uses hardcoded fixture objects; never invokes the Python prose helpers; never trips on this change.
+- `EXPECTED_TOTAL_LOG_CALLS` — stays at 265 (no new log calls added; the realignment is silent, symmetric with the existing `official_mismatch` override).
+
+**Before / after — Pattern B (P1=MEDIUM, P2=HIGH; strong-ELS fixture):**
+
+| Field | Before M11.0d-3b-2 | After M11.0d-3b-2 |
+| --- | --- | --- |
+| `policy_alert_level` | `HIGH` (P2) | `HIGH` (P2) — unchanged |
+| `decision_summary` | `"정책 신뢰도와 영향도가 중간 이상으로 확인되어 후속 모니터링이 필요합니다."` (MEDIUM string) | `"공식 검증과 high 영향이 결합되어 높은 수준의 정책 알림이 필요합니다."` (HIGH string) |
+| `action_recommendation` | `"No immediate action beyond routine monitoring."` (P1's MEDIUM fallthrough) | `"No immediate action beyond routine monitoring."` (HIGH alert has no dedicated branch — same string. The Pattern B realignment is most visible in `decision_summary`.) |
+
+**Before / after — Pattern A (P1=MEDIUM, P2=LOW; `boundary_score_60_medium_impact`):**
+
+| Field | Before M11.0d-3b-2 | After M11.0d-3b-2 |
+| --- | --- | --- |
+| `policy_alert_level` | `LOW` (P2) | `LOW` (P2) — unchanged |
+| `decision_summary` | `"정책 신뢰도와 영향도가 중간 이상으로 확인되어 후속 모니터링이 필요합니다."` (MEDIUM string next to LOW alert) | `"현재 단계에서는 명확한 정책 실행 신호가 낮아 일반 모니터링 대상으로 판단됩니다."` (LOW fallback) |
+
+**Affected production volume:** ~30% of analyses (the P1≠P2 rows in the M11.0d-1 disagreement summary; subtracting the official_mismatch rows where the conservative override already applies).
+
+**M11.0d-1 fixture handling:** All 6 fixtures left untouched. The originally-planned step 3 ("update `m11_0d_1_regression_fixtures_snapshot.json` prose fields") was dropped because that fixture's current schema only stores labels (`p1`, `p2`, `p3`, `p3_implied_tier`) — no prose fields. The SHA256 pin in the new test file enforces this.
+
+**Render verification:** required post-deploy via `python scripts/run_operational_checks.py --profile render-baseline` and a manual `/v2/analyze` spot-check on "전세사기" / "금융위" to confirm Korean recommendation prose matches the alert tier.
