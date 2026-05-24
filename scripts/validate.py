@@ -140,6 +140,13 @@ def _commands() -> List[List[str]]:
         # (OFFICIAL_DOMAIN_QUERY_HINTS) was deferred; the test pins
         # current behavior so a future cleanup can confirm scope.
         [python, "tests/test_dead_code_removal.py"],
+        # M11.6 — mojibake sentinel removal in official_crawler. Two
+        # FSS error-page detection checks held byte-corrupted Korean
+        # strings that could never match real titles. Default-to-delete
+        # cleanup; pins assert the byte sequences do not reappear and
+        # that the surrounding fetch path still produces its documented
+        # public shape on representative Korean input.
+        [python, "tests/test_mojibake_cleanup.py"],
         # M11.3 — read-only audit of the M11.1 candidate list. Compile
         # + --help smoke confirms the script loads; the test suite
         # pins idempotency, atomic-write, Korean round-trip, and the

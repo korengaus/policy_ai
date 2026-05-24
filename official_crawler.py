@@ -1007,23 +1007,6 @@ def fetch_best_official_document(search_result: dict, news_context: dict | None 
             search_url,
         )
 
-        if result["site_key"] == "fss" and "?먮윭?섏씠吏" in (search_title or ""):
-            result["search_attempt_count"] = max(result.get("search_attempt_count") or 0, 1)
-            result["search_attempt_results"].append(
-                {
-                    "query": result.get("search_query_used"),
-                    "url": search_url,
-                    "fetched": True,
-                    "status_code": search_response.status_code,
-                    "candidate_links_count": 0,
-                    "rendered_links_count": 0,
-                    "error": "FSS search returned error page",
-                }
-            )
-            result["usable"] = False
-            result["error"] = "FSS search returned error page"
-            return result
-
         candidate_links, parser_used = _extract_candidate_links(
             search_html=_response_text(search_response),
             search_url=search_url,
@@ -1129,11 +1112,6 @@ def fetch_best_official_document(search_result: dict, news_context: dict | None 
                         max_chars=1500,
                     )
                     attempt_result["title"] = attempt_title
-
-                    if result["site_key"] == "fss" and "?癒?쑎??륁뵠筌왖" in (attempt_title or ""):
-                        attempt_result["error"] = "FSS search returned error page"
-                        result["search_attempt_results"].append(attempt_result)
-                        continue
 
                     attempt_candidate_links, attempt_parser_used = _extract_candidate_links(
                         search_html=_response_text(attempt_response),
