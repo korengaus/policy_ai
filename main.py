@@ -1,9 +1,12 @@
 import json
+import os
 import sys
 import hashlib
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Callable, Optional
 
 from config import (
     AI_MODEL,
@@ -441,7 +444,541 @@ def _build_disagreement_signal(
     }
 
 
-def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> dict:
+# =========================================================================
+# M15.0d — Per-news-item parallel processing helpers.
+#
+# The per-news-item loop body splits cleanly into two phases at the LLM
+# call boundary:
+#
+#   Phase A — verdict computation (URL resolve → article fetch →
+#             official source → evidence extraction → contradiction →
+#             bias framing → policy confidence/impact → P1 → P3 → P4
+#             rewrite → P2 calibration → disagreement_signal). Pure
+#             function of (news, memory_snapshot, query, ...). Safe
+#             to parallelize across news items.
+#
+#   Phase B — LLM call (ai_reasoner.run_ai_reasoning), AI-driven topic
+#             classification, duplicate detection (against latest
+#             memory), memory mutation, and report assembly. Must run
+#             SEQUENTIALLY in submission order to (a) respect OpenAI
+#             rate limits, (b) preserve memory mutation determinism,
+#             and (c) keep `report_items` in input order.
+#
+# The split preserves every M11.0d invariant by construction: verdict
+# logic (P1/P2/P3/disagreement_signal) runs identically inside Phase A.
+# M11.0d-1 snapshot pin (42 synthetic rows + 3 named fixtures) is the
+# strongest safety signal — it must pass byte-identical after this
+# refactor.
+#
+# Concurrency limit: MAX_PARALLEL_NEWS_ITEMS env var, default 3.
+# Setting to 1 produces byte-identical behaviour to pre-M15.0d
+# sequential execution (safe rollback path).
+# =========================================================================
+
+
+def _max_parallel_news_items() -> int:
+    """Return the per-pipeline parallel-worker limit. Defaults to 3
+    when the env var is unset / invalid. Caller must clamp to
+    ``len(news_results)`` so we never spawn more workers than items."""
+    raw = os.environ.get("MAX_PARALLEL_NEWS_ITEMS", "").strip()
+    if not raw:
+        return 3
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return 3
+    return max(1, value)
+
+
+def _process_news_item_phase_a(
+    news: dict,
+    *,
+    index: int,
+    total: int,
+    memory_snapshot: dict,
+    query: str,
+    news_collection_debug: dict,
+    analysis_cache_key: str,
+) -> dict:
+    """Run the verdict-computation half of the per-news-item pipeline.
+
+    Pure function — reads ``memory_snapshot`` but never mutates it
+    (or anything else outside its own return value). Safe to call
+    concurrently from multiple threads.
+
+    Returns a dict carrying every per-item value Phase B + the
+    final report assembly need.
+    """
+    log.info(f"\n========== News {index} ==========")
+    log.info(f"title: {news['title']}")
+    log.info(f"published: {news['published']}")
+    log.info(f"Google News link: {news['google_link']}")
+    log.info(f"summary: {news['summary']}")
+
+    log.info("\n----- Resolve original URL -----")
+    original_url = resolve_google_news_url(news["google_link"])
+    log.info(f'original URL: {original_url}')
+
+    article_id = make_article_id(news["title"], original_url)
+
+    log.info("\n----- Fetch article body -----")
+    article_body = sanitize_text(fetch_article_body(original_url, max_chars=MAX_ARTICLE_CHARS))
+    log.info(article_body[:1000])
+
+    claims = extract_verifiable_claims(
+        article_body=article_body,
+        title=news.get("title") or "",
+        summary=news.get("summary") or "",
+        max_claims=3,
+    )
+    normalized_claims = normalize_claims(claims)
+
+    policy_claims = extract_policy_claim_sentences(
+        article_body,
+        max_sentences=MAX_POLICY_SENTENCES,
+    )
+
+    print_rule_based_results(policy_claims)
+
+    memory_context = summarize_all_memory(memory_snapshot)
+    core_policy_issue = (
+        policy_claims[0]["sentence"]
+        if policy_claims
+        else news.get("summary") or news.get("title") or ""
+    )
+    preliminary_topic = classify_policy_topic(
+        news_title=news["title"],
+        news_summary=news["summary"],
+        article_body=article_body,
+        ai_result={
+            "main_policy_issue": core_policy_issue,
+            "one_line_summary": news["summary"],
+        },
+    )
+    official_source_candidates = generate_official_source_candidates(
+        news_title=news["title"],
+        core_policy_issue=core_policy_issue,
+        topic=preliminary_topic,
+    )
+    print_official_source_candidates(official_source_candidates)
+
+    official_evidence_results = fetch_official_evidence(
+        official_source_candidates,
+        max_candidates=5,
+        news_context={
+            "title": news["title"],
+            "summary": news["summary"],
+            "article_body": article_body,
+            "topic": preliminary_topic,
+            "policy_claims": policy_claims,
+        },
+    )
+    print_official_evidence_results(official_evidence_results)
+
+    source_retrieval = build_source_retrieval_context(
+        normalized_claims=normalized_claims,
+        news=news,
+        original_url=original_url,
+        original_query=query,
+        article_body=article_body,
+        official_source_candidates=official_source_candidates,
+    )
+    source_queries = source_retrieval.get("source_queries", [])
+    source_candidates, official_body_debug = enrich_official_source_candidates_with_bodies(
+        source_retrieval.get("source_candidates", []),
+        official_evidence_results,
+        normalized_claims,
+    )
+    source_candidates, official_resolution_debug = resolve_official_evidence(
+        source_candidates,
+        normalized_claims,
+    )
+    source_candidates = evaluate_source_candidates(source_candidates)
+    evidence_extraction = extract_evidence_snippets(
+        normalized_claims=normalized_claims,
+        source_candidates=source_candidates,
+        article_body=article_body,
+    )
+    evidence_snippets = evidence_extraction.get("evidence_snippets", [])
+    claim_evidence_map = evidence_extraction.get("claim_evidence_map", {})
+    contradiction_result = run_contradiction_checks(
+        normalized_claims=normalized_claims,
+        evidence_snippets=evidence_snippets,
+        claim_evidence_map=claim_evidence_map,
+        source_queries=source_queries,
+    )
+    contradiction_checks = contradiction_result.get("contradiction_checks", [])
+    contradiction_summary = contradiction_result.get("contradiction_summary", {})
+    bias_framing_result = analyze_bias_framing(
+        normalized_claims=normalized_claims,
+        news_title=news.get("title") or "",
+        news_summary=news.get("summary") or "",
+        article_body=article_body,
+        source_candidates=source_candidates,
+        evidence_snippets=evidence_snippets,
+        claim_evidence_map=claim_evidence_map,
+        contradiction_checks=contradiction_checks,
+    )
+    bias_framing_analysis = bias_framing_result.get("bias_framing_analysis", [])
+    bias_framing_summary = bias_framing_result.get("bias_framing_summary", {})
+
+    # Phase 2 M5: optional semantic evidence matching. Strictly additive —
+    # the summary is computed read-only from existing inputs and attached
+    # to debug_summary below. It never feeds policy_confidence, verdict
+    # labels, or final_decision. When SEMANTIC_MATCHING_ENABLED is false
+    # (default) this short-circuits to an "unavailable" summary with no
+    # external calls.
+    semantic_evidence_summary = compute_semantic_evidence_summary(
+        normalized_claims=normalized_claims,
+        claim_text=(news.get("title") or "") + " " + (news.get("summary") or ""),
+        source_candidates=source_candidates,
+        evidence_snippets=evidence_snippets,
+    )
+
+    evidence_comparison = compare_news_with_official_evidence(
+        news_title=news["title"],
+        news_summary=news["summary"],
+        article_body=article_body,
+        policy_claims=policy_claims,
+        official_evidence_results=official_evidence_results,
+    )
+    print_evidence_comparison(evidence_comparison)
+
+    policy_confidence = calculate_policy_confidence(
+        news_title=news["title"],
+        news_summary=news["summary"],
+        article_body=article_body,
+        policy_claims=policy_claims,
+        official_evidence_results=official_evidence_results,
+        evidence_comparison=evidence_comparison,
+    )
+    print_policy_confidence(policy_confidence)
+
+    policy_impact = analyze_policy_impact(
+        news_title=news["title"],
+        news_summary=news["summary"],
+        article_body=article_body,
+        policy_claims=policy_claims,
+    )
+    print_policy_impact(policy_impact)
+
+    final_decision = make_final_decision(
+        policy_confidence=policy_confidence,
+        policy_impact=policy_impact,
+    )
+    # M11.0d-3a: capture P1's pure output BEFORE the mid-pipeline
+    # official_mismatch rewrite or P2's calibrator overwrite. Used
+    # downstream to populate debug_summary["disagreement_signal"].
+    p1_alert_level_raw = final_decision.get("policy_alert_level")
+
+    verification_card = build_verification_card(
+        news=news,
+        original_url=original_url,
+        policy_claims=policy_claims,
+        official_evidence_results=official_evidence_results,
+        evidence_comparison=evidence_comparison,
+        policy_confidence=policy_confidence,
+        article_body=article_body,
+        claims=claims,
+        normalized_claims=normalized_claims,
+        source_queries=source_queries,
+        source_candidates=source_candidates,
+        evidence_snippets=evidence_snippets,
+        claim_evidence_map=claim_evidence_map,
+        contradiction_checks=contradiction_checks,
+        contradiction_summary=contradiction_summary,
+        bias_framing_analysis=bias_framing_analysis,
+        bias_framing_summary=bias_framing_summary,
+    )
+    debug_summary = build_pipeline_debug_summary(
+        news=news,
+        original_url=original_url,
+        claims=claims,
+        normalized_claims=normalized_claims,
+        source_candidates=source_candidates,
+        official_source_candidates=official_source_candidates,
+        evidence_snippets=evidence_snippets,
+        contradiction_checks=contradiction_checks,
+        bias_framing_analysis=bias_framing_analysis,
+        verification_card=verification_card,
+    )
+    debug_summary["news_cache_hit"] = bool(news_collection_debug.get("news_cache_hit"))
+    debug_summary["news_cache_key"] = news_collection_debug.get("news_cache_key")
+    debug_summary["news_cache_ttl_seconds"] = news_collection_debug.get("news_cache_ttl_seconds")
+    debug_summary["news_collection_mode"] = news_collection_debug.get("news_collection_mode")
+    debug_summary["collection_source"] = news_collection_debug.get("collection_source")
+    debug_summary["analysis_cache_hit"] = False
+    debug_summary["analysis_cache_key"] = analysis_cache_key
+    debug_summary["analysis_cache_ttl_seconds"] = ANALYSIS_CACHE_TTL_SECONDS
+    debug_summary.update(official_body_debug or {})
+    debug_summary.update(official_resolution_debug or {})
+    debug_summary["semantic_evidence_summary"] = semantic_evidence_summary
+
+    if verification_card.get("official_mismatch"):
+        policy_confidence = dict(policy_confidence)
+        policy_confidence["policy_confidence_score"] = min(
+            int(policy_confidence.get("policy_confidence_score") or 0),
+            20,
+        )
+        policy_confidence["verification_strength"] = "none"
+        policy_confidence["confidence_evidence_source"] = None
+        policy_confidence["confidence_evidence_title"] = None
+        policy_confidence["confidence_evidence_url"] = None
+        policy_confidence["confidence_evidence_grade"] = None
+        mismatch_reasons = verification_card.get("official_mismatch_reasons") or []
+        policy_confidence["confidence_reasons"] = [
+            "no usable official document",
+            "official source topic mismatch",
+            *mismatch_reasons[:2],
+        ]
+
+        final_decision = dict(final_decision)
+        final_decision["policy_alert_level"] = (
+            "WATCH"
+            if policy_impact.get("impact_level") == "high"
+            else final_decision.get("policy_alert_level", "WATCH")
+        )
+        final_decision["action_recommendation"] = "추가 공식 출처 확인 필요"
+        final_decision["decision_summary"] = (
+            "공식 상세 근거가 부족하거나 뉴스 핵심 주제와 불일치하여 추가 공식 출처 확인이 필요합니다."
+        )
+        decision_reasons = list(final_decision.get("decision_reasons") or [])
+        for reason in ["no usable official evidence", "official source topic mismatch"]:
+            if reason not in decision_reasons:
+                decision_reasons.append(reason)
+        final_decision["decision_reasons"] = decision_reasons
+        verification_card["verdict_confidence"] = policy_confidence["policy_confidence_score"]
+
+    # M11.0d-3b (NARROW Strategy A): codification point. P2 is the
+    # authoritative producer of policy_alert_level. P1's value
+    # captured above as p1_alert_level_raw survives via the
+    # disagreement_signal.
+    final_decision, debug_summary = calibrate_final_decision(
+        final_decision=final_decision,
+        policy_confidence=policy_confidence,
+        policy_impact=policy_impact,
+        verification_card=verification_card,
+        source_candidates=source_candidates,
+        evidence_snippets=evidence_snippets,
+        debug_summary=debug_summary,
+    )
+    print_final_decision(final_decision)
+
+    # M11.0d-3a (Strategy C): record the three producer labels.
+    disagreement_signal = _build_disagreement_signal(
+        p1_alert_level_raw=p1_alert_level_raw,
+        p2_alert_level=final_decision.get("policy_alert_level"),
+        p3_verdict_label=verification_card.get("verdict_label"),
+    )
+    debug_summary["disagreement_signal"] = disagreement_signal
+    log.info(
+        "verdict.disagreement_signal",
+        extra={
+            "p1_label": disagreement_signal["p1_label"],
+            "p2_label": disagreement_signal["p2_label"],
+            "p3_label": disagreement_signal["p3_label"],
+            "p3_implied_tier": disagreement_signal["p3_implied_tier"],
+            "agreed": disagreement_signal["agreed"],
+            "disagreement_description": disagreement_signal["disagreement_description"],
+        },
+    )
+    verification_card["debug_summary"] = debug_summary
+    verification_card = sanitize_data(verification_card)
+    evidence_quality_summary = verification_card.get("evidence_quality_summary") or {}
+    claim_evidence_quality_summary = (
+        verification_card.get("claim_evidence_quality_summary") or []
+    )
+    print_verification_card(verification_card)
+
+    return {
+        "index": index,
+        "total": total,
+        "news": news,
+        "original_url": original_url,
+        "article_id": article_id,
+        "article_body": article_body,
+        "claims": claims,
+        "normalized_claims": normalized_claims,
+        "policy_claims": policy_claims,
+        "memory_context": memory_context,
+        "preliminary_topic": preliminary_topic,
+        "official_source_candidates": official_source_candidates,
+        "official_evidence_results": official_evidence_results,
+        "source_queries": source_queries,
+        "source_candidates": source_candidates,
+        "evidence_snippets": evidence_snippets,
+        "claim_evidence_map": claim_evidence_map,
+        "contradiction_checks": contradiction_checks,
+        "contradiction_summary": contradiction_summary,
+        "bias_framing_analysis": bias_framing_analysis,
+        "bias_framing_summary": bias_framing_summary,
+        "evidence_comparison": evidence_comparison,
+        "policy_confidence": policy_confidence,
+        "policy_impact": policy_impact,
+        "final_decision": final_decision,
+        "verification_card": verification_card,
+        "debug_summary": debug_summary,
+        "evidence_quality_summary": evidence_quality_summary,
+        "claim_evidence_quality_summary": claim_evidence_quality_summary,
+        "news_collection_debug": news_collection_debug,
+    }
+
+
+def _apply_news_item_phase_b(phase_a: dict, memory: dict) -> dict:
+    """Sequential half of the per-news-item pipeline: LLM call,
+    AI-driven topic, duplicate detection (against the LATEST
+    memory), memory mutation, and report-item assembly. Mutates
+    ``memory`` in-place — caller must ensure this runs serially in
+    submission order.
+
+    Returns a dict with:
+      * ``report_item``  — the per-news dict appended to report_items
+      * ``saved_to_memory`` — bool, whether this item added to memory
+      * ``duplicate``    — bool, whether this item was a known dup
+    """
+    news = phase_a["news"]
+    original_url = phase_a["original_url"]
+    article_id = phase_a["article_id"]
+    preliminary_topic = phase_a["preliminary_topic"]
+
+    # Re-compute duplicate against the LATEST memory state (which
+    # includes any items added by earlier Phase B iterations in this
+    # same run). Preserves exact byte-identical behaviour to the
+    # pre-M15.0d sequential loop.
+    existing_ids = {article.get("article_id") for article in memory.get("articles", [])}
+    duplicate = article_id in existing_ids
+
+    ai_result = run_ai_reasoning(
+        news_title=news["title"],
+        news_summary=news["summary"],
+        article_body=phase_a["article_body"],
+        policy_claims=phase_a["policy_claims"],
+        memory_context=phase_a["memory_context"],
+        official_source_candidates=phase_a["official_source_candidates"],
+        official_evidence_results=phase_a["official_evidence_results"],
+        evidence_comparison=phase_a["evidence_comparison"],
+    )
+    print_ai_results(ai_result)
+
+    topic = preliminary_topic
+    saved_to_memory = False
+
+    if ai_result.get("ai_available"):
+        topic = classify_policy_topic(
+            news_title=news["title"],
+            news_summary=news["summary"],
+            article_body=phase_a["article_body"],
+            ai_result=ai_result,
+        )
+
+        log.info("\n----- Topic classification -----")
+        log.info(f'topic: {topic}')
+
+        update_memory_with_result(
+            memory=memory,
+            topic=topic,
+            article_id=article_id,
+            news=news,
+            original_url=original_url,
+            ai_result=ai_result,
+            policy_claims=phase_a["policy_claims"],
+        )
+
+        save_policy_memory(memory)
+        saved_to_memory = not duplicate
+
+    if not ai_result.get("ai_available"):
+        log.info("\n----- Topic classification -----")
+        log.info(f'topic: {topic}')
+
+    log.info("\n" + "=" * 80)
+
+    report_item = sanitize_data({
+        "title": news.get("title"),
+        "published": news.get("published"),
+        "original_url": original_url,
+        "summary": news.get("summary"),
+        "topic": topic,
+        "claims": phase_a["claims"],
+        "normalized_claims": phase_a["normalized_claims"],
+        "source_queries": phase_a["source_queries"],
+        "source_candidates": phase_a["source_candidates"],
+        "evidence_snippets": phase_a["evidence_snippets"],
+        "claim_evidence_map": phase_a["claim_evidence_map"],
+        "claim_evidence_quality_summary": phase_a["claim_evidence_quality_summary"],
+        "evidence_quality_summary": phase_a["evidence_quality_summary"],
+        "contradiction_checks": phase_a["contradiction_checks"],
+        "contradiction_summary": phase_a["contradiction_summary"],
+        "bias_framing_analysis": phase_a["bias_framing_analysis"],
+        "bias_framing_summary": phase_a["bias_framing_summary"],
+        "policy_claims": phase_a["policy_claims"],
+        "official_source_candidates": phase_a["official_source_candidates"],
+        "official_evidence_results": phase_a["official_evidence_results"],
+        "evidence_comparison": phase_a["evidence_comparison"],
+        "policy_confidence": phase_a["policy_confidence"],
+        "policy_impact": phase_a["policy_impact"],
+        "final_decision": phase_a["final_decision"],
+        "verification_card": phase_a["verification_card"],
+        "debug_summary": phase_a["debug_summary"],
+        "news_collection_debug": phase_a["news_collection_debug"],
+        "ai_result": ai_result,
+        "saved_to_memory": saved_to_memory,
+        "duplicate": duplicate,
+        "api_result": {
+            "title": news.get("title"),
+            "original_url": original_url,
+            "topic": topic,
+            "claims": phase_a["claims"],
+            "normalized_claims": phase_a["normalized_claims"],
+            "source_queries": phase_a["source_queries"],
+            "source_candidates": phase_a["source_candidates"],
+            "evidence_snippets": phase_a["evidence_snippets"],
+            "claim_evidence_map": phase_a["claim_evidence_map"],
+            "claim_evidence_quality_summary": phase_a["claim_evidence_quality_summary"],
+            "evidence_quality_summary": phase_a["evidence_quality_summary"],
+            "contradiction_checks": phase_a["contradiction_checks"],
+            "contradiction_summary": phase_a["contradiction_summary"],
+            "bias_framing_analysis": phase_a["bias_framing_analysis"],
+            "bias_framing_summary": phase_a["bias_framing_summary"],
+            "policy_sentences": phase_a["policy_claims"],
+            "official_sources": phase_a["official_source_candidates"],
+            "evidence_comparison": phase_a["evidence_comparison"],
+            "policy_confidence": phase_a["policy_confidence"],
+            "policy_impact": phase_a["policy_impact"],
+            "final_decision": phase_a["final_decision"],
+            "verification_card": phase_a["verification_card"],
+            "debug_summary": phase_a["debug_summary"],
+            "news_collection_debug": phase_a["news_collection_debug"],
+            "claim_text": phase_a["verification_card"].get("claim_text"),
+            "verdict_label": phase_a["verification_card"].get("verdict_label"),
+            "verdict_confidence": phase_a["verification_card"].get("verdict_confidence"),
+            "evidence_sources": phase_a["verification_card"].get("evidence_sources"),
+            "source_reliability_score": phase_a["verification_card"].get("source_reliability_score"),
+            "source_reliability_reason": phase_a["verification_card"].get("source_reliability_reason"),
+            "evidence_summary": phase_a["verification_card"].get("evidence_summary"),
+            "missing_context": phase_a["verification_card"].get("missing_context"),
+            "last_checked_at": phase_a["verification_card"].get("last_checked_at"),
+            "review_status": phase_a["verification_card"].get("review_status"),
+            "ai_status": ai_result.get("ai_status", "unavailable"),
+            "ai_status_reason": ai_result.get("ai_status_reason", "unknown"),
+            "ai_model": ai_result.get("ai_model"),
+            "ai_available": bool(ai_result.get("ai_available")),
+        },
+    })
+
+    return {
+        "report_item": report_item,
+        "saved_to_memory": saved_to_memory,
+        "duplicate": duplicate,
+    }
+
+
+def analyze_pipeline(
+    query: str = QUERY,
+    max_news: int = MAX_NEWS_RESULTS,
+    *,
+    progress_callback: Optional[Callable[[str, dict], None]] = None,
+) -> dict:
     run_started_at = utc_now_iso()
     report_items = []
     saved_event_count = 0
@@ -486,436 +1023,109 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
         report["report_path"] = str(report_path)
         return report
 
-    for i, news in enumerate(news_results, start=1):
-        log.info(f"\n========== News {i} ==========")
-        log.info(f"title: {news['title']}")
-        log.info(f"published: {news['published']}")
-        log.info(f"Google News link: {news['google_link']}")
-        log.info(f"summary: {news['summary']}")
+    # M15.0d — Phase A (parallel) + Phase B (sequential) split.
+    # See _process_news_item_phase_a / _apply_news_item_phase_b above
+    # and Section A-I of the M15.0d Phase 1 diagnosis for the safety
+    # rationale. With MAX_PARALLEL_NEWS_ITEMS=1 (env override), the
+    # path is byte-identical to the pre-M15.0d sequential loop.
+    total_items = len(news_results)
+    max_parallel = min(_max_parallel_news_items(), total_items)
+    log.info(
+        "M15.0d parallel phase start: total=%d workers=%d",
+        total_items, max_parallel,
+    )
+    if progress_callback is not None:
+        try:
+            progress_callback("news_item_parallel_started", {
+                "total": total_items, "workers": max_parallel,
+            })
+        except Exception:  # noqa: BLE001 — progress is best-effort
+            pass
 
-        log.info("\n----- Resolve original URL -----")
-        original_url = resolve_google_news_url(news["google_link"])
-        log.info(f'original URL: {original_url}')
+    phase_a_results: list = [None] * total_items
+    if max_parallel <= 1 or total_items <= 1:
+        # Sequential path — byte-identical to pre-M15.0d.
+        for i, news in enumerate(news_results):
+            try:
+                phase_a_results[i] = _process_news_item_phase_a(
+                    news,
+                    index=i + 1,
+                    total=total_items,
+                    memory_snapshot=memory,
+                    query=query,
+                    news_collection_debug=news_collection_debug,
+                    analysis_cache_key=analysis_cache_key,
+                )
+            except Exception:
+                log.exception(
+                    "M15.0d Phase A failed for news index %d (sequential)", i + 1,
+                )
+            if progress_callback is not None:
+                try:
+                    progress_callback("news_item_completed", {
+                        "index": i + 1, "total": total_items,
+                    })
+                except Exception:  # noqa: BLE001
+                    pass
+    else:
+        # Parallel path — ThreadPoolExecutor over Phase A. I/O-bound
+        # work (HTTP fetches) releases the GIL; verdict computation
+        # is per-item pure-function work that does not touch shared
+        # mutable state (memory is read-only here; mutations happen
+        # in Phase B below).
+        with ThreadPoolExecutor(
+            max_workers=max_parallel,
+            thread_name_prefix="m15-0d-phase-a",
+        ) as executor:
+            future_to_index = {
+                executor.submit(
+                    _process_news_item_phase_a,
+                    news,
+                    index=i + 1,
+                    total=total_items,
+                    memory_snapshot=memory,
+                    query=query,
+                    news_collection_debug=news_collection_debug,
+                    analysis_cache_key=analysis_cache_key,
+                ): i
+                for i, news in enumerate(news_results)
+            }
+            for future in as_completed(future_to_index):
+                idx = future_to_index[future]
+                try:
+                    phase_a_results[idx] = future.result()
+                except Exception:
+                    log.exception(
+                        "M15.0d Phase A failed for news index %d (parallel)", idx + 1,
+                    )
+                log.info(
+                    "M15.0d Phase A item complete: index=%d total=%d",
+                    idx + 1, total_items,
+                )
+                if progress_callback is not None:
+                    try:
+                        progress_callback("news_item_completed", {
+                            "index": idx + 1, "total": total_items,
+                        })
+                    except Exception:  # noqa: BLE001
+                        pass
 
-        article_id = make_article_id(news["title"], original_url)
-        existing_ids = {article.get("article_id") for article in memory.get("articles", [])}
-        duplicate = article_id in existing_ids
-
-        log.info("\n----- Fetch article body -----")
-        article_body = sanitize_text(fetch_article_body(original_url, max_chars=MAX_ARTICLE_CHARS))
-        log.info(article_body[:1000])
-
-        claims = extract_verifiable_claims(
-            article_body=article_body,
-            title=news.get("title") or "",
-            summary=news.get("summary") or "",
-            max_claims=3,
-        )
-        normalized_claims = normalize_claims(claims)
-
-        policy_claims = extract_policy_claim_sentences(
-            article_body,
-            max_sentences=MAX_POLICY_SENTENCES,
-        )
-
-        print_rule_based_results(policy_claims)
-
-        memory_context = summarize_all_memory(memory)
-        core_policy_issue = (
-            policy_claims[0]["sentence"]
-            if policy_claims
-            else news.get("summary") or news.get("title") or ""
-        )
-        preliminary_topic = classify_policy_topic(
-            news_title=news["title"],
-            news_summary=news["summary"],
-            article_body=article_body,
-            ai_result={
-                "main_policy_issue": core_policy_issue,
-                "one_line_summary": news["summary"],
-            },
-        )
-        official_source_candidates = generate_official_source_candidates(
-            news_title=news["title"],
-            core_policy_issue=core_policy_issue,
-            topic=preliminary_topic,
-        )
-        print_official_source_candidates(official_source_candidates)
-
-        official_evidence_results = fetch_official_evidence(
-            official_source_candidates,
-            max_candidates=5,
-            news_context={
-                "title": news["title"],
-                "summary": news["summary"],
-                "article_body": article_body,
-                "topic": preliminary_topic,
-                "policy_claims": policy_claims,
-            },
-        )
-        print_official_evidence_results(official_evidence_results)
-
-        source_retrieval = build_source_retrieval_context(
-            normalized_claims=normalized_claims,
-            news=news,
-            original_url=original_url,
-            original_query=query,
-            article_body=article_body,
-            official_source_candidates=official_source_candidates,
-        )
-        source_queries = source_retrieval.get("source_queries", [])
-        source_candidates, official_body_debug = enrich_official_source_candidates_with_bodies(
-            source_retrieval.get("source_candidates", []),
-            official_evidence_results,
-            normalized_claims,
-        )
-        source_candidates, official_resolution_debug = resolve_official_evidence(
-            source_candidates,
-            normalized_claims,
-        )
-        source_candidates = evaluate_source_candidates(source_candidates)
-        evidence_extraction = extract_evidence_snippets(
-            normalized_claims=normalized_claims,
-            source_candidates=source_candidates,
-            article_body=article_body,
-        )
-        evidence_snippets = evidence_extraction.get("evidence_snippets", [])
-        claim_evidence_map = evidence_extraction.get("claim_evidence_map", {})
-        contradiction_result = run_contradiction_checks(
-            normalized_claims=normalized_claims,
-            evidence_snippets=evidence_snippets,
-            claim_evidence_map=claim_evidence_map,
-            source_queries=source_queries,
-        )
-        contradiction_checks = contradiction_result.get("contradiction_checks", [])
-        contradiction_summary = contradiction_result.get("contradiction_summary", {})
-        bias_framing_result = analyze_bias_framing(
-            normalized_claims=normalized_claims,
-            news_title=news.get("title") or "",
-            news_summary=news.get("summary") or "",
-            article_body=article_body,
-            source_candidates=source_candidates,
-            evidence_snippets=evidence_snippets,
-            claim_evidence_map=claim_evidence_map,
-            contradiction_checks=contradiction_checks,
-        )
-        bias_framing_analysis = bias_framing_result.get("bias_framing_analysis", [])
-        bias_framing_summary = bias_framing_result.get("bias_framing_summary", {})
-
-        # Phase 2 M5: optional semantic evidence matching. Strictly additive —
-        # the summary is computed read-only from existing inputs and attached
-        # to debug_summary below. It never feeds policy_confidence, verdict
-        # labels, or final_decision. When SEMANTIC_MATCHING_ENABLED is false
-        # (default) this short-circuits to an "unavailable" summary with no
-        # external calls.
-        semantic_evidence_summary = compute_semantic_evidence_summary(
-            normalized_claims=normalized_claims,
-            claim_text=(news.get("title") or "") + " " + (news.get("summary") or ""),
-            source_candidates=source_candidates,
-            evidence_snippets=evidence_snippets,
-        )
-
-        evidence_comparison = compare_news_with_official_evidence(
-            news_title=news["title"],
-            news_summary=news["summary"],
-            article_body=article_body,
-            policy_claims=policy_claims,
-            official_evidence_results=official_evidence_results,
-        )
-        print_evidence_comparison(evidence_comparison)
-
-        policy_confidence = calculate_policy_confidence(
-            news_title=news["title"],
-            news_summary=news["summary"],
-            article_body=article_body,
-            policy_claims=policy_claims,
-            official_evidence_results=official_evidence_results,
-            evidence_comparison=evidence_comparison,
-        )
-        print_policy_confidence(policy_confidence)
-
-        policy_impact = analyze_policy_impact(
-            news_title=news["title"],
-            news_summary=news["summary"],
-            article_body=article_body,
-            policy_claims=policy_claims,
-        )
-        print_policy_impact(policy_impact)
-
-        final_decision = make_final_decision(
-            policy_confidence=policy_confidence,
-            policy_impact=policy_impact,
-        )
-        # M11.0d-3a: capture P1's pure output BEFORE the mid-pipeline
-        # official_mismatch rewrite (L633-666) or P2's calibrator
-        # overwrite (L668). Used downstream to populate
-        # debug_summary["disagreement_signal"]. See
-        # docs/VERDICT_PRODUCER_DISAGREEMENT_MAP.md.
-        p1_alert_level_raw = final_decision.get("policy_alert_level")
-
-        verification_card = build_verification_card(
-            news=news,
-            original_url=original_url,
-            policy_claims=policy_claims,
-            official_evidence_results=official_evidence_results,
-            evidence_comparison=evidence_comparison,
-            policy_confidence=policy_confidence,
-            article_body=article_body,
-            claims=claims,
-            normalized_claims=normalized_claims,
-            source_queries=source_queries,
-            source_candidates=source_candidates,
-            evidence_snippets=evidence_snippets,
-            claim_evidence_map=claim_evidence_map,
-            contradiction_checks=contradiction_checks,
-            contradiction_summary=contradiction_summary,
-            bias_framing_analysis=bias_framing_analysis,
-            bias_framing_summary=bias_framing_summary,
-        )
-        debug_summary = build_pipeline_debug_summary(
-            news=news,
-            original_url=original_url,
-            claims=claims,
-            normalized_claims=normalized_claims,
-            source_candidates=source_candidates,
-            official_source_candidates=official_source_candidates,
-            evidence_snippets=evidence_snippets,
-            contradiction_checks=contradiction_checks,
-            bias_framing_analysis=bias_framing_analysis,
-            verification_card=verification_card,
-        )
-        debug_summary["news_cache_hit"] = bool(news_collection_debug.get("news_cache_hit"))
-        debug_summary["news_cache_key"] = news_collection_debug.get("news_cache_key")
-        debug_summary["news_cache_ttl_seconds"] = news_collection_debug.get("news_cache_ttl_seconds")
-        debug_summary["news_collection_mode"] = news_collection_debug.get("news_collection_mode")
-        debug_summary["collection_source"] = news_collection_debug.get("collection_source")
-        debug_summary["analysis_cache_hit"] = False
-        debug_summary["analysis_cache_key"] = analysis_cache_key
-        debug_summary["analysis_cache_ttl_seconds"] = ANALYSIS_CACHE_TTL_SECONDS
-        debug_summary.update(official_body_debug or {})
-        debug_summary.update(official_resolution_debug or {})
-        # Phase 2 M5: attach semantic evidence summary to debug_summary. This
-        # happens AFTER verdict-shaping logic above and BEFORE the calibrator
-        # below — neither reads ``debug_summary["semantic_evidence_summary"]``,
-        # so the verdict path is not influenced. Conservative wording rules in
-        # the calibrator ("의미 매칭 근거 부족", etc.) remain authoritative.
-        debug_summary["semantic_evidence_summary"] = semantic_evidence_summary
-        if verification_card.get("official_mismatch"):
-            policy_confidence = dict(policy_confidence)
-            policy_confidence["policy_confidence_score"] = min(
-                int(policy_confidence.get("policy_confidence_score") or 0),
-                20,
-            )
-            policy_confidence["verification_strength"] = "none"
-            policy_confidence["confidence_evidence_source"] = None
-            policy_confidence["confidence_evidence_title"] = None
-            policy_confidence["confidence_evidence_url"] = None
-            policy_confidence["confidence_evidence_grade"] = None
-            mismatch_reasons = verification_card.get("official_mismatch_reasons") or []
-            policy_confidence["confidence_reasons"] = [
-                "no usable official document",
-                "official source topic mismatch",
-                *mismatch_reasons[:2],
-            ]
-
-            final_decision = dict(final_decision)
-            final_decision["policy_alert_level"] = (
-                "WATCH"
-                if policy_impact.get("impact_level") == "high"
-                else final_decision.get("policy_alert_level", "WATCH")
-            )
-            final_decision["action_recommendation"] = "추가 공식 출처 확인 필요"
-            final_decision["decision_summary"] = (
-                "공식 상세 근거가 부족하거나 뉴스 핵심 주제와 불일치하여 추가 공식 출처 확인이 필요합니다."
-            )
-            decision_reasons = list(final_decision.get("decision_reasons") or [])
-            for reason in ["no usable official evidence", "official source topic mismatch"]:
-                if reason not in decision_reasons:
-                    decision_reasons.append(reason)
-            final_decision["decision_reasons"] = decision_reasons
-            verification_card["verdict_confidence"] = policy_confidence["policy_confidence_score"]
-
-        # M11.0d-3b (NARROW Strategy A): codification point.
-        # `calibrate_final_decision` (P2) is the AUTHORITATIVE
-        # producer for `final_decision["policy_alert_level"]`. The
-        # value P1's `make_final_decision` set above is OVERWRITTEN
-        # here — that is intentional and pinned by
-        # `tests/test_m11_0d_3b_p2_authority.py`. P1's raw label is
-        # preserved via `p1_alert_level_raw` (M11.0d-3a, captured
-        # at L585) and is surfaced through
-        # `debug_summary["disagreement_signal"]`. Korean prose
-        # fields (`decision_summary`, `action_recommendation`,
-        # `market_signal`) are still P1-generated; prose alignment
-        # to P2's label is deferred to M11.0d-3b-2.
-        final_decision, debug_summary = calibrate_final_decision(
-            final_decision=final_decision,
-            policy_confidence=policy_confidence,
-            policy_impact=policy_impact,
-            verification_card=verification_card,
-            source_candidates=source_candidates,
-            evidence_snippets=evidence_snippets,
-            debug_summary=debug_summary,
-        )
-        print_final_decision(final_decision)
-        # M11.0d-3a (Strategy C): record the three producers' labels so
-        # the disagreement is visible in debug_summary + structured logs.
-        # ZERO behaviour change — policy_alert_level (P2's output) and
-        # verdict_label (P3's output) are NOT modified here. The signal
-        # is internal/ops-only; it is NOT exposed in final_decision or
-        # at the top of verification_card. See M11.0d-2 design review
-        # for why Strategy C (signal-only) ships before Strategy A
-        # (P2-authoritative consolidation in M11.0d-3b).
-        disagreement_signal = _build_disagreement_signal(
-            p1_alert_level_raw=p1_alert_level_raw,
-            p2_alert_level=final_decision.get("policy_alert_level"),
-            p3_verdict_label=verification_card.get("verdict_label"),
-        )
-        debug_summary["disagreement_signal"] = disagreement_signal
-        log.info(
-            "verdict.disagreement_signal",
-            extra={
-                "p1_label": disagreement_signal["p1_label"],
-                "p2_label": disagreement_signal["p2_label"],
-                "p3_label": disagreement_signal["p3_label"],
-                "p3_implied_tier": disagreement_signal["p3_implied_tier"],
-                "agreed": disagreement_signal["agreed"],
-                "disagreement_description": disagreement_signal["disagreement_description"],
-            },
-        )
-        verification_card["debug_summary"] = debug_summary
-        verification_card = sanitize_data(verification_card)
-        evidence_quality_summary = verification_card.get("evidence_quality_summary") or {}
-        claim_evidence_quality_summary = (
-            verification_card.get("claim_evidence_quality_summary") or []
-        )
-        print_verification_card(verification_card)
-
-        ai_result = run_ai_reasoning(
-            news_title=news["title"],
-            news_summary=news["summary"],
-            article_body=article_body,
-            policy_claims=policy_claims,
-            memory_context=memory_context,
-            official_source_candidates=official_source_candidates,
-            official_evidence_results=official_evidence_results,
-            evidence_comparison=evidence_comparison,
-        )
-
-        print_ai_results(ai_result)
-
-        topic = preliminary_topic
-        saved_to_memory = False
-
-        if ai_result.get("ai_available"):
-            topic = classify_policy_topic(
-                news_title=news["title"],
-                news_summary=news["summary"],
-                article_body=article_body,
-                ai_result=ai_result,
-            )
-
-            log.info("\n----- Topic classification -----")
-            log.info(f'topic: {topic}')
-
-            memory = update_memory_with_result(
-                memory=memory,
-                topic=topic,
-                article_id=article_id,
-                news=news,
-                original_url=original_url,
-                ai_result=ai_result,
-                policy_claims=policy_claims,
-            )
-
-            save_policy_memory(memory)
-            saved_to_memory = not duplicate
-
-            if saved_to_memory:
-                saved_event_count += 1
-
-        if duplicate:
+    # Phase B — sequential, in original submission order. LLM call +
+    # memory mutation + report assembly. Order-deterministic by
+    # construction.
+    for phase_a in phase_a_results:
+        if phase_a is None:
+            # Phase A failed for this index — skip Phase B (preserves
+            # the existing "exceptions swallowed at outer level"
+            # contract; the operator sees the failure in logs).
+            continue
+        phase_b = _apply_news_item_phase_b(phase_a, memory)
+        report_items.append(phase_b["report_item"])
+        if phase_b["saved_to_memory"]:
+            saved_event_count += 1
+        if phase_b["duplicate"]:
             duplicate_count += 1
 
-        report_items.append(
-            sanitize_data({
-                "title": news.get("title"),
-                "published": news.get("published"),
-                "original_url": original_url,
-                "summary": news.get("summary"),
-                "topic": topic,
-                "claims": claims,
-                "normalized_claims": normalized_claims,
-                "source_queries": source_queries,
-                "source_candidates": source_candidates,
-                "evidence_snippets": evidence_snippets,
-                "claim_evidence_map": claim_evidence_map,
-                "claim_evidence_quality_summary": claim_evidence_quality_summary,
-                "evidence_quality_summary": evidence_quality_summary,
-                "contradiction_checks": contradiction_checks,
-                "contradiction_summary": contradiction_summary,
-                "bias_framing_analysis": bias_framing_analysis,
-                "bias_framing_summary": bias_framing_summary,
-                "policy_claims": policy_claims,
-                "official_source_candidates": official_source_candidates,
-                "official_evidence_results": official_evidence_results,
-                "evidence_comparison": evidence_comparison,
-                "policy_confidence": policy_confidence,
-                "policy_impact": policy_impact,
-                "final_decision": final_decision,
-                "verification_card": verification_card,
-                "debug_summary": debug_summary,
-                "news_collection_debug": news_collection_debug,
-                "ai_result": ai_result,
-                "saved_to_memory": saved_to_memory,
-                "duplicate": duplicate,
-                "api_result": {
-                    "title": news.get("title"),
-                    "original_url": original_url,
-                    "topic": topic,
-                    "claims": claims,
-                    "normalized_claims": normalized_claims,
-                    "source_queries": source_queries,
-                    "source_candidates": source_candidates,
-                    "evidence_snippets": evidence_snippets,
-                    "claim_evidence_map": claim_evidence_map,
-                    "claim_evidence_quality_summary": claim_evidence_quality_summary,
-                    "evidence_quality_summary": evidence_quality_summary,
-                    "contradiction_checks": contradiction_checks,
-                    "contradiction_summary": contradiction_summary,
-                    "bias_framing_analysis": bias_framing_analysis,
-                    "bias_framing_summary": bias_framing_summary,
-                    "policy_sentences": policy_claims,
-                    "official_sources": official_source_candidates,
-                    "evidence_comparison": evidence_comparison,
-                    "policy_confidence": policy_confidence,
-                    "policy_impact": policy_impact,
-                    "final_decision": final_decision,
-                    "verification_card": verification_card,
-                    "debug_summary": debug_summary,
-                    "news_collection_debug": news_collection_debug,
-                    "claim_text": verification_card.get("claim_text"),
-                    "verdict_label": verification_card.get("verdict_label"),
-                    "verdict_confidence": verification_card.get("verdict_confidence"),
-                    "evidence_sources": verification_card.get("evidence_sources"),
-                    "source_reliability_score": verification_card.get("source_reliability_score"),
-                    "source_reliability_reason": verification_card.get("source_reliability_reason"),
-                    "evidence_summary": verification_card.get("evidence_summary"),
-                    "missing_context": verification_card.get("missing_context"),
-                    "last_checked_at": verification_card.get("last_checked_at"),
-                    "review_status": verification_card.get("review_status"),
-                    "ai_status": ai_result.get("ai_status", "unavailable"),
-                    "ai_status_reason": ai_result.get("ai_status_reason", "unknown"),
-                    "ai_model": ai_result.get("ai_model"),
-                    "ai_available": bool(ai_result.get("ai_available")),
-                },
-            })
-        )
-
-        if not ai_result.get("ai_available"):
-            log.info("\n----- Topic classification -----")
-            log.info(f'topic: {topic}')
-
-        log.info("\n" + "=" * 80)
 
     print_timeline_summary(memory)
 

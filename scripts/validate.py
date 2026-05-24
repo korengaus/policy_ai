@@ -216,6 +216,15 @@ def _commands() -> List[List[str]]:
         # offline.
         ["node", str(ROOT / "tests" / "test_frontend_v2_client.test.js")],
         [python, "tests/test_v2_endpoints_e2e.py"],
+        # M15.0d — parallel per-news-item processing
+        # (concurrent.futures.ThreadPoolExecutor). Pins: order
+        # preservation, parallel-thread overlap detection, error
+        # isolation, MAX_PARALLEL_NEWS_ITEMS=1 sequential rollback
+        # path, progress_callback wiring, M11.0d invariant
+        # reachability. All tests fully offline using mocked
+        # Phase A / Phase B helpers — real analyze_pipeline never
+        # invoked.
+        [python, "tests/test_parallel_news_processing.py"],
         # M11.3 — read-only audit of the M11.1 candidate list. Compile
         # + --help smoke confirms the script loads; the test suite
         # pins idempotency, atomic-write, Korean round-trip, and the

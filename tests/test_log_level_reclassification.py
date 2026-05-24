@@ -126,11 +126,15 @@ PRESERVED_REAL_ERRORS: tuple[tuple[str, str], ...] = (
 #   * M11.0d-3a (Strategy C: disagreement_signal added 1× log.info
 #     "verdict.disagreement_signal" in main.analyze_pipeline; main.py
 #     IS in MIGRATED_FILES so this counts): 262 + 1 = 263
+#   * M15.0d (parallel per-news-item processing added 2× log.info in
+#     main.analyze_pipeline: one "M15.0d parallel phase start" and
+#     one per-item "Phase A item complete"; main.py IS in
+#     MIGRATED_FILES so both count): 263 + 2 = 265
 #
 # Any future milestone that legitimately adds log calls bumps this
 # expected count; the contract M14.4 actually pins is the *level
 # distribution*, not the absolute count.
-EXPECTED_TOTAL_LOG_CALLS = 263
+EXPECTED_TOTAL_LOG_CALLS = 265
 
 # Post-M14.4: 12 (down from 17 pre-M14.4 — 5 reclassifications).
 # M13.3d added log.info / log.warning calls only — no new log.error.

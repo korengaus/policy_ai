@@ -224,8 +224,41 @@ def run_analyze_pipeline_job(query: str, max_news: int, job_id: str) -> dict:
     )
     report_progress(job_id, stage=STAGE_PIPELINE_STARTED, percent=10,
                     detail=f"query={query}")
+    # M15.0d: bridge analyze_pipeline's parallel-phase progress
+    # callback to our existing report_progress channel. Each per-news
+    # Phase A completion fires a "news_item_completed" event with
+    # {index, total}; we translate to a percent in the 10-85 band so
+    # the bar moves smoothly during parallel work.
+    def _phase_a_progress_bridge(stage: str, payload: dict) -> None:
+        try:
+            if stage == "news_item_parallel_started":
+                report_progress(
+                    job_id,
+                    stage=stage,
+                    percent=12,
+                    detail=f"total={payload.get('total')} workers={payload.get('workers')}",
+                )
+            elif stage == "news_item_completed":
+                idx = int(payload.get("index") or 0)
+                total = max(1, int(payload.get("total") or 1))
+                # Map to the 15-80 band so news_item completions appear
+                # between pipeline_started (10) and saving_results (85).
+                pct = int(round(15 + (idx / total) * 65))
+                report_progress(
+                    job_id,
+                    stage=stage,
+                    percent=pct,
+                    detail=f"index={idx}/{total}",
+                )
+        except Exception:  # noqa: BLE001 — best-effort progress
+            pass
+
     try:
-        report = analyze_pipeline(query=query, max_news=int(max_news))
+        report = analyze_pipeline(
+            query=query,
+            max_news=int(max_news),
+            progress_callback=_phase_a_progress_bridge,
+        )
     except Exception as exc:  # noqa: BLE001 — wrap-and-report contract
         log.warning(
             "pipeline_worker.analyze_pipeline_failed",
