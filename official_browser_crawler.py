@@ -11,6 +11,10 @@ import re
 
 from text_utils import sanitize_data, sanitize_text
 
+from structured_logging import get_logger
+
+log = get_logger(__name__)
+
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -31,7 +35,11 @@ def fetch_rendered_page(url: str, timeout_ms: int = 15000) -> dict:
     }
 
     try:
-        from playwright.sync_api import sync_playwright
+        from playwright.sync_api import (
+            sync_playwright,
+            Error as PlaywrightError,
+            TimeoutError as PlaywrightTimeoutError,
+        )
     except ImportError as exc:
         result["error"] = f"Playwright is not installed: {exc}"
         return result
@@ -66,7 +74,57 @@ def fetch_rendered_page(url: str, timeout_ms: int = 15000) -> dict:
             context.close()
             browser.close()
 
+    except PlaywrightTimeoutError as exc:
+        # Page navigation / body extraction exceeded the budgeted
+        # timeout. Common on slow gov.kr sites under load. Sentinel
+        # return preserved — the caller (`extract_rendered_links`)
+        # gates downstream work on `result["rendered"]` being True.
+        log.warning(
+            "playwright.page_timeout",
+            extra={
+                "url": url,
+                "timeout_ms": timeout_ms,
+                "exception_type": type(exc).__name__,
+                "exception_message": str(exc)[:500],
+                "fallback_returned": "unrendered_result_dict",
+            },
+        )
+        result["error"] = str(exc)
+    except PlaywrightError as exc:
+        # Any other Playwright API failure: target closed, navigation
+        # error, content extraction error, browser launch failure.
+        # Catching the broader `Error` base class covers everything
+        # the sync_playwright API can raise other than the timeout
+        # case caught above.
+        log.warning(
+            "playwright.api_error",
+            extra={
+                "url": url,
+                "exception_type": type(exc).__name__,
+                "exception_message": str(exc)[:500],
+                "fallback_returned": "unrendered_result_dict",
+            },
+        )
+        result["error"] = str(exc)
     except Exception as exc:
+        # Last-resort fallback for genuinely unexpected non-Playwright
+        # errors (e.g., a programmer bug like NameError introduced by
+        # a refactor, or an OSError from the headless browser launcher
+        # that surfaces outside Playwright's own exception hierarchy).
+        # Kept as a separate distinct-event-name path so the operator
+        # can alert on `playwright.unexpected_error` specifically: any
+        # firing of this branch is either a Playwright version drift
+        # or a real bug introduced upstream. Sentinel return preserved
+        # so the pipeline stays available.
+        log.warning(
+            "playwright.unexpected_error",
+            extra={
+                "url": url,
+                "exception_type": type(exc).__name__,
+                "exception_message": str(exc)[:500],
+                "fallback_returned": "unrendered_result_dict",
+            },
+        )
         result["error"] = str(exc)
 
     return result

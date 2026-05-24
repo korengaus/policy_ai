@@ -156,6 +156,7 @@ except Exception:  # noqa: BLE001
 
 ### Site 4: `official_browser_crawler.fetch_rendered_page`
 
+- **Status:** ✅ **RESOLVED in M11.7b** (narrowed + logging only). The single broad `except Exception` at L69 was replaced with a three-tier chain: `PlaywrightTimeoutError` → event `playwright.page_timeout`; `PlaywrightError` (base) → event `playwright.api_error`; `Exception` (last-resort fallback) → event `playwright.unexpected_error`. The `from playwright.sync_api import sync_playwright` lazy import inside `fetch_rendered_page` was extended to also import `Error as PlaywrightError, TimeoutError as PlaywrightTimeoutError` (same `ImportError` guard preserved — Playwright remains optional). A module-level `get_logger` was added. Sentinel return shape preserved byte-for-byte across all three tiers — only `result["error"] = str(exc)` differs. Pinned by `tests/test_m11_7b_playwright_narrowing.py` (5 cases: each tier fires its own event with the right exception type + sentinel; happy path emits nothing; sentinel-shape byte-identity across all three tiers). `KeyboardInterrupt` / `SystemExit` now propagate correctly (they inherit from `BaseException`, not `Exception`, so the pre-M11.7b broad `except Exception` did NOT catch them either — pure preservation pin).
 - **Audit line cite:** L69
 - **Current line:** L69 (unchanged)
 - **Surrounding context:**

@@ -164,6 +164,15 @@ def _commands() -> List[List[str]]:
         # byte-identical; pins assert the warning fires on the failure
         # path AND stays silent on legitimate first-run / happy paths.
         [python, "tests/test_m11_7a_category2_logging.py"],
+        # M11.7b — Category 4 Playwright exception narrowing in
+        # official_browser_crawler.fetch_rendered_page. The broad
+        # `except Exception` was replaced with a three-tier chain
+        # (PlaywrightTimeoutError / PlaywrightError / Exception)
+        # with distinct structured-warning event names per tier.
+        # Sentinel return shape byte-identical; KeyboardInterrupt /
+        # SystemExit propagate correctly. Tests mock Playwright; no
+        # real headless browser is launched.
+        [python, "tests/test_m11_7b_playwright_narrowing.py"],
         # M11.3 — read-only audit of the M11.1 candidate list. Compile
         # + --help smoke confirms the script loads; the test suite
         # pins idempotency, atomic-write, Korean round-trip, and the
