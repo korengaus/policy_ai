@@ -147,6 +147,14 @@ def _commands() -> List[List[str]]:
         # that the surrounding fetch path still produces its documented
         # public shape on representative Korean input.
         [python, "tests/test_mojibake_cleanup.py"],
+        # M11.5c — dead-function removal in official_crawler.
+        # `fetch_official_page` had zero callers anywhere in the repo
+        # (surfaced as Site 5a in the M11.7 exception-handling audit)
+        # and was deleted as a follow-up dead-code pass. Pins assert
+        # the definition is gone, no repo file references it, the
+        # module still imports cleanly, and the actually-used public
+        # surface is intact.
+        [python, "tests/test_m11_5c_fetch_official_page_removed.py"],
         # M11.3 — read-only audit of the M11.1 candidate list. Compile
         # + --help smoke confirms the script loads; the test suite
         # pins idempotency, atomic-write, Korean round-trip, and the

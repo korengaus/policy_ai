@@ -497,32 +497,6 @@ def _extract_document_content(html: str, max_chars: int = 4000) -> dict:
     }
 
 
-def fetch_official_page(url: str) -> dict:
-    result = {
-        "url": url,
-        "fetched": False,
-        "status_code": None,
-        "title": None,
-        "text_snippet": "",
-        "error": None,
-    }
-
-    try:
-        response = _request_url(url)
-        result["status_code"] = response.status_code
-        response.raise_for_status()
-
-        title, text_snippet = _extract_html_text(_response_text(response), max_chars=1500)
-        result["title"] = title
-        result["text_snippet"] = text_snippet
-        result["fetched"] = True
-
-    except Exception as exc:
-        result["error"] = str(exc)
-
-    return result
-
-
 def _empty_relevance_fields() -> dict:
     return {
         "document_relevance_score": 0,

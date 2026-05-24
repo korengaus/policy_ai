@@ -396,3 +396,13 @@ The operator can choose any subset of the following targeted follow-up PRs. Each
 - No tests added because no code changed.
 - `regression.test.js` unchanged.
 - `npm test` byte-identical.
+
+## Resolution for Site 5a (M11.5c)
+
+`fetch_official_page` was deleted from `official_crawler.py` as a follow-up to the M11.7 finding. M11.5c is a dead-code cleanup pass, NOT an exception-handling change.
+
+- **Confirmed zero callers** by repo-wide grep at HEAD before deletion. The 8 occurrences of the function name inside this audit doc are documentation prose, not call sites.
+- **Function body removed:** 26 lines (L500–L525 in the post-M11.6 file: the 24-line def-through-`return result` block plus the two trailing blank lines, leaving the two leading blanks at L498–L499 as the PEP 8 separator before `_empty_relevance_fields`).
+- **No imports needed removal** — the deleted function used only intra-module helpers (`_request_url`, `_extract_html_text`, `_response_text`) that remain in active use elsewhere.
+- **Uniqueness + non-reintroduction pinned by** `tests/test_m11_5c_fetch_official_page_removed.py` (4 cases: definition absent, no repo references, module still imports, live public surface still present).
+- **Production behavior unchanged** — the function was never being called, so deleting it changes nothing at runtime. Sites 5b–5e (and the other audit-cited swallows) are explicitly NOT touched by M11.5c; they remain as documented above for future M11.7a / M11.7b / M11.7c work.
