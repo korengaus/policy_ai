@@ -427,7 +427,6 @@ def extract_evidence_snippets(
 ) -> dict:
     sentences = _split_sentences(article_body)
     evidence_snippets = []
-    claim_evidence_map = {}
 
     news_sources = [
         source
@@ -528,8 +527,6 @@ def extract_evidence_snippets(
             )
             evidence_snippets.append(snippet)
             claim_snippet_ids.append(snippet["evidence_id"])
-
-        claim_evidence_map[str(index)] = claim_snippet_ids
 
     evidence_snippets.sort(
         key=lambda item: (

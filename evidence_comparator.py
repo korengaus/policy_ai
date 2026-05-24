@@ -298,22 +298,6 @@ def _make_summary(
             )
         return "수집된 공식 페이지가 검증 대상에서 제외됐습니다. " + " / ".join(reasons)
 
-    if verification_level == "excluded_non_policy_page":
-        excluded = [
-            result
-            for result in official_evidence_results or []
-            if result.get("should_exclude_from_verification") or result.get("evidence_grade") in {"D", "E", "F"}
-        ]
-        reasons = []
-        has_detail_url = False
-        for result in excluded[:2]:
-            if result.get("selected_document_url") and result.get("is_detail_page"):
-                has_detail_url = True
-            label = result.get("document_type") or "non_policy_page"
-            detail = "; ".join(result.get("classification_reasons") or [])
-            reasons.append(f"{label}: {detail}" if detail else label)
-        return "수집된 공식 페이지가 검증 대상에서 제외됐습니다. " + " / ".join(reasons)
-
     if verification_level == "official_document_not_found":
         return "\uacf5\uc2dd \uac80\uc0c9 \ud398\uc774\uc9c0\ub294 \uc811\uadfc\ud588\uc9c0\ub9cc \ube44\uad50\ud560 \uc0c1\uc138 \uacf5\uc2dd\ubb38\uc11c\ub97c \ucc3e\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4."
 

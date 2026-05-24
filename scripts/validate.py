@@ -133,6 +133,13 @@ def _commands() -> List[List[str]]:
         # _missing_context_specific. The dead L491 copy was deleted;
         # this test catches any future re-introduction.
         [python, "tests/test_verification_card_dedup.py"],
+        # M11.5 — audit-identified dead-code removal pins. Items 1-3
+        # were deleted (evidence_comparator dup branch,
+        # extract_evidence_snippets claim_evidence_map double-build,
+        # frontend renderResultsLegacy + buildReportTextLegacy). Item 4
+        # (OFFICIAL_DOMAIN_QUERY_HINTS) was deferred; the test pins
+        # current behavior so a future cleanup can confirm scope.
+        [python, "tests/test_dead_code_removal.py"],
         # M11.3 — read-only audit of the M11.1 candidate list. Compile
         # + --help smoke confirms the script loads; the test suite
         # pins idempotency, atomic-write, Korean round-trip, and the
