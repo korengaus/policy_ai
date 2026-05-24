@@ -175,6 +175,38 @@ def _decision_summary(
 
 
 def make_final_decision(policy_confidence: dict, policy_impact: dict) -> dict:
+    """Producer 1 (P1) — Korean prose + market signals generator.
+
+    M11.0d-3b (NARROW Strategy A): this function is now formally
+    **PROSE-ONLY** for the user-facing pipeline. Its returned
+    ``policy_alert_level`` is OVERWRITTEN by
+    ``policy_scoring.calibrate_final_decision`` (P2) at
+    ``main.py:668`` — P2 is the single source of truth for the
+    user-facing alert label.
+
+    P1's label IS still captured by ``main.py:585`` into
+    ``p1_alert_level_raw`` and surfaced in
+    ``debug_summary["disagreement_signal"]`` (M11.0d-3a) for
+    operator-visible producer disagreement. It is NOT a verdict.
+
+    What P1 still authoritatively contributes to the user-facing
+    output:
+
+      * ``decision_summary``       (Korean prose, currently
+                                    branched on P1's own label —
+                                    aligning to P2's label is
+                                    deferred to M11.0d-3b-2)
+      * ``action_recommendation``  (Korean prose — same caveat)
+      * ``market_signal``          (label-independent; safe)
+      * ``decision_reasons``       (label-independent enrichment)
+
+    The disagreement between P1's label and P2's label drives the
+    long-standing UX inconsistency the audit's §1.5 #1 finding
+    flagged. M11.0d-3b-2 is the planned follow-up that realigns
+    P1's prose to P2's label. Until that ships, accept that the
+    Korean prose may describe a different alert tier than the
+    one the user sees in ``policy_alert_level``.
+    """
     alert_level, alert_reasons = _policy_alert_level(policy_confidence, policy_impact)
     market_signals, signal_reasons = _market_signal(policy_confidence, policy_impact)
     recommendation = _action_recommendation(

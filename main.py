@@ -735,6 +735,18 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
             final_decision["decision_reasons"] = decision_reasons
             verification_card["verdict_confidence"] = policy_confidence["policy_confidence_score"]
 
+        # M11.0d-3b (NARROW Strategy A): codification point.
+        # `calibrate_final_decision` (P2) is the AUTHORITATIVE
+        # producer for `final_decision["policy_alert_level"]`. The
+        # value P1's `make_final_decision` set above is OVERWRITTEN
+        # here — that is intentional and pinned by
+        # `tests/test_m11_0d_3b_p2_authority.py`. P1's raw label is
+        # preserved via `p1_alert_level_raw` (M11.0d-3a, captured
+        # at L585) and is surfaced through
+        # `debug_summary["disagreement_signal"]`. Korean prose
+        # fields (`decision_summary`, `action_recommendation`,
+        # `market_signal`) are still P1-generated; prose alignment
+        # to P2's label is deferred to M11.0d-3b-2.
         final_decision, debug_summary = calibrate_final_decision(
             final_decision=final_decision,
             policy_confidence=policy_confidence,

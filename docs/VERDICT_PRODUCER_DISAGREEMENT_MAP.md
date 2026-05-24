@@ -327,3 +327,41 @@ Add a `disagreement_signal` field to `debug_summary` that records `{p1_label, p2
 - Does NOT add a `disagreement_signal` field to `debug_summary` — that would be Strategy C from Section F, which requires operator approval.
 - Does NOT modify `tests/regression.test.js`.
 - Does NOT bump `EXPECTED_TOTAL_LOG_CALLS` (no new log calls were added).
+
+---
+
+## M11.0d-3a status — Strategy C SHIPPED (logging only)
+
+**Shipped:** the disagreement is now visible in `debug_summary["disagreement_signal"]` and as a `verdict.disagreement_signal` JSON log event on Render.
+
+- `main.analyze_pipeline` captures P1's raw label (before the mid-pipeline `official_mismatch` rewrite and P2's overwrite) and assembles a `{p1_label, p2_label, p3_label, p3_implied_tier, agreed, disagreement_description}` payload after `calibrate_final_decision` returns.
+- Zero behavior change — `policy_alert_level` and `verdict_label` byte-identical (proven by the 9-case M11.0d-1 snapshot pin and the 17 M11.0d-3a tests).
+- `EXPECTED_TOTAL_LOG_CALLS` bumped 262 → 263.
+
+## M11.0d-3b status — NARROW Strategy A SHIPPED (codification + invariants only; prose alignment DEFERRED to M11.0d-3b-2)
+
+**Shipped:**
+
+- **Codification of P2 authority** in docstrings of `policy_decision.make_final_decision` (now "prose-only") and `policy_scoring.calibrate_final_decision` (now "AUTHORITATIVE"), plus a contract comment at `main.py:668`. No logic change.
+- **Constraint #11 pin** (`operator_review_required` ALWAYS True): structural pin on `database.py` schemas (3 CREATE TABLEs with `NOT NULL DEFAULT 1`) + behavioral pin on `artifact_evidence_linker.candidate_to_dict` (forces True even when dataclass passes False).
+- **Constraint #12 pin** (LLM cannot raise verdict): structural pin asserting `llm_judge.py`, `ai_reasoner.py`, and `scripts/dry_run_llm_judge.py` contain no subscript/attribute assignment to `policy_alert_level` / `policy_confidence_score` / `verification_strength`; plus a repo-wide AST scan asserting `policy_alert_level` writers are confined to `main.py`, `policy_decision.py`, `policy_scoring.py`, `policy_confidence.py`, `verdict_label_diagnostic.py` (diagnostic), and `verdict_producer_comparison.py` (diagnostic).
+- **P2-authority behavioral pin** that runs P1+P2 on the strong-evidence ELS scenario (P1=MEDIUM, P2=HIGH) and asserts the final `policy_alert_level` is P2's HIGH.
+- **disagreement_signal preservation pin** confirming M11.0d-3a's wiring still captures P1's raw label after the docstring changes.
+
+**Deferred to M11.0d-3b-2 (prose alignment):**
+
+P1's prose generators `_decision_summary` and `_action_recommendation` branch on P1's own label, so when P1 says MEDIUM and P2 says HIGH the user sees `"정책 신뢰도와 영향도가 중간 이상으로 확인되어…"` (MEDIUM prose) next to the HIGH alert — a long-standing UX inconsistency for ~30% of production analyses.
+
+**Why M11.0d-3b did NOT realign the prose:**
+
+- M11.0d-3b's Phase 1 diagnosis confirmed prose alignment is **technically safe from a test-pin standpoint** — `tests/regression.test.js` runs against hardcoded JSON fixtures (never invokes Python), and zero Python tests pin the `decision_summary` / `action_recommendation` / `market_signal` fields. So no current test would catch a prose change.
+- BUT the prose change would alter user-visible Korean strings on Render for ~30% of analyses. That is a deliberate UX change that deserves its own milestone with explicit operator awareness — not a hidden side-effect inside a "codification" PR.
+- The NARROW path delivers the operator-visible benefit of Strategy A (formal P2 authority + Constraints #11 and #12 invariants pinned) at **zero behavior risk**, leaves M11.0d-1's snapshot pin byte-identical, and lets the operator review the exact Korean prose changes BEFORE shipping them in M11.0d-3b-2.
+
+**M11.0d-3b-2 plan (when operator decides to ship prose alignment):**
+
+1. Modify `policy_decision._decision_summary` and `policy_decision._action_recommendation` to accept the P2-derived label rather than P1's local label. Simplest implementation: change `make_final_decision` to take an optional `authoritative_alert_level` kwarg that, when provided, is used for prose; otherwise falls back to P1's own label (preserves existing call sites that don't pass P2's label).
+2. In `main.analyze_pipeline`, after `calibrate_final_decision` returns, re-derive prose via `make_final_decision(..., authoritative_alert_level=final_decision["policy_alert_level"])` OR call a new dedicated prose-only entry point.
+3. Update `tests/fixtures/m11_0d_1_regression_fixtures_snapshot.json` prose fields (label fields untouched) with an explicit M11.0d-3b-2 lineage comment.
+4. Render verification REQUIRED — Korean UI strings change for ~30% of analyses.
+5. Spot-check the strong-evidence ELS fixture: prose should switch from "정책 신뢰도와 영향도가 중간 이상…" (MEDIUM) to "공식 검증과 high 영향이 결합되어…" (HIGH).

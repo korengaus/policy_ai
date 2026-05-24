@@ -188,6 +188,12 @@ def _commands() -> List[List[str]]:
         # Pins the helper, the P3 mapping table, the agreement
         # semantics, and the main.py wiring points.
         [python, "tests/test_m11_0d_3a_disagreement_signal.py"],
+        # M11.0d-3b — NARROW Strategy A: codification of P2 authority
+        # + invariant pins for Constraints #11 (operator_review_required
+        # ALWAYS True) and #12 (LLM cannot raise verdict). Docstring +
+        # comment additions only — no logic change. Prose alignment
+        # is deferred to M11.0d-3b-2.
+        [python, "tests/test_m11_0d_3b_p2_authority.py"],
         # M11.3 — read-only audit of the M11.1 candidate list. Compile
         # + --help smoke confirms the script loads; the test suite
         # pins idempotency, atomic-write, Korean round-trip, and the

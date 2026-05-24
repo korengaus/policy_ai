@@ -158,6 +158,30 @@ def calibrate_final_decision(
     evidence_snippets: list[dict],
     debug_summary: dict,
 ) -> tuple[dict, dict]:
+    """Producer 2 (P2) — AUTHORITATIVE for ``policy_alert_level``.
+
+    M11.0d-3b (NARROW Strategy A): formal codification of what was
+    already true in production. This function returns the
+    ``policy_alert_level`` that the user sees on Render and in the
+    operator dashboard. It OVERWRITES whatever
+    ``policy_decision.make_final_decision`` (P1) computed earlier
+    in the pipeline (see ``main.py:668``).
+
+    P2's label vocabulary is ``{HIGH, WATCH, LOW}`` — note: never
+    ``MEDIUM`` (P1 has a MEDIUM tier but it is compressed to WATCH
+    or LOW here). The narrowing happens inside
+    :func:`_alert_from_score` and is intentional.
+
+    P1's label is preserved separately as
+    ``debug_summary["disagreement_signal"]["p1_label"]`` (M11.0d-3a)
+    for operator-visible producer disagreement. P3
+    (``verification_card._verdict_label``) is orthogonal and emits
+    workflow disposition labels in a disjoint vocabulary.
+
+    See ``docs/VERDICT_PRODUCER_DISAGREEMENT_MAP.md`` Section A for
+    the full pipeline ordering and ``tests/test_m11_0d_3b_p2_authority.py``
+    for the contract pins.
+    """
     debug = dict(debug_summary or {})
     strength = debug.get("evidence_strength_summary") or {}
     quality = debug.get("evidence_quality_summary") or verification_card.get("evidence_quality_summary") or {}
