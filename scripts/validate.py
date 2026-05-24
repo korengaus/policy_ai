@@ -173,6 +173,13 @@ def _commands() -> List[List[str]]:
         # SystemExit propagate correctly. Tests mock Playwright; no
         # real headless browser is launched.
         [python, "tests/test_m11_7b_playwright_narrowing.py"],
+        # M11.0d-1 — verdict producer disagreement diagnostic
+        # (DIAGNOSIS ONLY, no production code changed). Pins the
+        # current per-producer output snapshot for 42 synthetic-matrix
+        # rows + 3 named regression fixtures, and pins the
+        # disagreement-count summary. Any future producer change
+        # without an explicit M11.0d-3 re-baselining fails this test.
+        [python, "tests/test_verdict_producer_disagreement_diagnostic.py"],
         # M11.3 — read-only audit of the M11.1 candidate list. Compile
         # + --help smoke confirms the script loads; the test suite
         # pins idempotency, atomic-write, Korean round-trip, and the

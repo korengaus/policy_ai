@@ -1,0 +1,26 @@
+[
+  {
+    "id": "regression_fixture_geumyungwi_strong",
+    "description": "Strong-official ELS fixture (regression.test.js L205-307)",
+    "p1": "MEDIUM",
+    "p2": "HIGH",
+    "p3": "draft_verified",
+    "p3_implied_tier": "HIGH"
+  },
+  {
+    "id": "regression_fixture_geumyungwi_weak",
+    "description": "Weak-official 금융위 fixture (regression.test.js L130 score=18)",
+    "p1": "LOW",
+    "p2": "LOW",
+    "p3": "draft_needs_context",
+    "p3_implied_tier": "WATCH"
+  },
+  {
+    "id": "regression_fixture_jeonse_fraud",
+    "description": "Weak-official 전세사기 fixture (regression.test.js L325 score=12)",
+    "p1": "WATCH",
+    "p2": "WATCH",
+    "p3": "draft_unverified",
+    "p3_implied_tier": "LOW"
+  }
+]
