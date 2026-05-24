@@ -677,19 +677,27 @@ class InvariantByteIdentityPins(unittest.TestCase):
 # M11.0d-3b-2 time. Recompute and update these hex digests ONLY when
 # a future milestone explicitly re-baselines the fixtures (which is
 # itself a verdict-changing event, not a prose-only one).
+#
+# Hashes are computed over the LF-normalized byte stream so the pin
+# survives ``core.autocrlf`` differences between developer machines
+# (Windows checkout = CRLF in working tree) and CI runners
+# (Linux checkout = LF). ``.gitattributes`` declares ``*.json text
+# eol=lf``, so LF is the canonical form git stores; normalizing here
+# makes the hash match what git committed, not what the local
+# filesystem happens to expand it to.
 _M11_0D_1_FIXTURE_HASHES = {
     "m11_0d_1_synthetic_matrix.json":
-        "a02e50bc5c51099d65fe473e46f0e37078518dbb6de99268459817fe5d7689a6",
+        "601314b3b458fad53e324cec0ffab5b4728d67058bed147fc7b4d788870ff5e1",
     "m11_0d_1_p1_snapshot.json":
-        "3b56cead1e22362823825e8700449f3ceeb443a04fef29264a45b03b1516b2fa",
+        "a4c719818f9b65895994fbd6d7021b4b10758a1bdc200f6b3d0297cd082f3d27",
     "m11_0d_1_p2_snapshot.json":
-        "a0b3d8794b3a106e30cfdeda81ee8ac48e5a8e2b5cb754060ab64eb113704ce2",
+        "4bcb214aedc8e39c7ed7aa3d7e255ba1f878d738deea640fe87d6271365a3fed",
     "m11_0d_1_p3_snapshot.json":
-        "17420b5195cd9d1318a28cea4510472771310f8bb945337fd5d4339e76c92f40",
+        "300a4a40eb5090d055839aa1d34ea1d8ec87ac51605d2b27ac3c8d4decf33882",
     "m11_0d_1_disagreement_summary.json":
-        "ac43c795543aa79ac55ef8964cc6ad8ce51721d0c6fc50f3565e158af6fd9477",
+        "492708f19e1feae35b11a7fc551e29d374a0da050a90bf69f380398ac69e27b2",
     "m11_0d_1_regression_fixtures_snapshot.json":
-        "9a30b16b09acf8eb58262cb3ae3098ffe54e8e84a9f5ccde58ae7b2ea9ba77a4",
+        "1da29de31ece27ccc9de6f5b9589548a38267fefa4edc880e12e48c1b96f68f9",
 }
 
 
@@ -728,7 +736,11 @@ class ConservativeWordingAndFixtureImmutabilityPins(unittest.TestCase):
         for filename, expected in _M11_0D_1_FIXTURE_HASHES.items():
             with self.subTest(file=filename):
                 path = _FIXTURES / filename
-                actual = hashlib.sha256(path.read_bytes()).hexdigest()
+                # Normalize CRLF -> LF before hashing so the pin
+                # survives git checkout line-ending conversion (see
+                # comment on _M11_0D_1_FIXTURE_HASHES above).
+                normalized = path.read_bytes().replace(b"\r\n", b"\n")
+                actual = hashlib.sha256(normalized).hexdigest()
                 self.assertEqual(
                     actual, expected,
                     f"{filename} content drifted from M11.0d-3b-2 "
