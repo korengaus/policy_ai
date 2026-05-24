@@ -197,9 +197,15 @@ def _commands() -> List[List[str]]:
         # M15.0a — job queue infrastructure (RQ + Redis). Tests run
         # fully offline using fakeredis; --help / default invocations
         # of check_job_queue.py confirm the CLI surface. /analyze
-        # remains synchronous; M15.0b will wire it to RQ.
+        # remains synchronous; M15.0b wires it to RQ via /v2/*.
         [python, "scripts/check_job_queue.py", "--help"],
         [python, "tests/test_job_queue.py"],
+        # M15.0b — RQ-callable wrapper + SSE-backed /v2/* endpoints.
+        # Existing /analyze stays byte-identical. Tests use fakeredis
+        # + a mocked analyze_pipeline (the real 174s pipeline is
+        # never executed) and TestClient.stream for SSE assertions.
+        [python, "tests/test_pipeline_worker.py"],
+        [python, "tests/test_v2_endpoints.py"],
         # M11.3 — read-only audit of the M11.1 candidate list. Compile
         # + --help smoke confirms the script loads; the test suite
         # pins idempotency, atomic-write, Korean round-trip, and the
