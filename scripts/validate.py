@@ -180,6 +180,14 @@ def _commands() -> List[List[str]]:
         # disagreement-count summary. Any future producer change
         # without an explicit M11.0d-3 re-baselining fails this test.
         [python, "tests/test_verdict_producer_disagreement_diagnostic.py"],
+        # M11.0d-3a — Strategy C: capture all three producer labels
+        # into debug_summary["disagreement_signal"] + a structured
+        # log.info("verdict.disagreement_signal", ...) emission.
+        # Zero behaviour change — final_decision.policy_alert_level
+        # and verification_card.verdict_label are byte-identical.
+        # Pins the helper, the P3 mapping table, the agreement
+        # semantics, and the main.py wiring points.
+        [python, "tests/test_m11_0d_3a_disagreement_signal.py"],
         # M11.3 — read-only audit of the M11.1 candidate list. Compile
         # + --help smoke confirms the script loads; the test suite
         # pins idempotency, atomic-write, Korean round-trip, and the

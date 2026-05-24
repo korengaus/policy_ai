@@ -123,11 +123,14 @@ PRESERVED_REAL_ERRORS: tuple[tuple[str, str], ...] = (
 #     official_crawler.fetch_best_official_document's outer except;
 #     memory_store.py is NOT in MIGRATED_FILES so its +1 warning
 #     does not count toward this pin): 261 + 1 = 262
+#   * M11.0d-3a (Strategy C: disagreement_signal added 1× log.info
+#     "verdict.disagreement_signal" in main.analyze_pipeline; main.py
+#     IS in MIGRATED_FILES so this counts): 262 + 1 = 263
 #
 # Any future milestone that legitimately adds log calls bumps this
 # expected count; the contract M14.4 actually pins is the *level
 # distribution*, not the absolute count.
-EXPECTED_TOTAL_LOG_CALLS = 262
+EXPECTED_TOTAL_LOG_CALLS = 263
 
 # Post-M14.4: 12 (down from 17 pre-M14.4 — 5 reclassifications).
 # M13.3d added log.info / log.warning calls only — no new log.error.

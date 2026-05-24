@@ -377,6 +377,70 @@ def print_ai_results(ai_result: dict):
     log.info(ai_result.get("final_judgment"))
 
 
+# M11.0d-3a: heuristic normalization from P3's draft-disposition label
+# vocabulary to P1/P2's alert-tier vocabulary. The mapping mirrors
+# Section C of docs/VERDICT_PRODUCER_DISAGREEMENT_MAP.md and the
+# `_p3_implied_alert_tier` helper used by
+# tests/test_verdict_producer_disagreement_diagnostic.py. This is
+# an OBSERVABILITY-ONLY mapping: production verdict logic never
+# consumes it; only the debug_summary disagreement_signal does.
+_P3_TO_ALERT_TIER: dict[str, str] = {
+    "draft_verified": "HIGH",
+    "draft_likely_true": "MEDIUM",
+    "draft_disputed": "WATCH",
+    "draft_high_risk_review": "WATCH",
+    "draft_needs_review": "WATCH",
+    "draft_needs_official_confirmation": "WATCH",
+    "draft_needs_context": "WATCH",
+    "draft_unverified": "LOW",
+}
+
+
+def _build_disagreement_signal(
+    *,
+    p1_alert_level_raw: str | None,
+    p2_alert_level: str | None,
+    p3_verdict_label: str | None,
+) -> dict:
+    """Build the M11.0d-3a disagreement_signal dict.
+
+    Records the three producer labels + a heuristic P3-to-alert-tier
+    normalization + an ``agreed`` boolean + a human-readable
+    description. Pure function; no I/O; no exceptions raised on
+    missing inputs (uses ``"unknown"`` for any None).
+
+    The structure is consumed by debug_summary["disagreement_signal"]
+    and by the ``log.info("verdict.disagreement_signal", extra=...)``
+    emission in main.analyze_pipeline. It is NOT exposed at the top
+    of final_decision or verification_card.
+    """
+    p1 = p1_alert_level_raw or "unknown"
+    p2 = p2_alert_level or "unknown"
+    p3 = p3_verdict_label or "unknown"
+    p3_tier = _P3_TO_ALERT_TIER.get(p3, "UNKNOWN")
+    agreed = (p1 == p2 == p3_tier) and p1 != "unknown" and p3_tier != "UNKNOWN"
+    if agreed:
+        description = f"P1=P2=P3={p1} (all agree)"
+    else:
+        parts = [f"P1={p1}", f"P2={p2}", f"P3={p3}({p3_tier})"]
+        disagreeing = []
+        if p1 != p2:
+            disagreeing.append("P1≠P2")
+        if p1 != p3_tier:
+            disagreeing.append("P1≠P3")
+        if p2 != p3_tier:
+            disagreeing.append("P2≠P3")
+        description = " ".join(parts) + " — " + ", ".join(disagreeing)
+    return {
+        "p1_label": p1,
+        "p2_label": p2,
+        "p3_label": p3,
+        "p3_implied_tier": p3_tier,
+        "agreed": agreed,
+        "disagreement_description": description,
+    }
+
+
 def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> dict:
     run_started_at = utc_now_iso()
     report_items = []
@@ -582,6 +646,12 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
             policy_confidence=policy_confidence,
             policy_impact=policy_impact,
         )
+        # M11.0d-3a: capture P1's pure output BEFORE the mid-pipeline
+        # official_mismatch rewrite (L633-666) or P2's calibrator
+        # overwrite (L668). Used downstream to populate
+        # debug_summary["disagreement_signal"]. See
+        # docs/VERDICT_PRODUCER_DISAGREEMENT_MAP.md.
+        p1_alert_level_raw = final_decision.get("policy_alert_level")
 
         verification_card = build_verification_card(
             news=news,
@@ -675,6 +745,31 @@ def analyze_pipeline(query: str = QUERY, max_news: int = MAX_NEWS_RESULTS) -> di
             debug_summary=debug_summary,
         )
         print_final_decision(final_decision)
+        # M11.0d-3a (Strategy C): record the three producers' labels so
+        # the disagreement is visible in debug_summary + structured logs.
+        # ZERO behaviour change — policy_alert_level (P2's output) and
+        # verdict_label (P3's output) are NOT modified here. The signal
+        # is internal/ops-only; it is NOT exposed in final_decision or
+        # at the top of verification_card. See M11.0d-2 design review
+        # for why Strategy C (signal-only) ships before Strategy A
+        # (P2-authoritative consolidation in M11.0d-3b).
+        disagreement_signal = _build_disagreement_signal(
+            p1_alert_level_raw=p1_alert_level_raw,
+            p2_alert_level=final_decision.get("policy_alert_level"),
+            p3_verdict_label=verification_card.get("verdict_label"),
+        )
+        debug_summary["disagreement_signal"] = disagreement_signal
+        log.info(
+            "verdict.disagreement_signal",
+            extra={
+                "p1_label": disagreement_signal["p1_label"],
+                "p2_label": disagreement_signal["p2_label"],
+                "p3_label": disagreement_signal["p3_label"],
+                "p3_implied_tier": disagreement_signal["p3_implied_tier"],
+                "agreed": disagreement_signal["agreed"],
+                "disagreement_description": disagreement_signal["disagreement_description"],
+            },
+        )
         verification_card["debug_summary"] = debug_summary
         verification_card = sanitize_data(verification_card)
         evidence_quality_summary = verification_card.get("evidence_quality_summary") or {}
