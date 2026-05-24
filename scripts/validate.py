@@ -194,6 +194,12 @@ def _commands() -> List[List[str]]:
         # comment additions only — no logic change. Prose alignment
         # is deferred to M11.0d-3b-2.
         [python, "tests/test_m11_0d_3b_p2_authority.py"],
+        # M15.0a — job queue infrastructure (RQ + Redis). Tests run
+        # fully offline using fakeredis; --help / default invocations
+        # of check_job_queue.py confirm the CLI surface. /analyze
+        # remains synchronous; M15.0b will wire it to RQ.
+        [python, "scripts/check_job_queue.py", "--help"],
+        [python, "tests/test_job_queue.py"],
         # M11.3 — read-only audit of the M11.1 candidate list. Compile
         # + --help smoke confirms the script loads; the test suite
         # pins idempotency, atomic-write, Korean round-trip, and the

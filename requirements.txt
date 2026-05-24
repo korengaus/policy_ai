@@ -14,3 +14,15 @@ requests
 sqlalchemy
 trafilatura
 uvicorn
+
+# M15.0a — Phase 2 async orchestration foundation.
+# rq + redis provide the job queue used by the /health/queue endpoint
+# and by future M15.0b SSE endpoints. The application gracefully
+# degrades when REDIS_URL is unset; tests run offline using fakeredis.
+rq>=2.0.0
+redis>=5.0.0
+# fakeredis is import-only used by tests (tests/test_job_queue.py).
+# Kept in requirements.txt (not a separate dev-only file) because
+# scripts/validate.py runs the test suite as part of CI and would
+# otherwise fail to import the test module.
+fakeredis>=2.20.0

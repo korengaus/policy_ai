@@ -218,6 +218,39 @@ def health() -> dict:
     return {"status": "healthy"}
 
 
+# M15.0a — Phase 2 job-queue foundation. Returns the RQ queue's
+# current health so an operator can verify Redis connectivity, queue
+# depth, and worker count without touching `/health` (which is the
+# liveness probe and must stay byte-identical). Graceful degradation
+# is baked in: if REDIS_URL is unset or Redis is unreachable, the
+# response still returns 200 with `redis_connected=False`,
+# `queue_depth=0`, `workers_count=0` — the endpoint never raises and
+# never causes an outage. See `job_queue.py` for the full contract.
+@app.get("/health/queue")
+def health_queue() -> dict:
+    try:
+        import job_queue
+        return job_queue.get_queue_health()
+    except Exception as error:
+        # Defence-in-depth: even an unexpected exception inside
+        # job_queue must not 5xx the health endpoint. Report it
+        # as degraded with the exception type so operators can
+        # diagnose without an outage.
+        logger.warning(
+            "health_queue endpoint degraded: %s: %s",
+            type(error).__name__,
+            error,
+        )
+        return {
+            "redis_connected": False,
+            "queue_depth": 0,
+            "workers_count": 0,
+            "queue_name": "default",
+            "redis_url_set": False,
+            "error": f"{type(error).__name__}: {str(error)[:200]}",
+        }
+
+
 @app.post("/analyze", response_model=AnalyzeResponse)
 def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
     query = (request.query or "").strip()

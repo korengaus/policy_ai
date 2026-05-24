@@ -88,6 +88,7 @@ PROFILES = (
     "structured-logging",
     "print-migration",
     "json-logging-verification",
+    "job-queue",
     "full",
 )
 
@@ -1464,6 +1465,115 @@ def _structured_logging_tests_step() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Phase 2 M15.0a — job-queue infrastructure (RQ + Redis). The
+# "job-queue" profile bundles --help, default (no REDIS_URL → degraded
+# but informational) and the unit-test pin. The check_job_queue.py
+# CLI never hits Render and never reads OpenAI; it only touches Redis
+# when REDIS_URL is set in the local environment.
+# ---------------------------------------------------------------------------
+
+
+def _check_job_queue_help_step() -> dict:
+    return {
+        "name": "check_job_queue(--help)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "check_job_queue.py"),
+            "--help",
+        ],
+        "parser": _parse_check_job_queue_help_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _check_job_queue_status_step() -> dict:
+    return {
+        "name": "check_job_queue(default)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "check_job_queue.py"),
+        ],
+        "parser": _parse_check_job_queue_status_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _check_job_queue_tests_step() -> dict:
+    return {
+        "name": "test_job_queue",
+        "command": [
+            _python(),
+            str(ROOT / "tests" / "test_job_queue.py"),
+        ],
+        "parser": _parse_check_job_queue_tests_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _parse_check_job_queue_help_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    ok = (
+        exit_code == 0
+        and "check_job_queue" in stdout
+        and "Exit codes" in stdout
+    )
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"check_job_queue --help: exit_code={exit_code} "
+            f"help_text_detected={ok}"
+        ),
+    }
+
+
+def _parse_check_job_queue_status_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """The default invocation should exit 0 (informational) and print
+    the documented status header — whether REDIS_URL is set or not.
+    Only the "URL set but unreachable" branch returns exit 1, and the
+    operational checks runner is offline so REDIS_URL is unset."""
+    has_header = "M15.0a Job Queue Health" in stdout
+    ok = exit_code == 0 and has_header
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"check_job_queue default: exit_code={exit_code} "
+            f"header_detected={has_header}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "header_detected": has_header,
+        },
+    }
+
+
+def _parse_check_job_queue_tests_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    has_ok = "\nOK" in (stdout + "\n" + stderr)
+    ok = exit_code == 0 and has_ok
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"test_job_queue: exit_code={exit_code} "
+            f"ok_detected={has_ok}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "ok_detected": has_ok,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
 # Phase 2 M14.3a — request-id context tests live under the
 # structured-logging profile so the same ops run guards both the
 # JSON formatter contract and the request-id propagation contract.
@@ -1964,6 +2074,19 @@ def _resolve_steps(args: argparse.Namespace) -> List[dict]:
         steps.append(_check_cache_activation_help_step())
         steps.append(_measure_cache_impact_tests_step())
         steps.append(_check_cache_activation_tests_step())
+
+    if profile == "job-queue":
+        # M15.0a — job queue infrastructure (RQ + Redis). Fully
+        # offline by default. --help confirms the CLI loads; the
+        # default invocation (no REDIS_URL) reports the degraded-but-
+        # safe payload and exits 0; the unit tests pin the
+        # graceful-degradation contract, the /health/queue endpoint
+        # shape, and the no-LLM-imports invariant. To run the
+        # diagnostic against a real Redis (e.g., Render), invoke
+        # check_job_queue.py separately with REDIS_URL set.
+        steps.append(_check_job_queue_help_step())
+        steps.append(_check_job_queue_status_step())
+        steps.append(_check_job_queue_tests_step())
 
     if profile == "structured-logging":
         # M14.0a — structured logging foundation. Fully offline.
