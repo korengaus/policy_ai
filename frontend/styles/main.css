@@ -166,6 +166,47 @@
       color: #047857;
     }
 
+    /*
+     * M15.0c — V2 async progress UI.
+     * Slim progress bar + Korean stage label, shown only when the
+     * V2 (RQ + SSE) analyze path is active. Uses existing design
+     * tokens (--blue, --border, --muted) so it visually matches
+     * the rest of the page.
+     */
+    .v2-progress-wrap {
+      margin-top: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .v2-progress-wrap[hidden] {
+      display: none;
+    }
+
+    .v2-progress-track {
+      width: 100%;
+      height: 8px;
+      background: var(--surface-soft);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .v2-progress-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--blue), var(--blue-dark));
+      border-radius: 999px;
+      transition: width 0.3s ease-out;
+    }
+
+    .v2-progress-text {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
     .error-box {
       display: none;
       margin-top: 14px;

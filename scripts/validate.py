@@ -206,6 +206,16 @@ def _commands() -> List[List[str]]:
         # never executed) and TestClient.stream for SSE assertions.
         [python, "tests/test_pipeline_worker.py"],
         [python, "tests/test_v2_endpoints.py"],
+        # M15.0c — Frontend async integration (SSE + progress UI).
+        # Two pins: a Node-based static test that extracts the V2
+        # client section from the built web/index.html and asserts
+        # the SSE event types + fallback chain + Korean labels are
+        # all wired; a Python e2e test that uses RQ SimpleWorker in
+        # burst mode to run a mocked pipeline through the full
+        # enqueue → execute → /history inflation chain. Both fully
+        # offline.
+        ["node", str(ROOT / "tests" / "test_frontend_v2_client.test.js")],
+        [python, "tests/test_v2_endpoints_e2e.py"],
         # M11.3 — read-only audit of the M11.1 candidate list. Compile
         # + --help smoke confirms the script loads; the test suite
         # pins idempotency, atomic-write, Korean round-trip, and the

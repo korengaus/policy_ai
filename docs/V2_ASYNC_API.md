@@ -191,3 +191,102 @@ Without a Background Worker provisioned, the job will sit in "queued" state. Thi
 - **M15.0e** — Playwright browser pool (currently every per-news rendered fetch launches its own browser).
 
 Each milestone preserves the M11.0d-3b contract: P2 remains authoritative; `disagreement_signal` continues to be emitted on every analysis.
+
+---
+
+## Frontend integration — M15.0c
+
+**Status:** SHIPPED in M15.0c. The vanilla-JS frontend now tries V2 first, falls back to V1-async, then to sync `/analyze`.
+
+### V2 client location
+
+The V2 client functions (`v2PostAnalyze`, `v2StreamProgress`, `v2InflateResults`, `requestPolicyAnalysisV2`, etc.) live as a delimited section INSIDE `frontend/scripts/main.js`, marked by:
+
+```js
+// =====================================================================
+// M15.0c — V2 client (begin)
+...
+// M15.0c — V2 client (end)
+// =====================================================================
+```
+
+**Why inline, not a separate `frontend/scripts/v2_client.js` file?** The M11.5 / M13.2a / M13.2b build pipeline (`frontend/build_index.py`) injects exactly ONE `<script>` block and one `<style>` block into the template; adding a second source file would change the build contract and force updates to `tests/test_frontend_build.py`'s `JS_PATH` pin. M15.0c kept the build pipeline untouched and used a delimited section instead. Re-promoting to a separate physical file is a small follow-up that would require extending `build_index.py` to accept a list of JS sources (concatenated in order) and updating the test fixture accordingly.
+
+### Three-tier fallback chain
+
+`requestPolicyAnalysis({query, maxNews}, onProgress)` in `main.js`:
+
+1. **V2** (`requestPolicyAnalysisV2`) — POST `/v2/analyze` → EventSource on `/v2/jobs/{id}/stream`. Shows the progress UI. If EventSource is unavailable OR no events arrive in 10s, falls back to 2s polling of `/v2/jobs/{id}`.
+2. **V1 async** (`requestPolicyAnalysisAsync`, the pre-existing pattern) — POST `/jobs/analyze` + poll `/jobs/{id}` / `/jobs/{id}/result`. Uses the process-local `job_manager` system. Fires when V2 returns 503 (Redis unavailable) or any network error.
+3. **Sync** (`requestPolicyAnalysisLegacy`) — POST `/analyze` synchronously. Always works; blocks for 48-174s. Final safety net.
+
+Each tier rejects to the next on any exception. The user sees error UI only if all three fail.
+
+### V2 result inflation
+
+`/v2/jobs/{job_id}`'s `result` field carries `saved_result_ids` (list of integers) instead of the full per-news result rows. The frontend uses the existing `mapHistoryRowToResult` adapter (already defined in `main.js:2538`) and the existing `GET /history/{id}` endpoint to inflate each id back to the AnalyzeResult shape that `renderResults()` expects. Pattern (in pseudocode):
+
+```js
+const summary = sseCompletedPayload.result;
+const ids = summary.saved_result_ids || [];
+const rows = await Promise.all(ids.map((id) => fetch(`/history/${id}`).then(r => r.json())));
+const inflated = {
+  status: "ok",
+  results: rows.map(r => mapHistoryRowToResult(r.result)),
+  news_collection_debug: summary.news_collection_debug || {},
+  ai_status: summary.ai_status_summary || {},
+};
+renderAnalysisResponse(query, maxNews, stabilizeAnalysisResponseForRender(inflated, ...));
+```
+
+This means the frontend issues `N+1` requests on completion (1 status + N history fetches). For typical `max_news=1-3`, that's 2-4 fetches — acceptable. If this becomes a bottleneck, a future `/v2/jobs/{id}/result` endpoint could do the inflation server-side.
+
+### Progress UI
+
+The UI elements live in `frontend/template.html`:
+
+```html
+<div id="v2ProgressWrap" class="v2-progress-wrap" role="status" aria-live="polite" hidden>
+  <div class="v2-progress-track" role="progressbar" ...>
+    <div id="v2ProgressBar" class="v2-progress-bar" style="width:0%"></div>
+  </div>
+  <div id="v2ProgressText" class="v2-progress-text"></div>
+</div>
+```
+
+CSS in `frontend/styles/main.css` uses existing design tokens (`--blue`, `--blue-dark`, `--border`, `--muted`, `--surface-soft`). Hidden by default via the `hidden` attribute; shown only when `requestPolicyAnalysisV2` is active. Always reset in the `analyze()` handler's `finally` block so it disappears on success, error, and fallback alike.
+
+### Stage → Korean label table
+
+`V2_STAGE_LABELS_KO` in `main.js` translates pipeline stages to Korean strings. The first 5 are emitted by `pipeline_worker.report_progress` today (M15.0b); the rest are aspirational for M15.0d/e and pre-translated so a future per-step event can render without a frontend code change.
+
+| Stage | Korean |
+| --- | --- |
+| `queued` | 대기열에 등록됨 |
+| `pipeline_started` | 검증 파이프라인 실행 중 |
+| `saving_results` | 결과 저장 중 |
+| `completed` | 완료 |
+| `failed` | 실패 |
+| `news_collection` (M15.0d) | 뉴스 수집 중 |
+| `article_extraction` (M15.0d) | 기사 본문 추출 중 |
+| `claim_extraction` (M15.0d) | 주장 추출 중 |
+| `official_source_search` (M15.0d) | 공식 출처 검색 중 |
+| `evidence_extraction` (M15.0d) | 증거 추출 중 |
+| `verification_card` (M15.0d) | 검증 카드 구성 중 |
+| `ai_reasoning` (M15.0d) | AI 추론 중 |
+| `calibration` (M15.0d) | 최종 보정 중 |
+
+Unknown stage names fall through to `"진행 중"`.
+
+### Pins
+
+- `tests/test_frontend_v2_client.test.js` (Node) — extracts the V2 client section from the built `web/index.html` and asserts:
+  - Section delimiters present and unique
+  - All 7 M15.0b SSE event types are wired (`progress` / `status` / `completed` / `failed` / `timeout` / `unavailable` / `not_found`)
+  - The three-tier fallback chain is wired (V2 → V1-async → sync), in order
+  - All M15.0b stage labels translated to Korean
+  - `analyze()` handler resets the progress UI in `finally`
+  - All regression-pinned methodology phrases survived
+- `tests/test_v2_endpoints_e2e.py` (Python) — uses RQ's `SimpleWorker` in burst mode (in-process, no separate worker subprocess) to run a mocked pipeline through the full enqueue → execute → status-finished chain, and verifies the `/history/{id}` inflation path. The real `analyze_pipeline` is mocked; the worker really executes via RQ's actual machinery.
+- `tests/test_frontend_build.py` (existing) — confirms `web/index.html` matches a fresh `frontend/build_index.py` build.
+- `tests/regression.test.js` (existing, byte-identical) — confirms Korean methodology phrases unchanged and `buildReportText` output is consistent.

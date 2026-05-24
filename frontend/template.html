@@ -55,6 +55,27 @@
         <button id="historyBtn" class="secondary" type="button">최근 분석 불러오기</button>
       </div>
       <div id="statusLine" class="status-line"></div>
+      <!--
+        M15.0c — V2 async progress UI.
+        Hidden by default; shown only when requestPolicyAnalysisV2 is
+        active (RQ + SSE path). The legacy /jobs/analyze polling path
+        and the sync /analyze fallback do NOT touch this element.
+      -->
+      <div
+        id="v2ProgressWrap"
+        class="v2-progress-wrap"
+        role="status"
+        aria-live="polite"
+        hidden
+      >
+        <div class="v2-progress-track" role="progressbar"
+             aria-valuemin="0" aria-valuemax="100"
+             aria-label="분석 진행 상황">
+          <div id="v2ProgressBar" class="v2-progress-bar" style="width:0%"
+               aria-valuenow="0"></div>
+        </div>
+        <div id="v2ProgressText" class="v2-progress-text"></div>
+      </div>
       <div id="errorBox" class="error-box"></div>
     </section>
 

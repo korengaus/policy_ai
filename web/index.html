@@ -172,6 +172,47 @@
       color: #047857;
     }
 
+    /*
+     * M15.0c — V2 async progress UI.
+     * Slim progress bar + Korean stage label, shown only when the
+     * V2 (RQ + SSE) analyze path is active. Uses existing design
+     * tokens (--blue, --border, --muted) so it visually matches
+     * the rest of the page.
+     */
+    .v2-progress-wrap {
+      margin-top: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .v2-progress-wrap[hidden] {
+      display: none;
+    }
+
+    .v2-progress-track {
+      width: 100%;
+      height: 8px;
+      background: var(--surface-soft);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .v2-progress-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--blue), var(--blue-dark));
+      border-radius: 999px;
+      transition: width 0.3s ease-out;
+    }
+
+    .v2-progress-text {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
     .error-box {
       display: none;
       margin-top: 14px;
@@ -2309,6 +2350,27 @@
         <button id="historyBtn" class="secondary" type="button">최근 분석 불러오기</button>
       </div>
       <div id="statusLine" class="status-line"></div>
+      <!--
+        M15.0c — V2 async progress UI.
+        Hidden by default; shown only when requestPolicyAnalysisV2 is
+        active (RQ + SSE path). The legacy /jobs/analyze polling path
+        and the sync /analyze fallback do NOT touch this element.
+      -->
+      <div
+        id="v2ProgressWrap"
+        class="v2-progress-wrap"
+        role="status"
+        aria-live="polite"
+        hidden
+      >
+        <div class="v2-progress-track" role="progressbar"
+             aria-valuemin="0" aria-valuemax="100"
+             aria-label="분석 진행 상황">
+          <div id="v2ProgressBar" class="v2-progress-bar" style="width:0%"
+               aria-valuenow="0"></div>
+        </div>
+        <div id="v2ProgressText" class="v2-progress-text"></div>
+      </div>
       <div id="errorBox" class="error-box"></div>
     </section>
 
@@ -7394,6 +7456,302 @@
       return `${label} (${pct}%)`;
     }
 
+    // =====================================================================
+    // M15.0c — V2 client (begin)
+    //
+    // Functional equivalent of frontend/scripts/v2_client.js; kept inline
+    // in main.js to avoid touching the M11.5 / M13.2a / M13.2b single-JS-
+    // file build pipeline (see docs/V2_ASYNC_API.md "Frontend integration"
+    // section). Re-promoting to a separate file is a follow-up that
+    // requires updating frontend/build_index.py + tests/test_frontend_build.py.
+    //
+    // Public surface: requestPolicyAnalysisV2({query, maxNews}, onProgress)
+    // — used by requestPolicyAnalysis below as the topmost preference.
+    // =====================================================================
+
+    const V2_ENDPOINT = "/v2/analyze";
+    const V2_JOB_STATUS_ENDPOINT = (id) => `/v2/jobs/${encodeURIComponent(id)}`;
+    const V2_JOB_STREAM_ENDPOINT = (id) => `/v2/jobs/${encodeURIComponent(id)}/stream`;
+    const V2_POLL_INTERVAL_MS = 2000;
+    const V2_MAX_POLL_ATTEMPTS = 300; // 10-minute cap (mirrors legacy)
+    const V2_FALLBACK_AFTER_SILENCE_MS = 10000;
+    const V2_TERMINAL_STATUSES = new Set(["finished", "failed", "stopped", "canceled"]);
+
+    // Stage → Korean label. The first 5 are emitted by
+    // pipeline_worker.report_progress today (M15.0b). The later
+    // fine-grained labels are aspirational for M15.0d when the
+    // pipeline gets per-news parallelism; including them here lets
+    // M15.0d ship without a frontend follow-up.
+    const V2_STAGE_LABELS_KO = {
+      queued: "대기열에 등록됨",
+      pipeline_started: "검증 파이프라인 실행 중",
+      saving_results: "결과 저장 중",
+      completed: "완료",
+      failed: "실패",
+      news_collection: "뉴스 수집 중",
+      article_extraction: "기사 본문 추출 중",
+      claim_extraction: "주장 추출 중",
+      official_source_search: "공식 출처 검색 중",
+      evidence_extraction: "증거 추출 중",
+      verification_card: "검증 카드 구성 중",
+      ai_reasoning: "AI 추론 중",
+      calibration: "최종 보정 중",
+    };
+
+    function v2StageLabel(stage, percent) {
+      const label = V2_STAGE_LABELS_KO[stage] || stage || "진행 중";
+      const pct = Number.isFinite(Number(percent)) ? Number(percent) : 0;
+      return `${label} (${pct}%)`;
+    }
+
+    function v2SetProgressVisible(visible) {
+      const wrap = document.getElementById("v2ProgressWrap");
+      if (!wrap) return;
+      if (visible) {
+        wrap.hidden = false;
+        wrap.style.display = "";
+      } else {
+        wrap.hidden = true;
+        wrap.style.display = "none";
+      }
+    }
+
+    function v2UpdateProgress(percent, label) {
+      const bar = document.getElementById("v2ProgressBar");
+      const text = document.getElementById("v2ProgressText");
+      if (bar) {
+        const pct = Math.max(0, Math.min(100, Number(percent) || 0));
+        bar.style.width = `${pct}%`;
+        bar.setAttribute("aria-valuenow", String(pct));
+      }
+      if (text) {
+        text.textContent = label || "진행 중";
+      }
+    }
+
+    function v2ResetProgress() {
+      v2UpdateProgress(0, "");
+      v2SetProgressVisible(false);
+    }
+
+    async function v2PostAnalyze({ query, maxNews }) {
+      const response = await fetch(`${API_BASE}${V2_ENDPOINT}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, max_news: maxNews }),
+      });
+      if (!response.ok) {
+        let body = "";
+        try { body = await response.text(); } catch (_) {}
+        const err = new Error(`V2 enqueue failed: HTTP ${response.status} ${body}`);
+        err.status = response.status;
+        throw err;
+      }
+      return response.json();
+    }
+
+    async function v2FetchJobStatus(jobId) {
+      const response = await fetch(`${API_BASE}${V2_JOB_STATUS_ENDPOINT(jobId)}`);
+      if (!response.ok) {
+        const err = new Error(`V2 status fetch failed: HTTP ${response.status}`);
+        err.status = response.status;
+        throw err;
+      }
+      return response.json();
+    }
+
+    async function v2FetchHistoryRow(resultId) {
+      const response = await fetch(`${API_BASE}/history/${encodeURIComponent(resultId)}`);
+      if (!response.ok) {
+        throw new Error(`/history/${resultId} fetch failed: HTTP ${response.status}`);
+      }
+      const body = await response.json();
+      return body.result || null;
+    }
+
+    // After a V2 job finishes, the SSE "completed" event carries the
+    // `pipeline_worker._build_summary_payload` shape — which only
+    // includes `saved_result_ids`, not the full per-news results.
+    // Fetch each /history/{id} row and map it through the existing
+    // `mapHistoryRowToResult` adapter (defined above near L2538) to
+    // synthesize the AnalyzeResponse shape the renderer expects.
+    async function v2InflateResults(savedResultIds, summary) {
+      const ids = Array.isArray(savedResultIds) ? savedResultIds : [];
+      const results = [];
+      for (const id of ids) {
+        if (typeof id !== "number" || Number.isNaN(id)) continue;
+        try {
+          const row = await v2FetchHistoryRow(id);
+          if (row) results.push(mapHistoryRowToResult(row));
+        } catch (err) {
+          console.warn(`V2: failed to inflate history row ${id}:`, err);
+        }
+      }
+      return {
+        status: "ok",
+        results,
+        news_collection_debug: (summary && summary.news_collection_debug) || {},
+        ai_status: (summary && summary.ai_status_summary) || {},
+      };
+    }
+
+    // SSE stream wrapper. Falls back to polling if EventSource is
+    // unavailable OR if no events arrive in V2_FALLBACK_AFTER_SILENCE_MS.
+    function v2StreamProgress(jobId, onProgress, onComplete, onError) {
+      if (typeof EventSource === "undefined") {
+        return v2PollJobUntilTerminal(jobId, onProgress, onComplete, onError);
+      }
+      let source;
+      let closed = false;
+      let silenceTimer = null;
+      const close = () => {
+        if (closed) return;
+        closed = true;
+        try { source && source.close(); } catch (_) {}
+        if (silenceTimer) clearTimeout(silenceTimer);
+      };
+      try {
+        source = new EventSource(`${API_BASE}${V2_JOB_STREAM_ENDPOINT(jobId)}`);
+      } catch (_) {
+        return v2PollJobUntilTerminal(jobId, onProgress, onComplete, onError);
+      }
+      let receivedAny = false;
+      silenceTimer = setTimeout(() => {
+        if (!receivedAny && !closed) {
+          console.warn("V2 SSE: no events in 10s, falling back to polling");
+          close();
+          v2PollJobUntilTerminal(jobId, onProgress, onComplete, onError);
+        }
+      }, V2_FALLBACK_AFTER_SILENCE_MS);
+      const safeParse = (raw) => {
+        try { return JSON.parse(raw); } catch (_) { return { raw }; }
+      };
+      const handle = (event, kind) => {
+        receivedAny = true;
+        const payload = safeParse(event.data || "");
+        if (kind === "progress" || kind === "status") {
+          try { onProgress && onProgress(payload, kind); } catch (_) {}
+        } else if (kind === "completed") {
+          try { onComplete && onComplete(payload); } catch (_) {}
+          close();
+        } else if (
+          kind === "failed" || kind === "timeout"
+          || kind === "unavailable" || kind === "not_found"
+        ) {
+          const reason = (payload && (payload.error || payload.reason)) || kind;
+          try { onError && onError(new Error(`V2 stream ${kind}: ${reason}`)); } catch (_) {}
+          close();
+        }
+      };
+      source.addEventListener("progress", (e) => handle(e, "progress"));
+      source.addEventListener("status", (e) => handle(e, "status"));
+      source.addEventListener("completed", (e) => handle(e, "completed"));
+      source.addEventListener("failed", (e) => handle(e, "failed"));
+      source.addEventListener("timeout", (e) => handle(e, "timeout"));
+      source.addEventListener("unavailable", (e) => handle(e, "unavailable"));
+      source.addEventListener("not_found", (e) => handle(e, "not_found"));
+      source.addEventListener("error", () => {
+        if (closed) return;
+        if (!receivedAny) {
+          close();
+          v2PollJobUntilTerminal(jobId, onProgress, onComplete, onError);
+        }
+      });
+      return close;
+    }
+
+    async function v2PollJobUntilTerminal(jobId, onProgress, onComplete, onError) {
+      let cancelled = false;
+      let lastStatus = null;
+      const close = () => { cancelled = true; };
+      (async () => {
+        for (let i = 0; i < V2_MAX_POLL_ATTEMPTS; i += 1) {
+          if (cancelled) return;
+          await new Promise((r) => setTimeout(r, V2_POLL_INTERVAL_MS));
+          if (cancelled) return;
+          let status;
+          try {
+            status = await v2FetchJobStatus(jobId);
+          } catch (err) {
+            if (err.status === 404) {
+              try { onError && onError(new Error("job not found")); } catch (_) {}
+              return;
+            }
+            continue;
+          }
+          const current = status && status.status;
+          if (current !== lastStatus) {
+            try { onProgress && onProgress(status, "status"); } catch (_) {}
+            lastStatus = current;
+          }
+          if (V2_TERMINAL_STATUSES.has(current)) {
+            if (current === "finished") {
+              try { onComplete && onComplete(status); } catch (_) {}
+            } else {
+              try { onError && onError(new Error(`job ${current}`)); } catch (_) {}
+            }
+            return;
+          }
+        }
+        try { onError && onError(new Error("polling timed out")); } catch (_) {}
+      })();
+      return close;
+    }
+
+    async function requestPolicyAnalysisV2({ query, maxNews }, onProgress) {
+      const job = await v2PostAnalyze({ query, maxNews });
+      const jobId = job && job.job_id;
+      if (!jobId) {
+        throw new Error("V2 /v2/analyze did not return job_id");
+      }
+      v2SetProgressVisible(true);
+      v2UpdateProgress(2, v2StageLabel("queued", 2));
+      return new Promise((resolve, reject) => {
+        let resolved = false;
+        const finish = (result) => {
+          if (resolved) return;
+          resolved = true;
+          resolve(result);
+        };
+        const fail = (err) => {
+          if (resolved) return;
+          resolved = true;
+          reject(err);
+        };
+        const onProgressInner = (payload, kind) => {
+          if (kind === "progress") {
+            const pct = Number(payload.percent);
+            const stage = payload.stage || "";
+            v2UpdateProgress(pct, v2StageLabel(stage, pct));
+          }
+          if (typeof onProgress === "function") {
+            try { onProgress({ kind, payload }); } catch (_) {}
+          }
+        };
+        const onCompleteInner = async (payload) => {
+          try {
+            v2UpdateProgress(100, v2StageLabel("completed", 100));
+            const summary = (payload && payload.result) || {};
+            const savedIds = summary.saved_result_ids || [];
+            const inflated = await v2InflateResults(savedIds, summary);
+            finish(inflated);
+          } catch (err) {
+            fail(err);
+          }
+        };
+        const onErrorInner = (err) => fail(err);
+        try {
+          v2StreamProgress(jobId, onProgressInner, onCompleteInner, onErrorInner);
+        } catch (err) {
+          fail(err);
+        }
+      });
+    }
+
+    // =====================================================================
+    // M15.0c — V2 client (end)
+    // =====================================================================
+
     async function requestPolicyAnalysisLegacy({ query, maxNews }) {
       const response = await fetch(`${API_BASE}/analyze`, {
         method: "POST",
@@ -7460,6 +7818,16 @@
     }
 
     async function requestPolicyAnalysis({ query, maxNews }, onProgress) {
+      // M15.0c: three-tier fallback chain.
+      //   1. V2 (RQ worker + SSE) — preferred when Redis + worker available
+      //   2. V1 async (/jobs/analyze + polling) — process-local fallback
+      //   3. Sync /analyze — last resort, always works (but blocks 48-174s)
+      try {
+        return await requestPolicyAnalysisV2({ query, maxNews }, onProgress);
+      } catch (v2Error) {
+        console.warn("V2 flow failed, falling back to legacy async:", v2Error);
+        v2ResetProgress();
+      }
       try {
         return await requestPolicyAnalysisAsync({ query, maxNews }, onProgress);
       } catch (asyncError) {
@@ -7540,6 +7908,10 @@
         hideStatus();
       } finally {
         setBusy(false);
+        // M15.0c: always hide the progress UI when the analyze run
+        // ends (success, failure, or fallback to sync). The V2 path
+        // shows it; the legacy + sync paths do not.
+        v2ResetProgress();
       }
     }
 
