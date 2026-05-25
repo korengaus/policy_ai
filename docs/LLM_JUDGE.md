@@ -1,11 +1,12 @@
 # LLM Judge (M13.1)
 
-## Two-phase rollout
+## Three-phase rollout
 
 | Phase  | What it does                                          | Status     |
 |--------|-------------------------------------------------------|------------|
-| M13.1a | Infrastructure + dry-run CLI; NOT connected to verdict pipeline | this PR    |
-| M13.1b | Connect Judge to `analyze_pipeline` behind feature flag | future     |
+| M13.1a | Infrastructure + dry-run CLI; NOT connected to verdict pipeline | landed     |
+| M13.1b | Real OpenAI provider + `analyze_pipeline` wiring behind `LLM_JUDGE_ENABLED` feature flag | **this PR** |
+| M13.1c | Anthropic provider activation (Claude as primary, OpenAI as fallback) | future     |
 
 The split is intentional. The audit explicitly says
 "LLM cannot raise confidence — only downgrade." A two-phase rollout
@@ -110,27 +111,173 @@ the validation pipeline without real LLM calls:
 | `--simulate-malformed`          | `{ not json — exercises validator fallback`     |
 | `--simulate-upgrade-attempt`    | `{action: downgrade, new_label: draft_verified}` — validator refuses |
 
-## What happens in M13.1b
+## M13.1b — what ships in this PR
 
-M13.1b will:
+### OpenAIProvider (real provider)
 
-1. Replace `StubAnthropicProvider` and `StubOpenAIProvider` with real
-   implementations (lazy-importing `anthropic` and `openai` inside
-   `call()` so the M13.1a module shape stays unchanged).
-2. Add a `JUDGE_ENABLED` env var (default `false`).
-3. Add a Judge step to `analyze_pipeline` AFTER the deterministic
-   verdict but BEFORE the verification_card export.
-4. Persist Judge outputs in a new DB table with full audit trail.
-5. Surface Judge actions in the reviewer UI.
+`llm_judge.OpenAIProvider` calls the OpenAI Chat Completions API
+(`client.chat.completions.create`) with the model from `config.AI_MODEL`
+(currently `gpt-4o-mini`). The `openai` SDK is lazy-imported inside
+`call()` so `llm_judge.py` keeps zero top-level LLM dependencies — the
+M13.1a static-import test still passes.
 
-M13.1b will not happen until M13.1a's dry-run data shows the Judge
-behaves correctly on real data.
+Failure paths (all return a failure-shaped `LLMResponse` and let
+`run_judge` fall through to safe-confirm):
 
-## Cost guardrails (M13.1b prep, not M13.1a)
+- `openai` SDK not importable → `openai_sdk_missing`.
+- `OPENAI_API_KEY` unset / blank → `missing_api_key`.
+- Network / rate-limit / auth / timeout → `openai_call_failed:
+  <ExceptionType>`. The exception **type** is logged but the full
+  message (which can quote prompt fragments) is not, reducing the
+  chance of leaking prompt PII into logs.
+- Response shape unexpected (missing `.choices`, `.usage`, etc.) →
+  `openai_response_shape_unexpected`.
 
-When real providers are wired in M13.1b:
+Timeout: 15 seconds, passed to the `OpenAI(timeout=15.0)` constructor.
 
-- Per-call token budget.
-- Daily total budget with circuit-breaker.
-- Prompt caching where available.
+### `get_default_provider_chain()` shape under M13.1b
+
+| Environment | Chain |
+|---|---|
+| `OPENAI_API_KEY` set (non-empty after strip) | `[OpenAIProvider()]` |
+| Otherwise | `[StubOpenAIProvider()]` (offline-safe; `is_available → False`; drives `run_judge` to safe-confirm) |
+
+`StubAnthropicProvider` remains in the module file but is NOT in the
+default chain. M13.1c will revive it as a real `AnthropicProvider`.
+
+### `LLM_JUDGE_ENABLED` feature flag
+
+- Default: `"false"` (unset = disabled).
+- Truthy: `"true"` (case-insensitive, stripped). Any other value —
+  including `"1"`, `"yes"`, `"on"` — stays False. The stricter
+  parsing is intentional and avoids accidentally enabling the judge
+  via shell habits.
+- Read lazily at the pipeline call site on every analyze invocation;
+  toggling the env var does NOT require a process restart (matches
+  the `is_postgres_dual_write_enabled` pattern).
+- Independent of `OPENAI_API_KEY`. Both conditions are required for
+  the judge to make a real call; either being unset reverts to safe
+  fallback behaviour.
+
+### Pipeline integration point
+
+The judge is invoked inside `main._process_news_item_phase_a`,
+between `print_final_decision(...)` and the
+`_build_disagreement_signal(...)` call. The block:
+
+1. Captures `p2_alert_pre_judge = final_decision.get("policy_alert_level")`
+   BEFORE the judge runs.
+2. If `llm_judge_enabled()`, builds a `JudgeInput`, calls `run_judge`,
+   and applies the verdict via `_apply_judge_to_final_decision`.
+3. Wraps the whole block in `try/except Exception` with a
+   `log.warning("llm_judge.failed", extra={"error_type": ...})` —
+   the pipeline NEVER fails because of the judge.
+4. Records the verdict (or `None` when disabled) in
+   `debug_summary["llm_judge"]`.
+5. Passes `p2_alert_pre_judge` (NOT the post-judge value) to
+   `_build_disagreement_signal` so the M11.0d-1 fixtures stay
+   byte-identical even when a judge downgrade fires.
+
+### Application-site invariants
+
+| Field | Modifiable by judge? | How |
+|---|---|---|
+| `final_decision["policy_alert_level"]` | YES — downgrade only | Drops exactly one tier via `_ALERT_TIER_DOWNGRADE = {"HIGH"→"WATCH", "WATCH"→"LOW", "LOW"→"LOW"}` |
+| `final_decision["llm_judge_flagged_for_review"]` | Set to `True` on `flag_for_review` action | Never overwritten elsewhere |
+| `verification_card["verdict_label"]` | **NO** | Byte-identical pre/post judge — the judge reads it as input only |
+| `final_decision["action_recommendation"]` / `["decision_summary"]` | **NO** | Prose realignment already ran; judge never rewrites |
+| `final_decision["market_signal"]` / `["decision_reasons"]` | **NO** | Label-independent |
+| `disagreement_signal` | **NO** | Computed from `p2_alert_pre_judge`, not the post-judge value |
+| `operator_review_required` | **NO** | ALWAYS True elsewhere; judge never sets / reads / writes |
+| `truth_claim` | **NO** | ALWAYS False elsewhere; judge never sets / reads / writes |
+
+Schema-layer enforcement: `validate_judge_response_json` refuses any
+upgrade attempt at the source. The application site
+(`_apply_judge_to_final_decision`) is a second guard — the alert
+tier can only move down. Two-layer defence.
+
+**Schema tolerance for extra keys (M13.1b decision):** the validator
+intentionally tolerates unknown keys in the LLM response. LLMs
+occasionally append explanatory keys, and rejecting them would force
+unnecessary safe-confirm fallbacks. The action + new_label invariants
+are still enforced strictly.
+
+### Cost tracking
+
+A single `log.info("llm_judge.completed", extra={...})` is emitted
+inside `llm_judge.run_judge` on the success path. The structured
+fields:
+
+```
+model               = "gpt-4o-mini"
+action              = "confirm" | "downgrade" | "flag_for_review"
+input_tokens        = int
+output_tokens       = int
+estimated_cost_usd  = float | null  (null when model not in LLM_COST_PER_1K)
+latency_ms          = int
+provider            = "openai" | "openai_stub"
+fell_back           = bool
+```
+
+Pricing dict (top of `llm_judge.py`):
+
+```python
+LLM_COST_PER_1K = {
+    "gpt-4o-mini": {"input": 0.000150, "output": 0.000600},
+}
+```
+
+`OPENAI_API_KEY` is never logged. The exception path in `main.py`
+emits `log.warning("llm_judge.failed", extra={"error_type": <name>})`
+— the exception **type** only, not the full message.
+
+### Pin impact on `EXPECTED_TOTAL_LOG_CALLS`
+
+`tests/test_log_level_reclassification.py` pin bumped from `265` →
+`266`. Only the new `main.py` warning counts; the `llm_judge.py`
+INFO emission does not, because `llm_judge.py` is not in
+`MIGRATED_FILES`.
+
+### Default behaviour without the flag
+
+With `LLM_JUDGE_ENABLED` unset (the default), the entire judge block
+is skipped — `debug_summary["llm_judge"]` is set to `None`, no
+log emissions, no API calls, and the pipeline output is byte-identical
+to pre-M13.1b. This is the rollback path.
+
+### Operator activation
+
+See `docs/LLM_JUDGE_ACTIVATION_RUNBOOK.md` for the Render dashboard
+steps.
+
+### Cost guardrails
+
+When real providers are wired:
+
+- The per-call cap is the `max_tokens=800` ceiling in
+  `build_judge_request` (kept tight on purpose — the judge reads
+  summaries, not full articles).
+- `gpt-4o-mini` at `~$0.0002–$0.0005` per call; daily budget is
+  whatever the operator's OpenAI account allows.
+- No prompt caching in M13.1b; prompts are short enough that caching
+  isn't load-bearing yet.
 - Failure routes to `_safe_confirm_fallback` — never blocks a verdict.
+
+### Rollback
+
+Set `LLM_JUDGE_ENABLED=false` (or unset) on both Render services and
+restart. The pipeline reverts to byte-identical pre-M13.1b behaviour
+on the next call.
+
+## What happens in M13.1c
+
+M13.1c will:
+
+1. Replace `StubAnthropicProvider` with a real implementation
+   (Claude as primary; OpenAI as fallback).
+2. Add Anthropic-specific cost rates to `LLM_COST_PER_1K`.
+3. Persist judge outputs in a new DB table with full audit trail.
+4. Surface judge actions in the reviewer UI.
+
+M13.1c will not happen until M13.1b's production cost / latency /
+correctness data is reviewed.

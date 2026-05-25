@@ -263,6 +263,11 @@ def _commands() -> List[List[str]]:
         [python, "scripts/dry_run_llm_judge.py", "--help"],
         [python, "scripts/dry_run_llm_judge.py", "--status"],
         [python, "tests/test_llm_judge.py"],
+        # M13.1b — Real OpenAI provider + pipeline activation. Tests
+        # mock the openai SDK; no real API call is ever issued.
+        # The --provider stub default keeps the dry-run CLI offline.
+        [python, "scripts/dry_run_llm_judge.py", "--provider", "stub", "--status"],
+        [python, "tests/test_m13_1b_openai_provider.py"],
         # M13.2a / M13.2b — frontend build pipeline. --check enforces
         # the byte-identical guarantee between frontend/ source (now
         # template.html + styles/main.css + scripts/main.js) and the

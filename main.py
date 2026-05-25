@@ -62,6 +62,8 @@ from verification_card import build_verification_card, print_verification_card
 from pipeline_debug import build_pipeline_debug_summary
 from text_utils import sanitize_data, sanitize_text
 
+import llm_judge
+
 from structured_logging import get_logger
 
 log = get_logger(__name__)
@@ -402,6 +404,56 @@ _P3_TO_ALERT_TIER: dict[str, str] = {
     "draft_needs_context": "WATCH",
     "draft_unverified": "LOW",
 }
+
+
+# M13.1b — alert-tier downgrade map. Conservative one-tier drop applied
+# when the LLM judge returns ``action="downgrade"`` against a
+# rule-based P2 alert level. The judge can never raise the tier; LOW
+# is the floor.
+_ALERT_TIER_DOWNGRADE = {"HIGH": "WATCH", "WATCH": "LOW", "LOW": "LOW"}
+
+
+def _apply_judge_to_final_decision(
+    verdict, final_decision: dict, debug_summary: dict,
+) -> bool:
+    """Apply an LLM judge verdict to ``final_decision`` under strict
+    invariants. Returns True iff the verdict materially changed any
+    field. NEVER raises.
+
+    Invariants enforced here (defence-in-depth, on top of
+    ``llm_judge.validate_judge_response_json``):
+
+    * ``confirm`` — no change.
+    * ``flag_for_review`` — sets ``final_decision[\"llm_judge_flagged_for_review\"]``
+      to True; never touches ``policy_alert_level`` or any other field.
+    * ``downgrade`` — drops ``policy_alert_level`` by exactly one tier
+      via ``_ALERT_TIER_DOWNGRADE``. The judge's proposed
+      ``new_label`` (verdict_label rank) is validated by the schema
+      validator; the application site only uses it to confirm the
+      downgrade intent — verdict_label itself is NEVER modified here
+      (verification_card[\"verdict_label\"] is byte-identical pre/post).
+    * Never modifies ``operator_review_required`` (ALWAYS True
+      elsewhere) or ``truth_claim`` (ALWAYS False elsewhere).
+    * Never modifies ``action_recommendation`` / ``decision_summary``
+      (prose realignment already ran).
+    """
+    if verdict is None:
+        return False
+    action = getattr(verdict, "action", None)
+    if action == "confirm":
+        return False
+    if action == "flag_for_review":
+        final_decision["llm_judge_flagged_for_review"] = True
+        return True
+    if action == "downgrade":
+        current_tier = final_decision.get("policy_alert_level")
+        new_tier = _ALERT_TIER_DOWNGRADE.get(current_tier)
+        if new_tier is None or new_tier == current_tier:
+            # Unknown / already-LOW tier: no-op rather than guess.
+            return False
+        final_decision["policy_alert_level"] = new_tier
+        return True
+    return False
 
 
 def _build_disagreement_signal(
@@ -797,10 +849,55 @@ def _process_news_item_phase_a(
 
     print_final_decision(final_decision)
 
+    # M13.1b — LLM judge invocation. The judge can confirm, downgrade
+    # the policy_alert_level by one tier, or flag for human review.
+    # It CANNOT raise the alert level, modify verdict_label, change
+    # operator_review_required (ALWAYS True), or change truth_claim
+    # (ALWAYS False). The invariants are enforced both by
+    # ``llm_judge.validate_judge_response_json`` (schema layer) and by
+    # ``_apply_judge_to_final_decision`` (application layer).
+    #
+    # disagreement_signal MUST see the PRE-judge p2 alert so the
+    # P1/P2/P3 signal stays a function of the deterministic producers
+    # only. Otherwise judge downgrades would silently rewrite the
+    # signal and break the 6 M11.0d-1 snapshot fixtures.
+    p2_alert_pre_judge = final_decision.get("policy_alert_level")
+    judge_debug_payload = None
+    if llm_judge.llm_judge_enabled():
+        try:
+            judge_input = llm_judge.JudgeInput(
+                current_label=verification_card.get("verdict_label") or "",
+                policy_confidence_score=policy_confidence.get(
+                    "policy_confidence_score"
+                ),
+                verification_strength=policy_confidence.get(
+                    "verification_strength"
+                ),
+                claim_text=(news.get("title") or "")[:1000],
+                official_sources_count=len(source_candidates or []),
+                evidence_summary=verification_card.get("evidence_summary"),
+                contradiction_summary=contradiction_summary,
+                bias_framing_summary=bias_framing_summary,
+            )
+            judge_verdict = llm_judge.run_judge(judge_input, model=AI_MODEL)
+            applied = _apply_judge_to_final_decision(
+                judge_verdict, final_decision, debug_summary,
+            )
+            judge_debug_payload = llm_judge.judge_verdict_to_dict(judge_verdict)
+            judge_debug_payload["applied"] = bool(applied)
+        except Exception as exc:  # noqa: BLE001 — judge must never break pipeline
+            log.warning(
+                "llm_judge.failed",
+                extra={"error_type": type(exc).__name__},
+            )
+    debug_summary["llm_judge"] = judge_debug_payload
+
     # M11.0d-3a (Strategy C): record the three producer labels.
+    # p2_alert_pre_judge (captured above) preserves the deterministic
+    # P2 value even if M13.1b downgraded the live final_decision.
     disagreement_signal = _build_disagreement_signal(
         p1_alert_level_raw=p1_alert_level_raw,
-        p2_alert_level=final_decision.get("policy_alert_level"),
+        p2_alert_level=p2_alert_pre_judge,
         p3_verdict_label=verification_card.get("verdict_label"),
     )
     debug_summary["disagreement_signal"] = disagreement_signal

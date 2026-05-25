@@ -233,10 +233,12 @@ def _render_status_human(providers, model: str) -> str:
     for index, provider in enumerate(providers, start=1):
         availability = "True" if provider.is_available() else "False"
         suffix = ""
-        if isinstance(provider, llm_judge.StubAnthropicProvider):
+        if isinstance(provider, llm_judge.OpenAIProvider):
+            suffix = " (M13.1b real OpenAI; requires OPENAI_API_KEY)"
+        elif isinstance(provider, llm_judge.StubAnthropicProvider):
             suffix = " (M13.1a stub)"
         elif isinstance(provider, llm_judge.StubOpenAIProvider):
-            suffix = " (M13.1a stub)"
+            suffix = " (offline-safe stub; falls back to confirm)"
         elif isinstance(provider, _SimulatedProvider):
             suffix = " (simulated)"
         lines.append(
@@ -377,6 +379,15 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--provider", choices=("stub", "openai"), default="stub",
+        help=(
+            "M13.1b: which real-provider chain to use. 'stub' (default) "
+            "is offline-safe and always falls back to confirm. 'openai' "
+            "uses OpenAIProvider and REQUIRES OPENAI_API_KEY in the "
+            "environment; ignored when a --simulate-* flag is also set."
+        ),
+    )
+    parser.add_argument(
         "--json", action="store_true",
         help="Emit machine-readable JSON instead of the human report.",
     )
@@ -384,8 +395,21 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _resolve_providers(args):
-    """Return the provider chain implied by the --simulate-* flags
-    (or the default stub chain when no flag is given)."""
+    """Return the provider chain implied by --simulate-* / --provider.
+
+    Precedence (M13.1b):
+      1. Any --simulate-* flag wins — returns the simulated provider.
+      2. --provider openai → ``[OpenAIProvider()]`` (requires
+         OPENAI_API_KEY). The CLI does NOT validate the key here —
+         OpenAIProvider's ``is_available`` does, and ``run_judge``
+         falls through to safe-confirm if the key is missing, so
+         operators see the documented unavailable path.
+      3. --provider stub (default) → ``[StubOpenAIProvider()]``.
+
+    Returning the explicit one-element list (rather than the env-aware
+    default chain) keeps the CLI deterministic — operators can probe
+    either provider regardless of the ambient env.
+    """
     if args.simulate_confirm:
         return [_simulated_provider("confirm")]
     if args.simulate_downgrade:
@@ -396,7 +420,9 @@ def _resolve_providers(args):
         return [_simulated_provider("malformed")]
     if args.simulate_upgrade_attempt:
         return [_simulated_provider("upgrade_attempt")]
-    return llm_judge.get_default_provider_chain()
+    if args.provider == "openai":
+        return [llm_judge.OpenAIProvider()]
+    return [llm_judge.StubOpenAIProvider()]
 
 
 def _emit_payload(args, payload):

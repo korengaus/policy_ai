@@ -544,10 +544,15 @@ class SerializationSafetyTests(unittest.TestCase):
     def test_all_documented_keys_present(self):
         verdict = llm_judge.JudgeVerdict(action="confirm")
         out = llm_judge.judge_verdict_to_dict(verdict)
+        # M13.1b added input_tokens / output_tokens / estimated_cost_usd
+        # so debug_summary["llm_judge"] can surface real token usage and
+        # cost. The three new keys are stable contract; updating this
+        # pin is the documented way to extend the dict shape.
         expected_keys = {
             "action", "new_label", "reason_ko", "evidence_gaps",
             "raw_response", "provider_used", "model", "latency_ms",
             "fell_back", "fallback_reason",
+            "input_tokens", "output_tokens", "estimated_cost_usd",
             "truth_claim", "operator_review_required",
         }
         self.assertSetEqual(set(out.keys()), expected_keys)
@@ -633,12 +638,20 @@ class CliTests(unittest.TestCase):
         self.assertIn("dry_run_llm_judge", out)
         self.assertIn("Exit codes", out)
 
-    def test_status_exits_zero_and_lists_stubs(self):
-        rc, out, _ = self._run_cli(["--status"])
+    def test_status_exits_zero_and_lists_chain(self):
+        """M13.1b: get_default_provider_chain returns OpenAIProvider
+        when OPENAI_API_KEY is set, StubOpenAIProvider otherwise.
+        StubAnthropicProvider is no longer in the default chain
+        (kept in the module for M13.1c). This test runs with the env
+        cleared so it sees the stub chain deterministically."""
+        prior = os.environ.pop("OPENAI_API_KEY", None)
+        try:
+            rc, out, _ = self._run_cli(["--status"])
+        finally:
+            if prior is not None:
+                os.environ["OPENAI_API_KEY"] = prior
         self.assertEqual(rc, 0)
-        self.assertIn("anthropic_stub", out)
         self.assertIn("openai_stub", out)
-        self.assertIn("False", out)
         self.assertIn("M13.1a", out)
 
     def test_status_json(self):
@@ -806,14 +819,32 @@ class ModuleLevelStaticChecks(unittest.TestCase):
                 msg=f"llm_judge.py must not import {needle}",
             )
 
-    def test_not_imported_by_any_pipeline_entry_point(self):
+    def test_imported_by_main_under_m13_1b(self):
+        """M13.1b: main.py NOW imports llm_judge — that is the whole
+        point of this milestone. Previously (M13.1a) main.py was
+        forbidden from importing it; the contract is inverted here."""
         forbidden = re.compile(
             r"^(?:from\s+llm_judge\b|import\s+llm_judge\b)",
             re.MULTILINE,
         )
-        for filename in (
-            "main.py", "api_server.py", "scheduler.py", "job_manager.py",
-        ):
+        main_source = (_PROJECT_ROOT / "main.py").read_text(encoding="utf-8")
+        self.assertIsNotNone(
+            forbidden.search(main_source),
+            msg=(
+                "main.py MUST import llm_judge under M13.1b — the "
+                "pipeline wiring lives in _process_news_item_phase_a"
+            ),
+        )
+
+    def test_not_imported_by_other_entry_points(self):
+        """api_server.py / scheduler.py / job_manager.py go through
+        analyze_pipeline; they must not import llm_judge directly so
+        the LLM caller surface stays inside main.py."""
+        forbidden = re.compile(
+            r"^(?:from\s+llm_judge\b|import\s+llm_judge\b)",
+            re.MULTILINE,
+        )
+        for filename in ("api_server.py", "scheduler.py", "job_manager.py"):
             path = _PROJECT_ROOT / filename
             if not path.exists():
                 continue
@@ -821,8 +852,8 @@ class ModuleLevelStaticChecks(unittest.TestCase):
             self.assertIsNone(
                 forbidden.search(text),
                 msg=(
-                    f"{filename} must not import llm_judge in M13.1a "
-                    "(pipeline connection lands in M13.1b)"
+                    f"{filename} must not import llm_judge directly "
+                    "— the judge runs inside main.analyze_pipeline"
                 ),
             )
 

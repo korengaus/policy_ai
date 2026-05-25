@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Optional
@@ -81,6 +82,44 @@ ALLOWED_JUDGE_ACTIONS = frozenset({"confirm", "downgrade", "flag_for_review"})
 # without specifying a target label. Kept here (not in the CLI) so the
 # Judge module owns the safe default.
 DEFAULT_DOWNGRADE_FALLBACK = "draft_needs_review"
+
+
+# M13.1b — per-1K-token pricing for cost estimation. Hardcoded so the
+# cost log can self-report without an external rate sheet. Any model
+# not listed produces ``estimated_cost_usd = None`` in the log payload
+# rather than guessing. Update this dict (not the call site) when
+# OpenAI changes pricing or when a new model is enabled.
+LLM_COST_PER_1K = {
+    "gpt-4o-mini": {"input": 0.000150, "output": 0.000600},
+}
+
+
+def llm_judge_enabled() -> bool:
+    """Returns True iff env var ``LLM_JUDGE_ENABLED`` equals ``"true"``
+    (case-insensitive, leading/trailing whitespace stripped).
+
+    Defaults to False so the pipeline behaves byte-identically to
+    pre-M13.1b until an operator opts in via the Render dashboard.
+    Read lazily on every call so toggling the env var does not require
+    a process restart.
+    """
+    return os.environ.get("LLM_JUDGE_ENABLED", "").strip().lower() == "true"
+
+
+def estimate_cost_usd(
+    model: str, input_tokens: int, output_tokens: int,
+) -> Optional[float]:
+    """Compute an estimated USD cost for a single Judge call.
+
+    Returns ``None`` when the model is not in :data:`LLM_COST_PER_1K` —
+    a missing rate is reported honestly rather than silently guessed.
+    """
+    rates = LLM_COST_PER_1K.get(model)
+    if rates is None:
+        return None
+    input_cost = (max(0, int(input_tokens)) / 1000.0) * rates["input"]
+    output_cost = (max(0, int(output_tokens)) / 1000.0) * rates["output"]
+    return round(input_cost + output_cost, 6)
 
 
 def _max_rank() -> int:
@@ -128,7 +167,13 @@ class LLMRequest:
 
 @dataclass
 class LLMResponse:
-    """One provider response."""
+    """One provider response.
+
+    ``input_tokens`` / ``output_tokens`` are added in M13.1b so the
+    cost log can report real token usage from providers that return
+    a ``usage`` block (OpenAI v2.x SDK does). Stubs and providers
+    without usage data leave the fields at ``0``.
+    """
 
     raw_text: str
     model: str
@@ -136,6 +181,8 @@ class LLMResponse:
     success: bool
     error: Optional[str] = None
     latency_ms: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 class ReasoningProvider:
@@ -172,7 +219,13 @@ class StubAnthropicProvider(ReasoningProvider):
 
 
 class StubOpenAIProvider(ReasoningProvider):
-    """Placeholder for the M13.1b OpenAI fallback implementation."""
+    """M13.1b fallback when ``OPENAI_API_KEY`` is unset.
+
+    Kept in the chain for offline / CI environments so the Judge always
+    has a provider to consult. ``is_available`` returns False, which
+    drives ``run_judge`` to the safe-confirm fallback — pipeline output
+    stays byte-identical to pre-M13.1b when no key is available.
+    """
 
     name = "openai_stub"
 
@@ -186,17 +239,133 @@ class StubOpenAIProvider(ReasoningProvider):
             provider=self.name,
             success=False,
             error=(
-                "stub provider — M13.1a infrastructure only, "
+                "stub provider — no OPENAI_API_KEY set, "
                 "no real calls"
             ),
         )
 
 
+# ---------------------------------------------------------------------------
+# M13.1b — Real OpenAI provider.
+#
+# The class lazy-imports the ``openai`` SDK inside ``call`` so the
+# llm_judge module's import surface stays free of any LLM dependency
+# (the M13.1a static test pins this). ``is_available`` only reads the
+# env var — the SDK is imported on demand.
+# ---------------------------------------------------------------------------
+
+
+_OPENAI_TIMEOUT_SECONDS = 15.0
+
+
+def _failed_response(request: "LLMRequest", reason: str) -> "LLMResponse":
+    """Shared failure-shaped LLMResponse for OpenAIProvider. Empty
+    ``raw_text`` plus ``success=False`` drives ``run_judge`` past this
+    provider to the next chain entry (or the safe-confirm fallback)."""
+    return LLMResponse(
+        raw_text="",
+        model=request.model,
+        provider="openai",
+        success=False,
+        error=reason,
+    )
+
+
+class OpenAIProvider(ReasoningProvider):
+    """Real OpenAI Chat Completions caller (gpt-4o-mini by default).
+
+    Activation requires BOTH ``OPENAI_API_KEY`` set in the environment
+    AND ``LLM_JUDGE_ENABLED=true`` at the pipeline call site (the
+    second guard lives in main.py). ``is_available`` only checks the
+    key — the pipeline-level flag is checked by ``main._process_news_item_phase_a``
+    so the dry-run CLI can exercise the real provider with the key
+    set even when the pipeline flag is off.
+
+    NEVER raises. Any SDK error (import, auth, network, rate limit,
+    timeout, shape mismatch) returns a failure-shaped LLMResponse so
+    ``run_judge`` falls back to safe-confirm cleanly.
+    """
+
+    name = "openai"
+
+    def is_available(self) -> bool:
+        return bool(os.environ.get("OPENAI_API_KEY", "").strip())
+
+    def call(self, request: LLMRequest) -> LLMResponse:
+        try:
+            from openai import OpenAI  # lazy import
+        except ImportError:
+            return _failed_response(request, "openai_sdk_missing")
+
+        api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+        if not api_key:
+            return _failed_response(request, "missing_api_key")
+
+        start = time.time()
+        try:
+            client = OpenAI(api_key=api_key, timeout=_OPENAI_TIMEOUT_SECONDS)
+            response = client.chat.completions.create(
+                model=request.model,
+                messages=[
+                    {"role": "system", "content": request.system_prompt},
+                    {"role": "user", "content": request.user_prompt},
+                ],
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+                response_format={"type": "json_object"},
+            )
+        except Exception as exc:  # noqa: BLE001 — never propagate
+            # Exception type is logged but the full message (which may
+            # quote prompt fragments) is intentionally NOT captured —
+            # cuts the chance of leaking prompt PII into logs.
+            return _failed_response(
+                request, f"openai_call_failed: {type(exc).__name__}"
+            )
+        latency_ms = int((time.time() - start) * 1000)
+
+        try:
+            text = response.choices[0].message.content or ""
+            usage = getattr(response, "usage", None)
+            input_tokens = (
+                getattr(usage, "prompt_tokens", 0) or 0 if usage else 0
+            )
+            output_tokens = (
+                getattr(usage, "completion_tokens", 0) or 0 if usage else 0
+            )
+        except (AttributeError, IndexError, TypeError):
+            return _failed_response(
+                request, "openai_response_shape_unexpected"
+            )
+
+        return LLMResponse(
+            raw_text=text,
+            model=request.model,
+            provider=self.name,
+            success=True,
+            latency_ms=latency_ms,
+            input_tokens=int(input_tokens),
+            output_tokens=int(output_tokens),
+        )
+
+
 def get_default_provider_chain() -> list:
-    """Returns the provider chain in priority order. M13.1a returns
-    stubs; M13.1b will swap in real implementations behind a feature
-    flag without changing the chain shape."""
-    return [StubAnthropicProvider(), StubOpenAIProvider()]
+    """Returns the provider chain in priority order.
+
+    M13.1b activation logic:
+
+    * ``OPENAI_API_KEY`` set and non-empty → ``[OpenAIProvider()]``
+      (real provider; cost-incurring).
+    * Otherwise → ``[StubOpenAIProvider()]`` (offline-safe fallback;
+      drives ``run_judge`` to safe-confirm without any network call).
+
+    ``StubAnthropicProvider`` is intentionally NOT in this chain in
+    M13.1b — Anthropic activation is M13.1c. The class remains in the
+    file so the existing test suite, the dry-run CLI, and the future
+    M13.1c diff stay minimal.
+    """
+    if os.environ.get("OPENAI_API_KEY", "").strip():
+        return [OpenAIProvider()]
+    return [StubOpenAIProvider()]
 
 
 # ---------------------------------------------------------------------------
@@ -300,6 +469,10 @@ class JudgeVerdict:
     ``truth_claim`` and ``operator_review_required`` are kept on the
     dataclass for completeness but the canonical safety values are
     re-asserted at serialisation time in :func:`judge_verdict_to_dict`.
+
+    M13.1b adds ``input_tokens`` / ``output_tokens`` so the pipeline's
+    ``debug_summary["llm_judge"]`` payload can surface real usage. Both
+    default to 0 (stubs and fallbacks report no tokens).
     """
 
     action: str
@@ -312,6 +485,8 @@ class JudgeVerdict:
     latency_ms: int = 0
     fell_back: bool = False
     fallback_reason: Optional[str] = None
+    input_tokens: int = 0
+    output_tokens: int = 0
     # Safety pins — always False / True regardless of LLM output.
     truth_claim: bool = False
     operator_review_required: bool = True
@@ -350,6 +525,11 @@ def validate_judge_response_json(
     string ``"upgrade"`` or wraps an upgrade attempt inside a
     ``downgrade`` action, the validator refuses and the operator sees
     ``confirm`` instead.
+
+    Extra keys in the response are intentionally TOLERATED (M13.1b
+    decision): LLMs occasionally append explanatory keys, and rejecting
+    them would force unnecessary safe-confirm fallbacks. The action +
+    new_label invariants are still enforced strictly.
     """
     if not text or not str(text).strip():
         return _safe_confirm_fallback("empty response")
@@ -499,9 +679,41 @@ def run_judge(
         verdict.provider_used = response.provider
         verdict.model = response.model
         verdict.latency_ms = latency_ms
+        verdict.input_tokens = int(response.input_tokens or 0)
+        verdict.output_tokens = int(response.output_tokens or 0)
+        _emit_cost_log(response, verdict)
         return verdict
 
     return _safe_confirm_fallback(last_error or "no available provider")
+
+
+def _emit_cost_log(response: LLMResponse, verdict: JudgeVerdict) -> None:
+    """Single structured INFO emission after a provider returns. Lives
+    in llm_judge.py (NOT in MIGRATED_FILES) so it does NOT bump the
+    M14.4 EXPECTED_TOTAL_LOG_CALLS pin.
+
+    OPENAI_API_KEY is never read or referenced here — provider name,
+    model, and token counts only.
+    """
+    try:
+        cost = estimate_cost_usd(
+            response.model, response.input_tokens, response.output_tokens,
+        )
+        log.info(
+            "llm_judge.completed",
+            extra={
+                "model": response.model,
+                "action": verdict.action,
+                "input_tokens": int(response.input_tokens or 0),
+                "output_tokens": int(response.output_tokens or 0),
+                "estimated_cost_usd": cost,
+                "latency_ms": int(response.latency_ms or 0),
+                "provider": response.provider,
+                "fell_back": bool(verdict.fell_back),
+            },
+        )
+    except Exception:  # noqa: BLE001 — logging must never break the pipeline
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -528,6 +740,13 @@ def judge_verdict_to_dict(verdict: JudgeVerdict) -> dict:
         "latency_ms": verdict.latency_ms,
         "fell_back": verdict.fell_back,
         "fallback_reason": verdict.fallback_reason,
+        "input_tokens": int(verdict.input_tokens or 0),
+        "output_tokens": int(verdict.output_tokens or 0),
+        "estimated_cost_usd": estimate_cost_usd(
+            verdict.model or "",
+            verdict.input_tokens or 0,
+            verdict.output_tokens or 0,
+        ),
         "truth_claim": False,
         "operator_review_required": True,
     }

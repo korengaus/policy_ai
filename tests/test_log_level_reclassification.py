@@ -130,11 +130,17 @@ PRESERVED_REAL_ERRORS: tuple[tuple[str, str], ...] = (
 #     main.analyze_pipeline: one "M15.0d parallel phase start" and
 #     one per-item "Phase A item complete"; main.py IS in
 #     MIGRATED_FILES so both count): 263 + 2 = 265
+#   * M13.1b (OpenAI LLM judge activation added 1× log.warning
+#     "llm_judge.failed" in main._process_news_item_phase_a's
+#     except-block around the judge invocation; main.py IS in
+#     MIGRATED_FILES so this counts. The other M13.1b log call
+#     "llm_judge.completed" lives in llm_judge.py which is NOT in
+#     MIGRATED_FILES and so does not bump the pin): 265 + 1 = 266
 #
 # Any future milestone that legitimately adds log calls bumps this
 # expected count; the contract M14.4 actually pins is the *level
 # distribution*, not the absolute count.
-EXPECTED_TOTAL_LOG_CALLS = 265
+EXPECTED_TOTAL_LOG_CALLS = 266
 
 # Post-M14.4: 12 (down from 17 pre-M14.4 — 5 reclassifications).
 # M13.3d added log.info / log.warning calls only — no new log.error.
