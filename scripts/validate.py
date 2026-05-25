@@ -259,6 +259,19 @@ def _commands() -> List[List[str]]:
         [python, "scripts/check_parity.py", "--help"],
         [python, "scripts/check_parity.py"],
         [python, "tests/test_check_parity.py"],
+        # M12.2 — atomic policy_memory.json write + reports rotation.
+        # The atomic-write tests pin the tmp+rename contract on
+        # memory_store.save_policy_memory. The rotation tests exercise
+        # scripts/rotate_reports.py against a temp-dir sandbox so the
+        # real reports/ directory is never touched. The --dry-run
+        # smoke confirms the CLI runs cleanly against the project's
+        # real reports/ directory (no files are moved). Neither file
+        # is in tests/test_log_level_reclassification.py's
+        # MIGRATED_FILES, so EXPECTED_TOTAL_LOG_CALLS is unaffected.
+        [python, "tests/test_atomic_memory_store.py"],
+        [python, "tests/test_rotate_reports.py"],
+        [python, "scripts/rotate_reports.py", "--help"],
+        [python, "scripts/rotate_reports.py", "--dry-run", "--quiet"],
         # M13.1a — LLM Judge dry-run CLI + tests.
         [python, "scripts/dry_run_llm_judge.py", "--help"],
         [python, "scripts/dry_run_llm_judge.py", "--status"],

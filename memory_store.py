@@ -1,6 +1,8 @@
 import hashlib
 import json
 import os
+import threading
+import uuid
 from datetime import datetime, timezone
 
 from config import MEMORY_FILE
@@ -10,6 +12,15 @@ from topic_classifier import classify_policy_topic
 
 
 log = get_logger(__name__)
+
+
+# M12.2 — module-level lock serialises in-process writes to MEMORY_FILE.
+# Reason: M15.0d parallelised per-news-item processing in main.py, so
+# save_policy_memory can be invoked from multiple worker threads inside
+# a single analyze_pipeline run. Cross-process safety (scheduler vs API)
+# relies on os.replace's atomicity alone — lost-update prevention across
+# processes is explicitly deferred.
+_SAVE_LOCK = threading.Lock()
 
 
 def load_policy_memory() -> dict:
@@ -51,8 +62,41 @@ def load_policy_memory() -> dict:
 def save_policy_memory(memory: dict):
     memory["last_updated_at"] = datetime.now(timezone.utc).isoformat()
 
-    with open(MEMORY_FILE, "w", encoding="utf-8") as file:
-        json.dump(memory, file, ensure_ascii=False, indent=2)
+    # M12.2 — atomic write via tmp+rename. Serialise to a string FIRST so
+    # that a non-JSON-serialisable payload raises before we touch the
+    # filesystem; the on-disk file is left untouched on serialisation
+    # failure. fsync before os.replace guarantees content is durable
+    # before the rename swap so a power loss cannot leave an empty file.
+    serialised = json.dumps(memory, ensure_ascii=False, indent=2)
+
+    target_dir = os.path.dirname(os.path.abspath(MEMORY_FILE)) or "."
+    tmp_name = f"{os.path.basename(MEMORY_FILE)}.tmp.{os.getpid()}.{uuid.uuid4().hex[:8]}"
+    tmp_path = os.path.join(target_dir, tmp_name)
+
+    with _SAVE_LOCK:
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as file:
+                file.write(serialised)
+                file.flush()
+                os.fsync(file.fileno())
+            os.replace(tmp_path, MEMORY_FILE)
+        finally:
+            # Best-effort cleanup if os.replace failed mid-flight. When
+            # the replace succeeded the tmp path no longer exists, so the
+            # FileNotFoundError branch is the common path.
+            try:
+                os.remove(tmp_path)
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                log.warning(
+                    "memory_store.save_tmp_cleanup_failed",
+                    extra={
+                        "tmp_path": tmp_path,
+                        "exception_type": type(exc).__name__,
+                        "exception_message": str(exc)[:500],
+                    },
+                )
 
 
 def make_article_id(title: str, url: str) -> str:
