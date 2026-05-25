@@ -62,6 +62,8 @@ def _commands() -> List[List[str]]:
          "postgres_storage.py", "scripts/check_postgres_health.py",
          # M12.0b — Postgres backfill.
          "postgres_backfill.py", "scripts/run_postgres_backfill.py",
+         # M12.1 — Postgres parity check.
+         "scripts/check_parity.py",
          # M13.1a — LLM Judge infrastructure (dry-run only).
          "llm_judge.py", "scripts/dry_run_llm_judge.py",
          # M13.2a — frontend build pipeline.
@@ -249,6 +251,14 @@ def _commands() -> List[List[str]]:
         [python, "scripts/run_postgres_backfill.py", "--help"],
         [python, "scripts/run_postgres_backfill.py", "--status"],
         [python, "tests/test_postgres_backfill.py"],
+        # M12.1 — Postgres parity check CLI + tests. Default-env runs
+        # report "dual-write disabled" cleanly (no-op pass) — the tests
+        # exercise the parity logic, drift detection, exit-code policy,
+        # and the read-only contract using patched status payloads. No
+        # real Postgres is required.
+        [python, "scripts/check_parity.py", "--help"],
+        [python, "scripts/check_parity.py"],
+        [python, "tests/test_check_parity.py"],
         # M13.1a — LLM Judge dry-run CLI + tests.
         [python, "scripts/dry_run_llm_judge.py", "--help"],
         [python, "scripts/dry_run_llm_judge.py", "--status"],

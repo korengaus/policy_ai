@@ -1070,6 +1070,64 @@ def _postgres_backfill_tests_step() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Phase 2 M12.1 — parity check steps (layered into postgres-dual-write
+# profile).
+#
+# Fully offline. The default-env --help / default runs surface the
+# documented headers; the offline test suite pins the parity logic
+# (count math, drift detection, exit-code policy, read-only contract)
+# without touching a real Postgres. Steps:
+#   1) scripts/check_parity.py --help    (CLI smoke)
+#   2) scripts/check_parity.py           (default-env report — disabled
+#                                         is a no-op pass)
+#   3) tests/test_check_parity.py        (offline tests)
+# ---------------------------------------------------------------------------
+
+
+def _postgres_parity_help_step() -> dict:
+    return {
+        "name": "check_parity(--help)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "check_parity.py"),
+            "--help",
+        ],
+        "parser": _parse_postgres_parity_help_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _postgres_parity_default_step() -> dict:
+    return {
+        "name": "check_parity(default)",
+        "command": [
+            _python(),
+            str(ROOT / "scripts" / "check_parity.py"),
+        ],
+        "parser": _parse_postgres_parity_default_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+def _postgres_parity_tests_step() -> dict:
+    return {
+        "name": "test_check_parity",
+        "command": [
+            _python(),
+            str(ROOT / "tests" / "test_check_parity.py"),
+        ],
+        "parser": _parse_postgres_parity_tests_output,
+        "hits_render": False,
+        "may_call_openai": False,
+        "optional": False,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Phase 2 M13.1a — llm-judge-dry-run profile.
 #
 # Fully offline. Exercises the Judge CLI's --help / --status smokes
@@ -1990,10 +2048,17 @@ def _resolve_steps(args: argparse.Namespace) -> List[dict]:
         # unset) which is the expected state during validation; the
         # offline tests exercise the feature-flag, schema parity, and
         # SQLite-isolation invariants without needing a real Postgres.
-        # SQLite remains the sole source of truth in this milestone.
+        # M12.1 layered the read-only parity CLI on top — same offline
+        # contract: default-env --help / default runs report "disabled"
+        # cleanly and the tests pin the parity logic against a patched
+        # status payload. SQLite remains the source of truth across
+        # M12.0a/b and M12.1 alike.
         steps.append(_postgres_health_help_step())
         steps.append(_postgres_health_default_step())
         steps.append(_postgres_storage_tests_step())
+        steps.append(_postgres_parity_help_step())
+        steps.append(_postgres_parity_default_step())
+        steps.append(_postgres_parity_tests_step())
 
     if profile == "postgres-backfill":
         # M12.0b — Postgres backfill. Fully offline. --status reports
@@ -3341,6 +3406,99 @@ def _parse_postgres_storage_tests_output(
         "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
         "summary": (
             f"test_postgres_storage: exit_code={exit_code} "
+            f"ok_detected={has_ok}"
+        ),
+        "metrics": {
+            "exit_code_was_zero": exit_code == 0,
+            "ok_detected": has_ok,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# M12.1 — parity check parsers (layered into postgres-dual-write profile).
+# ---------------------------------------------------------------------------
+
+
+def _parse_postgres_parity_help_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``check_parity.py --help`` must exit 0 and surface the
+    documented header text + the Exit codes section."""
+    ok = (
+        exit_code == 0
+        and "check_parity" in stdout
+        and "Exit codes" in stdout
+    )
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"check_parity --help: exit_code={exit_code} "
+            f"help_text_detected={ok}"
+        ),
+    }
+
+
+def _parse_postgres_parity_default_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """Default-env parity report. Expected CI / local-validation shape:
+    dual-write DISABLED, the report announces "no-op", exit 0. A live
+    Postgres on the operator's machine that reports "parity OK" is
+    also a clean PASS. Anything else (drift, unreachable + strict)
+    must show up here as a FAIL."""
+    has_header = "Postgres Dual-Write Parity" in stdout
+    has_safety = "SQLite is the source of truth" in stdout or (
+        "sole source of truth" in stdout
+    )
+    disabled_no_op = "no-op" in stdout and "dual-write is disabled" in stdout
+    parity_ok = "parity OK" in stdout
+    drift_line = "DRIFT detected" in stdout
+    if exit_code == 0 and has_header and (disabled_no_op or parity_ok):
+        status = _HEALTH_PASS
+        if disabled_no_op:
+            summary = (
+                "check_parity: disabled (USE_POSTGRES_WRITE unset) — "
+                "parity check is a no-op"
+            )
+        else:
+            summary = (
+                "check_parity: enabled and every mirror table is in "
+                "parity"
+            )
+    elif exit_code == 1 and drift_line:
+        status = _HEALTH_FAIL
+        summary = (
+            "check_parity: drift detected on at least one mirror table"
+        )
+    else:
+        status = _HEALTH_FAIL
+        summary = f"check_parity: exit_code={exit_code}"
+    return {
+        "status": status,
+        "summary": summary,
+        "metrics": {
+            "exit_code": exit_code,
+            "header_detected": has_header,
+            "safety_footer_detected": has_safety,
+            "disabled_no_op_detected": disabled_no_op,
+            "parity_ok_detected": parity_ok,
+            "drift_line_detected": drift_line,
+        },
+    }
+
+
+def _parse_postgres_parity_tests_output(
+    stdout: str, stderr: str, exit_code: int,
+) -> dict:
+    """``tests/test_check_parity.py`` is a unittest runner — exit 0
+    with an ``OK`` line means the suite passed."""
+    has_ok = "\nOK" in (stdout + "\n" + stderr)
+    ok = exit_code == 0 and has_ok
+    return {
+        "status": _HEALTH_PASS if ok else _HEALTH_FAIL,
+        "summary": (
+            f"test_check_parity: exit_code={exit_code} "
             f"ok_detected={has_ok}"
         ),
         "metrics": {

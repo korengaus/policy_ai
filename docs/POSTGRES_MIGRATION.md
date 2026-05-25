@@ -249,6 +249,73 @@ All offline. No real Postgres is required for the validation suite to
 pass. Actual backfill execution is gated on operator intent
 (`--execute --yes`) and a provisioned `DATABASE_URL`.
 
+## M12.1 — Activation (Phase 2)
+
+M12.1 is the first milestone that actually points the dual-write infra
+at a real, provisioned Render Postgres instance. It ships:
+
+- `scripts/check_parity.py` — read-only CLI that compares per-table
+  row counts (and, optionally, per-row identity sets) between SQLite
+  and the Postgres mirror.
+- `tests/test_check_parity.py` — 26 offline tests pinning parity math,
+  drift detection, exit-code policy, and the read-only contract.
+- A `M12.1` extension to the existing `postgres-dual-write` operational
+  checks profile that adds `check_parity --help`, `check_parity`
+  default-env, and the parity test suite.
+- An entry in `scripts/validate.py` so the parity smoke + tests run on
+  every CI invocation.
+- `docs/POSTGRES_ACTIVATION_RUNBOOK.md` — the operator runbook for
+  enabling dual-write against a real instance.
+
+Activation overview:
+
+1. Provision Postgres on Render (or another host) and capture the
+   External URL with the `postgresql+psycopg://` prefix (M12.0a uses
+   the psycopg v3 driver).
+2. Set `USE_POSTGRES_WRITE=true` and `DATABASE_URL` in the local
+   shell (NOT yet on Render).
+3. Run `python scripts/check_postgres_health.py` — expect
+   `dual_write_enabled=True`, `can_connect=True`.
+4. Run `python scripts/run_postgres_backfill.py --status` then
+   `--dry-run` to preview row counts.
+5. After dry-run review, run `python scripts/run_postgres_backfill.py
+   --execute --yes` to copy SQLite rows into the mirror tables.
+6. Run `python scripts/check_parity.py` — expect every table to read
+   `delta=+0` and the report to end with `parity OK`.
+7. Render dual-write activation is a **separate operator decision**
+   driven by `docs/POSTGRES_ACTIVATION_RUNBOOK.md` and stays out of
+   scope for M12.1.
+
+The parity CLI is read-only on both databases under all circumstances —
+the `ReadOnlyContractTests` test pins that no `mirror_write`,
+`mirror_upsert`, or `ensure_schema` call is ever issued during a
+parity report. SQLite remains the source of truth across M12.0a/b
+and M12.1.
+
+### Failure modes (M12.1)
+
+- Dual-write disabled → parity is a no-op pass (exit 0).
+- Postgres unreachable + non-strict → informational, exit 0.
+- Postgres unreachable + `--strict` → exit 1 (operator action needed).
+- Row counts differ on any table → exit 1, `DRIFT detected` line.
+- `--sample` mode reveals same-count-different-rows drift → exit 1.
+
+### Validation (M12.1)
+
+The new infrastructure is exercised by:
+
+- `python scripts/check_parity.py --help`
+- `python scripts/check_parity.py`
+- `python scripts/check_parity.py --json`
+- `python tests/test_check_parity.py`
+- `python scripts/validate.py`
+- `python scripts/run_operational_checks.py --profile postgres-dual-write`
+- `npm test` (regression — still byte-identical)
+
+All offline. No real Postgres is required for the validation suite to
+pass. The optional `--sample` and `--strict` flags exercise the live-DB
+paths and are documented in the activation runbook.
+
 ## CI integration (M13.0)
 
 M13.0 added GitHub Actions CI that runs the full Python test suite +
