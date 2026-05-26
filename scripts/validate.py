@@ -240,6 +240,16 @@ def _commands() -> List[List[str]]:
         # built once, source_retrieval_agent.OFFICIAL_DOMAIN_QUERY_HINTS
         # has use-sites. Zero production-code change.
         [python, "tests/test_dead_code_removal_phase2.py"],
+        # M13.1b-obs (2026-05-26) — LLM judge + ai_reasoner
+        # operational observability. Pins the cost-estimation formula,
+        # aggregator math (accumulate / caller-separation / p95 /
+        # ring-buffer cap / reset), ai_reasoner.completed log fields,
+        # ai_reasoner.failed log on the broad-except path (M11.7c
+        # contract preserved), stub-mode aggregator skip, and the
+        # llm_judge aggregator hook inside _emit_cost_log. 11 tests.
+        # llm_observability.py and ai_reasoner.py are NOT in
+        # MIGRATED_FILES so EXPECTED_TOTAL_LOG_CALLS stays at 270.
+        [python, "tests/test_m13_1b_obs.py"],
         # M11.0d-1 — verdict producer disagreement diagnostic
         # (DIAGNOSIS ONLY, no production code changed). Pins the
         # current per-producer output snapshot for 42 synthetic-matrix

@@ -546,11 +546,20 @@ class ModuleAdoptionPin(unittest.TestCase):
 # no reason to migrate them). They remain pinned here as a guard
 # against any future PR adding the import without a clear
 # justification.
+#
+# M13.1b-obs (2026-05-26): ai_reasoner.py was removed from this
+# list. The operational-observability milestone adopted
+# structured_logging in ai_reasoner.py with explicit operator
+# approval to emit the new ai_reasoner.completed (log.info) and
+# ai_reasoner.failed (log.warning) events alongside the existing
+# OpenAI Responses-API call. This is the documented escape valve
+# the pin's comment describes ("future PR adding the import with
+# a clear justification"). The remaining 4 entries below stay
+# pinned.
 _LEGACY_FILES = (
     "api_server.py",
     "policy_scoring.py",
     "database.py",
-    "ai_reasoner.py",
     "job_manager.py",
 )
 

@@ -85,10 +85,19 @@ DEFAULT_DOWNGRADE_FALLBACK = "draft_needs_review"
 
 
 # M13.1b — per-1K-token pricing for cost estimation. Hardcoded so the
-# cost log can self-report without an external rate sheet. Any model
-# not listed produces ``estimated_cost_usd = None`` in the log payload
-# rather than guessing. Update this dict (not the call site) when
-# OpenAI changes pricing or when a new model is enabled.
+# cost log can self-report without an external rate sheet.
+#
+# Verified against the OpenAI public pricing page on 2026-05-26:
+#   gpt-4o-mini → $0.15 / 1M input tokens, $0.60 / 1M output tokens
+#   ⇒ $0.000150 / 1K input, $0.000600 / 1K output.
+# Sources (M13.1b-obs verification):
+#   - https://openai.com/api/pricing/
+#   - https://developers.openai.com/api/docs/models/gpt-4o-mini
+#
+# Any model not listed produces ``estimated_cost_usd = None`` in the
+# log payload rather than guessing. Update this dict (not call sites)
+# when OpenAI changes pricing or when a new model is enabled, and
+# refresh the verification date above in the same PR.
 LLM_COST_PER_1K = {
     "gpt-4o-mini": {"input": 0.000150, "output": 0.000600},
 }
@@ -694,6 +703,12 @@ def _emit_cost_log(response: LLMResponse, verdict: JudgeVerdict) -> None:
 
     OPENAI_API_KEY is never read or referenced here — provider name,
     model, and token counts only.
+
+    M13.1b-obs: ALSO pushes the call metrics into the in-process
+    aggregator (``llm_observability.record_llm_call``) so the live
+    metrics roll up across both Judge and Reasoner. The aggregator
+    push lives inside the same try/except as the log emission — a
+    broken aggregator silently degrades to no-op metrics.
     """
     try:
         cost = estimate_cost_usd(
@@ -711,6 +726,19 @@ def _emit_cost_log(response: LLMResponse, verdict: JudgeVerdict) -> None:
                 "provider": response.provider,
                 "fell_back": bool(verdict.fell_back),
             },
+        )
+        # M13.1b-obs aggregator push. Lazy import avoids any
+        # circularity at module load.
+        from llm_observability import record_llm_call
+
+        record_llm_call(
+            caller="llm_judge",
+            model=response.model,
+            input_tokens=int(response.input_tokens or 0),
+            output_tokens=int(response.output_tokens or 0),
+            estimated_cost_usd=cost,
+            latency_ms=int(response.latency_ms or 0),
+            success=bool(response.provider and not verdict.fell_back),
         )
     except Exception:  # noqa: BLE001 — logging must never break the pipeline
         pass

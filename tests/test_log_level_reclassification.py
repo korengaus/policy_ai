@@ -146,6 +146,16 @@ PRESERVED_REAL_ERRORS: tuple[tuple[str, str], ...] = (
 #     of an existing log.error — same call with extra={} added — so
 #     +0 to the count. Sites 1, 4, 5a, 5e are already resolved by
 #     M11.7a / M11.7b / M11.5c.): 266 + 4 = 270
+#   * M13.1b-obs (LLM judge + ai_reasoner operational observability —
+#     adds llm_observability.py aggregator module (NEW file, NOT in
+#     MIGRATED_FILES) + instruments ai_reasoner.py with 1 log.info
+#     "ai_reasoner.completed" on success + 1 log.warning
+#     "ai_reasoner.failed" on the broad-except path. ai_reasoner.py
+#     is NOT in MIGRATED_FILES so its 2 new log calls do not count.
+#     The new aggregator hook inside llm_judge._emit_cost_log adds
+#     a record_llm_call() invocation but no new log call. Both
+#     touched files are outside MIGRATED_FILES, so the pin stays
+#     at 270): 270 + 0 = 270
 #
 # Any future milestone that legitimately adds log calls bumps this
 # expected count; the contract M14.4 actually pins is the *level

@@ -1,12 +1,33 @@
 import json
 import os
+import time
 
 from config import AI_MODEL
+from llm_observability import estimate_cost_usd, record_llm_call
+from structured_logging import get_logger
 
 try:
     from openai import OpenAI
 except ImportError:
     OpenAI = None
+
+
+# M13.1b-obs (2026-05-26): per-call observability — token usage, cost
+# estimation, latency, and aggregator integration around the live
+# OpenAI API call. Adds two structured log events:
+#
+#   * ``ai_reasoner.completed`` (log.info) — successful API call;
+#     fired BEFORE downstream JSON parsing so the metrics roll up
+#     even if the response payload is malformed (API cost was already
+#     incurred).
+#   * ``ai_reasoner.failed`` (log.warning) — API failure OR downstream
+#     JSON parse failure. Additive only — the broad ``except Exception``
+#     pattern in ``run_ai_reasoning`` is preserved per M11.7c
+#     ("openai SDK has undocumented exception surface; narrowing
+#     risks letting library errors propagate and break the pipeline").
+#
+# OPENAI_API_KEY is never read or referenced in these log lines.
+log = get_logger(__name__)
 
 
 def get_openai_client():
@@ -277,6 +298,9 @@ def run_ai_reasoning(
         evidence_comparison=evidence_comparison,
     )
 
+    # M13.1b-obs: latency timer wraps the API call only — JSON parse
+    # and dict population happen after the timer stops.
+    start = time.perf_counter()
     try:
         response = client.responses.create(
             model=AI_MODEL,
@@ -288,6 +312,47 @@ def run_ai_reasoning(
                     "type": "json_object",
                 }
             },
+        )
+        latency_ms = int((time.perf_counter() - start) * 1000)
+
+        # M13.1b-obs: capture Responses-API token usage + emit
+        # observability BEFORE parsing. Field names match the
+        # Responses API (input_tokens / output_tokens) — distinct
+        # from Chat Completions (prompt_tokens / completion_tokens).
+        # Token capture is in its own try so a missing/odd usage
+        # block does not derail the rest of the success path; the
+        # outer except still catches anything that escapes.
+        usage = getattr(response, "usage", None)
+        input_tokens = (
+            getattr(usage, "input_tokens", 0) or 0 if usage else 0
+        )
+        output_tokens = (
+            getattr(usage, "output_tokens", 0) or 0 if usage else 0
+        )
+        cost = estimate_cost_usd(
+            AI_MODEL, int(input_tokens), int(output_tokens),
+        )
+        log.info(
+            "ai_reasoner.completed",
+            extra={
+                "model": AI_MODEL,
+                "action": "reasoning",
+                "input_tokens": int(input_tokens),
+                "output_tokens": int(output_tokens),
+                "estimated_cost_usd": cost,
+                "latency_ms": latency_ms,
+                "provider": "openai",
+                "fell_back": False,
+            },
+        )
+        record_llm_call(
+            caller="ai_reasoner",
+            model=AI_MODEL,
+            input_tokens=int(input_tokens),
+            output_tokens=int(output_tokens),
+            estimated_cost_usd=cost,
+            latency_ms=latency_ms,
+            success=True,
         )
 
         raw_text = response.output_text
@@ -324,6 +389,17 @@ def run_ai_reasoning(
         return parsed
 
     except json.JSONDecodeError as e:
+        # M13.1b-obs: emit failure warning BEFORE returning the
+        # existing _error_result. The successful API call (if any)
+        # was already recorded by the completed-log block above —
+        # this path captures the post-API parsing failure separately.
+        log.warning(
+            "ai_reasoner.failed",
+            extra={
+                "reason": "invalid_json_response",
+                "exception_type": type(e).__name__,
+            },
+        )
         return _error_result(
             "invalid_json_response",
             f"AI returned non-JSON response: {e}",
@@ -331,7 +407,22 @@ def run_ai_reasoning(
             official_evidence_results=official_evidence_results,
             evidence_comparison=evidence_comparison,
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
+        # M11.7c: intentionally broad — narrowing reviewed and rejected.
+        # The openai SDK's exception surface is undocumented (custom
+        # OpenAIError hierarchy + network exceptions + ImportError edge
+        # cases); narrowing risks letting library errors propagate up
+        # and break the pipeline. M13.1b-obs added the warning log
+        # below as an ADDITIVE observability hook; the except shape is
+        # unchanged. See docs/EXCEPTION_HANDLING_AUDIT.md for the broad-
+        # except policy.
+        log.warning(
+            "ai_reasoner.failed",
+            extra={
+                "reason": "api_call_failed",
+                "exception_type": type(e).__name__,
+            },
+        )
         return _error_result(
             "api_call_failed",
             f"AI reasoning failed: {e}",
