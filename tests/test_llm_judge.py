@@ -546,13 +546,16 @@ class SerializationSafetyTests(unittest.TestCase):
         out = llm_judge.judge_verdict_to_dict(verdict)
         # M13.1b added input_tokens / output_tokens / estimated_cost_usd
         # so debug_summary["llm_judge"] can surface real token usage and
-        # cost. The three new keys are stable contract; updating this
-        # pin is the documented way to extend the dict shape.
+        # cost. M13.1c added primary_provider_failed to surface whether
+        # the provider chain advanced past the primary slot (default:
+        # Anthropic → OpenAI fallback). Updating this pin is the
+        # documented way to extend the dict shape.
         expected_keys = {
             "action", "new_label", "reason_ko", "evidence_gaps",
             "raw_response", "provider_used", "model", "latency_ms",
             "fell_back", "fallback_reason",
             "input_tokens", "output_tokens", "estimated_cost_usd",
+            "primary_provider_failed",  # M13.1c
             "truth_claim", "operator_review_required",
         }
         self.assertSetEqual(set(out.keys()), expected_keys)

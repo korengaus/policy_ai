@@ -48,9 +48,17 @@ import llm_judge  # noqa: E402
 
 
 class _EnvScope:
-    """Snapshot/restore the M13.1b env vars."""
+    """Snapshot/restore the M13.1b env vars.
 
-    KEYS = ("OPENAI_API_KEY", "LLM_JUDGE_ENABLED", "AI_MODEL")
+    M13.1c — added ANTHROPIC_API_KEY / ANTHROPIC_MODEL / LLM_PROVIDER /
+    LLM_FALLBACK_PROVIDER to the snapshot so tests that mutate them
+    (DefaultChainTests in particular) don't leak across test runs."""
+
+    KEYS = (
+        "OPENAI_API_KEY", "LLM_JUDGE_ENABLED", "AI_MODEL",
+        "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL",
+        "LLM_PROVIDER", "LLM_FALLBACK_PROVIDER",
+    )
 
     def __enter__(self):
         self._snapshot = {key: os.environ.get(key) for key in self.KEYS}
@@ -264,34 +272,78 @@ class CallFailureTests(unittest.TestCase):
 
 
 class DefaultChainTests(unittest.TestCase):
-    def test_chain_returns_openai_provider_when_key_set(self):
+    """M13.1c rewrote this class for the env-driven provider chain.
+    The docstring on the M13.1b version of these tests explicitly
+    anticipated this transition (``"M13.1c will revive Anthropic;
+    M13.1b explicitly excludes it"``). The new tests assert the
+    M13.1c chain shape under each LLM_PROVIDER / LLM_FALLBACK_PROVIDER
+    combination."""
+
+    def test_chain_default_is_anthropic_then_openai(self):
+        """No env vars set → primary=Anthropic, fallback=OpenAI.
+        Both API keys absent doesn't change the chain shape — the
+        providers are still in slots; their is_available() reports
+        False and run_judge then advances to the safe-confirm
+        fallback. This shape gives operators predictable routing as
+        soon as keys are added in the Render dashboard."""
         with _EnvScope():
-            _set_env(OPENAI_API_KEY="sk-test")
+            _set_env(
+                OPENAI_API_KEY=None, ANTHROPIC_API_KEY=None,
+                LLM_PROVIDER=None, LLM_FALLBACK_PROVIDER=None,
+            )
+            chain = llm_judge.get_default_provider_chain()
+        self.assertEqual(len(chain), 2)
+        self.assertIsInstance(chain[0], llm_judge.AnthropicProvider)
+        self.assertIsInstance(chain[1], llm_judge.OpenAIProvider)
+
+    def test_chain_llm_provider_openai_skips_anthropic(self):
+        """LLM_PROVIDER=openai → primary=OpenAI only.
+        Anthropic is NOT in the chain even when ANTHROPIC_API_KEY
+        is set — operator override is honoured. Restores M13.1b's
+        OpenAI-only behavior for operators who want it."""
+        with _EnvScope():
+            _set_env(
+                OPENAI_API_KEY="sk-test", ANTHROPIC_API_KEY="ak-test",
+                LLM_PROVIDER="openai", LLM_FALLBACK_PROVIDER="none",
+            )
             chain = llm_judge.get_default_provider_chain()
         self.assertEqual(len(chain), 1)
         self.assertIsInstance(chain[0], llm_judge.OpenAIProvider)
+        for provider in chain:
+            self.assertNotIsInstance(
+                provider, llm_judge.AnthropicProvider,
+            )
 
-    def test_chain_returns_stub_when_key_unset(self):
+    def test_chain_llm_provider_disabled_returns_empty(self):
+        """LLM_PROVIDER=disabled → empty chain. run_judge then
+        returns the safe-confirm fallback (semantically equivalent
+        to LLM_JUDGE_ENABLED=false but a per-provider switch)."""
         with _EnvScope():
-            _set_env(OPENAI_API_KEY=None)
+            _set_env(
+                OPENAI_API_KEY="sk-test", ANTHROPIC_API_KEY="ak-test",
+                LLM_PROVIDER="disabled", LLM_FALLBACK_PROVIDER=None,
+            )
             chain = llm_judge.get_default_provider_chain()
-        self.assertEqual(len(chain), 1)
-        self.assertIsInstance(chain[0], llm_judge.StubOpenAIProvider)
+        self.assertEqual(chain, [])
 
-    def test_chain_returns_stub_when_key_blank(self):
+    def test_chain_never_includes_stubs(self):
+        """No active-chain code path produces stub providers in M13.1c.
+        Stubs remain only for the dry-run CLI's --provider stub option.
+        The default chain MUST be real providers (their is_available
+        gates network access; the dry-run CLI explicitly opts into
+        stubs via its --provider flag, not via the env)."""
         with _EnvScope():
-            _set_env(OPENAI_API_KEY="   ")
-            chain = llm_judge.get_default_provider_chain()
-        self.assertIsInstance(chain[0], llm_judge.StubOpenAIProvider)
-
-    def test_anthropic_stub_no_longer_in_default_chain(self):
-        """M13.1c will revive Anthropic; M13.1b explicitly excludes it."""
-        with _EnvScope():
-            _set_env(OPENAI_API_KEY="sk-test")
+            _set_env(
+                OPENAI_API_KEY="sk-test", ANTHROPIC_API_KEY="ak-test",
+                LLM_PROVIDER=None, LLM_FALLBACK_PROVIDER=None,
+            )
             chain = llm_judge.get_default_provider_chain()
         for provider in chain:
             self.assertNotIsInstance(
-                provider, llm_judge.StubAnthropicProvider
+                provider, llm_judge.StubAnthropicProvider,
+            )
+            self.assertNotIsInstance(
+                provider, llm_judge.StubOpenAIProvider,
             )
 
 

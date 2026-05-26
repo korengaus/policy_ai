@@ -353,6 +353,11 @@ def run_ai_reasoning(
             estimated_cost_usd=cost,
             latency_ms=latency_ms,
             success=True,
+            # M13.1c — ai_reasoner uses the OpenAI Responses API
+            # directly (no provider abstraction here, distinct from
+            # llm_judge.py's multi-provider chain). Provider is
+            # always "openai" for this call site.
+            provider="openai",
         )
 
         raw_text = response.output_text

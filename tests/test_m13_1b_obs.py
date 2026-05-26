@@ -123,15 +123,20 @@ class AggregatorTests(unittest.TestCase):
             get_metrics_snapshot,
         )
 
+        # M13.1c — signature-only update: pass provider="openai".
+        # Top-level snapshot fields (asserted below) remain sums
+        # across providers, so semantic behavior is unchanged.
         record_llm_call(
             caller="llm_judge", model="gpt-4o-mini",
             input_tokens=500, output_tokens=200,
             estimated_cost_usd=0.000195, latency_ms=400, success=True,
+            provider="openai",
         )
         record_llm_call(
             caller="llm_judge", model="gpt-4o-mini",
             input_tokens=300, output_tokens=100,
             estimated_cost_usd=0.000105, latency_ms=350, success=True,
+            provider="openai",
         )
 
         snap = get_metrics_snapshot()
@@ -151,15 +156,18 @@ class AggregatorTests(unittest.TestCase):
             get_metrics_snapshot,
         )
 
+        # M13.1c — signature-only update: pass provider="openai".
         record_llm_call(
             caller="llm_judge", model="gpt-4o-mini",
             input_tokens=100, output_tokens=50,
             estimated_cost_usd=0.0000450, latency_ms=400, success=True,
+            provider="openai",
         )
         record_llm_call(
             caller="ai_reasoner", model="gpt-4o-mini",
             input_tokens=2000, output_tokens=500,
             estimated_cost_usd=0.0006, latency_ms=1500, success=True,
+            provider="openai",
         )
 
         snap = get_metrics_snapshot()
@@ -182,6 +190,7 @@ class AggregatorTests(unittest.TestCase):
                 caller="llm_judge", model="gpt-4o-mini",
                 input_tokens=0, output_tokens=0,
                 estimated_cost_usd=0.0, latency_ms=latency, success=True,
+                provider="openai",  # M13.1c signature-only update
             )
 
         snap = get_metrics_snapshot()
@@ -209,6 +218,7 @@ class AggregatorTests(unittest.TestCase):
                 estimated_cost_usd=0.0,
                 latency_ms=i,  # monotonically increasing
                 success=True,
+                provider="openai",  # M13.1c signature-only update
             )
 
         snap = get_metrics_snapshot()
@@ -231,6 +241,7 @@ class AggregatorTests(unittest.TestCase):
             caller="llm_judge", model="gpt-4o-mini",
             input_tokens=100, output_tokens=50,
             estimated_cost_usd=0.0001, latency_ms=400, success=True,
+            provider="openai",  # M13.1c signature-only update
         )
         self.assertIn("llm_judge", get_metrics_snapshot())
 

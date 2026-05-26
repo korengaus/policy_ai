@@ -63,6 +63,23 @@ def _empty_caller_metrics() -> dict[str, Any]:
         "total_output_tokens": 0,
         "total_estimated_cost_usd": 0.0,
         "latencies_ms": [],
+        # M13.1c — per-provider breakdown. Caller-level top-level
+        # fields stay as the SUM across providers (preserves M13.1b
+        # observability test assertions). Operators can drill into
+        # `by_provider[<provider>]` to compare e.g. anthropic vs
+        # openai cost / latency.
+        "by_provider": {},
+    }
+
+
+def _empty_provider_metrics() -> dict[str, Any]:
+    return {
+        "total_calls": 0,
+        "successful_calls": 0,
+        "total_input_tokens": 0,
+        "total_output_tokens": 0,
+        "total_estimated_cost_usd": 0.0,
+        "latencies_ms": [],
     }
 
 
@@ -75,6 +92,7 @@ def record_llm_call(
     estimated_cost_usd: Optional[float],
     latency_ms: int,
     success: bool,
+    provider: str = "unknown",
 ) -> None:
     """Push one call's metrics into the aggregator.
 
@@ -82,36 +100,78 @@ def record_llm_call(
     (``"llm_judge"`` / ``"ai_reasoner"``). Multiple callers may push
     concurrently — the implementation is thread-safe.
 
-    Failed calls still bump ``total_calls`` but do not contribute to
-    successful-call counters / token totals / cost / latency
-    distribution. This keeps the success-only stats honest while
-    still surfacing total attempt rate.
+    ``provider`` (M13.1c) is the LLM provider that served the call
+    (``"anthropic"`` / ``"openai"`` / ``"unknown"``). The same metric
+    shape is tracked twice: at the caller level (sum across
+    providers, preserving M13.1b semantics) and inside a
+    ``by_provider`` sub-dict keyed by provider name. The kwarg has
+    a default of ``"unknown"`` so legacy callers that don't pass it
+    still work — their metrics aggregate under ``by_provider["unknown"]``.
+
+    Failed calls still bump ``total_calls`` (at both caller and
+    provider levels) but do not contribute to successful-call
+    counters / token totals / cost / latency distribution. This keeps
+    the success-only stats honest while still surfacing total attempt
+    rate.
 
     NEVER raises. A broken aggregator silently degrades to no-op
     metrics rather than breaking the pipeline.
     """
     try:
         caller_key = str(caller or "unknown")
+        provider_key = str(provider or "unknown")
         with _LOCK:
-            metrics = _STATE.setdefault(caller_key, _empty_caller_metrics())
-            metrics["total_calls"] += 1
+            caller_metrics = _STATE.setdefault(
+                caller_key, _empty_caller_metrics(),
+            )
+            # M13.1c: backfill `by_provider` for any pre-existing state
+            # row that was created before this milestone (defence in
+            # depth against reset_metrics_for_tests / module reload
+            # race).
+            if "by_provider" not in caller_metrics:
+                caller_metrics["by_provider"] = {}
+            provider_metrics = caller_metrics["by_provider"].setdefault(
+                provider_key, _empty_provider_metrics(),
+            )
+
+            caller_metrics["total_calls"] += 1
+            provider_metrics["total_calls"] += 1
             if not success:
                 return
-            metrics["successful_calls"] += 1
-            metrics["total_input_tokens"] += int(input_tokens or 0)
-            metrics["total_output_tokens"] += int(output_tokens or 0)
+
+            caller_metrics["successful_calls"] += 1
+            provider_metrics["successful_calls"] += 1
+
+            input_int = int(input_tokens or 0)
+            output_int = int(output_tokens or 0)
+            caller_metrics["total_input_tokens"] += input_int
+            caller_metrics["total_output_tokens"] += output_int
+            provider_metrics["total_input_tokens"] += input_int
+            provider_metrics["total_output_tokens"] += output_int
+
             if estimated_cost_usd is not None:
-                metrics["total_estimated_cost_usd"] = round(
-                    float(metrics["total_estimated_cost_usd"])
-                    + float(estimated_cost_usd),
+                cost_float = float(estimated_cost_usd)
+                caller_metrics["total_estimated_cost_usd"] = round(
+                    float(caller_metrics["total_estimated_cost_usd"])
+                    + cost_float,
                     6,
                 )
-            latencies = metrics["latencies_ms"]
-            latencies.append(int(latency_ms or 0))
-            overflow = len(latencies) - _LATENCY_HISTORY_CAP
-            if overflow > 0:
-                # ring-buffer trim — drop the oldest entries.
-                del latencies[:overflow]
+                provider_metrics["total_estimated_cost_usd"] = round(
+                    float(provider_metrics["total_estimated_cost_usd"])
+                    + cost_float,
+                    6,
+                )
+
+            latency_int = int(latency_ms or 0)
+            for bucket in (
+                caller_metrics["latencies_ms"],
+                provider_metrics["latencies_ms"],
+            ):
+                bucket.append(latency_int)
+                overflow = len(bucket) - _LATENCY_HISTORY_CAP
+                if overflow > 0:
+                    # ring-buffer trim — drop the oldest entries.
+                    del bucket[:overflow]
     except Exception:  # noqa: BLE001 — never break the pipeline
         return
 
@@ -165,42 +225,65 @@ def get_metrics_snapshot() -> dict[str, dict[str, Any]]:
           ...
         }
     """
+    def _copy_metrics_row(row: dict[str, Any]) -> dict[str, Any]:
+        """Snapshot helper — copies one caller-or-provider metrics
+        row including its latency ring-buffer."""
+        return {
+            "total_calls": int(row["total_calls"]),
+            "successful_calls": int(row["successful_calls"]),
+            "total_input_tokens": int(row["total_input_tokens"]),
+            "total_output_tokens": int(row["total_output_tokens"]),
+            "total_estimated_cost_usd": float(
+                row["total_estimated_cost_usd"]
+            ),
+            "_latencies_ms": list(row["latencies_ms"]),
+        }
+
     # Step 1: copy state under lock.
     with _LOCK:
         copied: dict[str, dict[str, Any]] = {}
         for caller_key, metrics in _STATE.items():
-            copied[caller_key] = {
-                "total_calls": int(metrics["total_calls"]),
-                "successful_calls": int(metrics["successful_calls"]),
-                "total_input_tokens": int(metrics["total_input_tokens"]),
-                "total_output_tokens": int(metrics["total_output_tokens"]),
-                "total_estimated_cost_usd": float(
-                    metrics["total_estimated_cost_usd"]
-                ),
-                "_latencies_ms": list(metrics["latencies_ms"]),
-            }
+            caller_row = _copy_metrics_row(metrics)
+            providers_copy: dict[str, dict[str, Any]] = {}
+            for provider_key, prov_row in (
+                metrics.get("by_provider") or {}
+            ).items():
+                providers_copy[provider_key] = _copy_metrics_row(prov_row)
+            caller_row["_by_provider_raw"] = providers_copy
+            copied[caller_key] = caller_row
 
     # Step 2: compute statistics outside the lock.
-    snapshot: dict[str, dict[str, Any]] = {}
-    for caller_key, metrics in copied.items():
-        latencies = metrics.pop("_latencies_ms")
+    def _finalise_row(row: dict[str, Any]) -> dict[str, Any]:
+        latencies = row.pop("_latencies_ms")
         if latencies:
-            avg_latency_ms = int(round(sum(latencies) / len(latencies)))
-            p50_latency_ms = _percentile(latencies, 0.50)
-            p95_latency_ms = _percentile(latencies, 0.95)
+            row["avg_latency_ms"] = int(
+                round(sum(latencies) / len(latencies))
+            )
+            row["p50_latency_ms"] = _percentile(latencies, 0.50)
+            row["p95_latency_ms"] = _percentile(latencies, 0.95)
         else:
-            avg_latency_ms = 0
-            p50_latency_ms = 0
-            p95_latency_ms = 0
-        metrics["avg_latency_ms"] = avg_latency_ms
-        metrics["p50_latency_ms"] = p50_latency_ms
-        metrics["p95_latency_ms"] = p95_latency_ms
-        metrics["latency_sample_count"] = len(latencies)
-        # Round total cost to 6 decimal places for display determinism.
-        metrics["total_estimated_cost_usd"] = round(
-            metrics["total_estimated_cost_usd"], 6,
+            row["avg_latency_ms"] = 0
+            row["p50_latency_ms"] = 0
+            row["p95_latency_ms"] = 0
+        row["latency_sample_count"] = len(latencies)
+        row["total_estimated_cost_usd"] = round(
+            row["total_estimated_cost_usd"], 6,
         )
-        snapshot[caller_key] = metrics
+        return row
+
+    snapshot: dict[str, dict[str, Any]] = {}
+    for caller_key, caller_row in copied.items():
+        providers_raw = caller_row.pop("_by_provider_raw") or {}
+        _finalise_row(caller_row)
+        # M13.1c: per-provider breakdown shaped identically to the
+        # caller-level row so operators can drill in. The dict key is
+        # always "by_provider" so consumers can do
+        # snapshot["llm_judge"]["by_provider"]["anthropic"]["total_calls"].
+        caller_row["by_provider"] = {
+            provider_key: _finalise_row(prov_row)
+            for provider_key, prov_row in providers_raw.items()
+        }
+        snapshot[caller_key] = caller_row
     return snapshot
 
 

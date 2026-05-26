@@ -203,6 +203,19 @@ PRESERVED_REAL_ERRORS: tuple[tuple[str, str], ...] = (
 #                       below as well.
 #     Closes audit §1.5 #10 (print-based logging) completely.
 #     298 + 25 = 323
+#   * M13.1c (Anthropic provider + multi-provider abstraction —
+#     adds AnthropicProvider class in llm_judge.py plus
+#     `llm_judge.fallback_engaged` log.info emitted by run_judge
+#     when the provider chain advances past the primary slot.
+#     llm_judge.py is NOT in MIGRATED_FILES so the new log calls
+#     do not bump the M14.4 counting scope. The llm_observability.py
+#     aggregator gained a `by_provider` sub-dict but emits no new
+#     log calls. ai_reasoner.py's one record_llm_call site gained a
+#     `provider="openai"` kwarg but emits no new log calls. Test
+#     files (test_m13_1c_anthropic_provider.py + minor updates to
+#     test_m13_1b_obs.py / test_m13_1b_openai_provider.py /
+#     test_llm_judge.py) are also outside the MIGRATED_FILES scope.
+#     323 + 0 = 323): pin stays.
 #
 # Any future milestone that legitimately adds log calls bumps this
 # expected count; the contract M14.4 actually pins is the *level

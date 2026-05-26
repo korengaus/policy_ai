@@ -42,6 +42,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Optional
@@ -87,19 +88,31 @@ DEFAULT_DOWNGRADE_FALLBACK = "draft_needs_review"
 # M13.1b — per-1K-token pricing for cost estimation. Hardcoded so the
 # cost log can self-report without an external rate sheet.
 #
-# Verified against the OpenAI public pricing page on 2026-05-26:
+# OpenAI gpt-4o-mini verified against the OpenAI public pricing page
+# on 2026-05-26:
 #   gpt-4o-mini → $0.15 / 1M input tokens, $0.60 / 1M output tokens
 #   ⇒ $0.000150 / 1K input, $0.000600 / 1K output.
 # Sources (M13.1b-obs verification):
 #   - https://openai.com/api/pricing/
 #   - https://developers.openai.com/api/docs/models/gpt-4o-mini
 #
+# M13.1c — Anthropic Claude Sonnet 4.6 verified 2026-05-27 against:
+#   - https://docs.anthropic.com/en/docs/about-claude/pricing
+#   - https://www.anthropic.com/news/claude-sonnet-4-6
+#   claude-sonnet-4-6 → $3.00 / 1M input, $15.00 / 1M output
+#   ⇒ $0.003 / 1K input, $0.015 / 1K output.
+# Pricing matches Sonnet 4.5 (Anthropic kept the same rate card).
+# Prompt caching (up to 90% savings) and batch processing (50%
+# savings) are NOT applied here — flat per-call rate. Deferred to
+# follow-up milestone with explicit operator approval.
+#
 # Any model not listed produces ``estimated_cost_usd = None`` in the
 # log payload rather than guessing. Update this dict (not call sites)
-# when OpenAI changes pricing or when a new model is enabled, and
+# when a provider changes pricing or when a new model is enabled, and
 # refresh the verification date above in the same PR.
 LLM_COST_PER_1K = {
     "gpt-4o-mini": {"input": 0.000150, "output": 0.000600},
+    "claude-sonnet-4-6": {"input": 0.003000, "output": 0.015000},
 }
 
 
@@ -266,18 +279,52 @@ class StubOpenAIProvider(ReasoningProvider):
 
 _OPENAI_TIMEOUT_SECONDS = 15.0
 
+# M13.1c — Anthropic uses the same 15s budget as OpenAI; Sonnet 4.6
+# is generally slower per-call than gpt-4o-mini but well under 15s
+# for the short Judge prompt. Observability will surface real p95.
+_ANTHROPIC_TIMEOUT_SECONDS = 15.0
 
-def _failed_response(request: "LLMRequest", reason: str) -> "LLMResponse":
-    """Shared failure-shaped LLMResponse for OpenAIProvider. Empty
-    ``raw_text`` plus ``success=False`` drives ``run_judge`` past this
-    provider to the next chain entry (or the safe-confirm fallback)."""
+
+# M13.1c — strip ```json ... ``` and ``` ... ``` code-fence wrappers
+# that Anthropic Sonnet sometimes emits around its JSON response.
+# OpenAI's `response_format={"type":"json_object"}` already returns
+# bare JSON so this helper is only meaningful inside AnthropicProvider.
+# Falls back to the original text when no fence is found.
+_JSON_FENCE_RE = re.compile(
+    r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL,
+)
+
+
+def _strip_json_fences(text: str) -> str:
+    if not text:
+        return text
+    match = _JSON_FENCE_RE.match(text)
+    if match:
+        return match.group(1)
+    return text
+
+
+def _failed_response_for(
+    request: "LLMRequest", provider_name: str, reason: str,
+) -> "LLMResponse":
+    """Generalised failure-shaped LLMResponse used by both OpenAI and
+    Anthropic providers. Empty ``raw_text`` plus ``success=False``
+    drives ``run_judge`` past this provider to the next chain entry
+    (or the safe-confirm fallback)."""
     return LLMResponse(
         raw_text="",
         model=request.model,
-        provider="openai",
+        provider=provider_name,
         success=False,
         error=reason,
     )
+
+
+def _failed_response(request: "LLMRequest", reason: str) -> "LLMResponse":
+    """Compat shim — preserves the M13.1b shape of the OpenAI-only
+    failure helper. New providers call :func:`_failed_response_for`
+    directly with their own provider name."""
+    return _failed_response_for(request, "openai", reason)
 
 
 class OpenAIProvider(ReasoningProvider):
@@ -357,24 +404,189 @@ class OpenAIProvider(ReasoningProvider):
         )
 
 
+# ---------------------------------------------------------------------------
+# M13.1c — Real Anthropic provider (Claude Sonnet 4.6 primary).
+#
+# Mirrors OpenAIProvider's shape: lazy SDK import, env-key activation,
+# NEVER-raises contract, structured failure responses.
+#
+# Key differences from OpenAI Chat Completions surfaced here:
+#   * system prompt is passed at the top level as ``system=`` (not in
+#     the messages array).
+#   * usage fields are ``input_tokens`` / ``output_tokens`` (not
+#     ``prompt_tokens`` / ``completion_tokens``).
+#   * text is at ``message.content[0].text`` (not
+#     ``choices[0].message.content``).
+#   * no native ``response_format={"type":"json_object"}`` — JSON
+#     output is requested via the existing prompt + Pydantic-style
+#     validator. Sonnet sometimes wraps JSON in ```json fences; we
+#     strip them via :func:`_strip_json_fences` BEFORE returning so
+#     the validator sees bare JSON.
+# ---------------------------------------------------------------------------
+
+
+def _resolve_anthropic_model(request_model: Optional[str]) -> str:
+    """Provider-owned model resolution. If main.py passed a Claude
+    model id (begins with ``claude-``), honour it; otherwise fall
+    back to ``ANTHROPIC_MODEL`` env (default ``claude-sonnet-4-6``).
+    Same pattern keeps OpenAIProvider's model resolution untouched
+    when it receives an OpenAI model id like ``gpt-4o-mini``."""
+    if request_model and str(request_model).startswith("claude-"):
+        return str(request_model)
+    return os.environ.get("ANTHROPIC_MODEL", "").strip() or "claude-sonnet-4-6"
+
+
+class AnthropicProvider(ReasoningProvider):
+    """Real Anthropic Messages API caller (claude-sonnet-4-6 by default).
+
+    Activation requires BOTH ``ANTHROPIC_API_KEY`` set in the environment
+    AND ``LLM_JUDGE_ENABLED=true`` at the pipeline call site (the second
+    guard lives in main.py). ``is_available`` only checks the key.
+
+    NEVER raises. Any SDK error (import, auth, network, rate limit,
+    timeout, shape mismatch) returns a failure-shaped LLMResponse so
+    ``run_judge`` falls back cleanly — to OpenAIProvider in the
+    M13.1c default chain, then to safe-confirm.
+    """
+
+    name = "anthropic"
+
+    def is_available(self) -> bool:
+        return bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
+
+    def call(self, request: LLMRequest) -> LLMResponse:
+        try:
+            from anthropic import Anthropic  # lazy import
+        except ImportError:
+            return _failed_response_for(
+                request, "anthropic", "anthropic_sdk_missing",
+            )
+
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+        if not api_key:
+            return _failed_response_for(
+                request, "anthropic", "missing_api_key",
+            )
+
+        model = _resolve_anthropic_model(request.model)
+        start = time.time()
+        try:
+            client = Anthropic(
+                api_key=api_key, timeout=_ANTHROPIC_TIMEOUT_SECONDS,
+            )
+            message = client.messages.create(
+                model=model,
+                max_tokens=request.max_tokens,
+                system=request.system_prompt,
+                messages=[{"role": "user", "content": request.user_prompt}],
+                temperature=request.temperature,
+            )
+        except Exception as exc:  # noqa: BLE001 — never propagate
+            # Exception type is logged but the full message (which may
+            # quote prompt fragments) is intentionally NOT captured —
+            # cuts the chance of leaking prompt PII into logs. Same
+            # contract as OpenAIProvider.call.
+            return _failed_response_for(
+                request, "anthropic",
+                f"anthropic_call_failed: {type(exc).__name__}",
+            )
+        latency_ms = int((time.time() - start) * 1000)
+
+        try:
+            content_blocks = getattr(message, "content", None) or []
+            raw_text = ""
+            if content_blocks:
+                first_block = content_blocks[0]
+                raw_text = getattr(first_block, "text", "") or ""
+            raw_text = _strip_json_fences(raw_text)
+            usage = getattr(message, "usage", None)
+            input_tokens = (
+                getattr(usage, "input_tokens", 0) or 0 if usage else 0
+            )
+            output_tokens = (
+                getattr(usage, "output_tokens", 0) or 0 if usage else 0
+            )
+        except (AttributeError, IndexError, TypeError):
+            return _failed_response_for(
+                request, "anthropic",
+                "anthropic_response_shape_unexpected",
+            )
+
+        return LLMResponse(
+            raw_text=raw_text,
+            model=model,
+            provider=self.name,
+            success=True,
+            latency_ms=latency_ms,
+            input_tokens=int(input_tokens),
+            output_tokens=int(output_tokens),
+        )
+
+
+def _resolve_provider_instance(name: str) -> Optional[ReasoningProvider]:
+    """Map a provider name (from env vars) to a real provider instance.
+    Returns None when the name is ``none`` / ``disabled`` / unknown —
+    callers treat that as "no provider in this slot"."""
+    label = (name or "").strip().lower()
+    if label == "anthropic":
+        return AnthropicProvider()
+    if label == "openai":
+        return OpenAIProvider()
+    # ``none`` / ``disabled`` / empty / unknown → drop the slot.
+    return None
+
+
 def get_default_provider_chain() -> list:
     """Returns the provider chain in priority order.
 
-    M13.1b activation logic:
+    M13.1c env-driven routing:
 
-    * ``OPENAI_API_KEY`` set and non-empty → ``[OpenAIProvider()]``
-      (real provider; cost-incurring).
-    * Otherwise → ``[StubOpenAIProvider()]`` (offline-safe fallback;
-      drives ``run_judge`` to safe-confirm without any network call).
+    * ``LLM_PROVIDER`` controls the PRIMARY provider:
+        - ``anthropic`` (default if unset) → AnthropicProvider primary
+        - ``openai``                       → OpenAIProvider primary
+        - ``disabled``                     → empty chain (run_judge
+          immediately returns the safe-confirm fallback — equivalent
+          to having no provider available)
+    * ``LLM_FALLBACK_PROVIDER`` controls the SECONDARY slot:
+        - ``openai`` (default if unset) → OpenAIProvider in slot 2
+        - ``anthropic``                 → AnthropicProvider in slot 2
+        - ``none``                      → no slot 2 (primary-only chain)
 
-    ``StubAnthropicProvider`` is intentionally NOT in this chain in
-    M13.1b — Anthropic activation is M13.1c. The class remains in the
-    file so the existing test suite, the dry-run CLI, and the future
-    M13.1c diff stay minimal.
+    Providers whose API key is unset still appear in the chain — their
+    ``is_available`` returns False and ``run_judge`` advances past
+    them. This means an operator can pre-configure the chain even
+    before adding keys.
+
+    Stubs are NOT in the active chain in M13.1c. They remain available
+    for the dry-run CLI to use explicitly via its ``--provider`` flag.
+
+    M13.1b backward compat: with both API keys set on Render and
+    ``LLM_PROVIDER`` unset, the chain is [Anthropic, OpenAI]. This IS
+    a behavioral change from M13.1b (which was OpenAI-only). To restore
+    M13.1b behavior, the operator sets ``LLM_PROVIDER=openai`` in the
+    Render dashboard.
     """
-    if os.environ.get("OPENAI_API_KEY", "").strip():
-        return [OpenAIProvider()]
-    return [StubOpenAIProvider()]
+    primary_name = os.environ.get("LLM_PROVIDER", "anthropic")
+    fallback_name = os.environ.get("LLM_FALLBACK_PROVIDER", "openai")
+
+    chain: list = []
+    primary = _resolve_provider_instance(primary_name)
+    if primary is not None:
+        chain.append(primary)
+
+    # Skip the fallback slot when LLM_PROVIDER is disabled — there's
+    # no primary to "fall back FROM", so an explicitly-disabled
+    # chain means "no LLM at all".
+    if (primary_name or "").strip().lower() != "disabled":
+        fallback = _resolve_provider_instance(fallback_name)
+        # Avoid putting the same provider twice (e.g.
+        # LLM_PROVIDER=openai + LLM_FALLBACK_PROVIDER=openai).
+        if fallback is not None and (
+            primary is None or type(fallback) is not type(primary)
+        ):
+            chain.append(fallback)
+
+    return chain
 
 
 # ---------------------------------------------------------------------------
@@ -496,6 +708,14 @@ class JudgeVerdict:
     fallback_reason: Optional[str] = None
     input_tokens: int = 0
     output_tokens: int = 0
+    # M13.1c — true iff the primary provider in the chain failed and
+    # the chain advanced to a secondary provider (or to safe-confirm).
+    # Distinct from ``fell_back`` which is True only when the verdict
+    # itself IS the safe-confirm fallback (LLM unreachable / output
+    # rejected). The two can both be True (primary failed + fallback
+    # also failed → safe-confirm). M13.1b tests check ``fell_back``
+    # alone and remain unaffected.
+    primary_provider_failed: bool = False
     # Safety pins — always False / True regardless of LLM output.
     truth_claim: bool = False
     operator_review_required: bool = True
@@ -665,9 +885,28 @@ def run_judge(
     request = build_judge_request(judge_input, model=model)
 
     last_error = None
-    for provider in providers:
+    # M13.1c — track which provider attempts failed so we can:
+    #   (a) set verdict.primary_provider_failed when the chain
+    #       advances past the first slot, and
+    #   (b) emit one `llm_judge.fallback_engaged` log per fallback
+    #       attempt so operators can see why we engaged secondary.
+    primary_name: Optional[str] = (
+        providers[0].name if providers else None
+    )
+    primary_failure_reason: Optional[str] = None
+
+    for slot_index, provider in enumerate(providers):
+        is_primary = (slot_index == 0)
+
         if not provider.is_available():
             last_error = f"{provider.name} unavailable"
+            if is_primary:
+                primary_failure_reason = last_error
+            else:
+                _emit_fallback_engaged_log(
+                    primary_name, primary_failure_reason,
+                    provider.name, "skipped: " + last_error,
+                )
             continue
         try:
             start = time.time()
@@ -675,12 +914,27 @@ def run_judge(
             latency_ms = int((time.time() - start) * 1000)
         except Exception as exc:  # noqa: BLE001
             last_error = f"{provider.name} crashed: {exc}"
+            if is_primary:
+                primary_failure_reason = last_error
             continue
 
         if response is None or not response.success:
             err = (response.error if response is not None else "no response")
             last_error = f"{provider.name} returned error: {err}"
+            if is_primary:
+                primary_failure_reason = last_error
             continue
+
+        # Provider returned success — if we've advanced past the primary
+        # slot, that means primary failed and we're engaging the
+        # fallback. Emit the structured log BEFORE returning so the
+        # operator-visible record sits next to the corresponding
+        # `llm_judge.completed` line.
+        if not is_primary:
+            _emit_fallback_engaged_log(
+                primary_name, primary_failure_reason,
+                provider.name, None,
+            )
 
         verdict = validate_judge_response_json(
             response.raw_text, judge_input.current_label,
@@ -690,10 +944,46 @@ def run_judge(
         verdict.latency_ms = latency_ms
         verdict.input_tokens = int(response.input_tokens or 0)
         verdict.output_tokens = int(response.output_tokens or 0)
+        verdict.primary_provider_failed = not is_primary
         _emit_cost_log(response, verdict)
         return verdict
 
-    return _safe_confirm_fallback(last_error or "no available provider")
+    verdict = _safe_confirm_fallback(last_error or "no available provider")
+    # If the primary slot existed and failed, that path is recorded too.
+    verdict.primary_provider_failed = bool(primary_failure_reason)
+    return verdict
+
+
+def _emit_fallback_engaged_log(
+    primary_name: Optional[str],
+    primary_failure_reason: Optional[str],
+    fallback_name: str,
+    fallback_skip_reason: Optional[str],
+) -> None:
+    """M13.1c — single structured INFO emission when the provider chain
+    advances past the primary. Lives in llm_judge.py (NOT in
+    MIGRATED_FILES) so it does NOT bump the M14.4 pin.
+
+    NEVER raises. ANTHROPIC_API_KEY / OPENAI_API_KEY never logged
+    here — only provider names and failure-reason strings (which
+    contain exception type names, never prompt content)."""
+    try:
+        log.info(
+            "llm_judge.fallback_engaged",
+            extra={
+                "primary_provider": primary_name,
+                "primary_failure_reason": (
+                    primary_failure_reason or "unknown"
+                )[:300],
+                "fallback_provider": fallback_name,
+                "fallback_skip_reason": (
+                    fallback_skip_reason[:300]
+                    if fallback_skip_reason else None
+                ),
+            },
+        )
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _emit_cost_log(response: LLMResponse, verdict: JudgeVerdict) -> None:
@@ -739,6 +1029,11 @@ def _emit_cost_log(response: LLMResponse, verdict: JudgeVerdict) -> None:
             estimated_cost_usd=cost,
             latency_ms=int(response.latency_ms or 0),
             success=bool(response.provider and not verdict.fell_back),
+            # M13.1c — populate the per-provider sub-dict so operators
+            # can compare anthropic vs openai cost/latency. Falls back
+            # to "unknown" inside record_llm_call when response.provider
+            # is empty/None (should not happen in practice).
+            provider=str(response.provider or "unknown"),
         )
     except Exception:  # noqa: BLE001 — logging must never break the pipeline
         pass
@@ -775,6 +1070,11 @@ def judge_verdict_to_dict(verdict: JudgeVerdict) -> dict:
             verdict.input_tokens or 0,
             verdict.output_tokens or 0,
         ),
+        # M13.1c — exposes whether the provider chain advanced past
+        # the primary slot (Anthropic in the default config). Always
+        # False in M13.1b-only deployments where the chain has a
+        # single provider.
+        "primary_provider_failed": bool(verdict.primary_provider_failed),
         "truth_claim": False,
         "operator_review_required": True,
     }

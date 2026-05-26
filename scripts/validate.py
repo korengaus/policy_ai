@@ -275,6 +275,17 @@ def _commands() -> List[List[str]]:
         # files (M14.0-print-a's 9 + M14.0-print-b's 2) appear in
         # MIGRATED_FILES — the "audit §1.5 #10 closed" invariant.
         [python, "tests/test_m14_0_print_b_migration.py"],
+        # M13.1c (2026-05-27) — AnthropicProvider + multi-provider
+        # abstraction for the LLM judge. Adds Claude Sonnet 4.6 as
+        # primary provider with OpenAI gpt-4o-mini as fallback,
+        # gated by LLM_PROVIDER / LLM_FALLBACK_PROVIDER env vars.
+        # 10 tests: happy path (2 — response shape + JSON fence
+        # stripping), failure (3 — SDK missing / no key / call raise),
+        # cost formula for Sonnet 4.6, routing (4 — primary success /
+        # primary fail with fallback log + primary_provider_failed
+        # flag / LLM_PROVIDER=openai skips Anthropic / LLM_PROVIDER=
+        # disabled returns safe-confirm).
+        [python, "tests/test_m13_1c_anthropic_provider.py"],
         # M11.0d-1 — verdict producer disagreement diagnostic
         # (DIAGNOSIS ONLY, no production code changed). Pins the
         # current per-producer output snapshot for 42 synthetic-matrix
