@@ -375,6 +375,16 @@ def fetch_article_body(url: str, max_chars: int = 5000) -> str:
         # EXCEPTED_EXCEPT_ERRORS in tests/test_log_level_reclassification.py.
         # Return value (empty string) preserved — Category 3 ambition
         # (distinguish fetch_failed from empty body) deferred to M11.7d.
+        #
+        # M11.7c: intentionally broad — narrowing reviewed and rejected.
+        # The try-body fans out across `_fetch_html_candidates` (requests
+        # family), `_extract_candidate_text` (trafilatura + BeautifulSoup
+        # with undocumented exception surfaces), and several string-op
+        # helpers. trafilatura usually returns None on failure but can
+        # raise lxml-level errors on malformed HTML; BS4 can raise
+        # AttributeError/RecursionError on pathological DOMs. Narrowing
+        # to any tuple risks silently leaking exceptions on edge-case
+        # article HTML — see docs/EXCEPTION_HANDLING_AUDIT.md Site 2.
         log.warning(
             "article_extractor.fetch_failed",
             extra={

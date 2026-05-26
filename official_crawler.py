@@ -881,6 +881,17 @@ def _extract_candidate_links(
         # M11.7a-2 Site 5b: structured warning so site-specific parser
         # regressions surface in JSON logs. Return shape unchanged —
         # falls through to the generic_fallback parser below.
+        #
+        # M11.7c: intentionally broad — narrowing reviewed and rejected.
+        # `extract_links_for_site` dispatches to per-site parsers
+        # (FSS / FSC / IBK / MOLIT / Gov24 / BOK / Assembly) whose
+        # failure modes are unbounded — BS4 AttributeError on layout
+        # changes, KeyError from internal mapping tables, IndexError
+        # from list ops, ValueError from urljoin on malformed hrefs.
+        # The contract documented in the audit is "a broken site-
+        # specific parser MUST NOT block the generic_fallback parser
+        # that runs below" — narrowing here would defeat that
+        # guarantee. See docs/EXCEPTION_HANDLING_AUDIT.md Site 5b.
         log.warning(
             "official_crawler.site_specific_parser_failed",
             extra={
@@ -1203,6 +1214,22 @@ def fetch_best_official_document(search_result: dict, news_context: dict | None 
                     # retry-loop failures. Return shape unchanged — the
                     # error string is still captured on attempt_result and
                     # the loop continues to the next query variant.
+                    #
+                    # M11.7c: intentionally broad — narrowing reviewed and
+                    # rejected pending production-log audit. The try-body
+                    # fans out across `_request_url` (RequestException
+                    # family), `raise_for_status` (HTTPError),
+                    # `_response_text` (UnicodeDecodeError), `_extract_html_text`
+                    # (BS4 errors), and `_extract_candidate_links` (which
+                    # falls through to `extract_official_result_links`
+                    # OUTSIDE Site 5b's inner try → BS4/urljoin errors can
+                    # surface here). Narrowing to RequestException would
+                    # propagate BS4/urljoin/scoring errors up to the outer
+                    # wrapper (Site 5e), mis-classifying per-attempt parse
+                    # failures as outer-wrapper failures. The M11.7a-2
+                    # `exception_type` field in the warning now collects
+                    # the data needed for a future evidence-based narrowing
+                    # — see docs/EXCEPTION_HANDLING_AUDIT.md Site 5c.
                     log.warning(
                         "official_crawler.attempt_failed",
                         extra={
@@ -1310,6 +1337,22 @@ def fetch_best_official_document(search_result: dict, news_context: dict | None 
                 # M11.7a-2 Site 5d: structured warning for per-candidate
                 # document evaluation failures. Return shape unchanged —
                 # candidate marked error_page and excluded from `evaluated`.
+                #
+                # M11.7c: intentionally broad — narrowing reviewed and
+                # rejected pending production-log audit. The try-body
+                # fans out across `_request_url` (RequestException
+                # family + MissingSchema/InvalidURL on malformed candidate
+                # URLs), `raise_for_status` (HTTPError),
+                # `_extract_document_content` (BS4/trafilatura),
+                # `_apply_candidate_title_fallback` /
+                # `_document_quality_exclusion_reason` (string ops), and
+                # `score_document_relevance` (KeyError/TypeError on
+                # malformed scoring inputs). Narrowing to RequestException
+                # would mis-classify scoring/parsing errors as outer-
+                # wrapper failures. The M11.7a-2 `exception_type` field
+                # in the warning now collects the data needed for a
+                # future evidence-based narrowing — see
+                # docs/EXCEPTION_HANDLING_AUDIT.md Site 5d.
                 log.warning(
                     "official_crawler.candidate_evaluation_failed",
                     extra={

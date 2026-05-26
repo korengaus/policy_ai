@@ -923,6 +923,18 @@ def resolve_google_news_url(google_news_url: str) -> str:
         # PRESERVED_REAL_ERRORS in tests/test_log_level_reclassification.py
         # pins the substring '원문 URL 변환 실패'. Adds extra={} fields for
         # alertable observability; +0 log call (same call, structured).
+        #
+        # M11.7c: intentionally broad — narrowing reviewed and rejected.
+        # The googlenewsdecoder library (decoderv2.py) raises bare
+        # `Exception("Failed to fetch data from Google.")`,
+        # `Exception("Header not found...")`, and
+        # `Exception("Footer not found...")` directly — not subclasses.
+        # Narrowing to ANY tuple of specific types would silently fail
+        # to catch these library-raised exceptions and break the
+        # "decoder failed → return original URL" fallback. Broad catch
+        # is also forward-compatible with future library bumps that
+        # might change exception classes — see docs/EXCEPTION_HANDLING_AUDIT.md
+        # Site 3a.
         log.error(
             f'원문 URL 변환 실패: {error}',
             extra={

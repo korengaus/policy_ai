@@ -186,6 +186,19 @@ def _commands() -> List[List[str]]:
         # verbatim. Return shapes byte-identical; all 9 audit cites
         # now resolved.
         [python, "tests/test_m11_7a_2_exception_logging.py"],
+        # M11.7c — exception-narrowing review of the same 5 sites.
+        # Reviewed each broad `except Exception` for narrowing
+        # feasibility and concluded all 5 should remain broad with
+        # documented inline rationale. Decisive Site 3a finding:
+        # googlenewsdecoder/decoderv2.py raises bare `Exception("...")`
+        # — narrowing would silently leak library errors. Static AST
+        # pins assert each handler still catches `Exception` (not
+        # narrowed) AND carries an M11.7c marker comment; runtime
+        # pins assert each site still catches its primary expected
+        # exception class (RequestException family / library bare
+        # Exception / BS4 AttributeError). Guards against future
+        # "cleanup" PRs that narrow without operator approval.
+        [python, "tests/test_m11_7c_exception_narrowing.py"],
         # M11.0d-1 — verdict producer disagreement diagnostic
         # (DIAGNOSIS ONLY, no production code changed). Pins the
         # current per-producer output snapshot for 42 synthetic-matrix
