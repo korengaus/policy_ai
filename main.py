@@ -888,7 +888,15 @@ def _process_news_item_phase_a(
         except Exception as exc:  # noqa: BLE001 — judge must never break pipeline
             log.warning(
                 "llm_judge.failed",
-                extra={"error_type": type(exc).__name__},
+                # M13.1c-hotfix-1: capture the truncated exception
+                # message alongside the type so operators can pinpoint
+                # KeyError keys / SDK error texts without enabling
+                # debug logging. 200-char cap mirrors the conservative
+                # truncation used by pipeline_worker.save_failed.
+                extra={
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc)[:200],
+                },
             )
     debug_summary["llm_judge"] = judge_debug_payload
 

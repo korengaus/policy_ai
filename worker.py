@@ -33,6 +33,7 @@ from __future__ import annotations
 import os
 import sys
 
+from database import init_db
 from structured_logging import get_logger
 
 
@@ -102,6 +103,16 @@ def main() -> int:
         f"(redis url set; ping OK)",
         extra={"queue_name": queue_name},
     )
+    # M13.1c-hotfix-1: ensure SQLite schema exists before the worker
+    # consumes jobs. analyze_pipeline + save_analysis_result touch
+    # embedding_cache and analysis_results directly; without this call
+    # the worker hits "no such table" on first job because Render
+    # spins Web and Worker on separate ephemeral filesystems (only
+    # api_server.lifespan calls init_db on the Web side). Idempotent:
+    # all CREATE statements use IF NOT EXISTS. Per Phase 1 §①, an
+    # init failure is propagated as a strong signal — Render restarts
+    # the process and the operator sees the exception in stderr.
+    init_db()
     queue = rq.Queue(queue_name, connection=connection)
     worker = rq.Worker([queue], connection=connection)
     try:
