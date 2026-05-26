@@ -50,6 +50,17 @@ MIGRATED_FILES: tuple[str, ...] = (
     "evidence_extraction_agent.py",
     "contradiction_agent.py",
     "official_source_body.py",
+    # M14.0-print-a (2026-05-26) — 9 pipeline files newly migrated
+    # from print() to structured logging. See lineage block below.
+    "official_source_search.py",
+    "memory_store.py",
+    "source_reliability_agent.py",
+    "worker.py",
+    "source_retrieval_agent.py",
+    "claim_extractor.py",
+    "official_evidence_resolution.py",
+    "claim_normalizer.py",
+    "pipeline_debug.py",
 )
 
 
@@ -156,15 +167,36 @@ PRESERVED_REAL_ERRORS: tuple[tuple[str, str], ...] = (
 #     a record_llm_call() invocation but no new log call. Both
 #     touched files are outside MIGRATED_FILES, so the pin stays
 #     at 270): 270 + 0 = 270
+#   * M14.0-print-a (pipeline print() → structured logging — 26 new
+#     log calls across 9 files newly added to MIGRATED_FILES.
+#     Per-file contribution to the +28 pin bump:
+#       official_source_search.py     +8 new (was 0 existing; now 8)
+#       memory_store.py               +6 new + 2 existing = 8
+#         (existing = memory_store.load_corrupt_or_missing warning
+#         + memory_store.save_tmp_cleanup_failed warning from M11.7a
+#         / M12.2 — these were already emitted, just outside scope)
+#       source_reliability_agent.py   +3 new (was 0; now 3)
+#       worker.py                     +3 new (was 0; now 3) — 1 log.error
+#         + 2 log.info
+#       source_retrieval_agent.py     +2 new (was 0; now 2)
+#       claim_extractor.py            +1 new (was 0; now 1)
+#       official_evidence_resolution.py +1 new (was 0; now 1)
+#       claim_normalizer.py           +1 new (was 0; now 1)
+#       pipeline_debug.py             +1 new (was 0; now 1)
+#     Total entering scope: 26 NEW + 2 EXISTING = 28: 270 + 28 = 298
 #
 # Any future milestone that legitimately adds log calls bumps this
 # expected count; the contract M14.4 actually pins is the *level
 # distribution*, not the absolute count.
-EXPECTED_TOTAL_LOG_CALLS = 270
+EXPECTED_TOTAL_LOG_CALLS = 298
 
 # Post-M14.4: 12 (down from 17 pre-M14.4 — 5 reclassifications).
 # M13.3d added log.info / log.warning calls only — no new log.error.
-EXPECTED_TOTAL_LOG_ERRORS = 12
+# M14.0-print-a (2026-05-26): worker.py joined MIGRATED_FILES with
+# 1 log.error in `_fail` (worker startup failure path). The other
+# 8 newly-migrated files added log.info / log.warning only. Bump
+# from 12 → 13.
+EXPECTED_TOTAL_LOG_ERRORS = 13
 
 
 def _read(filename: str) -> str:

@@ -5,7 +5,13 @@ from collections import Counter
 from urllib.parse import urlparse
 
 from official_metadata import is_official_domain, looks_like_official_search_or_index_url
+from structured_logging import get_logger
 from text_utils import sanitize_text
+
+
+# M14.0-print-a (2026-05-26): module logger replaces the
+# [OfficialEvidenceResolution] print() summary diagnostic.
+log = get_logger(__name__)
 
 
 DETAIL_URL_SIGNALS = [
@@ -430,12 +436,20 @@ def resolve_official_evidence(
         "official_resolution_failures": dict(sorted(failures.items())),
         "official_resolution_top_score": max((int(source.get("official_evidence_score") or 0) for source in official), default=0),
     }
-    print(
+    # M14.0-print-a (2026-05-26): print → log.info conversion.
+    log.info(
         "[OfficialEvidenceResolution] "
         f"candidates={summary['official_resolution_candidates']} "
         f"direct={summary['official_resolution_direct_matches']} "
         f"contextual={summary['official_resolution_contextual_matches']} "
         f"weak={summary['official_resolution_weak_candidates']} "
-        f"top_score={summary['official_resolution_top_score']}"
+        f"top_score={summary['official_resolution_top_score']}",
+        extra={
+            "candidates": summary["official_resolution_candidates"],
+            "direct": summary["official_resolution_direct_matches"],
+            "contextual": summary["official_resolution_contextual_matches"],
+            "weak": summary["official_resolution_weak_candidates"],
+            "top_score": summary["official_resolution_top_score"],
+        },
     )
     return resolved, summary

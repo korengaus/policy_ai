@@ -33,9 +33,33 @@ from __future__ import annotations
 import os
 import sys
 
+from structured_logging import get_logger
+
+
+# M14.0-print-a (2026-05-26): module logger for the worker entry-point
+# diagnostics. The structured_logging handler emits to stderr, matching
+# the original `file=sys.stderr` destination — no change in where these
+# messages land for Render's log capture.
+log = get_logger(__name__)
+
 
 def _fail(code: int, message: str) -> int:
-    print(f"[worker] {message}", file=sys.stderr)
+    # M14.0-print-a (2026-05-26): print → log.error. Worker startup
+    # failures are real errors. Original `file=sys.stderr` is preserved
+    # by the structured_logging handler (which targets stderr). Uses
+    # `reason` for the message text — `message` is a LogRecord standard
+    # attribute and gets filtered out of extras.
+    #
+    # The literal "startup failed" prefix satisfies the M14.4
+    # NoFalsePositiveErrorsPin contract — log.error needs a
+    # strong-error keyword in the literal portion of the f-string OR
+    # to live inside an except. _fail is called from the main worker
+    # flow (REDIS_URL missing / SDK ImportError / Redis ping failed),
+    # not from an except block, so the keyword path applies.
+    log.error(
+        f"[worker] startup failed: {message}",
+        extra={"exit_code": code, "reason": message[:500]},
+    )
     return code
 
 
@@ -71,16 +95,20 @@ def main() -> int:
         )
 
     queue_name = os.environ.get("WORKER_QUEUE_NAME", "default").strip() or "default"
-    print(
+    # M14.0-print-a (2026-05-26): print → log.info — worker startup
+    # success is a normal operational milestone.
+    log.info(
         f"[worker] starting RQ worker on queue {queue_name!r} "
-        f"(redis url set; ping OK)"
+        f"(redis url set; ping OK)",
+        extra={"queue_name": queue_name},
     )
     queue = rq.Queue(queue_name, connection=connection)
     worker = rq.Worker([queue], connection=connection)
     try:
         worker.work(with_scheduler=False)
     except KeyboardInterrupt:
-        print("[worker] interrupted by keyboard; shutting down cleanly")
+        # M14.0-print-a (2026-05-26): print → log.info — clean shutdown.
+        log.info("[worker] interrupted by keyboard; shutting down cleanly")
         return 0
     return 0
 

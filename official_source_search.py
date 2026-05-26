@@ -1,6 +1,14 @@
 import re
 from urllib.parse import quote
 
+from structured_logging import get_logger
+
+
+# M14.0-print-a (2026-05-26): module logger for the
+# print_official_source_candidates diagnostic helper. See
+# docs/EXCEPTION_HANDLING_AUDIT.md and the M14.0b/c migration patterns.
+log = get_logger(__name__)
+
 
 OFFICIAL_SOURCE_CATALOG = [
     {
@@ -889,16 +897,45 @@ def generate_official_source_candidates(
 
 
 def print_official_source_candidates(candidates: list[dict]):
-    print("\n----- Official source candidates -----")
+    # M14.0-print-a (2026-05-26): print → log.info conversion. Function
+    # name kept for backward compatibility — operators may invoke it via
+    # the existing call-site in main.py. Korean / English content
+    # preserved verbatim; structured extras added per interpolated field.
+    log.info("\n----- Official source candidates -----")
 
     if not candidates:
-        print("No official source candidates generated.")
+        log.info("No official source candidates generated.")
         return
 
     for candidate in candidates:
-        print(f"- {candidate['source_name']} ({candidate['source_type']})")
-        print(f"  reliability: {candidate['reliability_score']}/5")
-        print(f"  query: {candidate['search_query']}")
-        print(f"  search_query_variants: {', '.join(candidate.get('search_query_variants') or [])}")
-        print(f"  official_search_url: {candidate['official_search_url']}")
-        print(f"  reason: {candidate['reason']}")
+        source_name = candidate.get("source_name") or ""
+        source_type = candidate.get("source_type") or ""
+        log.info(
+            f"- {source_name} ({source_type})",
+            extra={"source_name": source_name, "source_type": source_type},
+        )
+        reliability_score = candidate.get("reliability_score")
+        log.info(
+            f"  reliability: {reliability_score}/5",
+            extra={"reliability_score": reliability_score},
+        )
+        search_query = candidate.get("search_query") or ""
+        log.info(
+            f"  query: {search_query}",
+            extra={"search_query": search_query[:200]},
+        )
+        search_query_variants = candidate.get("search_query_variants") or []
+        log.info(
+            f"  search_query_variants: {', '.join(search_query_variants)}",
+            extra={"search_query_variants": search_query_variants},
+        )
+        official_search_url = candidate.get("official_search_url") or ""
+        log.info(
+            f"  official_search_url: {official_search_url}",
+            extra={"official_search_url": official_search_url[:500]},
+        )
+        reason = candidate.get("reason") or ""
+        log.info(
+            f"  reason: {reason}",
+            extra={"reason": reason[:200]},
+        )

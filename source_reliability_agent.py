@@ -9,6 +9,12 @@ from official_metadata import (
     name_implies_official,
     official_source_type_from_identity,
 )
+from structured_logging import get_logger
+
+
+# M14.0-print-a (2026-05-26): module logger replaces the
+# [SourceReliabilityAgent] print() diagnostics.
+log = get_logger(__name__)
 
 
 VERY_HIGH_DOMAINS = [
@@ -245,9 +251,23 @@ def evaluate_source_candidates(source_candidates: list[dict]) -> list[dict]:
         ),
         default={},
     )
-    print(f"[SourceReliabilityAgent] evaluated {len(evaluated)} sources")
-    print(f"[SourceReliabilityAgent] top source: {top_source.get('title') or top_source.get('url') or 'None'}")
-    print(f"[SourceReliabilityAgent] official candidates: {official_count}")
+    # M14.0-print-a (2026-05-26): print → log.info conversion.
+    log.info(
+        f"[SourceReliabilityAgent] evaluated {len(evaluated)} sources",
+        extra={"evaluated_count": len(evaluated)},
+    )
+    top_source_title = top_source.get("title") or top_source.get("url") or "None"
+    log.info(
+        f"[SourceReliabilityAgent] top source: {top_source_title}",
+        extra={
+            "top_source_title": (top_source.get("title") or "")[:200],
+            "top_source_url": (top_source.get("url") or "")[:500],
+        },
+    )
+    log.info(
+        f"[SourceReliabilityAgent] official candidates: {official_count}",
+        extra={"official_candidate_count": official_count},
+    )
     return evaluated
 
 

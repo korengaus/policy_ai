@@ -3,7 +3,13 @@ from urllib.parse import urlparse
 import hashlib
 import re
 
+from structured_logging import get_logger
 from text_utils import sanitize_text
+
+
+# M14.0-print-a (2026-05-26): module logger replaces the
+# [SourceRetrievalAgent] print() diagnostics.
+log = get_logger(__name__)
 
 
 OFFICIAL_SOURCE_TYPES = {
@@ -271,7 +277,11 @@ def generate_source_queries(
                 }
             )
 
-    print(f"[SourceRetrievalAgent] generated {len(source_queries)} source queries")
+    # M14.0-print-a (2026-05-26): print → log.info conversion.
+    log.info(
+        f"[SourceRetrievalAgent] generated {len(source_queries)} source queries",
+        extra={"source_queries_count": len(source_queries)},
+    )
     return source_queries
 
 
@@ -328,7 +338,11 @@ def create_source_candidates(
                 }
             )
 
-    print(f"[SourceRetrievalAgent] created {len(source_candidates)} source candidates")
+    # M14.0-print-a (2026-05-26): print → log.info conversion.
+    log.info(
+        f"[SourceRetrievalAgent] created {len(source_candidates)} source candidates",
+        extra={"source_candidates_count": len(source_candidates)},
+    )
     return _stable_sort_source_candidates(source_candidates)
 
 

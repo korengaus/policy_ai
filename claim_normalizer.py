@@ -1,5 +1,12 @@
 import re
 
+from structured_logging import get_logger
+
+
+# M14.0-print-a (2026-05-26): module logger replaces the
+# [ClaimNormalizer] print() diagnostic.
+log = get_logger(__name__)
+
 
 ACTOR_PATTERNS = [
     "정부",
@@ -221,5 +228,9 @@ def normalize_claim(claim_text: str) -> dict:
 
 def normalize_claims(claims: list[str]) -> list[dict]:
     normalized = [normalize_claim(claim) for claim in (claims or [])]
-    print(f"[ClaimNormalizer] normalized {len(normalized)} claims")
+    # M14.0-print-a (2026-05-26): print → log.info conversion.
+    log.info(
+        f"[ClaimNormalizer] normalized {len(normalized)} claims",
+        extra={"normalized_count": len(normalized)},
+    )
     return normalized

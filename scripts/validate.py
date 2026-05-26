@@ -250,6 +250,17 @@ def _commands() -> List[List[str]]:
         # llm_observability.py and ai_reasoner.py are NOT in
         # MIGRATED_FILES so EXPECTED_TOTAL_LOG_CALLS stays at 270.
         [python, "tests/test_m13_1b_obs.py"],
+        # M14.0-print-a (2026-05-26) — pipeline print() → structured
+        # logging migration for 26 print calls across 9 pipeline
+        # production files (official_source_search.py, memory_store.py,
+        # source_reliability_agent.py, worker.py, source_retrieval_agent.py,
+        # claim_extractor.py, official_evidence_resolution.py,
+        # claim_normalizer.py, pipeline_debug.py). Pins zero remaining
+        # print() calls, get_logger import + module-level init present,
+        # MIGRATED_FILES contains all 9, and EXPECTED_TOTAL_LOG_CALLS = 298.
+        # Resolves audit §1.5 #10 for pipeline scope. timeline.py +
+        # scheduler.py deferred to M14.0-print-b.
+        [python, "tests/test_m14_0_print_migration.py"],
         # M11.0d-1 — verdict producer disagreement diagnostic
         # (DIAGNOSIS ONLY, no production code changed). Pins the
         # current per-producer output snapshot for 42 synthetic-matrix

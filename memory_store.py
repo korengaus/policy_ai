@@ -194,8 +194,12 @@ def update_memory_with_result(
     existing_ids = {article.get("article_id") for article in memory.get("articles", [])}
 
     if article_id in existing_ids:
-        print("\n----- Policy memory update -----")
-        print("This article is already saved. Skipping duplicate save.")
+        # M14.0-print-a (2026-05-26): print → log.info conversion.
+        log.info("\n----- Policy memory update -----")
+        log.info(
+            "This article is already saved. Skipping duplicate save.",
+            extra={"article_id": article_id},
+        )
         return memory
 
     article_record = {
@@ -266,9 +270,15 @@ def update_memory_with_result(
 
     rebuild_topic_summaries(memory)
 
-    print("\n----- Policy memory update -----")
-    print("Saved new policy event.")
-    print("topic:", topic)
-    print("file:", MEMORY_FILE)
+    # M14.0-print-a (2026-05-26): print → log.info conversion.
+    log.info("\n----- Policy memory update -----")
+    log.info(
+        "Saved new policy event.",
+        extra={"article_id": article_id, "topic": topic},
+    )
+    log.info(f"topic: {topic}", extra={"topic": topic})
+    log.info(
+        f"file: {MEMORY_FILE}", extra={"file_path": str(MEMORY_FILE)},
+    )
 
     return memory

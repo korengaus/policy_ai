@@ -1,5 +1,12 @@
 import re
 
+from structured_logging import get_logger
+
+
+# M14.0-print-a (2026-05-26): module logger replaces the
+# [ClaimExtractor] print() diagnostic.
+log = get_logger(__name__)
+
 
 POLICY_KEYWORDS = [
     "정부",
@@ -186,5 +193,9 @@ def extract_verifiable_claims(
         if fallback_claim:
             claims.append(fallback_claim)
 
-    print(f"[ClaimExtractor] extracted {len(claims)} claims")
+    # M14.0-print-a (2026-05-26): print → log.info conversion.
+    log.info(
+        f"[ClaimExtractor] extracted {len(claims)} claims",
+        extra={"claims_count": len(claims)},
+    )
     return claims

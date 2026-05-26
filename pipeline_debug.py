@@ -1,3 +1,11 @@
+from structured_logging import get_logger
+
+
+# M14.0-print-a (2026-05-26): module logger replaces the
+# [PipelineDebug] print() summary diagnostic.
+log = get_logger(__name__)
+
+
 def _count(items) -> int:
     return len(items) if isinstance(items, list) else 0
 
@@ -281,7 +289,11 @@ def build_pipeline_debug_summary(
         "needs_human_review": needs_human_review,
         "missing_steps": missing_steps,
     }
-    print(
+    # M14.0-print-a (2026-05-26): print → log.info conversion. Every
+    # interpolated field is also surfaced via `extra=` so JSON-log
+    # aggregators (Render with LOG_FORMAT=json) can query individual
+    # values without parsing the formatted string.
+    log.info(
         "[PipelineDebug] "
         f"intake_ok={str(intake_ok).lower()} "
         f"claim_count={claims_count} "
@@ -296,6 +308,22 @@ def build_pipeline_debug_summary(
         f"official_mismatch={str(official_mismatch).lower()} "
         f"official_body={official_body_summary} "
         f"official_direct_match_score={summary['official_direct_match_score']} "
-        f"bias_framing_ok={str(bias_framing_ok).lower()}"
+        f"bias_framing_ok={str(bias_framing_ok).lower()}",
+        extra={
+            "intake_ok": bool(intake_ok),
+            "claim_count": claims_count,
+            "evidence_count": matched_evidence_count,
+            "contradiction_candidates": contradiction_candidates_searched,
+            "contradiction_matched": contradiction_candidates_matched,
+            "confirmed_contradictions": confirmed_contradictions,
+            "possible_contradictions": possible_contradictions,
+            "contradiction_source": contradiction_verdict_source,
+            "evidence_strength": strength_summary,
+            "evidence_quality": quality_summary,
+            "official_mismatch": bool(official_mismatch),
+            "official_body": official_body_summary,
+            "official_direct_match_score": summary["official_direct_match_score"],
+            "bias_framing_ok": bool(bias_framing_ok),
+        },
     )
     return summary
