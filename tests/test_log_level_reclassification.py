@@ -136,11 +136,21 @@ PRESERVED_REAL_ERRORS: tuple[tuple[str, str], ...] = (
 #     MIGRATED_FILES so this counts. The other M13.1b log call
 #     "llm_judge.completed" lives in llm_judge.py which is NOT in
 #     MIGRATED_FILES and so does not bump the pin): 265 + 1 = 266
+#   * M11.7a-2 (Category 2 logging sweep — 7 audit cites mapped to
+#     5 distinct code-sites; 4 new log.warning calls landed in
+#     MIGRATED_FILES: Site 2 article_extractor.fetch_article_body
+#     +1 "article_extractor.fetch_failed"; Sites 5b/5c/5d
+#     official_crawler.py +3 — "site_specific_parser_failed",
+#     "attempt_failed", "candidate_evaluation_failed". Site 3a
+#     news_collector.resolve_google_news_url was a structured upgrade
+#     of an existing log.error — same call with extra={} added — so
+#     +0 to the count. Sites 1, 4, 5a, 5e are already resolved by
+#     M11.7a / M11.7b / M11.5c.): 266 + 4 = 270
 #
 # Any future milestone that legitimately adds log calls bumps this
 # expected count; the contract M14.4 actually pins is the *level
 # distribution*, not the absolute count.
-EXPECTED_TOTAL_LOG_CALLS = 266
+EXPECTED_TOTAL_LOG_CALLS = 270
 
 # Post-M14.4: 12 (down from 17 pre-M14.4 — 5 reclassifications).
 # M13.3d added log.info / log.warning calls only — no new log.error.

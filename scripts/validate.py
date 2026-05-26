@@ -175,6 +175,17 @@ def _commands() -> List[List[str]]:
         # SystemExit propagate correctly. Tests mock Playwright; no
         # real headless browser is launched.
         [python, "tests/test_m11_7b_playwright_narrowing.py"],
+        # M11.7a-2 — Category 2 logging sweep for the 5 remaining
+        # audit sites after M11.7a / M11.7b / M11.5c. Adds structured
+        # `log.warning` calls at article_extractor.fetch_article_body
+        # (Site 2), official_crawler._extract_candidate_links (Site 5b),
+        # the per-attempt retry loop (Site 5c), and per-candidate
+        # evaluation (Site 5d); structurally upgrades the existing
+        # Korean log.error at news_collector.resolve_google_news_url
+        # (Site 3a) with extra={} fields while preserving the message
+        # verbatim. Return shapes byte-identical; all 9 audit cites
+        # now resolved.
+        [python, "tests/test_m11_7a_2_exception_logging.py"],
         # M11.0d-1 — verdict producer disagreement diagnostic
         # (DIAGNOSIS ONLY, no production code changed). Pins the
         # current per-producer output snapshot for 42 synthetic-matrix

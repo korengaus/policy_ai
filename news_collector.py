@@ -918,5 +918,17 @@ def resolve_google_news_url(google_news_url: str) -> str:
         return google_news_url
 
     except Exception as error:
-        log.error(f'원문 URL 변환 실패: {error}')
+        # M11.7a-2 Site 3a: structured-upgrade of the existing log.error.
+        # The Korean f-string message is preserved verbatim because
+        # PRESERVED_REAL_ERRORS in tests/test_log_level_reclassification.py
+        # pins the substring '원문 URL 변환 실패'. Adds extra={} fields for
+        # alertable observability; +0 log call (same call, structured).
+        log.error(
+            f'원문 URL 변환 실패: {error}',
+            extra={
+                "url": (google_news_url or "")[:500],
+                "exception_type": type(error).__name__,
+                "exception_message": str(error)[:500],
+            },
+        )
         return google_news_url

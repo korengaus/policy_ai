@@ -877,7 +877,21 @@ def _extract_candidate_links(
             query=query,
             max_links=5,
         )
-    except Exception:
+    except Exception as exc:
+        # M11.7a-2 Site 5b: structured warning so site-specific parser
+        # regressions surface in JSON logs. Return shape unchanged —
+        # falls through to the generic_fallback parser below.
+        log.warning(
+            "official_crawler.site_specific_parser_failed",
+            extra={
+                "source_name": source_name,
+                "search_url": (search_url or "")[:500],
+                "query": (query or "")[:200],
+                "exception_type": type(exc).__name__,
+                "exception_message": str(exc)[:500],
+                "fallback_returned": "generic_fallback",
+            },
+        )
         site_candidates = []
 
     if site_candidates:
@@ -1185,6 +1199,21 @@ def fetch_best_official_document(search_result: dict, news_context: dict | None 
                             result["ibk_content_url_used"] = attempt_url
                         break
                 except Exception as exc:
+                    # M11.7a-2 Site 5c: structured warning for per-attempt
+                    # retry-loop failures. Return shape unchanged — the
+                    # error string is still captured on attempt_result and
+                    # the loop continues to the next query variant.
+                    log.warning(
+                        "official_crawler.attempt_failed",
+                        extra={
+                            "source_name": result.get("source_name"),
+                            "site_key": result.get("site_key"),
+                            "attempt_query": (attempt_query or "")[:200],
+                            "attempt_url": (attempt_url or "")[:500],
+                            "exception_type": type(exc).__name__,
+                            "exception_message": str(exc)[:500],
+                        },
+                    )
                     attempt_result["error"] = str(exc)
                     if result.get("site_key") == "ibk":
                         result["ibk_content_attempt_results"].append(attempt_result.copy())
@@ -1278,6 +1307,21 @@ def fetch_best_official_document(search_result: dict, news_context: dict | None 
                     }
                 )
             except Exception as exc:
+                # M11.7a-2 Site 5d: structured warning for per-candidate
+                # document evaluation failures. Return shape unchanged —
+                # candidate marked error_page and excluded from `evaluated`.
+                log.warning(
+                    "official_crawler.candidate_evaluation_failed",
+                    extra={
+                        "source_name": result.get("source_name"),
+                        "site_key": result.get("site_key"),
+                        "candidate_url": (candidate.get("url") or "")[:500],
+                        "candidate_score": candidate.get("score"),
+                        "exception_type": type(exc).__name__,
+                        "exception_message": str(exc)[:500],
+                        "fallback_relevance_level": "error_page",
+                    },
+                )
                 candidate["relevance_score"] = 0
                 candidate["relevance_level"] = "error_page"
                 candidate["relevance_error"] = str(exc)

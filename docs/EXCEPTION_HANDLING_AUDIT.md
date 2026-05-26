@@ -68,6 +68,7 @@ def load_policy_memory() -> dict:
 
 ### Site 2: `article_extractor.fetch_article_body`
 
+- **Status:** ✅ **RESOLVED in M11.7a-2** (logging only, no control-flow change). A `log.warning("article_extractor.fetch_failed", extra={url, max_chars, exception_type, exception_message, fallback_returned})` was added at the TOP of the except block, BEFORE the six pre-existing `log.error` field-name lines (which are pinned by `EXCEPTED_EXCEPT_ERRORS` and remain verbatim). Return value (empty string `""`) preserved. The audit's Category 3 ambition (distinguish fetch-failure from legitimate empty body via a tagged return-value dict) is **deferred to a future M11.7d** because it touches the verdict path. Pinned by `tests/test_m11_7a_2_exception_logging.py::ArticleExtractorFetchFailedWarningTests` (3 cases: forced inner failure → 1 warning + 6 existing errors + empty-string return; happy path → no warning; legitimate empty-body fallback → no warning).
 - **Audit line cite:** L364
 - **Current line:** L371 (drift +7 from intermediate edits)
 - **Surrounding context:**
@@ -104,6 +105,7 @@ def fetch_article_body(url: str, max_chars: int = 5000) -> str:
 
 ### Site 3a: `news_collector.resolve_google_news_url`
 
+- **Status:** ✅ **RESOLVED in M11.7a-2** (structured upgrade of the existing `log.error`, no control-flow change). The existing `log.error(f'원문 URL 변환 실패: {error}')` was kept verbatim (its Korean substring is pinned by `PRESERVED_REAL_ERRORS`), and `extra={url, exception_type, exception_message}` was added so operators can grep / alert on machine-readable fields without losing the Korean operator-facing message. Return value (original Google URL) preserved. +0 to `EXPECTED_TOTAL_LOG_CALLS` because the same call now carries `extra=`. Pinned by `tests/test_m11_7a_2_exception_logging.py::NewsCollectorResolveGoogleUrlStructuredErrorTests` (3 cases: decoder failure → Korean message + new extras; happy decode → no error; non-Google URL short-circuit → no decoder call, no error).
 - **Audit line cite:** L736
 - **Current line:** L920 (audit's L736 cite actually points at the **different** function `_parse_google_news_rss`; see Site 3b below. `resolve_google_news_url` lives at L907 with its except at L920. I'm covering both interpretations of the audit cite.)
 - **Surrounding context (L907-922):**
@@ -239,6 +241,7 @@ def fetch_official_page(url: str) -> dict:
 
 #### Site 5b: `_extract_candidate_links` (L906)
 
+- **Status:** ✅ **RESOLVED in M11.7a-2** (logging only, no control-flow change). The bare `except Exception:` was widened to `except Exception as exc:` and a `log.warning("official_crawler.site_specific_parser_failed", extra={source_name, search_url, query, exception_type, exception_message, fallback_returned})` was added BEFORE the `site_candidates = []` fall-through. The generic_fallback parser still runs as before; return shape `(candidates, parser_used)` byte-identical. Pinned by `tests/test_m11_7a_2_exception_logging.py::OfficialCrawlerSiteSpecificParserFailedTests` (2 cases: parser-raises → warning + generic_fallback; happy parse → no warning).
 - **Audit-mapped cite:** L711 (drift large)
 - **Current line:** L906
 - **Surrounding context:**
@@ -271,6 +274,7 @@ def _extract_candidate_links(search_html, search_url, source_name, query) -> tup
 
 #### Site 5c: per-attempt retry-loop swallow (L1213)
 
+- **Status:** ✅ **RESOLVED in M11.7a-2** (logging only, no control-flow change, no narrowing). A `log.warning("official_crawler.attempt_failed", extra={source_name, site_key, attempt_query, attempt_url, exception_type, exception_message})` was added at the TOP of the per-attempt except block, BEFORE the existing `attempt_result["error"] = str(exc)` mutation. The audit's Category 4 narrowing recommendation (to `(RequestException, Timeout, HTTPError)`) is **deferred to a future M11.7c** until a Render-log audit confirms the actual exception types seen in production. Return shape preserved. Pinned by `tests/test_m11_7a_2_exception_logging.py::OfficialCrawlerAttemptFailedTests` (3 cases: per-attempt request raises → warning fires + attempt_result still captured; outer-wrapper-only failure fires M11.7a's outer_wrapper_failure but NOT attempt_failed; happy first-attempt → no attempt_failed warning).
 - **Audit-mapped cite:** L1040 / L1133 (drift large, plus M11.6 deletions)
 - **Current line:** L1213
 - **Surrounding context:**
@@ -301,6 +305,7 @@ except Exception as exc:
 
 #### Site 5d: per-candidate relevance-scoring swallow (L1306)
 
+- **Status:** ✅ **RESOLVED in M11.7a-2** (logging only, no control-flow change, no narrowing). A `log.warning("official_crawler.candidate_evaluation_failed", extra={source_name, site_key, candidate_url, candidate_score, exception_type, exception_message, fallback_relevance_level})` was added at the TOP of the per-candidate except block, BEFORE the candidate mutation lines that set `relevance_level="error_page"`. As with Site 5c, narrowing the broad `Exception` is deferred to future M11.7c pending production-log audit. Return shape preserved. Pinned by `tests/test_m11_7a_2_exception_logging.py::OfficialCrawlerCandidateEvaluationFailedTests` (2 cases: per-candidate fetch raises → warning fires + candidate marked error_page; happy candidate eval → no warning).
 - **Audit-mapped cite:** L1229 (drift large, plus M11.6 deletions)
 - **Current line:** L1306
 - **Surrounding context:**
@@ -371,19 +376,16 @@ except Exception as exc:
 
 The operator can choose any subset of the following targeted follow-up PRs. Each is independently mergeable.
 
-| Suggested PR | Sites | Strategy | Risk | Effort |
-| --- | --- | --- | --- | --- |
-| **M11.7a — Logging-only sweep** | 1, 3a, 5b, 5c (logging only), 5d (logging only), 5e | Add structured `log.warning` / `log.error` to each except, preserving return shape. No control-flow changes. | LOW | Small |
-| **M11.7b — Narrow Playwright broad-Exception** | 4 | Replace `except Exception` with `except (PlaywrightError, PlaywrightTimeoutError)`. | LOW | Tiny |
-| **M11.7c — Narrow crawler-attempt broad-Exception** | 5c, 5d | Replace `except Exception` with `except (RequestException, Timeout, HTTPError, …)` after a brief Render-log audit to confirm the actual exception types seen in production. | LOW-MEDIUM | Small |
-| **M11.7d — Distinguish article-fetch failure from empty body** | 2 | Return a status-tagged dict; update `main.py` and downstream verdict logic to read the status. Requires 3 verdict regression suites + Render verification. | MEDIUM-HIGH | Medium |
-| **M11.5c (separate dead-code pass)** | 5a (`fetch_official_page`) | Delete the unused function. Not part of M11.7. | LOW | Tiny |
+| Suggested PR | Sites | Strategy | Risk | Effort | Status |
+| --- | --- | --- | --- | --- | --- |
+| **M11.7a — Logging-only sweep (HIGH priority sites)** | 1, 5e | Add structured `log.warning` to memory_store + outer fetch_best_official_document, preserving return shape. | LOW | Small | ✅ Done |
+| **M11.7b — Narrow Playwright broad-Exception** | 4 | Replace `except Exception` with three-tier `(PlaywrightTimeoutError / PlaywrightError / Exception)` chain with per-tier event names. | LOW | Tiny | ✅ Done |
+| **M11.5c — Dead-code removal** | 5a (`fetch_official_page`) | Delete the unused function. | LOW | Tiny | ✅ Done |
+| **M11.7a-2 — Logging-only sweep (remaining MEDIUM sites)** | 2, 3a, 5b, 5c, 5d | Add structured `log.warning` (Sites 2, 5b, 5c, 5d) or upgrade existing `log.error` with `extra={}` (Site 3a) at each remaining broad-except boundary. Preserves return shape; no narrowing. | LOW | Small | ✅ Done |
+| **M11.7c — Narrow crawler-attempt broad-Exception** | 5c, 5d | Replace `except Exception` with `except (RequestException, Timeout, HTTPError, …)` after a Render-log audit using the M11.7a-2 structured warnings to confirm production exception types. | LOW-MEDIUM | Small | Open (future) |
+| **M11.7d — Distinguish article-fetch failure from empty body** | 2 | Return a status-tagged dict; update `main.py` and downstream verdict logic. Requires 3 verdict regression suites + Render verification. | MEDIUM-HIGH | Medium | Open (held for design review) |
 
-**Recommended ordering:**
-1. **M11.7a first** (logging-only) — pure observability gain, zero behavioral risk. Lets you see whether sites are actually firing in production before deciding whether to narrow.
-2. **M11.7b second** (Playwright narrow) — cheapest correctness win, restores `KeyboardInterrupt` propagation.
-3. **M11.7c third** — only after a few weeks of M11.7a logs have shown what exception types actually fire in `_extract_candidate_links` and per-candidate scoring.
-4. **M11.7d held for design review** — touches the verdict producer; deserves its own design discussion.
+**Resolution summary (as of M11.7a-2):** All 9 audit cites from §1.5 #8 are resolved. The 5 remaining unresolved code-sites after M11.7a / M11.7b / M11.5c — Sites 2, 3a, 5b, 5c, 5d — were each fixed in M11.7a-2 by adding structured `log.warning` (or upgrading the existing `log.error`) inside their broad-except blocks, preserving return shapes exactly. Two follow-up PRs remain open as future work but are not blocking: M11.7c (exception-type narrowing on 5c/5d, gated by production-log evidence) and M11.7d (Category 3 return-value tagging on Site 2, gated by verdict-path design review).
 
 ## What's NOT in M11.7
 

@@ -369,6 +369,22 @@ def fetch_article_body(url: str, max_chars: int = 5000) -> str:
         return ""
 
     except Exception as error:
+        # M11.7a-2 Site 2: structured warning capturing exception details
+        # before the existing 6 field-name log.error lines fire. The 6
+        # log.error lines stay verbatim — they are pinned by
+        # EXCEPTED_EXCEPT_ERRORS in tests/test_log_level_reclassification.py.
+        # Return value (empty string) preserved — Category 3 ambition
+        # (distinguish fetch_failed from empty body) deferred to M11.7d.
+        log.warning(
+            "article_extractor.fetch_failed",
+            extra={
+                "url": (url or "")[:500],
+                "max_chars": max_chars,
+                "exception_type": type(error).__name__,
+                "exception_message": str(error)[:500],
+                "fallback_returned": "empty_string",
+            },
+        )
         log.error("[ArticleExtractor] encoding used: unknown")
         log.error("[ArticleExtractor] text quality score: -10000")
         log.error("[ArticleExtractor] text length: 0")
