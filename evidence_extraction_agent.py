@@ -188,6 +188,27 @@ def _quality_score(
     extraction_method: str,
     match_reason: str,
 ) -> int:
+    """Compute the evidence_quality_score for a snippet (0-100 clamp).
+
+    audit §1.5 #5 (2026-05-26): this function is a 25-step additive
+    score accumulator with calibration-pinned weights. The full table
+    of additives is documented in docs/MAGIC_THRESHOLDS.md §3.
+
+    Key load-bearing weights:
+      * base = 20
+      * source_type official: +28 (largest single contribution)
+      * evidence_type direct_support: +28
+      * verification_role primary: +14
+      * extraction_method article_body: +16
+      * various floors (min/max) for not-fetched / topic_mismatch /
+        official-classification cases
+
+    Changing any additive shifts the bell curve of
+    evidence_quality_score, which feeds P2's HIGH-alert gate at
+    `evidence_quality_score >= 65`. Verdict regression suites
+    (tests/test_verdict_label_b08_fix.py, _diagnostic.py,
+    _producer_comparison.py) cover the end-to-end pin.
+    """
     score = 20
     source_type = source.get("source_type") or ""
     verification_role = source.get("verification_role") or ""

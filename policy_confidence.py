@@ -149,6 +149,12 @@ def calculate_policy_confidence(
 
     policy_confidence_score = max(0, min(100, round(raw_score)))
     if not official_usable:
+        # audit §1.5 #5 (2026-05-26): no-official-doc confidence clamp.
+        # The 20 ceiling forces verification_strength = "none" via the
+        # _verification_strength boundaries below (>= 25 = "low"). This
+        # cascades into many P2 paths — see docs/MAGIC_THRESHOLDS.md §4.
+        # Symmetric with the `unknown` tier value in
+        # _source_confidence_score (line ~153).
         policy_confidence_score = min(20, policy_confidence_score)
         verification_strength = "none"
     else:

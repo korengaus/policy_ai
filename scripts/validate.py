@@ -221,6 +221,25 @@ def _commands() -> List[List[str]]:
         # produce equivalent output). Zero production-code change;
         # confirms M11.4 + M11.4b resolutions still hold.
         [python, "tests/test_no_duplicate_definitions.py"],
+        # audit §1.5 #5 (2026-05-26) — magic-thresholds documentation
+        # pins. Asserts docs/MAGIC_THRESHOLDS.md exists and covers the
+        # verdict-pipeline file subset; that targeted module-level
+        # threshold constants carry inline calibration-source comments;
+        # and that the most verdict-critical values (official_crawler
+        # document gates + policy_scoring alert cutoffs) match the
+        # catalog. Drift detector for the most behaviour-critical
+        # numeric literals in the codebase.
+        [python, "tests/test_magic_thresholds_documented.py"],
+        # audit §1.5 #6 + #7 re-audit (2026-05-26) — generalises
+        # tests/test_mojibake_cleanup.py's official_crawler.py-only
+        # scan into a codebase-wide `?<Hangul>` fingerprint detector
+        # (with raw-string and regex-syntax false-positive filtering).
+        # Also adds three stale-audit-cite confirmation pins:
+        # evidence_comparator._make_summary excluded_non_policy_page
+        # branch unique, evidence_extraction_agent claim_evidence_map
+        # built once, source_retrieval_agent.OFFICIAL_DOMAIN_QUERY_HINTS
+        # has use-sites. Zero production-code change.
+        [python, "tests/test_dead_code_removal_phase2.py"],
         # M11.0d-1 — verdict producer disagreement diagnostic
         # (DIAGNOSIS ONLY, no production code changed). Pins the
         # current per-producer output snapshot for 42 synthetic-matrix

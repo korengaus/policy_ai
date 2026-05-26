@@ -32,6 +32,9 @@ OPPOSING_ACTIONS = [
     ({"지원", "감면", "혜택", "보조"}, {"축소", "중단", "폐지"}),
 ]
 
+# audit §1.5 #5 (2026-05-26): minimum source reliability_score for
+# a snippet to be considered as a contradiction candidate. See
+# docs/MAGIC_THRESHOLDS.md §10. Lower → more sources qualify; raise → tighter contradiction-candidate gating.
 SOURCE_SCORE_MINIMUM = 45
 
 

@@ -162,6 +162,11 @@ def evaluate_source_candidate(source: dict) -> dict:
     if source_type == "unknown":
         flags.append("unofficial_source")
 
+    # audit §1.5 #5 (2026-05-26): reliability tier base scores.
+    # See docs/MAGIC_THRESHOLDS.md §2 for the full tier table +
+    # downstream consequences. The 95 / 85 / 68 / 52 / 30 spread is
+    # load-bearing for policy_scoring._source_trust_score's
+    # `min(15, avg // 5)` term — changes ripple into P2 verdict labels.
     if source_type == "official_government" or _matches_domain(domain, VERY_HIGH_DOMAINS):
         score = 95
         reason = "공식 정부/금융당국/공공기관 도메인 기반 출처 후보입니다."

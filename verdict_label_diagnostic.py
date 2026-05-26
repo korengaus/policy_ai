@@ -369,6 +369,9 @@ WEAK_EVIDENCE_SUMMARY_PHRASES = (
 )
 
 
+# audit §1.5 #5 (2026-05-26): B08 diagnostic threshold. Used by the
+# retrospective verdict-label diagnostic script, NOT the live pipeline.
+# See docs/MAGIC_THRESHOLDS.md §10 + docs/VERDICT_LABEL_DIAGNOSTIC.md.
 WEAK_EVIDENCE_SCORE_THRESHOLD = 30
 
 

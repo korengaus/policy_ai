@@ -134,6 +134,12 @@ def _alert_from_score(
         return "WATCH"
     if official_mismatch and source_trust_score < 45:
         return "WATCH" if impact_level == "high" or risk_level == "high" else "LOW"
+    # audit §1.5 #5 (2026-05-26): M11.0c HIGH-alert five-gate cluster.
+    # ALL six conditions must hold for HIGH. See
+    # docs/MAGIC_THRESHOLDS.md §6 for calibration history (resolved
+    # M11.0b false-positive rate). The 75 / 65 / 55 / 55 quadruple
+    # is THE most verdict-critical magic-number cluster — any change
+    # must regress-test against all 103 cases listed in §5.
     if (
         final_score >= 75
         and evidence_quality_score >= 65
@@ -143,6 +149,8 @@ def _alert_from_score(
         and impact_level == "high"
     ):
         return "HIGH"
+    # WATCH fallback: any of (decent score / high-impact / high-risk).
+    # See docs/MAGIC_THRESHOLDS.md §6 WATCH criteria.
     if final_score >= 45 or impact_level == "high" or risk_level == "high":
         return "WATCH"
     return "LOW"
@@ -196,6 +204,14 @@ def calibrate_final_decision(
     contradiction_adjustment = _contradiction_adjustment(contradiction_summary)
     impact_component = _impact_gate(policy_impact, policy_confidence)
 
+    # audit §1.5 #5 (2026-05-26): P2 weighted-average coefficients.
+    # See docs/MAGIC_THRESHOLDS.md §5. The three "evidence dimensions"
+    # (strength / quality / source_trust) each carry 0.25 — equal voice.
+    # Confidence (0.15) and impact (0.10) play secondary roles.
+    # Reweighting requires re-running 103 cases across
+    # tests/test_verdict_label_b08_fix.py (24),
+    # tests/test_verdict_label_diagnostic.py (42), and
+    # tests/test_verdict_producer_comparison.py (37).
     base_score = (
         strength_component * 0.25
         + evidence_quality_score * 0.25

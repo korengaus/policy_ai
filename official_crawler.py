@@ -37,9 +37,16 @@ REQUEST_HEADERS = {
     "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
     "Connection": "close",
 }
-MIN_DOCUMENT_SCORE = 25
-WEAK_DOCUMENT_RELEVANCE_THRESHOLD = 35
-DOCUMENT_RELEVANCE_THRESHOLD = 40
+# audit §1.5 #5 (2026-05-26): verdict-pipeline document-fetch gates.
+# Values are calibration-pinned. See docs/MAGIC_THRESHOLDS.md §1 for
+# the full catalog entry (calibration source, downstream consequence,
+# re-evaluation trigger). Changing any value here requires its own
+# milestone with verdict regression proof — at minimum the suites in
+# tests/test_verdict_label_b08_fix.py and
+# tests/test_verdict_producer_comparison.py.
+MIN_DOCUMENT_SCORE = 25  # candidate-document pre-evaluation gate; lower → more candidates scored (noise risk)
+WEAK_DOCUMENT_RELEVANCE_THRESHOLD = 35  # M11.0c B08 weakly_usable boundary; below this → source excluded from verification
+DOCUMENT_RELEVANCE_THRESHOLD = 40  # M11.0c B08 strongly_usable boundary; combined with evidence_grade ∈ {A,B,C} gates result["usable"]=True
 MATERIAL_MATCH_CONCEPTS = {
     "rental_loan",
     "mortgage_loan",

@@ -365,6 +365,11 @@ def compare_news_with_official_evidence(
     missing_keywords = [keyword for keyword in keywords if keyword not in official_text]
 
     if keywords:
+        # audit §1.5 #5 (2026-05-26): support_score formula —
+        # 70% weight on keyword-overlap ratio, 30% cap on corpus
+        # access (doc fetches × 10 + searches × 5). See
+        # docs/MAGIC_THRESHOLDS.md §11. The 70/30 split intentionally
+        # privileges semantic overlap over raw access count.
         support_score = min(
             100,
             int(round((len(matched_keywords) / len(keywords)) * 70))
