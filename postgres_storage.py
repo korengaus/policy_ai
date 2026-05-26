@@ -587,6 +587,85 @@ def mirror_upsert(
 
 
 # ---------------------------------------------------------------------------
+# Read helpers — M12.0c-minimal.
+#
+# Used by ``database.get_result_by_id`` / ``get_recent_results`` when
+# dual-write is enabled, so the Web service on Render can see rows
+# the Worker process wrote (the two services run on separate
+# ephemeral filesystems and never share a SQLite file).
+#
+# These helpers return ``None`` to signal "Postgres is unavailable or
+# raised an error" so the caller can fall back to SQLite. An empty
+# list from ``read_recent_analysis_results`` is a VALID result
+# meaning "Postgres has 0 rows" and is treated as authoritative — the
+# caller MUST NOT fall back to SQLite in that case. NEVER raise.
+# ---------------------------------------------------------------------------
+
+
+def read_analysis_result_by_id(result_id: int) -> Optional[dict]:
+    """Return the analysis_results row as a dict, or None when:
+    - dual-write is disabled (no engine),
+    - the row is not present in Postgres,
+    - any SQLAlchemy / unexpected error fires (the caller falls back
+      to SQLite, so a transient Postgres outage is non-fatal).
+    """
+    engine = get_engine()
+    if engine is None:
+        return None
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                sa.select(analysis_results_table).where(
+                    analysis_results_table.c.id == int(result_id)
+                )
+            ).first()
+        return dict(row._mapping) if row is not None else None
+    except SQLAlchemyError as exc:
+        log.warning("read_analysis_result_by_id failed: %s", exc)
+        return None
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "read_analysis_result_by_id unexpected error: %s", exc,
+        )
+        return None
+
+
+def read_recent_analysis_results(limit: int = 20) -> Optional[list]:
+    """Return the newest analysis_results rows as a list of dicts, or
+    None when the engine is unavailable or any error fires.
+
+    An empty list IS a valid hit ("Postgres has 0 rows") — the caller
+    MUST treat None and ``[]`` differently:
+
+    * None → Postgres unavailable, caller should fall back to SQLite.
+    * ``[]`` → Postgres is authoritative and says zero rows; trust it.
+
+    Limit is clamped to ``[1, 100]`` to match the SQLite-side helper
+    so the contract stays identical between paths.
+    """
+    engine = get_engine()
+    if engine is None:
+        return None
+    safe_limit = max(1, min(int(limit or 20), 100))
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                sa.select(analysis_results_table)
+                .order_by(analysis_results_table.c.id.desc())
+                .limit(safe_limit)
+            ).all()
+        return [dict(row._mapping) for row in rows]
+    except SQLAlchemyError as exc:
+        log.warning("read_recent_analysis_results failed: %s", exc)
+        return None
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "read_recent_analysis_results unexpected error: %s", exc,
+        )
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Diagnostic helper — read-only, used by scripts/check_postgres_health.py.
 # ---------------------------------------------------------------------------
 

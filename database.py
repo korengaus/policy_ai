@@ -446,6 +446,26 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
 
 def get_recent_results(limit: int = 20):
     safe_limit = max(1, min(int(limit or 20), 100))
+    # M12.0c-minimal: prefer Postgres when dual-write is enabled so the
+    # Web service can see rows the Worker process wrote (Web and Worker
+    # run on separate ephemeral filesystems on Render and don't share
+    # SQLite). Lazy import preserved per the
+    # test_database_uses_lazy_import_inside_helpers pin.
+    #
+    # Empty list from Postgres is AUTHORITATIVE (== "PG has 0 rows") —
+    # we trust it and do NOT fall back to SQLite. Only None
+    # (disabled / engine error) triggers the SQLite fallback below.
+    try:
+        from postgres_storage import (
+            is_postgres_dual_write_enabled,
+            read_recent_analysis_results,
+        )
+        if is_postgres_dual_write_enabled():
+            pg_rows = read_recent_analysis_results(safe_limit)
+            if pg_rows is not None:
+                return pg_rows
+    except Exception:  # noqa: BLE001 — PG read failure must not block SQLite
+        pass
     with get_connection() as connection:
         rows = connection.execute(
             """
@@ -460,6 +480,21 @@ def get_recent_results(limit: int = 20):
 
 
 def get_result_by_id(result_id: int):
+    # M12.0c-minimal: see the comment in get_recent_results. The same
+    # rationale applies — Web reads must consult Postgres first when
+    # dual-write is enabled, otherwise /history/{id} returns 404 for
+    # rows the Worker wrote on a different filesystem.
+    try:
+        from postgres_storage import (
+            is_postgres_dual_write_enabled,
+            read_analysis_result_by_id,
+        )
+        if is_postgres_dual_write_enabled():
+            pg_row = read_analysis_result_by_id(result_id)
+            if pg_row is not None:
+                return pg_row
+    except Exception:  # noqa: BLE001 — PG read failure must not block SQLite
+        pass
     with get_connection() as connection:
         row = connection.execute(
             """

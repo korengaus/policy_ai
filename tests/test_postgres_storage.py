@@ -649,6 +649,397 @@ class DatabaseDualWriteIsolationTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# M12.0c-minimal: Postgres read helpers + database.py fallback semantics.
+#
+# These tests exercise the new ``read_analysis_result_by_id`` /
+# ``read_recent_analysis_results`` helpers using the same SQLite-as-
+# Postgres substitute the dual-write tests already use, so no real
+# Postgres server is required. The integration class verifies that
+# ``database.get_result_by_id`` / ``get_recent_results`` prefer the
+# Postgres row when enabled and fall back to SQLite when not.
+# ---------------------------------------------------------------------------
+
+
+class ReadAnalysisResultByIdTests(unittest.TestCase):
+    """Direct tests of ``postgres_storage.read_analysis_result_by_id``."""
+
+    def test_returns_none_when_dual_write_disabled(self):
+        with _EnvScope():
+            _set_env(USE_POSTGRES_WRITE=None, DATABASE_URL=None)
+            import postgres_storage
+
+            self.assertIsNone(postgres_storage.read_analysis_result_by_id(1))
+
+    def test_returns_dict_when_row_present(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                tmp_db = Path(tmp_dir) / "read_by_id_present.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{tmp_db}")
+                import postgres_storage
+
+                engine = postgres_storage.get_engine()
+                self.assertIsNotNone(engine)
+                postgres_storage.ensure_schema(engine)
+                postgres_storage.mirror_write(
+                    "analysis_results",
+                    {
+                        "id": 42,
+                        "query": "read by id present",
+                        "title": "from postgres",
+                        "original_url": "https://example.com/pg-42",
+                        "created_at": "2026-05-27T00:00:00+00:00",
+                    },
+                )
+
+                row = postgres_storage.read_analysis_result_by_id(42)
+                self.assertIsNotNone(row)
+                self.assertIsInstance(row, dict)
+                self.assertEqual(row["id"], 42)
+                self.assertEqual(row["title"], "from postgres")
+                self.assertEqual(
+                    row["original_url"], "https://example.com/pg-42",
+                )
+                postgres_storage.reset_engine_for_tests()
+
+    def test_returns_none_when_row_missing(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                tmp_db = Path(tmp_dir) / "read_by_id_missing.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{tmp_db}")
+                import postgres_storage
+
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+
+                self.assertIsNone(
+                    postgres_storage.read_analysis_result_by_id(9999),
+                )
+                postgres_storage.reset_engine_for_tests()
+
+    def test_returns_none_when_engine_errors(self):
+        with _EnvScope():
+            _set_env(USE_POSTGRES_WRITE="true",
+                     DATABASE_URL="postgresql+psycopg://"
+                                  "u:p@127.0.0.1:1/none")
+            import postgres_storage
+
+            # Invalid URL → connection error inside the helper. The
+            # contract is to log a warning and return None, NEVER raise.
+            try:
+                result = postgres_storage.read_analysis_result_by_id(1)
+            except Exception as exc:  # noqa: BLE001
+                self.fail(f"read_analysis_result_by_id raised: {exc!r}")
+            self.assertIsNone(result)
+
+
+class ReadRecentAnalysisResultsTests(unittest.TestCase):
+    """Direct tests of ``postgres_storage.read_recent_analysis_results``.
+
+    The empty-list semantics is the load-bearing invariant: when
+    Postgres knows there are 0 rows, the helper returns ``[]`` (not
+    None) so the database.py caller treats it as authoritative and
+    does NOT fall back to SQLite. The disabled / error paths return
+    None so the caller does fall back."""
+
+    def test_returns_none_when_dual_write_disabled(self):
+        with _EnvScope():
+            _set_env(USE_POSTGRES_WRITE=None, DATABASE_URL=None)
+            import postgres_storage
+
+            self.assertIsNone(
+                postgres_storage.read_recent_analysis_results(limit=5),
+            )
+
+    def test_returns_empty_list_when_no_rows(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                tmp_db = Path(tmp_dir) / "read_recent_empty.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{tmp_db}")
+                import postgres_storage
+
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+
+                result = postgres_storage.read_recent_analysis_results(
+                    limit=5,
+                )
+                # The crucial distinction: [] (PG authoritative zero),
+                # not None (PG unavailable). database.py uses this to
+                # decide whether to fall back to SQLite.
+                self.assertEqual(result, [])
+                self.assertIsNotNone(result)
+                postgres_storage.reset_engine_for_tests()
+
+    def test_returns_rows_newest_first(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                tmp_db = Path(tmp_dir) / "read_recent_order.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{tmp_db}")
+                import postgres_storage
+
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                for row_id, title in [
+                    (1, "oldest"), (2, "middle"), (3, "newest"),
+                ]:
+                    postgres_storage.mirror_write(
+                        "analysis_results",
+                        {
+                            "id": row_id,
+                            "query": "order test",
+                            "title": title,
+                            "original_url": f"https://example.com/o-{row_id}",
+                            "created_at": (
+                                f"2026-05-27T00:00:0{row_id}+00:00"
+                            ),
+                        },
+                    )
+
+                rows = postgres_storage.read_recent_analysis_results(
+                    limit=10,
+                )
+                self.assertEqual(len(rows), 3)
+                self.assertEqual(rows[0]["id"], 3)  # newest first
+                self.assertEqual(rows[0]["title"], "newest")
+                self.assertEqual(rows[2]["id"], 1)  # oldest last
+                postgres_storage.reset_engine_for_tests()
+
+    def test_respects_limit_clamp(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                tmp_db = Path(tmp_dir) / "read_recent_limit.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{tmp_db}")
+                import postgres_storage
+
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                for row_id in range(1, 6):  # 5 rows
+                    postgres_storage.mirror_write(
+                        "analysis_results",
+                        {
+                            "id": row_id,
+                            "query": "limit test",
+                            "title": f"row {row_id}",
+                            "original_url": f"https://example.com/l-{row_id}",
+                            "created_at": "2026-05-27T00:00:00+00:00",
+                        },
+                    )
+
+                # limit=2 → exactly 2 rows (LIMIT honored).
+                rows_two = postgres_storage.read_recent_analysis_results(
+                    limit=2,
+                )
+                self.assertEqual(len(rows_two), 2)
+                # limit=-5 → clamped to 1 by max(1, ...). A literal 0
+                # would NOT trigger the min clamp because the clamp
+                # expression is ``max(1, min(int(limit or 20), 100))``
+                # and ``0 or 20 → 20`` short-circuits past the floor.
+                # Negative inputs are the only way to hit the floor;
+                # this also matches the SQLite helper's behaviour, so
+                # the contract stays identical between paths.
+                rows_negative = postgres_storage.read_recent_analysis_results(
+                    limit=-5,
+                )
+                self.assertEqual(len(rows_negative), 1)
+                # limit=999 → clamped to 100 (max clamp); but only 5
+                # rows exist, so the visible count caps at 5. The clamp
+                # behaviour is asserted indirectly by the absence of
+                # any exception and the matching count.
+                rows_large = postgres_storage.read_recent_analysis_results(
+                    limit=999,
+                )
+                self.assertEqual(len(rows_large), 5)
+                postgres_storage.reset_engine_for_tests()
+
+
+class DatabaseReadFallbackIntegrationTests(unittest.TestCase):
+    """Integration tests for the database.py side of M12.0c-minimal.
+
+    Two SQLite files are used per case: one as the local "SQLite
+    source of truth" (``database.DB_PATH``) and one as the
+    "Postgres" substitute behind ``DATABASE_URL``. The matrix
+    confirms that the read helpers prefer Postgres when enabled and
+    fall back to SQLite when Postgres is disabled or returns None —
+    and that an authoritative empty list from Postgres is NOT
+    overridden by SQLite rows."""
+
+    def test_get_result_by_id_prefers_postgres_when_enabled(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg_substitute.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    database.init_db()  # SQLite schema only; no rows.
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    postgres_storage.mirror_write(
+                        "analysis_results",
+                        {
+                            "id": 7,
+                            "query": "prefer pg",
+                            "title": "from postgres",
+                            "original_url": "https://example.com/pg-7",
+                            "created_at": "2026-05-27T00:00:00+00:00",
+                        },
+                    )
+
+                    row = database.get_result_by_id(7)
+                    self.assertIsNotNone(row)
+                    self.assertEqual(row["title"], "from postgres")
+                    self.assertEqual(
+                        row["original_url"], "https://example.com/pg-7",
+                    )
+                    postgres_storage.reset_engine_for_tests()
+
+    def test_get_result_by_id_falls_back_to_sqlite_when_disabled(self):
+        from text_utils import sanitize_data
+
+        with _EnvScope():
+            _set_env(USE_POSTGRES_WRITE=None, DATABASE_URL=None)
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_only.db"
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+
+                    database.init_db()
+                    sample = {
+                        "title": "from sqlite",
+                        "original_url": "https://example.com/sqlite-1",
+                        "topic": "정책",
+                        "claim_text": "주장",
+                        "verdict_label": "draft_likely_true",
+                        "verdict_confidence": 70,
+                        "verification_card": {
+                            "claim_text": "주장",
+                            "verdict_label": "draft_likely_true",
+                            "verdict_confidence": 70,
+                        },
+                    }
+                    status = database.save_analysis_result(
+                        sanitize_data(sample), query="fallback-disabled",
+                    )
+                    self.assertTrue(status["saved"])
+
+                    row = database.get_result_by_id(status["id"])
+                    self.assertIsNotNone(row)
+                    self.assertEqual(row["title"], "from sqlite")
+                    self.assertEqual(
+                        row["original_url"], "https://example.com/sqlite-1",
+                    )
+
+    def test_get_result_by_id_falls_back_to_sqlite_when_pg_returns_none(self):
+        """Postgres is enabled and reachable but has no matching row;
+        SQLite does. The caller must fall back to SQLite and return
+        the SQLite row rather than 404."""
+        from text_utils import sanitize_data
+
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg_substitute.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    database.init_db()
+                    # Set up PG substitute schema but insert nothing —
+                    # so read_analysis_result_by_id will return None.
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    # Seed only SQLite.
+                    sample = {
+                        "title": "from sqlite only",
+                        "original_url": "https://example.com/sqlite-only",
+                        "topic": "정책",
+                        "claim_text": "주장",
+                        "verdict_label": "draft_likely_true",
+                        "verdict_confidence": 70,
+                        "verification_card": {
+                            "claim_text": "주장",
+                            "verdict_label": "draft_likely_true",
+                            "verdict_confidence": 70,
+                        },
+                    }
+                    # Patch out the mirror_write so save_analysis_result
+                    # writes only to SQLite for this test case.
+                    with patch.object(
+                        postgres_storage, "mirror_write",
+                        lambda *a, **kw: False,
+                    ):
+                        status = database.save_analysis_result(
+                            sanitize_data(sample), query="fallback-miss",
+                        )
+                    self.assertTrue(status["saved"])
+
+                    row = database.get_result_by_id(status["id"])
+                    self.assertIsNotNone(row)
+                    self.assertEqual(row["title"], "from sqlite only")
+                    postgres_storage.reset_engine_for_tests()
+
+    def test_get_recent_results_prefers_postgres_empty_over_sqlite_rows(self):
+        """Load-bearing invariant: when Postgres returns ``[]`` (PG
+        authoritative zero), the caller MUST trust it and NOT fall
+        back to SQLite, even if SQLite holds rows. Without this,
+        operators migrating to Postgres would see stale SQLite data
+        leaking through."""
+        from text_utils import sanitize_data
+
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg_substitute.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    database.init_db()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    # Seed SQLite with a row that should NOT leak
+                    # through, but DO NOT mirror to PG.
+                    sample = {
+                        "title": "stale sqlite row",
+                        "original_url": "https://example.com/stale",
+                        "topic": "정책",
+                        "claim_text": "주장",
+                        "verdict_label": "draft_likely_true",
+                        "verdict_confidence": 70,
+                        "verification_card": {
+                            "claim_text": "주장",
+                            "verdict_label": "draft_likely_true",
+                            "verdict_confidence": 70,
+                        },
+                    }
+                    with patch.object(
+                        postgres_storage, "mirror_write",
+                        lambda *a, **kw: False,
+                    ):
+                        database.save_analysis_result(
+                            sanitize_data(sample), query="empty-pg",
+                        )
+
+                    rows = database.get_recent_results(limit=5)
+                    # PG has 0 rows → [] returned authoritatively.
+                    # SQLite has 1 stale row but must be IGNORED.
+                    self.assertEqual(rows, [])
+                    postgres_storage.reset_engine_for_tests()
+
+
 class ModuleLevelStaticChecks(unittest.TestCase):
     """Pure source-text inspection. Cheap and stable; catches the
     invariant the brief asks for without needing to wrangle Python's
