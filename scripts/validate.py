@@ -210,6 +210,17 @@ def _commands() -> List[List[str]]:
         # below. AST pins guard against re-inlining; identity pins
         # guard against accidental rebinding.
         [python, "tests/test_keyword_consolidation.py"],
+        # audit §1.5 #2 re-audit (2026-05-26) — generalises M11.4b's
+        # single-function uniqueness pin into a codebase-wide AST-walk
+        # pin (no intra-file duplicate module-level OR class-level
+        # defs) plus a cross-file name-collision allowlist of 27
+        # known-good per-module helpers. Adds defense-in-depth pins
+        # for CASE A (_missing_context_specific still unique) and
+        # CASE B (the two _official_adjusted_* functions retain
+        # different signatures + their byte-identical body sections
+        # produce equivalent output). Zero production-code change;
+        # confirms M11.4 + M11.4b resolutions still hold.
+        [python, "tests/test_no_duplicate_definitions.py"],
         # M11.0d-1 — verdict producer disagreement diagnostic
         # (DIAGNOSIS ONLY, no production code changed). Pins the
         # current per-producer output snapshot for 42 synthetic-matrix

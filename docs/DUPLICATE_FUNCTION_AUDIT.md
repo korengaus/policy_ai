@@ -237,3 +237,123 @@ confirm the diagnosis-only outcome did not perturb anything:
 - `scripts/validate.py` adds the new dedup test to its run set.
 - `npm test` remains byte-identical (frontend / build / regression
   unchanged).
+
+## audit §1.5 #2 re-audit (2026-05-26)
+
+A fresh codebase scan re-checked whether duplicate function
+definitions had accumulated since M11.4b. The re-audit:
+
+- **Confirmed M11.4b's intra-file resolution is intact** — AST-walk
+  of every repo-root `*.py` file finds zero modules with duplicate
+  module-level OR class-level `def`s. The
+  `verification_card._missing_context_specific` deduplication is
+  still single-source.
+- **Confirmed M11.4's classification of "Duplicate 2" as an audit
+  misclassification still holds** —
+  `verification_card._official_adjusted_evidence_quality` and
+  `pipeline_debug._official_adjusted_quality_summary` retain
+  different names and different signatures (dict-with-flag vs
+  bool-direct). Their function bodies after the early-return are
+  byte-identical, but they cannot be literally consolidated without
+  either a signature change (out of scope) or a helper-extraction
+  refactor (M11.4 deferred this as future M11.5; still deferred).
+- **Generalised M11.4b's single-function guard into a codebase-wide
+  AST-walk pin** — `tests/test_no_duplicate_definitions.py` now
+  asserts zero intra-file duplicates across every repo-root `*.py`
+  file (excluding `tests/` / `scripts/`). Any future PR that
+  re-introduces a same-name `def` within a single module will fail
+  this pin immediately.
+- **Pinned the cross-file name-collision allowlist** — see table
+  below. Growth of this set will fail the allowlist pin until either
+  the new collision is added to the allowlist OR the duplicate is
+  consolidated.
+
+### Cross-file name collision table (audit §1.5 #2 re-audit, allowlisted)
+
+The following module-level `def` names appear in 2+ repo-root files.
+Each is a per-module helper whose body MAY OR MAY NOT be semantically
+equivalent across files — the audit did NOT diff the bodies. These
+are reported only; consolidating any one of them requires its own
+behaviour-impact analysis and operator approval. Pinned by
+`tests/test_no_duplicate_definitions.py::KnownGoodCrossFileDuplicatesAllowlist`.
+
+| Function | File count | Files |
+| --- | --- | --- |
+| `_utc_now_iso` | 6 | `artifact_evidence_linker.py`, `artifact_extractor.py`, `job_manager.py`, `legacy_review_enrollment.py`, `pipeline_worker.py`, `source_crawler.py` |
+| `_normalize_text` | 5 | `article_extractor.py`, `claim_extractor.py`, `evidence_comparator.py`, `official_crawler.py`, `official_source_search.py` |
+| `_now_iso` | 5 | `bias_framing_agent.py`, `contradiction_agent.py`, `evidence_extraction_agent.py`, `source_retrieval_agent.py`, `verification_card.py` |
+| `_split_sentences` | 5 | `claim_extractor.py`, `evidence_extraction_agent.py`, `official_evidence_resolution.py`, `semantic_chunker.py`, `verification_card.py` |
+| `_tokens` | 4 | `contradiction_agent.py`, `evidence_extraction_agent.py`, `official_evidence_resolution.py`, `official_source_body.py` |
+| `_coerce_analysis_id` | 3 | `artifact_evidence_linker.py`, `verdict_label_diagnostic.py`, `verdict_producer_comparison.py` |
+| `_coerce_int` | 3 | `semantic_chunker.py`, `verdict_label_diagnostic.py`, `verdict_producer_comparison.py` |
+| `_domain` | 3 | `official_evidence_resolution.py`, `official_source_body.py`, `source_reliability_agent.py` |
+| `_level` | 3 | `bias_framing_agent.py`, `official_relevance.py`, `source_reliability_agent.py` |
+| `_numbers` | 3 | `contradiction_agent.py`, `official_evidence_resolution.py`, `official_source_body.py` |
+| `health_check` | 3 | `http_cache.py`, `postgres_storage.py`, `structured_logging.py` |
+| `main` | 3 | `main.py`, `scheduler.py`, `worker.py` |
+| `_claim_text` | 2 | `contradiction_agent.py`, `official_evidence_resolution.py` |
+| `_empty_result` | 2 | `artifact_extractor.py`, `source_crawler.py` |
+| `_extract_title` | 2 | `artifact_extractor.py`, `official_source_body.py` |
+| `_hangul_count` | 2 | `article_extractor.py`, `text_utils.py` |
+| `_has_any` | 2 | `policy_decision.py`, `policy_impact.py` |
+| `_normalize` | 2 | `evidence_extraction_agent.py`, `official_document_classifier.py` |
+| `_policy_claims_text` | 2 | `official_relevance.py`, `policy_impact.py` |
+| `_reconstruct_claim_count` | 2 | `verdict_label_diagnostic.py`, `verdict_producer_comparison.py` |
+| `_reconstruct_evidence_comparison` | 2 | `verdict_label_diagnostic.py`, `verdict_producer_comparison.py` |
+| `_response_from_cache_entry` | 2 | `official_crawler.py`, `official_source_body.py` |
+| `_row_to_dict` | 2 | `database.py`, `job_manager.py` |
+| `_safe_json_load` | 2 | `verdict_label_diagnostic.py`, `verdict_producer_comparison.py` |
+| `_same_domain` | 2 | `official_crawler.py`, `official_site_parsers.py` |
+| `get_job_status` | 2 | `job_manager.py`, `job_queue.py` |
+| `normalize_domain` | 2 | `official_metadata.py`, `source_registry.py` |
+
+### Observations on the collision table
+
+- The top of the table is dominated by **trivial helper utilities**
+  (`_now_iso`, `_utc_now_iso`, `_normalize_text`, `_tokens`,
+  `_split_sentences`) that are semantically similar but tuned
+  per-module. A future cleanup milestone could consolidate the most
+  obvious one-liners (`_now_iso` / `_utc_now_iso`) to a shared module
+  like `time_utils.py` — at the cost of touching 11 files.
+- The `verdict_label_diagnostic.py` ↔ `verdict_producer_comparison.py`
+  pair contributes 5 collisions (`_coerce_analysis_id`, `_coerce_int`,
+  `_reconstruct_claim_count`, `_reconstruct_evidence_comparison`,
+  `_safe_json_load`). These are parallel diagnostic scripts that
+  historically grew by copy-paste. A future M11.x could extract a
+  shared `diagnostic_utils.py`.
+- `main` (in 3 files), `health_check` (in 3 files), and
+  `get_job_status` (in 2 files) are **intentionally** per-module
+  entry points; they MUST stay separate.
+- `_official_adjusted_quality_summary` (in pipeline_debug) does NOT
+  appear in the table — its sibling in `verification_card.py` has a
+  different name (`_official_adjusted_evidence_quality`). The
+  near-duplicate bodies are pinned by
+  `Case2BodyEquivalencePin.test_official_adjusted_functions_produce_equivalent_output`.
+
+### What this re-audit ships
+
+- This audit-doc section (added below the M11.4b resolution).
+- `tests/test_no_duplicate_definitions.py` — 6 new pins generalising
+  M11.4b's protection across the codebase, plus the cross-file
+  allowlist.
+- New entry in `scripts/validate.py` for the new test file.
+- **Zero production-code changes.** M11.4 + M11.4b already fixed the
+  two cited cases.
+
+### Verification
+
+- 6 new tests in `tests/test_no_duplicate_definitions.py` pass.
+- 11 existing tests in `tests/test_verification_card_dedup.py`
+  remain green (CASE A protection preserved).
+- All pre-existing verdict / exception-handling / cache / Postgres /
+  logging / enrollment / frontend pins remain green.
+- `npm test` byte-identical.
+
+### Limits of this re-audit
+
+- Bodies of cross-file name-collision functions were NOT diffed.
+  Some are likely semantically equivalent (`_now_iso` /
+  `_utc_now_iso`); others are likely per-module-tuned. Diffing each
+  pair is its own milestone with its own behaviour-impact analysis.
+- The allowlist pin is a drift detector, not a quality bar.
+  Existing collisions remain; only NEW collisions fail the test.
