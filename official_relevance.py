@@ -5,6 +5,14 @@ import re
 # adds the official_statement key); see docs/KOREAN_CONSTANTS.md.
 from korean_constants import CONCEPT_SYNONYMS_RELEVANCE as CONCEPT_SYNONYMS
 
+# audit §1.5 #3 re-audit (2026-05-26): ERROR_SIGNALS /
+# HARD_ERROR_SIGNALS / NAVIGATION_ERROR_SIGNALS are intentionally
+# separate from official_source_body.ERROR_PAGE_PATTERNS. They
+# overlap by ~7 items but the official_relevance variants are scored
+# against *document relevance* (HARD vs NAVIGATION subsets carry
+# different penalties), while ERROR_PAGE_PATTERNS is consumed as a
+# flat filter against body text. The subset structure here is
+# load-bearing for the scoring path. Keep separate.
 ERROR_SIGNALS = [
     "요청하신 페이지를 찾을 수 없습니다",
     "페이지를 찾을 수 없습니다",
@@ -44,6 +52,13 @@ NAVIGATION_ERROR_SIGNALS = [
     "로그인",
 ]
 
+# audit §1.5 #3 re-audit (2026-05-26): STOP_TERMS is intentionally
+# separate from korean_constants.STOPWORDS_OFFICIAL_BODY /
+# STOPWORDS_COMPARATOR. The overlap is ~6 items but STOP_TERMS is
+# consumed only by extract_query_terms (query-term extraction —
+# a much narrower tokenization context), while STOPWORDS_* are used
+# during sentence-level analysis. M11.2 audit explicitly considered
+# this and left STOP_TERMS in place. Keep separate.
 STOP_TERMS = {"뉴스", "기사", "관련", "정책", "정부", "이번", "해당", "대한", "나섰다"}
 
 

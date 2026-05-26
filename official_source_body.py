@@ -72,6 +72,13 @@ OFFICIAL_NAME_HINTS = {
     "국세청",
 }
 
+# audit §1.5 #3 re-audit (2026-05-26): ERROR_PAGE_PATTERNS is
+# intentionally separate from official_relevance.ERROR_SIGNALS /
+# HARD_ERROR_SIGNALS / NAVIGATION_ERROR_SIGNALS. The 7-item overlap
+# is coincidental; this set filters body text in the body crawler,
+# while official_relevance's variants score document relevance with
+# load-bearing subset structure. See docs/KOREAN_CONSTANTS.md
+# re-audit table.
 ERROR_PAGE_PATTERNS = {
     "페이지가 없거나",
     "페이지를 찾을 수 없습니다",
@@ -93,6 +100,13 @@ ERROR_PAGE_PATTERNS = {
 # top-of-file import). INSTITUTION_TERMS is a single-source list and
 # remains in this file.
 
+# audit \u00a71.5 #3 re-audit (2026-05-26): INSTITUTION_TERMS shares some
+# Korean institution names (\uae08\uc735\uc704, \uae08\uac10\uc6d0, \uad6d\ud1a0\ubd80, \ud55c\uad6d\uc740\ud589) with
+# verification_card._sentence_score's inline actor list, but the
+# two serve different purposes: INSTITUTION_TERMS matches mentions
+# in official documents during body fetching, while verification_card
+# scores news sentences for "describes a policy action by an
+# authority". Keep separate.
 INSTITUTION_TERMS = [
     "\uae08\uc735\uc704",
     "\uae08\uc735\uc704\uc6d0\ud68c",

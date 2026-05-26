@@ -1,6 +1,20 @@
 
 from structured_logging import get_logger
 
+# audit \u00a71.5 #3 re-audit (2026-05-26): LOW_RISK_KEYWORDS is set-equal
+# to policy_impact.LOW_IMPACT_KEYWORDS but with the trailing \uc124\uba85 \u2192
+# \uc804\ub9dd order preserved here. Lifted to korean_constants.py to remove
+# literal duplication while preserving each consumer's first-match
+# behavior verbatim. HIGH_RISK_KEYWORDS / MEDIUM_RISK_KEYWORDS are
+# INTENTIONALLY separate from the policy_impact HIGH/MEDIUM tuples \u2014
+# they measure *risk signaling* (regulatory tightening, supervision)
+# whereas HIGH/MEDIUM_IMPACT_KEYWORDS measure *impact magnitude*
+# (specific market actions). Unifying would conflate two distinct
+# scoring axes \u2014 see docs/KOREAN_CONSTANTS.md re-audit table.
+from korean_constants import (
+    LOW_RISK_KEYWORDS_POLICY_CONFIDENCE as LOW_RISK_KEYWORDS,
+)
+
 log = get_logger(__name__)
 GRADE_SCORES = {
     "A": 100,
@@ -11,6 +25,9 @@ GRADE_SCORES = {
     None: 0,
 }
 
+# audit \u00a71.5 #3 re-audit (2026-05-26): intentionally separate from
+# policy_impact.HIGH_IMPACT_KEYWORDS. 4 items overlap (\uaddc\uc81c / \ucc28\ub2e8 /
+# \uae08\uc9c0 / \ub300\ucd9c \uc81c\ud55c) but the two lists score different axes.
 HIGH_RISK_KEYWORDS = [
     "\uaddc\uc81c",
     "\ucc28\ub2e8",
@@ -20,6 +37,8 @@ HIGH_RISK_KEYWORDS = [
     "\uac10\ub3c5",
     "\uc870\uc0ac \ucc29\uc218",
 ]
+# audit \u00a71.5 #3 re-audit (2026-05-26): intentionally separate from
+# policy_impact.MEDIUM_IMPACT_KEYWORDS. Only 1 item overlaps (\uc2e4\ud589 \uac10\uc18c).
 MEDIUM_RISK_KEYWORDS = [
     "\uae08\ub9ac \ubcc0\uacbd",
     "\uae08\ub9ac",
@@ -27,13 +46,6 @@ MEDIUM_RISK_KEYWORDS = [
     "\uc2e4\ud589 \uac10\uc18c",
     "\uc81c\ub3c4 \ubcc0\uacbd",
     "\ud61c\ud0dd \ubcc0\uacbd",
-]
-LOW_RISK_KEYWORDS = [
-    "\ud589\uc0ac",
-    "\ubc1c\uc5b8",
-    "\uc81c\uc5b8",
-    "\uc124\uba85",
-    "\uc804\ub9dd",
 ]
 
 

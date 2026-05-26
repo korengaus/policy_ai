@@ -199,6 +199,17 @@ def _commands() -> List[List[str]]:
         # Exception / BS4 AttributeError). Guards against future
         # "cleanup" PRs that narrow without operator approval.
         [python, "tests/test_m11_7c_exception_narrowing.py"],
+        # audit §1.5 #3 re-audit (2026-05-26) — keyword consolidation
+        # follow-up to M11.2. Lifts LOW_RISK_KEYWORDS (policy_confidence)
+        # and LOW_IMPACT_KEYWORDS (policy_impact) — which M11.2 missed
+        # because they were in single-source files — to
+        # korean_constants.py as two separately named tuples preserving
+        # each consumer's order verbatim. The two are SET-EQUAL but
+        # differ in trailing-item order (설명 ↔ 전망), pinned by the
+        # set-equivalence + order-preservation tests in the file
+        # below. AST pins guard against re-inlining; identity pins
+        # guard against accidental rebinding.
+        [python, "tests/test_keyword_consolidation.py"],
         # M11.0d-1 — verdict producer disagreement diagnostic
         # (DIAGNOSIS ONLY, no production code changed). Pins the
         # current per-producer output snapshot for 42 synthetic-matrix

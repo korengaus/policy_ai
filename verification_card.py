@@ -96,6 +96,15 @@ def _split_sentences(text: str) -> list[str]:
 
 
 def _sentence_score(sentence: str) -> int:
+    # audit §1.5 #3 re-audit (2026-05-26): the two inline keyword
+    # lists below (actor list + target list) share some Korean tokens
+    # with official_source_body.INSTITUTION_TERMS and with
+    # korean_constants.CONCEPT_SYNONYMS_*, but they serve a different
+    # purpose: scoring NEWS SENTENCES for "describes a policy action
+    # by an authority" / "mentions a policy target". Centralising
+    # them with the official-document or concept-matching constants
+    # would broaden their match surface and change sentence scores.
+    # Keep inline — see docs/KOREAN_CONSTANTS.md re-audit table.
     score = min(len(sentence), 160)
     if any(keyword in sentence for keyword in POLICY_ACTION_KEYWORDS):
         score += 60

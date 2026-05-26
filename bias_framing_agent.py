@@ -62,6 +62,12 @@ SENSATIONAL_TERMS = [
     "panic",
 ]
 
+# audit §1.5 #3 re-audit (2026-05-26): UNCERTAINTY_TERMS shares some
+# tokens (검토, 추진, 논의, 전망) with config.STAGE_ORDER and with
+# policy_impact.UNCERTAIN_KEYWORDS, but the data shapes and purposes
+# are different: STAGE_ORDER is a stage→int ordering dict, this is a
+# flat list scored for rhetorical hedging, and policy_impact's list
+# is scored against impact direction. Keep separate.
 UNCERTAINTY_TERMS = [
     "가능성",
     "전망",
@@ -92,6 +98,14 @@ UNCERTAINTY_TERMS = [
     "reportedly",
 ]
 
+# audit §1.5 #3 re-audit (2026-05-26): PRO_POLICY_TERMS /
+# ANTI_POLICY_TERMS are intentionally separate from
+# policy_impact.POSITIVE_KEYWORDS / NEGATIVE_KEYWORDS. The two pairs
+# overlap by ~4 items each, but bias_framing scores *framing bias*
+# (how the article is rhetorically framed) while policy_impact scores
+# *impact direction* (whether the policy increases or reduces market
+# pressure). Unifying would conflate two different signal axes.
+# See docs/KOREAN_CONSTANTS.md re-audit table.
 PRO_POLICY_TERMS = ["지원", "완화", "혜택", "감면", "확대", "안정", "보호"]
 ANTI_POLICY_TERMS = ["규제", "강화", "제한", "억제", "차단", "금지", "불허", "축소", "부담"]
 PRO_MARKET_TERMS = ["상승", "호황", "회복", "활성화", "투자", "성장"]

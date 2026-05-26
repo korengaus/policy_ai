@@ -1,6 +1,20 @@
 
 from structured_logging import get_logger
 
+# audit §1.5 #3 re-audit (2026-05-26): LOW_IMPACT_KEYWORDS is
+# set-equal to policy_confidence.LOW_RISK_KEYWORDS but with the
+# trailing 전망 → 설명 order preserved here. Lifted to
+# korean_constants.py to remove literal duplication while preserving
+# byte-identical first-match behavior. HIGH / MEDIUM / POSITIVE /
+# NEGATIVE / UNCERTAIN / CONSUMER_HOUSING / MARKET / BUSINESS keyword
+# constants below are INTENTIONALLY separate from any similarly-named
+# constants in policy_confidence.py / bias_framing_agent.py — they
+# score different policy axes — see docs/KOREAN_CONSTANTS.md
+# re-audit table.
+from korean_constants import (
+    LOW_IMPACT_KEYWORDS_POLICY_IMPACT as LOW_IMPACT_KEYWORDS,
+)
+
 log = get_logger(__name__)
 GROUP_RULES = {
     "homeowners": ["\uc720\uc8fc\ud0dd\uc790", "1\uc8fc\ud0dd\uc790", "\uc8fc\ud0dd\ubcf4\uc720", "\uc8fc\ub2f4\ub300", "\uc8fc\ud0dd\ub2f4\ubcf4\ub300\ucd9c"],
@@ -25,6 +39,10 @@ SECTOR_RULES = {
     "consumer_finance": ["\uae08\ub9ac", "\uc774\uc790", "\ub300\ucd9c", "\uc18c\ube44\uc790", "\uc2e0\uc6a9\ub300\ucd9c"],
 }
 
+# audit \u00a71.5 #3 re-audit (2026-05-26): intentionally separate from
+# policy_confidence.HIGH_RISK_KEYWORDS. 4 items overlap (\uaddc\uc81c / \ucc28\ub2e8 /
+# \uae08\uc9c0 / \ub300\ucd9c \uc81c\ud55c) but HIGH_IMPACT scores *impact magnitude* while
+# HIGH_RISK scores *risk signaling* \u2014 different downstream axes.
 HIGH_IMPACT_KEYWORDS = [
     "\uaddc\uc81c",
     "\ucc28\ub2e8",
@@ -37,6 +55,9 @@ HIGH_IMPACT_KEYWORDS = [
     "\uc9c0\uc6d0 \ud655\ub300",
     "\ub9cc\uae30 \uc6d0\ucc9c \ucc28\ub2e8",
 ]
+# audit \u00a71.5 #3 re-audit (2026-05-26): intentionally separate from
+# policy_confidence.MEDIUM_RISK_KEYWORDS. Only 1 item overlaps
+# (\uc2e4\ud589 \uac10\uc18c) \u2014 the two lists score different policy axes.
 MEDIUM_IMPACT_KEYWORDS = [
     "\uc870\uc0ac \ucc29\uc218",
     "\uc81c\ub3c4 \uac80\ud1a0",
@@ -45,12 +66,23 @@ MEDIUM_IMPACT_KEYWORDS = [
     "\uc2e4\ud589 \uac10\uc18c",
     "\ud604\ud669 \uc870\uc0ac",
 ]
-LOW_IMPACT_KEYWORDS = ["\ud589\uc0ac", "\ubc1c\uc5b8", "\uc81c\uc5b8", "\uc804\ub9dd", "\uc124\uba85"]
+# LOW_IMPACT_KEYWORDS is now imported from korean_constants (see
+# top-of-file). It is set-equal to policy_confidence.LOW_RISK_KEYWORDS
+# but with the trailing two items in different order so each
+# consumer's first-match behavior is preserved verbatim.
 
+# audit \u00a71.5 #3 re-audit (2026-05-26): intentionally separate from
+# bias_framing_agent.PRO_POLICY_TERMS / ANTI_POLICY_TERMS \u2014 those
+# score framing bias; these score impact direction. 4 items overlap
+# but the downstream scoring is different.
 POSITIVE_KEYWORDS = ["\uae08\ub9ac\uac10\uba74", "\uae08\ub9ac \uac10\uba74", "\uc9c0\uc6d0 \ud655\ub300", "\uc9c0\uc6d0", "\ud61c\ud0dd", "\uc778\ud558", "\uc644\ud654"]
 NEGATIVE_KEYWORDS = ["\uc81c\ud55c", "\ucc28\ub2e8", "\uae08\uc9c0", "\ucd95\uc18c", "\uac10\uc18c", "\uaddc\uc81c", "\ubd80\ub2f4", "\uc5b4\ub824\uc6cc"]
 UNCERTAIN_KEYWORDS = ["\uc870\uc0ac", "\uac80\ud1a0", "\uc804\ub9dd", "\uac00\ub2a5\uc131", "\uc9c0\uc801"]
 
+# audit \u00a71.5 #3 re-audit (2026-05-26): intentionally separate from
+# korean_constants.CONCEPT_SYNONYMS_RELEVANCE / COMPARATOR. Those are
+# grouped-by-concept dicts of synonyms; this is a flat list used by
+# the consumer-housing-finance heuristic in analyze_policy_impact.
 CONSUMER_HOUSING_FINANCE_KEYWORDS = [
     "\uc804\uc138\ub300\ucd9c",
     "\uc8fc\ub2f4\ub300",
@@ -61,7 +93,19 @@ CONSUMER_HOUSING_FINANCE_KEYWORDS = [
     "\ucc28\ub2e8",
     "\uaddc\uc81c",
 ]
+# audit \u00a71.5 #3 re-audit (2026-05-26): MARKET_KEYWORDS is
+# intentionally a NARROWER list than the inline market list in
+# analyze_policy_impact (L165 below). MARKET_KEYWORDS is consumed as
+# a boolean "if any present \u2192 promote market_sensitivity to \u226560"
+# check; the inline list is consumed as a hit-count base for
+# _score_sensitivity. The two lists score the same axis with
+# different sensitivity \u2014 unifying would change scoring.
 MARKET_KEYWORDS = ["\ub300\ucd9c", "\uae08\ub9ac", "\uc740\ud589", "\ubd80\ub3d9\uc0b0", "\uc8fc\ud0dd", "\uae08\uc735\uad8c"]
+# audit \u00a71.5 #3 re-audit (2026-05-26): BUSINESS_KEYWORDS includes
+# the bare token "\uae30\uc5c5" (generic "company"); the inline list at L175
+# omits it because the inline list is a hit-count base where "\uae30\uc5c5"
+# would over-match. The module-level list is a boolean "if NONE
+# present \u2192 clamp" check where the broader keyword is correct.
 BUSINESS_KEYWORDS = ["\uc911\uc18c\uae30\uc5c5", "\uadfc\ub85c\uc790", "\uc740\ud589", "\uae30\uc5c5\uc740\ud589", "\uae30\uc5c5", "\uc0ac\uc5c5\uc790", "\uc18c\uc0c1\uacf5\uc778", "IBK"]
 
 

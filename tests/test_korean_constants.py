@@ -60,6 +60,16 @@ _PINNED_TUPLES = (
      kc.TEST_MOJIBAKE_MARKERS_ARTICLE_EXTRACTOR_MIN),
     ("POLICY_ACTION_KEYWORDS", kc.POLICY_ACTION_KEYWORDS,
      kc.TEST_POLICY_ACTION_KEYWORDS_MIN),
+    # audit §1.5 #3 re-audit (2026-05-26): the two LOW_* tuples are
+    # set-equal but ordered differently per consumer. Each gets its
+    # own subset pin so a future edit removing items from either
+    # tuple fails immediately.
+    ("LOW_RISK_KEYWORDS_POLICY_CONFIDENCE",
+     kc.LOW_RISK_KEYWORDS_POLICY_CONFIDENCE,
+     kc.TEST_LOW_RISK_KEYWORDS_POLICY_CONFIDENCE_MIN),
+    ("LOW_IMPACT_KEYWORDS_POLICY_IMPACT",
+     kc.LOW_IMPACT_KEYWORDS_POLICY_IMPACT,
+     kc.TEST_LOW_IMPACT_KEYWORDS_POLICY_IMPACT_MIN),
 )
 
 _PINNED_MAPPINGS = (
@@ -163,6 +173,11 @@ _MINIMUM_SIZES = {
     "MOJIBAKE_MARKERS_TEXT_UTILS": 10,
     "MOJIBAKE_MARKERS_ARTICLE_EXTRACTOR": 10,
     "POLICY_ACTION_KEYWORDS": 15,
+    # audit §1.5 #3 re-audit (2026-05-26): both LOW_* tuples have
+    # 5 items at audit time. Floor at 5 keeps the regression-safety
+    # contract tight — a future removal will fail immediately.
+    "LOW_RISK_KEYWORDS_POLICY_CONFIDENCE": 5,
+    "LOW_IMPACT_KEYWORDS_POLICY_IMPACT": 5,
 }
 
 _MINIMUM_MAPPING_KEYS = {
@@ -347,6 +362,13 @@ _REQUIRED_IMPORTS = {
                                  "STOPWORDS_OFFICIAL_BODY"),
     "verification_card.py":   ("korean_constants",
                                 "HOUSING_QUERY_TERMS"),
+    # audit §1.5 #3 re-audit (2026-05-26): policy_confidence.py and
+    # policy_impact.py now import their LOW_* tuples from
+    # korean_constants instead of declaring them locally.
+    "policy_confidence.py":   ("korean_constants",
+                                "LOW_RISK_KEYWORDS_POLICY_CONFIDENCE"),
+    "policy_impact.py":       ("korean_constants",
+                                "LOW_IMPACT_KEYWORDS_POLICY_IMPACT"),
 }
 
 
@@ -465,6 +487,13 @@ class AntiReintroductionTests(unittest.TestCase):
             "HOUSING_QUERY_TERMS", "HOUSING_DOCUMENT_TERMS",
             "POLICY_ACTION_KEYWORDS",
         },
+        # audit §1.5 #3 re-audit (2026-05-26): policy_confidence.py
+        # and policy_impact.py centralized only LOW_RISK_KEYWORDS /
+        # LOW_IMPACT_KEYWORDS. HIGH/MEDIUM/POSITIVE/etc. constants in
+        # these files remain intentionally local (MAJOR DIVERGENCE
+        # from any look-alike in other files — see audit doc).
+        "policy_confidence.py":   {"LOW_RISK_KEYWORDS"},
+        "policy_impact.py":       {"LOW_IMPACT_KEYWORDS"},
     }
 
     @staticmethod

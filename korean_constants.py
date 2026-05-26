@@ -303,6 +303,54 @@ POLICY_ACTION_KEYWORDS: Tuple[str, ...] = (
 
 
 # ============================================================
+# LOW-LEVEL RISK / IMPACT KEYWORDS
+# Used by: policy_confidence.py (_risk_level), policy_impact.py (_impact_level)
+# Purpose: detect low-severity policy signals when no HIGH or MEDIUM
+# keyword matched.
+#
+# audit §1.5 #3 re-audit (2026-05-26): the two tuples below are
+# SET-EQUAL — both wrap {행사, 발언, 제언, 설명, 전망}. M11.2 did not
+# catch this because the M11.2 audit treated them as belonging to
+# separate single-source files. Each consumer uses
+# `for kw in TUPLE: if kw in text: return ..., kw` — first match wins
+# and feeds into the human-readable `confidence_reasons` /
+# `impact_reasons` strings. The two tuples differ ONLY in the order
+# of the last two items (설명 ↔ 전망), so each consumer's first-match
+# behavior is preserved exactly when imported with its original
+# ordering. KEPT AS TWO SEPARATELY NAMED TUPLES to preserve
+# byte-identical reason-string output per consumer.
+# ============================================================
+
+
+# Source: policy_confidence.py:31-37 (audit §1.5 #3 re-audit). The
+# trailing 설명 → 전망 order is preserved verbatim so `_risk_level`'s
+# first-match keyword for "low risk keyword detected: ..." prose
+# remains byte-identical when both 설명 and 전망 appear in text.
+LOW_RISK_KEYWORDS_POLICY_CONFIDENCE: Tuple[str, ...] = (
+    "행사",
+    "발언",
+    "제언",
+    "설명",
+    "전망",
+)
+
+
+# Source: policy_impact.py:48 (audit §1.5 #3 re-audit). The trailing
+# 전망 → 설명 order is preserved verbatim so `_impact_level`'s
+# first-match keyword for "low impact keyword detected: ..." prose
+# remains byte-identical when both 전망 and 설명 appear in text.
+# Set-equal to LOW_RISK_KEYWORDS_POLICY_CONFIDENCE — pinned by
+# tests/test_keyword_consolidation.py::LowKeywordSetEquivalencePin.
+LOW_IMPACT_KEYWORDS_POLICY_IMPACT: Tuple[str, ...] = (
+    "행사",
+    "발언",
+    "제언",
+    "전망",
+    "설명",
+)
+
+
+# ============================================================
 # REGRESSION-SAFETY PINS — DO NOT MODIFY WITHOUT OPERATOR REVIEW
 # Each TEST_*_MIN constant is a strict subset of its corresponding
 # main constant. Used by tests/test_korean_constants.py to catch
@@ -368,4 +416,17 @@ TEST_HOUSING_DOCUMENT_TERMS_MIN: FrozenSet[str] = frozenset({
 
 TEST_POLICY_ACTION_KEYWORDS_MIN: Tuple[str, ...] = (
     "검토", "발표", "시행", "제한", "지원", "규제", "정책",
+)
+
+
+# audit §1.5 #3 re-audit (2026-05-26). Both LOW_* tuples are
+# set-equal, so the same minimum-subset pin applies to each. Two
+# distinct constants keep the per-consumer naming explicit.
+TEST_LOW_RISK_KEYWORDS_POLICY_CONFIDENCE_MIN: Tuple[str, ...] = (
+    "행사", "발언", "전망",
+)
+
+
+TEST_LOW_IMPACT_KEYWORDS_POLICY_IMPACT_MIN: Tuple[str, ...] = (
+    "행사", "발언", "전망",
 )

@@ -109,6 +109,13 @@ def describe_semantic_config() -> dict:
     }
 
 
+# audit §1.5 #3 re-audit (2026-05-26): STAGE_ORDER shares Korean
+# tokens (발언, 검토, 추진, 논의) with multiple keyword lists in
+# policy_confidence.py, policy_impact.py, and bias_framing_agent.py.
+# Despite the token overlap, the SHAPE is fundamentally different:
+# STAGE_ORDER maps stage-name → integer rank (policy-stage ordering),
+# while the other constants are flat lists scored against text. They
+# cannot be unified without changing the data model. Keep separate.
 STAGE_ORDER = {
     "소문": 1,
     "발언": 2,
