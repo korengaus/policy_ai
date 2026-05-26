@@ -261,6 +261,20 @@ def _commands() -> List[List[str]]:
         # Resolves audit §1.5 #10 for pipeline scope. timeline.py +
         # scheduler.py deferred to M14.0-print-b.
         [python, "tests/test_m14_0_print_migration.py"],
+        # M14.0-print-b (2026-05-26) — operational scripts print() →
+        # structured logging migration for 25 print calls across 2
+        # files (timeline.py runs inside analyze_pipeline at
+        # main.py:1260 on every Render request; scheduler.py is
+        # operator-run CLI). All 25 categorized CATEGORY A in Phase 1
+        # diagnosis: 24 log.info + 1 log.error (scheduler.run_once's
+        # per-query failure path inside `except Exception as error:`).
+        # Pins zero remaining print() calls, both files have get_logger
+        # import + module-level init, MIGRATED_FILES contains both,
+        # EXPECTED_TOTAL_LOG_CALLS = 323, EXPECTED_TOTAL_LOG_ERRORS = 14.
+        # Includes a combined-scope membership pin asserting all 11
+        # files (M14.0-print-a's 9 + M14.0-print-b's 2) appear in
+        # MIGRATED_FILES — the "audit §1.5 #10 closed" invariant.
+        [python, "tests/test_m14_0_print_b_migration.py"],
         # M11.0d-1 — verdict producer disagreement diagnostic
         # (DIAGNOSIS ONLY, no production code changed). Pins the
         # current per-producer output snapshot for 42 synthetic-matrix

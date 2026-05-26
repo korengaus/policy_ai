@@ -61,6 +61,11 @@ MIGRATED_FILES: tuple[str, ...] = (
     "official_evidence_resolution.py",
     "claim_normalizer.py",
     "pipeline_debug.py",
+    # M14.0-print-b (2026-05-26) — operational scripts migrated.
+    # timeline.py runs inside analyze_pipeline (main.py:1260);
+    # scheduler.py is operator-run CLI. Closes audit §1.5 #10.
+    "timeline.py",
+    "scheduler.py",
 )
 
 
@@ -184,11 +189,25 @@ PRESERVED_REAL_ERRORS: tuple[tuple[str, str], ...] = (
 #       claim_normalizer.py           +1 new (was 0; now 1)
 #       pipeline_debug.py             +1 new (was 0; now 1)
 #     Total entering scope: 26 NEW + 2 EXISTING = 28: 270 + 28 = 298
+#   * M14.0-print-b (operational scripts print() → structured logging
+#     — 25 new log calls across 2 files newly added to MIGRATED_FILES.
+#     timeline.py runs inside analyze_pipeline (main.py:1260) on every
+#     Render request — its prior print() output bypassed the JSON
+#     log aggregator. scheduler.py is operator-run CLI (render.yaml
+#     never runs it). Per-file contribution to the +25 pin bump:
+#       timeline.py     +13 new log.info (was 0 existing; now 13)
+#       scheduler.py    +11 new log.info + 1 new log.error = 12
+#                       (was 0 existing; now 12). The 1 log.error
+#                       lives inside `except Exception as error:`
+#                       so it's added to EXPECTED_EXCEPT_ERRORS
+#                       below as well.
+#     Closes audit §1.5 #10 (print-based logging) completely.
+#     298 + 25 = 323
 #
 # Any future milestone that legitimately adds log calls bumps this
 # expected count; the contract M14.4 actually pins is the *level
 # distribution*, not the absolute count.
-EXPECTED_TOTAL_LOG_CALLS = 298
+EXPECTED_TOTAL_LOG_CALLS = 323
 
 # Post-M14.4: 12 (down from 17 pre-M14.4 — 5 reclassifications).
 # M13.3d added log.info / log.warning calls only — no new log.error.
@@ -196,7 +215,11 @@ EXPECTED_TOTAL_LOG_CALLS = 298
 # 1 log.error in `_fail` (worker startup failure path). The other
 # 8 newly-migrated files added log.info / log.warning only. Bump
 # from 12 → 13.
-EXPECTED_TOTAL_LOG_ERRORS = 13
+# M14.0-print-b (2026-05-26): scheduler.py joined MIGRATED_FILES
+# with 1 log.error in `run_once`'s `except Exception as error:`
+# block (per-query failure path). timeline.py added log.info only.
+# Bump from 13 → 14.
+EXPECTED_TOTAL_LOG_ERRORS = 14
 
 
 def _read(filename: str) -> str:
@@ -483,6 +506,9 @@ class ExceptBlockErrorsPreserved(unittest.TestCase):
         "main.py": 2,                # 2 cache except blocks
         "news_collector.py": 3,      # 2 cache except blocks + URL decoder except
         "article_extractor.py": 6,   # all 6 inside extract except block
+        # M14.0-print-b: scheduler.run_once catches per-query failures
+        # in `except Exception as error:` and logs via log.error.
+        "scheduler.py": 1,
     }
 
     def test_except_block_errors_pinned(self):

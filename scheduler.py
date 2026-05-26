@@ -3,6 +3,15 @@ import time
 
 from database import init_db, save_analysis_result
 from main import analyze_pipeline
+from structured_logging import get_logger
+
+
+# M14.0-print-b (2026-05-26): module logger for the scheduler CLI.
+# scheduler.py is operator-run only (render.yaml runs uvicorn /
+# worker.py, never scheduler). The structured_logging handler emits
+# to stderr — operators still see all messages during interactive
+# `--once` / `--loop` runs in the default LOG_FORMAT=text mode.
+log = get_logger(__name__)
 
 
 DEFAULT_QUERIES = [
@@ -23,44 +32,77 @@ def _iter_api_results(report: dict):
 
 def run_once():
     init_db()
-    print("[Scheduler] Starting run...")
+    # M14.0-print-b (2026-05-26): print → log.info conversion. All
+    # status lines preserved verbatim with structured extras for
+    # JSON-log queryability.
+    log.info("[Scheduler] Starting run...")
 
     for query in DEFAULT_QUERIES:
-        print(f"[Scheduler] Query: {query}")
+        log.info(f"[Scheduler] Query: {query}", extra={"query": query})
         try:
             report = analyze_pipeline(query=query, max_news=1)
             results = list(_iter_api_results(report))
             if not results:
-                print(f"[Scheduler] No results for query: {query}")
+                log.info(
+                    f"[Scheduler] No results for query: {query}",
+                    extra={"query": query},
+                )
                 continue
 
             for result in results:
                 save_status = save_analysis_result(result, query=query)
                 title = result.get("title") or "(untitled)"
                 if save_status.get("duplicate"):
-                    print(f"[Scheduler] Duplicate skipped: {title}")
+                    log.info(
+                        f"[Scheduler] Duplicate skipped: {title}",
+                        extra={"query": query, "title": title[:200]},
+                    )
                 elif save_status.get("saved"):
-                    print(f"[Scheduler] Saved: {title}")
+                    log.info(
+                        f"[Scheduler] Saved: {title}",
+                        extra={"query": query, "title": title[:200]},
+                    )
                 else:
-                    print(f"[Scheduler] Not saved: {title}")
+                    log.info(
+                        f"[Scheduler] Not saved: {title}",
+                        extra={"query": query, "title": title[:200]},
+                    )
         except Exception as error:
-            print(f"[Scheduler] Error for query {query}: {error}")
+            # M14.0-print-b: print → log.error. Inside the broad
+            # `except Exception as error:` block — satisfies the
+            # M14.4 NoFalsePositiveErrorsPin via inside-except path,
+            # so no keyword needed in the literal text.
+            log.error(
+                f"[Scheduler] Error for query {query}: {error}",
+                extra={
+                    "query": query,
+                    "exception_type": type(error).__name__,
+                    "exception_message": str(error)[:500],
+                },
+            )
 
-    print("[Scheduler] Run complete.")
+    log.info("[Scheduler] Run complete.")
 
 
 def run_loop(interval_minutes=60):
     interval_seconds = max(1, int(interval_minutes)) * 60
-    print(f"[Scheduler] Loop started. interval_minutes={interval_minutes}")
-    print("[Scheduler] Press Ctrl+C to stop.")
+    # M14.0-print-b (2026-05-26): print → log.info conversion.
+    log.info(
+        f"[Scheduler] Loop started. interval_minutes={interval_minutes}",
+        extra={"interval_minutes": interval_minutes},
+    )
+    log.info("[Scheduler] Press Ctrl+C to stop.")
 
     try:
         while True:
             run_once()
-            print(f"[Scheduler] Sleeping for {interval_minutes} minutes...")
+            log.info(
+                f"[Scheduler] Sleeping for {interval_minutes} minutes...",
+                extra={"interval_minutes": interval_minutes},
+            )
             time.sleep(interval_seconds)
     except KeyboardInterrupt:
-        print("[Scheduler] Stopped by user.")
+        log.info("[Scheduler] Stopped by user.")
 
 
 def main():
