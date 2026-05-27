@@ -2049,6 +2049,780 @@ class DatabaseDuplicateDetectionFallbackTests(unittest.TestCase):
                     postgres_storage.reset_engine_for_tests()
 
 
+# ---------------------------------------------------------------------------
+# M12.0c-4: operator CLI table read helpers + database.py fallback.
+#
+# Five helpers cover the operator-CLI tables:
+#
+#   * read_fetch_artifacts             (source_fetch_artifacts)
+#   * read_extraction_results          (artifact_text_extractions)
+#   * read_evidence_candidates         (artifact_evidence_candidates)
+#   * read_producer_comparisons        (verdict_producer_comparisons)
+#   * read_verdict_label_attributions  (verdict_label_attributions)
+#
+# Test layout: 2 unit + 2 integration per function (20) + 2 db_path-skip
+# tests (extraction + producer_comparisons) = 22 new tests.
+# ---------------------------------------------------------------------------
+
+
+def _seed_fetch_artifact_in_pg(*, source_id, url, fetch_timestamp,
+                                created_at="2026-05-27T00:00:00",
+                                success=1):
+    import postgres_storage
+
+    postgres_storage.mirror_write(
+        "source_fetch_artifacts",
+        {
+            "source_id": source_id, "url": url,
+            "fetch_timestamp": fetch_timestamp,
+            "success": success, "truth_claim": 0,
+            "official_source_candidate": 0,
+            "created_at": created_at,
+        },
+    )
+
+
+def _seed_extraction_result_in_pg(*, artifact_id, source_id, url,
+                                   extraction_timestamp,
+                                   created_at="2026-05-27T00:00:00",
+                                   success=1):
+    import postgres_storage
+
+    postgres_storage.mirror_write(
+        "artifact_text_extractions",
+        {
+            "artifact_id": artifact_id, "source_id": source_id,
+            "url": url, "extraction_timestamp": extraction_timestamp,
+            "success": success, "truth_claim": 0,
+            "official_source_candidate": 0,
+            "created_at": created_at,
+        },
+    )
+
+
+def _seed_evidence_candidate_in_pg(*, extraction_id, source_id, url,
+                                    analysis_id, claim_text,
+                                    candidate_timestamp,
+                                    created_at="2026-05-27T00:00:00",
+                                    match_score=0.5):
+    import postgres_storage
+
+    postgres_storage.mirror_write(
+        "artifact_evidence_candidates",
+        {
+            "extraction_id": extraction_id, "source_id": source_id,
+            "url": url, "analysis_id": analysis_id,
+            "claim_text": claim_text, "match_score": match_score,
+            "candidate_timestamp": candidate_timestamp,
+            "truth_claim": 0, "official_source_candidate": 0,
+            "operator_review_required": 1,
+            "created_at": created_at,
+        },
+    )
+
+
+def _seed_producer_comparison_in_pg(*, analysis_id, source, input_hash,
+                                     comparison_timestamp,
+                                     created_at="2026-05-27T00:00:00",
+                                     all_three_agree=1,
+                                     disagreement_pattern=None):
+    import postgres_storage
+
+    postgres_storage.mirror_upsert(
+        "verdict_producer_comparisons",
+        {
+            "analysis_id": analysis_id, "source": source,
+            "input_hash": input_hash,
+            "comparison_timestamp": comparison_timestamp,
+            "all_three_agree": all_three_agree,
+            "p1_p2_agree": all_three_agree,
+            "p1_p3_agree": all_three_agree,
+            "p2_p3_agree": all_three_agree,
+            "disagreement_pattern": disagreement_pattern,
+            "truth_claim": 0, "operator_review_required": 1,
+            "created_at": created_at,
+        },
+        ["input_hash"],
+    )
+
+
+def _seed_verdict_label_attribution_in_pg(*, analysis_id,
+                                           diagnostic_timestamp,
+                                           created_at="2026-05-27T00:00:00",
+                                           attributed_branch_id=None,
+                                           is_weak_evidence_verified=0):
+    import postgres_storage
+
+    postgres_storage.mirror_upsert(
+        "verdict_label_attributions",
+        {
+            "analysis_id": analysis_id,
+            "diagnostic_timestamp": diagnostic_timestamp,
+            "attributed_branch_id": attributed_branch_id,
+            "is_weak_evidence_verified": is_weak_evidence_verified,
+            "truth_claim": 0, "operator_review_required": 1,
+            "created_at": created_at,
+        },
+        ["analysis_id"],
+    )
+
+
+# -- Unit tests (10): 2 per helper ------------------------------------
+
+
+class ReadFetchArtifactsTests(unittest.TestCase):
+    def test_returns_none_when_dual_write_disabled(self):
+        with _EnvScope():
+            _set_env(USE_POSTGRES_WRITE=None, DATABASE_URL=None)
+            import postgres_storage
+
+            self.assertIsNone(postgres_storage.read_fetch_artifacts())
+
+    def test_filters_and_pagination(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                tmp_db = Path(tmp_dir) / "rfa.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{tmp_db}")
+                import postgres_storage
+
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                _seed_fetch_artifact_in_pg(
+                    source_id="src-a", url="https://a/1",
+                    fetch_timestamp="2026-05-27T00:00:01",
+                )
+                _seed_fetch_artifact_in_pg(
+                    source_id="src-a", url="https://a/2",
+                    fetch_timestamp="2026-05-27T00:00:02",
+                )
+                _seed_fetch_artifact_in_pg(
+                    source_id="src-b", url="https://b/1",
+                    fetch_timestamp="2026-05-27T00:00:03",
+                )
+
+                # source filter narrows + newest-first.
+                rows = postgres_storage.read_fetch_artifacts(
+                    source_id="src-a", limit=10,
+                )
+                self.assertEqual(len(rows), 2)
+                self.assertEqual(rows[0]["url"], "https://a/2")
+                self.assertEqual(rows[1]["url"], "https://a/1")
+                # No-match filter → [] authoritative (NOT None).
+                empty = postgres_storage.read_fetch_artifacts(
+                    source_id="nonexistent",
+                )
+                self.assertEqual(empty, [])
+                self.assertIsNotNone(empty)
+                postgres_storage.reset_engine_for_tests()
+
+
+class ReadExtractionResultsTests(unittest.TestCase):
+    def test_returns_none_when_dual_write_disabled(self):
+        with _EnvScope():
+            _set_env(USE_POSTGRES_WRITE=None, DATABASE_URL=None)
+            import postgres_storage
+
+            self.assertIsNone(postgres_storage.read_extraction_results())
+
+    def test_filters_by_source_and_artifact_id(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                tmp_db = Path(tmp_dir) / "rer.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{tmp_db}")
+                import postgres_storage
+
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                _seed_extraction_result_in_pg(
+                    artifact_id=10, source_id="src-x", url="u1",
+                    extraction_timestamp="2026-05-27T00:00:01",
+                )
+                _seed_extraction_result_in_pg(
+                    artifact_id=11, source_id="src-x", url="u2",
+                    extraction_timestamp="2026-05-27T00:00:02",
+                )
+                _seed_extraction_result_in_pg(
+                    artifact_id=12, source_id="src-y", url="u3",
+                    extraction_timestamp="2026-05-27T00:00:03",
+                )
+
+                # source filter
+                rows = postgres_storage.read_extraction_results(
+                    source_id="src-x",
+                )
+                self.assertEqual(len(rows), 2)
+                # artifact_id filter
+                one = postgres_storage.read_extraction_results(
+                    artifact_id=11,
+                )
+                self.assertEqual(len(one), 1)
+                self.assertEqual(one[0]["url"], "u2")
+                # Combined filter
+                none_match = postgres_storage.read_extraction_results(
+                    source_id="src-x", artifact_id=12,
+                )
+                self.assertEqual(none_match, [])
+                postgres_storage.reset_engine_for_tests()
+
+
+class ReadEvidenceCandidatesTests(unittest.TestCase):
+    def test_returns_none_when_dual_write_disabled(self):
+        with _EnvScope():
+            _set_env(USE_POSTGRES_WRITE=None, DATABASE_URL=None)
+            import postgres_storage
+
+            self.assertIsNone(
+                postgres_storage.read_evidence_candidates(),
+            )
+
+    def test_filters_by_analysis_source_extraction(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                tmp_db = Path(tmp_dir) / "rec.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{tmp_db}")
+                import postgres_storage
+
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                _seed_evidence_candidate_in_pg(
+                    extraction_id=1, source_id="src-a", url="u1",
+                    analysis_id="ana-1", claim_text="c1",
+                    candidate_timestamp="2026-05-27T00:00:01",
+                )
+                _seed_evidence_candidate_in_pg(
+                    extraction_id=2, source_id="src-a", url="u2",
+                    analysis_id="ana-1", claim_text="c2",
+                    candidate_timestamp="2026-05-27T00:00:02",
+                )
+                _seed_evidence_candidate_in_pg(
+                    extraction_id=3, source_id="src-b", url="u3",
+                    analysis_id="ana-2", claim_text="c3",
+                    candidate_timestamp="2026-05-27T00:00:03",
+                )
+
+                # analysis_id filter
+                ana1 = postgres_storage.read_evidence_candidates(
+                    analysis_id="ana-1",
+                )
+                self.assertEqual(len(ana1), 2)
+                # source_id filter
+                srcb = postgres_storage.read_evidence_candidates(
+                    source_id="src-b",
+                )
+                self.assertEqual(len(srcb), 1)
+                self.assertEqual(srcb[0]["analysis_id"], "ana-2")
+                # extraction_id filter
+                ext2 = postgres_storage.read_evidence_candidates(
+                    extraction_id=2,
+                )
+                self.assertEqual(len(ext2), 1)
+                # Empty-string analysis_id MUST NOT inject WHERE.
+                # (truthy guard parity with SQLite-side.)
+                all_rows = postgres_storage.read_evidence_candidates(
+                    analysis_id="",
+                )
+                self.assertEqual(len(all_rows), 3)
+                postgres_storage.reset_engine_for_tests()
+
+
+class ReadProducerComparisonsTests(unittest.TestCase):
+    def test_returns_none_when_dual_write_disabled(self):
+        with _EnvScope():
+            _set_env(USE_POSTGRES_WRITE=None, DATABASE_URL=None)
+            import postgres_storage
+
+            self.assertIsNone(
+                postgres_storage.read_producer_comparisons(),
+            )
+
+    def test_only_disagreements_and_pattern_filter(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                tmp_db = Path(tmp_dir) / "rpc.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{tmp_db}")
+                import postgres_storage
+
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                _seed_producer_comparison_in_pg(
+                    analysis_id="ana-1", source="s1",
+                    input_hash="h-agree",
+                    comparison_timestamp="2026-05-27T00:00:01",
+                    all_three_agree=1, disagreement_pattern=None,
+                )
+                _seed_producer_comparison_in_pg(
+                    analysis_id="ana-2", source="s2",
+                    input_hash="h-disagree-1",
+                    comparison_timestamp="2026-05-27T00:00:02",
+                    all_three_agree=0,
+                    disagreement_pattern="p1_only",
+                )
+                _seed_producer_comparison_in_pg(
+                    analysis_id="ana-3", source="s3",
+                    input_hash="h-disagree-2",
+                    comparison_timestamp="2026-05-27T00:00:03",
+                    all_three_agree=0,
+                    disagreement_pattern="p2_only",
+                )
+
+                # only_disagreements maps to all_three_agree == 0.
+                disagree = postgres_storage.read_producer_comparisons(
+                    only_disagreements=True,
+                )
+                self.assertEqual(len(disagree), 2)
+                self.assertTrue(
+                    all(r["all_three_agree"] == 0 for r in disagree)
+                )
+                # Pattern filter narrows further.
+                p1 = postgres_storage.read_producer_comparisons(
+                    disagreement_pattern="p1_only",
+                )
+                self.assertEqual(len(p1), 1)
+                self.assertEqual(p1[0]["analysis_id"], "ana-2")
+                postgres_storage.reset_engine_for_tests()
+
+
+class ReadVerdictLabelAttributionsTests(unittest.TestCase):
+    def test_returns_none_when_dual_write_disabled(self):
+        with _EnvScope():
+            _set_env(USE_POSTGRES_WRITE=None, DATABASE_URL=None)
+            import postgres_storage
+
+            self.assertIsNone(
+                postgres_storage.read_verdict_label_attributions(),
+            )
+
+    def test_only_weak_and_branch_filter(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                tmp_db = Path(tmp_dir) / "rvla.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{tmp_db}")
+                import postgres_storage
+
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                _seed_verdict_label_attribution_in_pg(
+                    analysis_id="ana-1",
+                    diagnostic_timestamp="2026-05-27T00:00:01",
+                    attributed_branch_id="branch_A",
+                    is_weak_evidence_verified=0,
+                )
+                _seed_verdict_label_attribution_in_pg(
+                    analysis_id="ana-2",
+                    diagnostic_timestamp="2026-05-27T00:00:02",
+                    attributed_branch_id="branch_B",
+                    is_weak_evidence_verified=1,
+                )
+                _seed_verdict_label_attribution_in_pg(
+                    analysis_id="ana-3",
+                    diagnostic_timestamp="2026-05-27T00:00:03",
+                    attributed_branch_id="branch_A",
+                    is_weak_evidence_verified=1,
+                )
+
+                # only_weak_evidence_verified → is_weak_evidence_verified=1.
+                weak = postgres_storage.read_verdict_label_attributions(
+                    only_weak_evidence_verified=True,
+                )
+                self.assertEqual(len(weak), 2)
+                # Branch filter.
+                branch_a = (
+                    postgres_storage.read_verdict_label_attributions(
+                        attributed_branch_id="branch_A",
+                    )
+                )
+                self.assertEqual(len(branch_a), 2)
+                # Combined filter.
+                weak_a = (
+                    postgres_storage.read_verdict_label_attributions(
+                        attributed_branch_id="branch_A",
+                        only_weak_evidence_verified=True,
+                    )
+                )
+                self.assertEqual(len(weak_a), 1)
+                self.assertEqual(weak_a[0]["analysis_id"], "ana-3")
+                postgres_storage.reset_engine_for_tests()
+
+
+# -- Integration tests (10): 2 per wrapper + db_path skip (2) ---------
+
+
+class DatabaseOperatorCliFallbackTests(unittest.TestCase):
+    """Integration tests for the database.py side of M12.0c-4."""
+
+    # --- get_fetch_artifacts -----------------------------------------
+
+    def test_get_fetch_artifacts_prefers_postgres_when_enabled(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    database.init_source_fetch_artifacts_table()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    _seed_fetch_artifact_in_pg(
+                        source_id="pg-src", url="https://pg/x",
+                        fetch_timestamp="2026-05-27T00:00:01",
+                    )
+
+                    rows = database.get_fetch_artifacts()
+                    self.assertEqual(len(rows), 1)
+                    self.assertEqual(rows[0]["source_id"], "pg-src")
+                    # _row_to_fetch_artifact transformation applied.
+                    self.assertIsInstance(rows[0]["success"], bool)
+                    self.assertIsInstance(rows[0]["truth_claim"], bool)
+                    postgres_storage.reset_engine_for_tests()
+
+    def test_get_fetch_artifacts_pg_empty_list_authoritative(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    database.init_source_fetch_artifacts_table()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    # Seed SQLite only; suppress PG mirror.
+                    with patch.object(
+                        postgres_storage, "mirror_write",
+                        lambda *a, **kw: False,
+                    ):
+                        database.save_fetch_artifact({
+                            "source_id": "sqlite-only",
+                            "url": "https://stale/x",
+                            "fetch_timestamp": "2026-05-27T00:00:00",
+                            "success": True,
+                        })
+
+                    rows = database.get_fetch_artifacts()
+                    self.assertEqual(rows, [])
+                    postgres_storage.reset_engine_for_tests()
+
+    # --- get_extraction_results --------------------------------------
+
+    def test_get_extraction_results_prefers_postgres_when_enabled(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    database.init_artifact_text_extractions_table()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    _seed_extraction_result_in_pg(
+                        artifact_id=42, source_id="pg-src",
+                        url="https://pg/e",
+                        extraction_timestamp="2026-05-27T00:00:01",
+                    )
+
+                    rows = database.get_extraction_results()
+                    self.assertEqual(len(rows), 1)
+                    self.assertEqual(rows[0]["artifact_id"], 42)
+                    self.assertIsInstance(rows[0]["success"], bool)
+                    postgres_storage.reset_engine_for_tests()
+
+    def test_get_extraction_results_pg_empty_list_authoritative(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    database.init_artifact_text_extractions_table()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    with patch.object(
+                        postgres_storage, "mirror_write",
+                        lambda *a, **kw: False,
+                    ):
+                        database.save_extraction_result({
+                            "artifact_id": 1,
+                            "source_id": "stale",
+                            "url": "https://stale/y",
+                            "extraction_timestamp": "2026-05-27T00:00:00",
+                            "success": True,
+                        })
+
+                    rows = database.get_extraction_results()
+                    self.assertEqual(rows, [])
+                    postgres_storage.reset_engine_for_tests()
+
+    # --- get_evidence_candidates -------------------------------------
+
+    def test_get_evidence_candidates_prefers_postgres_when_enabled(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    database.init_artifact_evidence_candidates_table()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    _seed_evidence_candidate_in_pg(
+                        extraction_id=5, source_id="pg-src",
+                        url="https://pg/c", analysis_id="ana-pg",
+                        claim_text="claim from pg",
+                        candidate_timestamp="2026-05-27T00:00:01",
+                    )
+
+                    rows = database.get_evidence_candidates(
+                        analysis_id="ana-pg",
+                    )
+                    self.assertEqual(len(rows), 1)
+                    self.assertEqual(rows[0]["claim_text"], "claim from pg")
+                    # bool conversions applied.
+                    self.assertIsInstance(
+                        rows[0]["operator_review_required"], bool,
+                    )
+                    self.assertIsInstance(rows[0]["match_score"], float)
+                    postgres_storage.reset_engine_for_tests()
+
+    def test_get_evidence_candidates_pg_empty_list_authoritative(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    database.init_artifact_evidence_candidates_table()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    with patch.object(
+                        postgres_storage, "mirror_write",
+                        lambda *a, **kw: False,
+                    ):
+                        database.save_evidence_candidate({
+                            "extraction_id": 1, "source_id": "stale",
+                            "url": "u", "analysis_id": "ana-stale",
+                            "claim_text": "c",
+                            "candidate_timestamp": "2026-05-27T00:00:00",
+                        })
+
+                    rows = database.get_evidence_candidates()
+                    self.assertEqual(rows, [])
+                    postgres_storage.reset_engine_for_tests()
+
+    # --- get_producer_comparisons ------------------------------------
+
+    def test_get_producer_comparisons_prefers_postgres_when_enabled(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    database.init_verdict_producer_comparisons_table()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    _seed_producer_comparison_in_pg(
+                        analysis_id="ana-pc", source="pc-src",
+                        input_hash="h-pc-1",
+                        comparison_timestamp="2026-05-27T00:00:01",
+                    )
+
+                    rows = database.get_producer_comparisons(
+                        analysis_id="ana-pc",
+                    )
+                    self.assertEqual(len(rows), 1)
+                    self.assertEqual(rows[0]["source"], "pc-src")
+                    self.assertIsInstance(rows[0]["all_three_agree"], bool)
+                    postgres_storage.reset_engine_for_tests()
+
+    def test_get_producer_comparisons_pg_empty_list_authoritative(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    database.init_verdict_producer_comparisons_table()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    with patch.object(
+                        postgres_storage, "mirror_upsert",
+                        lambda *a, **kw: False,
+                    ):
+                        database.save_producer_comparison({
+                            "analysis_id": "ana-stale",
+                            "source": "s",
+                            "input_hash": "h-stale",
+                            "comparison_timestamp": "2026-05-27T00:00:00",
+                        })
+
+                    rows = database.get_producer_comparisons()
+                    self.assertEqual(rows, [])
+                    postgres_storage.reset_engine_for_tests()
+
+    # --- get_verdict_label_attributions ------------------------------
+
+    def test_get_verdict_label_attributions_prefers_postgres_when_enabled(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    database.init_verdict_label_attributions_table()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    _seed_verdict_label_attribution_in_pg(
+                        analysis_id="ana-vla",
+                        diagnostic_timestamp="2026-05-27T00:00:01",
+                        attributed_branch_id="branch_X",
+                        is_weak_evidence_verified=1,
+                    )
+
+                    rows = database.get_verdict_label_attributions(
+                        analysis_id="ana-vla",
+                    )
+                    self.assertEqual(len(rows), 1)
+                    self.assertEqual(
+                        rows[0]["attributed_branch_id"], "branch_X",
+                    )
+                    self.assertIsInstance(
+                        rows[0]["is_weak_evidence_verified"], bool,
+                    )
+                    self.assertTrue(rows[0]["is_weak_evidence_verified"])
+                    postgres_storage.reset_engine_for_tests()
+
+    def test_get_verdict_label_attributions_pg_empty_list_authoritative(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    database.init_verdict_label_attributions_table()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    with patch.object(
+                        postgres_storage, "mirror_upsert",
+                        lambda *a, **kw: False,
+                    ):
+                        database.save_verdict_label_attribution({
+                            "analysis_id": "ana-stale-vla",
+                            "diagnostic_timestamp": "2026-05-27T00:00:00",
+                        })
+
+                    rows = database.get_verdict_label_attributions()
+                    self.assertEqual(rows, [])
+                    postgres_storage.reset_engine_for_tests()
+
+    # --- db_path skip (2) --------------------------------------------
+
+    def test_get_extraction_results_with_db_path_skips_postgres(self):
+        """When the caller passes an explicit ``db_path``, PG MUST be
+        skipped — the caller is opting into a specific SQLite file
+        (CLI's ``--db-path`` flag / isolated tests)."""
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                explicit_db = Path(tmp_dir) / "explicit.db"
+                pg_db = Path(tmp_dir) / "pg.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                import database
+                import postgres_storage
+
+                # PG has a row that would be visible if we did not
+                # skip — but the caller passed db_path, so PG MUST be
+                # ignored.
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                _seed_extraction_result_in_pg(
+                    artifact_id=999, source_id="pg-src",
+                    url="https://pg/should-not-appear",
+                    extraction_timestamp="2026-05-27T00:00:01",
+                )
+                # explicit_db is empty — initialise its schema directly.
+                with patch("database.DB_PATH", explicit_db):
+                    database.init_artifact_text_extractions_table()
+
+                rows = database.get_extraction_results(db_path=explicit_db)
+                # PG had a row but db_path was passed → SQLite only.
+                self.assertEqual(rows, [])
+                postgres_storage.reset_engine_for_tests()
+
+    def test_get_producer_comparisons_with_db_path_skips_postgres(self):
+        """db_path skip with a different filter shape
+        (``only_disagreements`` bool flag)."""
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                explicit_db = Path(tmp_dir) / "explicit.db"
+                pg_db = Path(tmp_dir) / "pg.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                import database
+                import postgres_storage
+
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                _seed_producer_comparison_in_pg(
+                    analysis_id="ana-pg-skip", source="s",
+                    input_hash="h-pg-skip",
+                    comparison_timestamp="2026-05-27T00:00:01",
+                    all_three_agree=0,
+                    disagreement_pattern="p1_only",
+                )
+                with patch("database.DB_PATH", explicit_db):
+                    database.init_verdict_producer_comparisons_table()
+
+                rows = database.get_producer_comparisons(
+                    only_disagreements=True, db_path=explicit_db,
+                )
+                self.assertEqual(rows, [])
+                postgres_storage.reset_engine_for_tests()
+
+
 class ModuleLevelStaticChecks(unittest.TestCase):
     """Pure source-text inspection. Cheap and stable; catches the
     invariant the brief asks for without needing to wrangle Python's

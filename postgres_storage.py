@@ -951,6 +951,275 @@ def read_analysis_result_id_by_url(
 
 
 # ---------------------------------------------------------------------------
+# Read helpers — M12.0c-4 (operator CLI tables).
+#
+# These mirror the M12.0c-minimal / M12.0c-2 pattern for the five
+# operator-facing read functions in database.py:
+#
+#   - get_fetch_artifacts            (source_fetch_artifacts)
+#   - get_extraction_results         (artifact_text_extractions)
+#   - get_evidence_candidates        (artifact_evidence_candidates)
+#   - get_producer_comparisons       (verdict_producer_comparisons)
+#   - get_verdict_label_attributions (verdict_label_attributions)
+#
+# Contract (identical across all five):
+#
+#   * Return ``[]`` when Postgres has zero matching rows — AUTHORITATIVE.
+#     The caller in database.py MUST treat ``[]`` and None differently:
+#       - None → engine unavailable / error → fall back to SQLite.
+#       - ``[]`` → PG is authoritative and says zero rows; trust it.
+#   * Return RAW dicts (``dict(row._mapping)``) without applying the
+#     SQLite-side ``_row_to_*`` normalizations. Those live in
+#     database.py and the wrapper there applies them to both SQLite
+#     Rows and PG raw dicts (both are duck-typed).
+#   * NEVER raise. Any SQLAlchemy / unexpected error → log.warning +
+#     return None.
+#   * Filter args are keyword-only. Truthy guards on free-text filters
+#     so a passed ``""`` does not produce a ``WHERE col = ''`` clause
+#     (matches the SQLite-side ``if analysis_id is not None and
+#     str(analysis_id):`` guard).
+#   * No ``db_path`` arg — these helpers always read the default
+#     Postgres engine. The caller in database.py is responsible for
+#     skipping the helper entirely when an explicit ``db_path`` was
+#     passed (CLI's ``--db-path`` opts into a specific SQLite file).
+# ---------------------------------------------------------------------------
+
+
+def read_fetch_artifacts(
+    *,
+    source_id: Optional[str] = None,
+    limit: int = 50,
+) -> Optional[list]:
+    """source_fetch_artifacts rows, newest first. ``limit`` clamped
+    to ``[1, 500]``."""
+    engine = get_engine()
+    if engine is None:
+        return None
+    try:
+        safe_limit = max(1, min(int(limit or 50), 500))
+    except (TypeError, ValueError):
+        safe_limit = 50
+    try:
+        stmt = sa.select(source_fetch_artifacts_table)
+        if source_id:
+            stmt = stmt.where(
+                source_fetch_artifacts_table.c.source_id == str(source_id),
+            )
+        stmt = stmt.order_by(
+            source_fetch_artifacts_table.c.fetch_timestamp.desc(),
+            source_fetch_artifacts_table.c.id.desc(),
+        ).limit(safe_limit)
+        with engine.connect() as conn:
+            rows = conn.execute(stmt).all()
+        return [dict(row._mapping) for row in rows]
+    except SQLAlchemyError as exc:
+        log.warning("read_fetch_artifacts failed: %s", exc)
+        return None
+    except Exception as exc:  # noqa: BLE001
+        log.warning("read_fetch_artifacts unexpected error: %s", exc)
+        return None
+
+
+def read_extraction_results(
+    *,
+    source_id: Optional[str] = None,
+    artifact_id: Optional[int] = None,
+    limit: int = 50,
+) -> Optional[list]:
+    """artifact_text_extractions rows, newest first. ``limit``
+    clamped to ``[1, 500]``."""
+    engine = get_engine()
+    if engine is None:
+        return None
+    try:
+        safe_limit = max(1, min(int(limit or 50), 500))
+    except (TypeError, ValueError):
+        safe_limit = 50
+    try:
+        stmt = sa.select(artifact_text_extractions_table)
+        if source_id:
+            stmt = stmt.where(
+                artifact_text_extractions_table.c.source_id == str(source_id),
+            )
+        if artifact_id is not None:
+            try:
+                stmt = stmt.where(
+                    artifact_text_extractions_table.c.artifact_id
+                    == int(artifact_id),
+                )
+            except (TypeError, ValueError):
+                pass
+        stmt = stmt.order_by(
+            artifact_text_extractions_table.c.extraction_timestamp.desc(),
+            artifact_text_extractions_table.c.id.desc(),
+        ).limit(safe_limit)
+        with engine.connect() as conn:
+            rows = conn.execute(stmt).all()
+        return [dict(row._mapping) for row in rows]
+    except SQLAlchemyError as exc:
+        log.warning("read_extraction_results failed: %s", exc)
+        return None
+    except Exception as exc:  # noqa: BLE001
+        log.warning("read_extraction_results unexpected error: %s", exc)
+        return None
+
+
+def read_evidence_candidates(
+    *,
+    analysis_id: Optional[str] = None,
+    source_id: Optional[str] = None,
+    extraction_id: Optional[int] = None,
+    limit: int = 50,
+) -> Optional[list]:
+    """artifact_evidence_candidates rows, newest first. ``limit``
+    clamped to ``[1, 500]``."""
+    engine = get_engine()
+    if engine is None:
+        return None
+    try:
+        safe_limit = max(1, min(int(limit or 50), 500))
+    except (TypeError, ValueError):
+        safe_limit = 50
+    try:
+        stmt = sa.select(artifact_evidence_candidates_table)
+        if analysis_id is not None and str(analysis_id):
+            stmt = stmt.where(
+                artifact_evidence_candidates_table.c.analysis_id
+                == str(analysis_id),
+            )
+        if source_id:
+            stmt = stmt.where(
+                artifact_evidence_candidates_table.c.source_id
+                == str(source_id),
+            )
+        if extraction_id is not None:
+            try:
+                stmt = stmt.where(
+                    artifact_evidence_candidates_table.c.extraction_id
+                    == int(extraction_id),
+                )
+            except (TypeError, ValueError):
+                pass
+        stmt = stmt.order_by(
+            artifact_evidence_candidates_table.c.candidate_timestamp.desc(),
+            artifact_evidence_candidates_table.c.id.desc(),
+        ).limit(safe_limit)
+        with engine.connect() as conn:
+            rows = conn.execute(stmt).all()
+        return [dict(row._mapping) for row in rows]
+    except SQLAlchemyError as exc:
+        log.warning("read_evidence_candidates failed: %s", exc)
+        return None
+    except Exception as exc:  # noqa: BLE001
+        log.warning("read_evidence_candidates unexpected error: %s", exc)
+        return None
+
+
+def read_producer_comparisons(
+    *,
+    analysis_id: Optional[str] = None,
+    disagreement_pattern: Optional[str] = None,
+    only_disagreements: bool = False,
+    limit: int = 50,
+) -> Optional[list]:
+    """verdict_producer_comparisons rows, newest first. ``limit``
+    clamped to ``[1, 500]``.
+
+    ``only_disagreements=True`` maps to ``all_three_agree == 0`` per
+    the SQLite-side semantics (PG mirror also stores the bool as INT)."""
+    engine = get_engine()
+    if engine is None:
+        return None
+    try:
+        safe_limit = max(1, min(int(limit or 50), 500))
+    except (TypeError, ValueError):
+        safe_limit = 50
+    try:
+        stmt = sa.select(verdict_producer_comparisons_table)
+        if analysis_id is not None and str(analysis_id):
+            stmt = stmt.where(
+                verdict_producer_comparisons_table.c.analysis_id
+                == str(analysis_id),
+            )
+        if disagreement_pattern:
+            stmt = stmt.where(
+                verdict_producer_comparisons_table.c.disagreement_pattern
+                == str(disagreement_pattern),
+            )
+        if only_disagreements:
+            stmt = stmt.where(
+                verdict_producer_comparisons_table.c.all_three_agree == 0,
+            )
+        stmt = stmt.order_by(
+            verdict_producer_comparisons_table.c.comparison_timestamp.desc(),
+            verdict_producer_comparisons_table.c.id.desc(),
+        ).limit(safe_limit)
+        with engine.connect() as conn:
+            rows = conn.execute(stmt).all()
+        return [dict(row._mapping) for row in rows]
+    except SQLAlchemyError as exc:
+        log.warning("read_producer_comparisons failed: %s", exc)
+        return None
+    except Exception as exc:  # noqa: BLE001
+        log.warning("read_producer_comparisons unexpected error: %s", exc)
+        return None
+
+
+def read_verdict_label_attributions(
+    *,
+    analysis_id: Optional[str] = None,
+    attributed_branch_id: Optional[str] = None,
+    only_weak_evidence_verified: bool = False,
+    limit: int = 100,
+) -> Optional[list]:
+    """verdict_label_attributions rows, newest first. ``limit``
+    clamped to ``[1, 500]`` (default 100 to match the SQLite-side
+    helper).
+
+    ``only_weak_evidence_verified=True`` maps to
+    ``is_weak_evidence_verified == 1`` per the SQLite-side semantics."""
+    engine = get_engine()
+    if engine is None:
+        return None
+    try:
+        safe_limit = max(1, min(int(limit or 100), 500))
+    except (TypeError, ValueError):
+        safe_limit = 100
+    try:
+        stmt = sa.select(verdict_label_attributions_table)
+        if analysis_id is not None and str(analysis_id):
+            stmt = stmt.where(
+                verdict_label_attributions_table.c.analysis_id
+                == str(analysis_id),
+            )
+        if attributed_branch_id:
+            stmt = stmt.where(
+                verdict_label_attributions_table.c.attributed_branch_id
+                == str(attributed_branch_id),
+            )
+        if only_weak_evidence_verified:
+            stmt = stmt.where(
+                verdict_label_attributions_table.c.is_weak_evidence_verified
+                == 1,
+            )
+        stmt = stmt.order_by(
+            verdict_label_attributions_table.c.diagnostic_timestamp.desc(),
+            verdict_label_attributions_table.c.id.desc(),
+        ).limit(safe_limit)
+        with engine.connect() as conn:
+            rows = conn.execute(stmt).all()
+        return [dict(row._mapping) for row in rows]
+    except SQLAlchemyError as exc:
+        log.warning("read_verdict_label_attributions failed: %s", exc)
+        return None
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "read_verdict_label_attributions unexpected error: %s", exc,
+        )
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Diagnostic helper — read-only, used by scripts/check_postgres_health.py.
 # ---------------------------------------------------------------------------
 

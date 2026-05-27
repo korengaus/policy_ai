@@ -1208,6 +1208,22 @@ def get_fetch_artifacts(source_id: str = None, limit: int = 50) -> list:
         capped_limit = max(1, min(int(limit or 50), 500))
     except (TypeError, ValueError):
         capped_limit = 50
+    # M12.0c-4: no db_path arg on this function — always use default DB.
+    # Standard M12.0c-2 pattern: PG primary, [] = PG truth, None →
+    # SQLite fallback.
+    try:
+        from postgres_storage import (
+            is_postgres_dual_write_enabled,
+            read_fetch_artifacts,
+        )
+        if is_postgres_dual_write_enabled():
+            pg_rows = read_fetch_artifacts(
+                source_id=source_id, limit=capped_limit,
+            )
+            if pg_rows is not None:
+                return [_row_to_fetch_artifact(r) for r in pg_rows]
+    except Exception:  # noqa: BLE001 — PG read failure must not block SQLite
+        pass
     with get_connection() as connection:
         _ensure_source_fetch_artifacts_table(connection)
         if source_id:
@@ -1403,6 +1419,25 @@ def get_extraction_results(source_id: str = None, artifact_id: int = None,
         capped_limit = max(1, min(int(limit or 50), 500))
     except (TypeError, ValueError):
         capped_limit = 50
+    # M12.0c-4: PG fallback ONLY when db_path is None. An explicit
+    # db_path means the caller is opting into a specific SQLite file
+    # (CLI --db-path / isolated tests) — Postgres MUST be skipped.
+    if db_path is None:
+        try:
+            from postgres_storage import (
+                is_postgres_dual_write_enabled,
+                read_extraction_results,
+            )
+            if is_postgres_dual_write_enabled():
+                pg_rows = read_extraction_results(
+                    source_id=source_id,
+                    artifact_id=artifact_id,
+                    limit=capped_limit,
+                )
+                if pg_rows is not None:
+                    return [_row_to_extraction_result(r) for r in pg_rows]
+        except Exception:  # noqa: BLE001 — PG read failure must not block SQLite
+            pass
     connection = _open_connection(db_path)
     try:
         _ensure_artifact_text_extractions_table(connection)
@@ -1634,6 +1669,25 @@ def get_evidence_candidates(
         capped_limit = max(1, min(int(limit or 50), 500))
     except (TypeError, ValueError):
         capped_limit = 50
+    # M12.0c-4: PG fallback ONLY when db_path is None (see comment in
+    # get_extraction_results for the rationale).
+    if db_path is None:
+        try:
+            from postgres_storage import (
+                is_postgres_dual_write_enabled,
+                read_evidence_candidates,
+            )
+            if is_postgres_dual_write_enabled():
+                pg_rows = read_evidence_candidates(
+                    analysis_id=analysis_id,
+                    source_id=source_id,
+                    extraction_id=extraction_id,
+                    limit=capped_limit,
+                )
+                if pg_rows is not None:
+                    return [_row_to_evidence_candidate(r) for r in pg_rows]
+        except Exception:  # noqa: BLE001 — PG read failure must not block SQLite
+            pass
     connection = _open_connection(db_path)
     try:
         _ensure_artifact_evidence_candidates_table(connection)
@@ -1900,6 +1954,24 @@ def get_producer_comparisons(
         capped_limit = max(1, min(int(limit or 50), 500))
     except (TypeError, ValueError):
         capped_limit = 50
+    # M12.0c-4: PG fallback ONLY when db_path is None.
+    if db_path is None:
+        try:
+            from postgres_storage import (
+                is_postgres_dual_write_enabled,
+                read_producer_comparisons,
+            )
+            if is_postgres_dual_write_enabled():
+                pg_rows = read_producer_comparisons(
+                    analysis_id=analysis_id,
+                    disagreement_pattern=disagreement_pattern,
+                    only_disagreements=only_disagreements,
+                    limit=capped_limit,
+                )
+                if pg_rows is not None:
+                    return [_row_to_producer_comparison(r) for r in pg_rows]
+        except Exception:  # noqa: BLE001 — PG read failure must not block SQLite
+            pass
     connection = _open_connection(db_path)
     try:
         _ensure_verdict_producer_comparisons_table(connection)
@@ -2150,6 +2222,27 @@ def get_verdict_label_attributions(
         capped_limit = max(1, min(int(limit or 100), 500))
     except (TypeError, ValueError):
         capped_limit = 100
+    # M12.0c-4: PG fallback ONLY when db_path is None.
+    if db_path is None:
+        try:
+            from postgres_storage import (
+                is_postgres_dual_write_enabled,
+                read_verdict_label_attributions,
+            )
+            if is_postgres_dual_write_enabled():
+                pg_rows = read_verdict_label_attributions(
+                    analysis_id=analysis_id,
+                    attributed_branch_id=attributed_branch_id,
+                    only_weak_evidence_verified=only_weak_evidence_verified,
+                    limit=capped_limit,
+                )
+                if pg_rows is not None:
+                    return [
+                        _row_to_verdict_label_attribution(r)
+                        for r in pg_rows
+                    ]
+        except Exception:  # noqa: BLE001 — PG read failure must not block SQLite
+            pass
     connection = _open_connection(db_path)
     try:
         _ensure_verdict_label_attributions_table(connection)
