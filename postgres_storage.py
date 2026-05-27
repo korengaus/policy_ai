@@ -850,6 +850,107 @@ def read_review_decisions_for_task(task_id: str) -> Optional[list]:
 
 
 # ---------------------------------------------------------------------------
+# Read helpers — M12.0c-3 (duplicate INSERT prevention).
+#
+# Used by ``database.result_exists_by_url`` and
+# ``database.get_result_id_by_url`` to prevent duplicate
+# ``analysis_results`` rows when the Web service is asked to save a URL
+# that the Worker has already persisted (Web and Worker have separate
+# ephemeral filesystems on Render and never share SQLite).
+#
+# Asymmetric None semantics:
+#
+#   * ``read_analysis_result_exists_by_url`` returns Optional[bool]:
+#       - True  → PG has at least one matching row (authoritative).
+#       - False → PG authoritatively has zero matching rows; caller
+#                 MUST trust this and NOT fall back to SQLite. Same
+#                 ``[]`` = PG truth contract as M12.0c-2.
+#       - None  → engine unavailable / error; caller falls back to
+#                 SQLite as best-effort.
+#
+#   * ``read_analysis_result_id_by_url`` returns Optional[int]:
+#       - int   → the latest analysis_results.id matching the URL.
+#       - None  → engine miss OR row missing (conflated, same as the
+#                 M12.0c-minimal ``read_analysis_result_by_id`` helper).
+#                 Caller falls back to SQLite for single-id lookups.
+#
+# NEVER raise.
+# ---------------------------------------------------------------------------
+
+
+def read_analysis_result_exists_by_url(
+    original_url: str,
+) -> Optional[bool]:
+    """True / False AUTHORITATIVELY when the engine is reachable; None
+    on engine miss or error. See module docstring above for the full
+    semantics — True AND False are both PG-authoritative; only None
+    triggers SQLite fallback in the caller."""
+    engine = get_engine()
+    if engine is None:
+        return None
+    try:
+        # SELECT 1 ... LIMIT 1 — we only need to know whether any row
+        # exists, not pull the (potentially large) row. ``.scalar()``
+        # returns the literal 1 on a hit or None on a miss; we coerce
+        # to bool so the contract returns True / False explicitly.
+        stmt = (
+            sa.select(sa.literal(1))
+            .select_from(analysis_results_table)
+            .where(analysis_results_table.c.original_url == original_url)
+            .limit(1)
+        )
+        with engine.connect() as conn:
+            hit = conn.execute(stmt).scalar()
+        return hit is not None
+    except SQLAlchemyError as exc:
+        log.warning("read_analysis_result_exists_by_url failed: %s", exc)
+        return None
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "read_analysis_result_exists_by_url unexpected error: %s",
+            exc,
+        )
+        return None
+
+
+def read_analysis_result_id_by_url(
+    original_url: str,
+) -> Optional[int]:
+    """Return the most recent ``analysis_results.id`` for ``original_url``
+    (``ORDER BY id DESC LIMIT 1``), or None when:
+      * dual-write disabled (no engine),
+      * no matching row in Postgres,
+      * any SQLAlchemy / unexpected error fires.
+
+    None conflates 'no row' with 'engine miss' — the caller in
+    database.py falls back to SQLite in either case, which is the
+    M12.0c-minimal single-id-lookup contract."""
+    engine = get_engine()
+    if engine is None:
+        return None
+    try:
+        stmt = (
+            sa.select(analysis_results_table.c.id)
+            .where(analysis_results_table.c.original_url == original_url)
+            .order_by(analysis_results_table.c.id.desc())
+            .limit(1)
+        )
+        with engine.connect() as conn:
+            row_id = conn.execute(stmt).scalar()
+        if row_id is None:
+            return None
+        return int(row_id)
+    except SQLAlchemyError as exc:
+        log.warning("read_analysis_result_id_by_url failed: %s", exc)
+        return None
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "read_analysis_result_id_by_url unexpected error: %s", exc,
+        )
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Diagnostic helper — read-only, used by scripts/check_postgres_health.py.
 # ---------------------------------------------------------------------------
 

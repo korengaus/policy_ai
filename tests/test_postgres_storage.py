@@ -1735,6 +1735,320 @@ class DatabaseReviewFallbackIntegrationTests(unittest.TestCase):
                     postgres_storage.reset_engine_for_tests()
 
 
+# ---------------------------------------------------------------------------
+# M12.0c-3: duplicate INSERT prevention helpers + database.py fallback.
+#
+# Two helpers cover the analysis_results duplicate-detection path:
+#
+#   * read_analysis_result_exists_by_url — Optional[bool]; True AND
+#     False are PG-authoritative, only None triggers SQLite fallback.
+#   * read_analysis_result_id_by_url — Optional[int]; standard
+#     M12.0c-minimal single-id-lookup pattern (None → SQLite fallback).
+#
+# 4 tests per function × 2 functions = 8 new tests.
+# ---------------------------------------------------------------------------
+
+
+class ReadAnalysisResultExistsByUrlTests(unittest.TestCase):
+    def test_returns_none_when_dual_write_disabled(self):
+        with _EnvScope():
+            _set_env(USE_POSTGRES_WRITE=None, DATABASE_URL=None)
+            import postgres_storage
+
+            self.assertIsNone(
+                postgres_storage.read_analysis_result_exists_by_url(
+                    "https://example.com/x",
+                ),
+            )
+
+    def test_true_when_present_false_when_missing(self):
+        """Combined check: True/False are BOTH authoritative when the
+        engine is reachable — the load-bearing semantic that lets the
+        caller skip SQLite fallback on a PG ``False``."""
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                tmp_db = Path(tmp_dir) / "exists_by_url.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{tmp_db}")
+                import postgres_storage
+
+                engine = postgres_storage.get_engine()
+                self.assertIsNotNone(engine)
+                postgres_storage.ensure_schema(engine)
+                postgres_storage.mirror_write(
+                    "analysis_results",
+                    {
+                        "id": 1,
+                        "query": "exists test",
+                        "title": "row present",
+                        "original_url": "https://example.com/present",
+                        "created_at": "2026-05-27T00:00:00+00:00",
+                    },
+                )
+
+                # Present URL → True (authoritative).
+                self.assertEqual(
+                    postgres_storage.read_analysis_result_exists_by_url(
+                        "https://example.com/present",
+                    ),
+                    True,
+                )
+                # Missing URL → False (authoritative — NOT None).
+                result = postgres_storage.read_analysis_result_exists_by_url(
+                    "https://example.com/never-saved",
+                )
+                self.assertEqual(result, False)
+                self.assertIsNotNone(result)
+                postgres_storage.reset_engine_for_tests()
+
+
+class ReadAnalysisResultIdByUrlTests(unittest.TestCase):
+    def test_returns_none_when_dual_write_disabled(self):
+        with _EnvScope():
+            _set_env(USE_POSTGRES_WRITE=None, DATABASE_URL=None)
+            import postgres_storage
+
+            self.assertIsNone(
+                postgres_storage.read_analysis_result_id_by_url(
+                    "https://example.com/x",
+                ),
+            )
+
+    def test_returns_latest_id_or_none(self):
+        """Latest-id behaviour (``ORDER BY id DESC LIMIT 1``) plus the
+        missing-row → None contract."""
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                tmp_db = Path(tmp_dir) / "id_by_url.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{tmp_db}")
+                import postgres_storage
+
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                # Two rows with the same URL — different ids. Helper
+                # must return the newest (highest) id.
+                postgres_storage.mirror_write(
+                    "analysis_results",
+                    {
+                        "id": 10,
+                        "query": "first",
+                        "title": "older",
+                        "original_url": "https://example.com/dup",
+                        "created_at": "2026-05-27T00:00:00+00:00",
+                    },
+                )
+                postgres_storage.mirror_write(
+                    "analysis_results",
+                    {
+                        "id": 11,
+                        "query": "second",
+                        "title": "newer",
+                        "original_url": "https://example.com/dup",
+                        "created_at": "2026-05-27T00:01:00+00:00",
+                    },
+                )
+
+                self.assertEqual(
+                    postgres_storage.read_analysis_result_id_by_url(
+                        "https://example.com/dup",
+                    ),
+                    11,
+                )
+                # Missing URL → None.
+                self.assertIsNone(
+                    postgres_storage.read_analysis_result_id_by_url(
+                        "https://example.com/never",
+                    ),
+                )
+                postgres_storage.reset_engine_for_tests()
+
+
+class DatabaseDuplicateDetectionFallbackTests(unittest.TestCase):
+    """Integration tests for the database.py side of M12.0c-3.
+
+    Each case sets up two SQLite files: one is the local SQLite source
+    of truth (``database.DB_PATH``) and one is the Postgres substitute
+    behind ``DATABASE_URL``. Confirms that:
+
+      * ``result_exists_by_url`` prefers Postgres when enabled and that
+        PG ``False`` is authoritative over any stale SQLite row.
+      * ``get_result_id_by_url`` prefers Postgres when enabled and
+        falls back to SQLite when Postgres returns None.
+    """
+
+    def test_result_exists_by_url_prefers_postgres_when_enabled(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg_substitute.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    database.init_db()  # SQLite schema only; no rows.
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    # Seed PG only; SQLite stays empty.
+                    postgres_storage.mirror_write(
+                        "analysis_results",
+                        {
+                            "id": 5,
+                            "query": "exists from pg",
+                            "title": "in pg",
+                            "original_url": "https://example.com/pg-exists",
+                            "created_at": "2026-05-27T00:00:00+00:00",
+                        },
+                    )
+
+                    self.assertTrue(
+                        database.result_exists_by_url(
+                            "https://example.com/pg-exists",
+                        )
+                    )
+                    postgres_storage.reset_engine_for_tests()
+
+    def test_result_exists_by_url_pg_false_authoritative_over_stale_sqlite(self):
+        """Load-bearing invariant: when PG says no row (False), the
+        wrapper trusts PG even if SQLite has a stale row. Without this,
+        duplicate detection would leak through and the caller would
+        skip a legitimate save."""
+        from text_utils import sanitize_data
+
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg_substitute.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    database.init_db()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    # Seed SQLite with a row but DO NOT mirror to PG.
+                    sample = {
+                        "title": "stale sqlite row",
+                        "original_url": "https://example.com/stale-only",
+                        "topic": "정책",
+                        "claim_text": "주장",
+                        "verdict_label": "draft_likely_true",
+                        "verdict_confidence": 70,
+                        "verification_card": {
+                            "claim_text": "주장",
+                            "verdict_label": "draft_likely_true",
+                            "verdict_confidence": 70,
+                        },
+                    }
+                    with patch.object(
+                        postgres_storage, "mirror_write",
+                        lambda *a, **kw: False,
+                    ):
+                        database.save_analysis_result(
+                            sanitize_data(sample),
+                            query="stale-test",
+                        )
+
+                    # PG has 0 rows for this URL → False authoritative.
+                    # SQLite has 1 stale row but must be IGNORED.
+                    self.assertFalse(
+                        database.result_exists_by_url(
+                            "https://example.com/stale-only",
+                        )
+                    )
+                    postgres_storage.reset_engine_for_tests()
+
+    def test_get_result_id_by_url_prefers_postgres_when_enabled(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg_substitute.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    database.init_db()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    postgres_storage.mirror_write(
+                        "analysis_results",
+                        {
+                            "id": 99,
+                            "query": "id from pg",
+                            "title": "pg row",
+                            "original_url": "https://example.com/pg-id",
+                            "created_at": "2026-05-27T00:00:00+00:00",
+                        },
+                    )
+
+                    self.assertEqual(
+                        database.get_result_id_by_url(
+                            "https://example.com/pg-id",
+                        ),
+                        99,
+                    )
+                    postgres_storage.reset_engine_for_tests()
+
+    def test_get_result_id_by_url_falls_back_to_sqlite_when_pg_returns_none(self):
+        """PG is enabled and reachable but has no matching row; SQLite
+        does. The caller falls back to SQLite — same as the M12.0c-minimal
+        single-id-lookup pattern."""
+        from text_utils import sanitize_data
+
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg_substitute.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    database.init_db()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    # Seed SQLite only; PG stays empty for this URL.
+                    sample = {
+                        "title": "sqlite-only id source",
+                        "original_url": "https://example.com/sqlite-id-only",
+                        "topic": "정책",
+                        "claim_text": "주장",
+                        "verdict_label": "draft_likely_true",
+                        "verdict_confidence": 70,
+                        "verification_card": {
+                            "claim_text": "주장",
+                            "verdict_label": "draft_likely_true",
+                            "verdict_confidence": 70,
+                        },
+                    }
+                    with patch.object(
+                        postgres_storage, "mirror_write",
+                        lambda *a, **kw: False,
+                    ):
+                        status = database.save_analysis_result(
+                            sanitize_data(sample),
+                            query="sqlite-id-test",
+                        )
+                    self.assertTrue(status["saved"])
+                    sqlite_id = status["id"]
+
+                    # PG returns None for this URL → fall back to SQLite.
+                    self.assertEqual(
+                        database.get_result_id_by_url(
+                            "https://example.com/sqlite-id-only",
+                        ),
+                        sqlite_id,
+                    )
+                    postgres_storage.reset_engine_for_tests()
+
+
 class ModuleLevelStaticChecks(unittest.TestCase):
     """Pure source-text inspection. Cheap and stable; catches the
     invariant the brief asks for without needing to wrangle Python's

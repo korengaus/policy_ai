@@ -222,6 +222,23 @@ def result_exists_by_url(original_url: str) -> bool:
     if not original_url:
         return False
 
+    # M12.0c-3: PG primary for duplicate detection. Both True AND False
+    # are AUTHORITATIVE — only None (engine miss) triggers SQLite fallback.
+    # This is the same ``[]`` = PG truth contract as M12.0c-2; trusting PG
+    # False is what prevents duplicate INSERTs when the Worker has already
+    # saved a URL that Web's local SQLite doesn't know about.
+    try:
+        from postgres_storage import (
+            is_postgres_dual_write_enabled,
+            read_analysis_result_exists_by_url,
+        )
+        if is_postgres_dual_write_enabled():
+            pg_result = read_analysis_result_exists_by_url(original_url)
+            if pg_result is not None:
+                return pg_result
+    except Exception:  # noqa: BLE001 — PG read failure must not block SQLite
+        pass
+
     with get_connection() as connection:
         row = connection.execute(
             """
@@ -244,6 +261,19 @@ def get_result_id_by_url(original_url: str):
     """
     if not original_url:
         return None
+    # M12.0c-3: standard single-id-lookup pattern (M12.0c-minimal). PG
+    # primary; PG None (engine miss OR row missing) falls back to SQLite.
+    try:
+        from postgres_storage import (
+            is_postgres_dual_write_enabled,
+            read_analysis_result_id_by_url,
+        )
+        if is_postgres_dual_write_enabled():
+            pg_id = read_analysis_result_id_by_url(original_url)
+            if pg_id is not None:
+                return pg_id
+    except Exception:  # noqa: BLE001 — PG read failure must not block SQLite
+        pass
     with get_connection() as connection:
         row = connection.execute(
             """
