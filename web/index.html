@@ -2736,11 +2736,29 @@
 
   <script>
     const API_BASE = window.location.origin;
-    const LOCAL_HISTORY_KEY = "policy_ai_recent_analysis";
+    // M17-search-quality: storage key bumped from
+    // "policy_ai_recent_analysis" to invalidate cached entries written
+    // before the hot-topic card stopped silently surfacing localStorage
+    // history. Old entries — overwhelmingly 전세대출 from the platform's
+    // historical default query — are cleared via the one-shot
+    // _M17_LEGACY_HISTORY_KEY removal at page-load init below.
+    const LOCAL_HISTORY_KEY = "policy_ai_recent_analysis_v2";
+    const _M17_LEGACY_HISTORY_KEY = "policy_ai_recent_analysis";
     const REVIEW_QUEUE_KEY = "policy_ai_review_queue";
     const REVIEW_ACTION_KEY = "policy_ai_reviewer_actions";
     const LOCAL_HISTORY_LIMIT = 5;
     const REVIEW_QUEUE_LIMIT = 20;
+
+    // M17-search-quality: one-shot cleanup of the legacy storage key.
+    // Idempotent — removeItem on a missing key is a no-op. Wrapped in
+    // try/catch because localStorage may be unavailable (Safari private
+    // mode, disabled cookies); a cleanup failure must never break init.
+    try {
+      if (typeof localStorage !== "undefined"
+          && localStorage.getItem(_M17_LEGACY_HISTORY_KEY) !== null) {
+        localStorage.removeItem(_M17_LEGACY_HISTORY_KEY);
+      }
+    } catch (_) { /* localStorage unavailable — proceed */ }
 
     // Phase 2 M3: lightweight localStorage to avoid QuotaExceededError.
     // The slim shape keeps just enough to render history rows and topic cards;
@@ -4316,7 +4334,12 @@
       if (currentResults.length) {
         return currentResults.map((result, index) => topicCardFromResult(result, index, "current"));
       }
-      return topicCardsFromHistory(safeReadLocalHistory());
+      // M17-search-quality: do NOT fall back to localStorage history.
+      // The previous behaviour surfaced prior 전세대출 analyses as if
+      // they were results for the user's current query, breaking trust.
+      // The page-load + empty-result paths now show the empty-state
+      // placeholder rendered by renderHotTopics instead.
+      return [];
     }
 
     function renderHotTopics(preferredResults) {
@@ -4325,7 +4348,7 @@
         return activeCategory === "전체" || card.category === activeCategory;
       });
       if (!cards.length) {
-        hotTopicsEl.innerHTML = '<div class="empty-state">선택한 카테고리에 표시할 검증 뉴스가 없습니다. 검색을 실행하거나 최근 분석을 불러와 주세요.</div>';
+        hotTopicsEl.innerHTML = '<div class="empty-state">검색을 실행하면 검증 카드가 표시됩니다.</div>';
         return;
       }
       hotTopicsEl.innerHTML = cards.map((card) => {
@@ -6442,8 +6465,16 @@
     function renderResults(results, focusIndex = selectedResultIndex) {
       if (!results.length) {
         metricsEl.style.display = "none";
+        // M17-search-quality: when a search was just attempted (currentReportContext
+        // holds the query that produced zero results), surface a clear
+        // "관련 기사를 찾지 못했습니다" message. Otherwise (initial landing /
+        // explicit clear) keep the generic prompt. Read the query BEFORE
+        // clearCurrentReportContext nulls the context.
+        const justSearched = !!(currentReportContext && currentReportContext.query);
         clearCurrentReportContext();
-        resultsEl.innerHTML = '<div class="empty-state">관심 있는 이슈의 상세 보기를 누르거나 검색어를 입력하면 검증 리포트가 표시됩니다.</div>';
+        resultsEl.innerHTML = justSearched
+          ? '<div class="empty-state">관련 기사를 찾지 못했습니다. 다른 검색어로 다시 시도해 주세요.</div>'
+          : '<div class="empty-state">관심 있는 이슈의 상세 보기를 누르거나 검색어를 입력하면 검증 리포트가 표시됩니다.</div>';
         renderHotTopics();
         return;
       }

@@ -183,7 +183,7 @@ function makeFullResult(query, idx) {
     `this.__historyResult = saveLocalAnalysisHistory("금융위", 2, ${JSON.stringify(fullResponse)});`,
     sandbox
   );
-  const raw = sandbox.__storage.get("policy_ai_recent_analysis");
+  const raw = sandbox.__storage.get("policy_ai_recent_analysis_v2");
   assert.ok(raw, "history should be written to localStorage");
   const parsed = JSON.parse(raw);
   assert.strictEqual(parsed.length, 1, "should save one slim record");
@@ -264,7 +264,7 @@ function makeFullResult(query, idx) {
     `this.__historyResult = saveLocalAnalysisHistory("금융위", 1, ${JSON.stringify(responseData)});`,
     sandbox
   );
-  const baseline = sandbox.__storage.get("policy_ai_recent_analysis").length;
+  const baseline = sandbox.__storage.get("policy_ai_recent_analysis_v2").length;
 
   // Now create a sandbox with a tight quota and attempt to write a second item.
   const tight = createSandbox({ quotaAfterBytes: Math.max(50, Math.floor(baseline * 0.6)) });

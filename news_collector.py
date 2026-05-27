@@ -551,7 +551,17 @@ def _raw_fallback_candidate(title: str, href: str, summary: str, source: str, ba
     return _fallback_item(title, original_url, summary, source)
 
 
-def _candidate_score(item: dict) -> int:
+def _query_tokens_for_scoring(query: str) -> set[str]:
+    # M17-search-quality: replaces the hard-coded housing-keyword bias
+    # in _candidate_score. Returns lowercased tokens with length >= 2
+    # so single-char particles ('의', '를', '이') don't match noise.
+    if not query:
+        return set()
+    normalized = _normalize_query(query)
+    return {tok for tok in normalized.split() if len(tok) >= 2}
+
+
+def _candidate_score(item: dict, query: str | None = None) -> int:
     title = _normalize_spaces(item.get("title", ""))
     url = item.get("original_url") or item.get("link") or ""
     score = min(len(title), 120)
@@ -564,19 +574,31 @@ def _candidate_score(item: dict) -> int:
         score += 20
     if re.search(r"[.?!…\"'“”‘’]|[가-힣]{2,}\s+[가-힣]{2,}", title):
         score += 15
-    if any(keyword in title for keyword in ["대출", "금리", "부동산", "정책", "규제", "지원", "전세", "주택"]):
-        score += 25
+    # M17-search-quality: query-token overlap replaces the previous
+    # hard-coded +25 bonus for 대출/금리/부동산/정책/규제/지원/전세/주택.
+    # The old code biased selection toward housing-finance titles
+    # regardless of what the user searched for, surfacing 전세대출
+    # articles for queries like "기후변화 정책". Now the bonus only
+    # fires when the title actually overlaps with the user's query.
+    query_tokens = _query_tokens_for_scoring(query) if query else set()
+    if query_tokens:
+        title_lower = title.lower()
+        overlap_count = sum(1 for tok in query_tokens if tok in title_lower)
+        if overlap_count >= 1:
+            score += 25
+        if overlap_count >= 2:
+            score += 10
     if any(pattern in url for pattern in ["news", "article", "v.daum.net", "naver.com"]):
         score += 10
     return score
 
 
-def _force_select_best(items: list[dict], source: str) -> list[dict]:
+def _force_select_best(items: list[dict], source: str, query: str | None = None) -> list[dict]:
     unique = _dedupe_news_items([item for item in items if item])
     if not unique:
         return []
 
-    best = max(unique, key=_candidate_score)
+    best = max(unique, key=lambda candidate: _candidate_score(candidate, query=query))
     log.info("[NewsCollector] Forcing fallback selection: 1 item")
     forced = dict(best)
     forced["source"] = forced.get("source") or source
@@ -693,7 +715,7 @@ def search_naver_news_fallback(query: str, max_results: int = 3) -> tuple[list[d
                 return items[:max_results], None
 
         if not items:
-            items = _force_select_best(raw_candidates, "naver_fallback")
+            items = _force_select_best(raw_candidates, "naver_fallback", query=query)
 
         log.info(f"[NewsCollector] Fallback selected: {len(items)}")
         return items[:max_results], None
@@ -732,7 +754,7 @@ def search_daum_news_fallback(query: str, max_results: int = 3) -> tuple[list[di
                 return items[:max_results], None
 
         if not items:
-            items = _force_select_best(raw_candidates, "daum_fallback")
+            items = _force_select_best(raw_candidates, "daum_fallback", query=query)
 
         log.info(f"[NewsCollector] Fallback selected: {len(items)}")
         return items[:max_results], None
@@ -983,7 +1005,7 @@ def search_google_news_rss_with_meta(query: str, max_results: int = 3):
             collection_source = "daum_fallback"
 
     if not selected and raw_results:
-        selected = _force_select_best(raw_results, "google_rss")
+        selected = _force_select_best(raw_results, "google_rss", query=query)
         mode = "forced_google_rss"
         collection_source = "google_rss"
 

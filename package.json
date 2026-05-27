@@ -1,8 +1,9 @@
 {
   "scripts": {
-    "test": "node tests/regression.test.js && node tests/localstorage_slim.test.js && node tests/review_ui.test.js",
+    "test": "node tests/regression.test.js && node tests/localstorage_slim.test.js && node tests/review_ui.test.js && node tests/test_m17_hot_topic_no_history_fallback.test.js",
     "test:regression": "node tests/regression.test.js",
     "test:localstorage": "node tests/localstorage_slim.test.js",
-    "test:review-ui": "node tests/review_ui.test.js"
+    "test:review-ui": "node tests/review_ui.test.js",
+    "test:m17": "node tests/test_m17_hot_topic_no_history_fallback.test.js"
   }
 }
