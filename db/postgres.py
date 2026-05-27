@@ -149,6 +149,17 @@ def _parse_iso(value: Any) -> Optional[datetime]:
 def postgres_dual_write(result: dict, *, query: str = "") -> dict:
     """Best-effort dual-write to Postgres after a successful SQLite save.
 
+    M12.0d-2 (Stage 2 / Option 5B): trimmed to write only to the
+    ``audit_log`` table. The previous stories / claims / verdicts
+    INSERTs have been removed — those tables were never read by any
+    code in the project (verified by grep) and were write-only
+    dead weight. The actual verification data flows through
+    :mod:`postgres_storage` (analysis_results, review_tasks, jobs,
+    artifact_* tables) as the canonical dual-write surface. This
+    module is retained for the audit_log write path used by
+    :mod:`api_server` and :mod:`job_manager` (see
+    ``_postgres_dual_write_job``).
+
     Returns a small status dict describing what happened. Never raises.
     """
     status = {"attempted": False, "ok": False, "skipped_reason": None, "error": None}
@@ -187,82 +198,12 @@ def postgres_dual_write(result: dict, *, query: str = "") -> dict:
         final_decision = result.get("final_decision") or {}
 
         news_url = result.get("original_url") or ""
-        news_title = result.get("title") or ""
+        verdict_label = (
+            verification_card.get("verdict_label")
+            or result.get("verdict_label")
+            or ""
+        )
         now = _utc_now()
-
-        story_row = session.execute(
-            text(
-                """
-                INSERT INTO stories (news_url, news_title, fetched_at, created_at)
-                VALUES (:news_url, :news_title, :fetched_at, :created_at)
-                RETURNING id
-                """
-            ),
-            {
-                "news_url": news_url,
-                "news_title": news_title,
-                "fetched_at": _parse_iso(verification_card.get("last_checked_at")) or now,
-                "created_at": now,
-            },
-        ).fetchone()
-        story_id = story_row[0] if story_row else None
-
-        claim_text_value = verification_card.get("claim_text") or result.get("claim_text") or ""
-        normalized_claims = result.get("normalized_claims") or verification_card.get("normalized_claims") or []
-        normalized_first = ""
-        if isinstance(normalized_claims, list) and normalized_claims:
-            first = normalized_claims[0]
-            if isinstance(first, dict):
-                normalized_first = first.get("normalized") or first.get("text") or ""
-            else:
-                normalized_first = str(first)
-
-        claim_row = session.execute(
-            text(
-                """
-                INSERT INTO claims (story_id, text, normalized, claim_type, created_at)
-                VALUES (:story_id, :text, :normalized, :claim_type, :created_at)
-                RETURNING id
-                """
-            ),
-            {
-                "story_id": story_id,
-                "text": claim_text_value,
-                "normalized": normalized_first,
-                "claim_type": result.get("topic") or "",
-                "created_at": now,
-            },
-        ).fetchone()
-        claim_id = claim_row[0] if claim_row else None
-
-        verdict_label = verification_card.get("verdict_label") or result.get("verdict_label") or ""
-        verdict_confidence = _coerce_int(
-            verification_card.get("verdict_confidence") or result.get("verdict_confidence")
-        )
-
-        session.execute(
-            text(
-                """
-                INSERT INTO verdicts (
-                    claim_id, label, confidence, pipeline_version, rules_version,
-                    schema_version, llm_model, created_at
-                ) VALUES (
-                    :claim_id, :label, :confidence, :pipeline_version, :rules_version,
-                    :schema_version, :llm_model, :created_at
-                )
-                """
-            ),
-            {
-                "claim_id": claim_id,
-                "label": verdict_label,
-                "confidence": verdict_confidence,
-                "pipeline_version": os.getenv("PIPELINE_VERSION", "phase2-m1"),
-                "rules_version": os.getenv("RULES_VERSION", "v1"),
-                "schema_version": os.getenv("SCHEMA_VERSION", "v1"),
-                "llm_model": result.get("ai_model") or os.getenv("AI_MODEL", ""),
-                "created_at": now,
-            },
-        )
 
         session.execute(
             text(
@@ -272,8 +213,8 @@ def postgres_dual_write(result: dict, *, query: str = "") -> dict:
                 """
             ),
             {
-                "entity": "story",
-                "entity_id": str(story_id) if story_id is not None else "",
+                "entity": "analysis_result",
+                "entity_id": news_url,
                 "action": "dual_write",
                 "actor": "api_server",
                 "payload": json.dumps(
@@ -290,12 +231,8 @@ def postgres_dual_write(result: dict, *, query: str = "") -> dict:
 
         session.commit()
         status["ok"] = True
-        status["story_id"] = story_id
-        status["claim_id"] = claim_id
         logger.info(
-            "Postgres dual-write ok: story_id=%s claim_id=%s url=%s",
-            story_id,
-            claim_id,
+            "Postgres audit-log dual-write ok: entity=analysis_result url=%s",
             news_url,
         )
     except Exception as error:
@@ -304,7 +241,10 @@ def postgres_dual_write(result: dict, *, query: str = "") -> dict:
         except Exception:
             pass
         status["error"] = str(error)
-        logger.warning("Postgres dual-write failed (SQLite remains source of truth): %s", error)
+        logger.warning(
+            "Postgres dual-write failed (SQLite remains source of truth): %s",
+            error,
+        )
     finally:
         try:
             session.close()

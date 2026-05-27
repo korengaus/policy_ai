@@ -13,6 +13,17 @@ from text_utils import sanitize_data, sanitize_text
 # only configures handlers idempotently. Existing ``_embedding_logger``
 # alias at the bottom of this file is kept for the embedding-cache
 # helpers and is unrelated to this logger.
+#
+# M12.0d-2 (Stage 2 / Q7=1.2 contract): the SQLite fallback blocks
+# inside each of the 15 PG-primary read functions are preserved as
+# the explicit ``pg_enabled=False`` path for local dev / tests
+# without a Postgres substrate. They remain structurally unreachable
+# when ``USE_POSTGRES_WRITE=true`` (the ``if pg_enabled:`` branch
+# always returns first), so on Render they never execute. The
+# per-function Stage 1 comments saying "SQLite block unreachable when
+# dual-write enabled" remain factually accurate; Stage 2's
+# contribution is the explicit decision that the block stays in tree
+# rather than being deleted.
 log = get_logger(__name__)
 
 
@@ -633,9 +644,49 @@ _embedding_logger = _embedding_logging.getLogger(__name__)
 
 
 def get_cached_embedding(text_hash: str, provider: str, model: str):
-    """Return a previously stored vector, or ``None`` if absent/unusable."""
+    """Return a previously stored vector, or ``None`` if absent/unusable.
+
+    M12.0d-2 (Stage 2): PG-primary when dual-write is enabled, so the
+    Web and Worker services on Render share a single cache instead of
+    each rebuilding their own SQLite cache from scratch after every
+    restart (Render free-tier filesystems are ephemeral). A PG cache
+    miss (``None``) is a legitimate miss — caller computes a fresh
+    embedding; we do NOT fall through to SQLite when PG is enabled.
+    When dual-write is disabled (local dev / tests), the SQLite path
+    runs unchanged."""
     if not text_hash or not provider:
         return None
+    try:
+        from postgres_storage import (
+            is_postgres_dual_write_enabled,
+            read_cached_embedding,
+        )
+        pg_enabled = is_postgres_dual_write_enabled()
+    except Exception:
+        log.error(
+            "get_cached_embedding failed to import postgres_storage",
+            exc_info=True,
+            extra={"function": "get_cached_embedding"},
+        )
+        raise
+    if pg_enabled:
+        try:
+            pg_vector = read_cached_embedding(text_hash, provider, model)
+        except Exception:
+            log.error(
+                "get_cached_embedding PG read failed",
+                exc_info=True,
+                extra={
+                    "function": "get_cached_embedding",
+                    "text_hash_prefix": text_hash[:16] if text_hash else None,
+                    "provider": provider,
+                    "model": model,
+                },
+            )
+            raise
+        # PG returned vector OR None (legitimate cache miss).
+        # We do NOT fall through to SQLite — caller recomputes on miss.
+        return pg_vector
     try:
         with get_connection() as connection:
             row = connection.execute(
@@ -1082,7 +1133,15 @@ def list_review_tasks(*, status=None, limit: int = 50, offset: int = 0) -> list:
 def update_review_task_status(task_id: str, *, new_status: str,
                               updated_at: str) -> dict:
     """Update a task's status row. Caller is responsible for
-    transition validation via review_workflow.validate_status_transition."""
+    transition validation via review_workflow.validate_status_transition.
+
+    M12.0d-2 (Stage 2): after the SQLite UPDATE we re-read the row
+    directly from SQLite (NOT via ``get_review_task``, which would
+    return the PG row whose status is still pre-UPDATE) and mirror it
+    to PG via ``mirror_upsert`` on ``task_id``. Before this change PG
+    ``review_tasks.status`` was frozen at insert-time forever, masking
+    every status transition from operators reading via the PG-primary
+    ``get_review_task`` path."""
     with get_connection() as connection:
         _ensure_review_tables(connection)
         connection.execute(
@@ -1090,6 +1149,20 @@ def update_review_task_status(task_id: str, *, new_status: str,
             (new_status, updated_at, task_id),
         )
         connection.commit()
+        # Re-read the fresh row from SQLite (the source of truth)
+        # within the SAME connection scope so the mirror payload
+        # reflects the just-committed UPDATE.
+        sqlite_row = connection.execute(
+            "SELECT * FROM review_tasks WHERE task_id = ?",
+            (task_id,),
+        ).fetchone()
+    if sqlite_row is not None:
+        # mirror_upsert filters payload columns against the PG schema
+        # so passing the raw SQLite row dict is safe even though it
+        # contains all columns. Conflict key is task_id (PRIMARY KEY).
+        _mirror_upsert_safe(
+            "review_tasks", dict(sqlite_row), ["task_id"],
+        )
     return get_review_task(task_id) or {}
 
 

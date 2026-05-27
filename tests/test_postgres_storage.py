@@ -143,27 +143,27 @@ class EngineLifecycleTests(unittest.TestCase):
 
             self.assertIsNone(postgres_storage.get_engine())
 
-    def test_get_engine_returns_none_when_url_empty(self):
+    def test_get_engine_raises_when_url_empty(self):
+        """M12.0d-2: missing DATABASE_URL when dual-write is enabled is
+        a configuration error and surfaces as PostgresReadError instead
+        of silently disabling dual-write (Stage 1 deviation #4 fix)."""
         with _EnvScope():
             _set_env(USE_POSTGRES_WRITE="true", DATABASE_URL="")
             import postgres_storage
 
-            self.assertIsNone(postgres_storage.get_engine())
+            with self.assertRaises(postgres_storage.PostgresReadError):
+                postgres_storage.get_engine()
 
-    def test_get_engine_does_not_raise_on_invalid_url(self):
+    def test_get_engine_raises_on_invalid_url(self):
+        """M12.0d-2: SQLAlchemy parse failures surface as
+        PostgresReadError instead of being swallowed."""
         with _EnvScope():
-            # SQLAlchemy refuses to parse a meaningless dialect; the
-            # helper must catch that and return None instead of letting
-            # the exception escape.
             _set_env(USE_POSTGRES_WRITE="true",
                      DATABASE_URL="not-a-real-url-dialect:///nowhere")
             import postgres_storage
 
-            try:
-                result = postgres_storage.get_engine()
-            except Exception as exc:  # noqa: BLE001
-                self.fail(f"get_engine raised: {exc!r}")
-            self.assertIsNone(result)
+            with self.assertRaises(postgres_storage.PostgresReadError):
+                postgres_storage.get_engine()
 
     def test_reset_engine_for_tests_clears_cache(self):
         with _EnvScope():

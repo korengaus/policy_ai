@@ -378,7 +378,18 @@ def backfill_table(
         result.duration_seconds = time.time() - start
         return result
 
-    engine = postgres_storage.get_engine()
+    # M12.0d-2: get_engine now raises PostgresReadError on configuration
+    # / SQLAlchemy failure (Stage 1 deviation #4 fix). backfill_table's
+    # public contract is NEVER-raises, so we catch and surface the
+    # failure as a populated errors entry.
+    try:
+        engine = postgres_storage.get_engine()
+    except postgres_storage.PostgresReadError as exc:
+        result.errors.append(
+            f"Postgres engine unavailable: {exc}"
+        )
+        result.duration_seconds = time.time() - start
+        return result
     if engine is None:
         result.errors.append(
             "Postgres engine unavailable; check DATABASE_URL"
@@ -539,10 +550,16 @@ def collect_status() -> dict:
     decide whether to run the backfill.
     """
     health = postgres_storage.health_check()
-    engine = (
-        postgres_storage.get_engine()
-        if health["dual_write_enabled"] else None
-    )
+    # M12.0d-2: get_engine may raise PostgresReadError on URL / engine
+    # creation failure (Stage 1 deviation #4 fix); collect_status is a
+    # diagnostic that must not raise, so we mirror health_check's
+    # try/except behaviour and downgrade the raise to None engine.
+    engine = None
+    if health["dual_write_enabled"]:
+        try:
+            engine = postgres_storage.get_engine()
+        except Exception:  # noqa: BLE001 — diagnostic must not raise
+            engine = None
     sqlite_counts = {
         name: _count_rows(name) for name in TABLE_READERS
     }

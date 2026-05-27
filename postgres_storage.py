@@ -29,6 +29,7 @@ requires updating both files in the same change. See
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from typing import Optional
@@ -100,10 +101,17 @@ _engine: Optional[Engine] = None
 def get_engine() -> Optional[Engine]:
     """Lazy engine creation.
 
-    Returns ``None`` when dual-write is disabled or ``DATABASE_URL`` is
-    missing. The engine is cached at module level; call
-    :func:`reset_engine_for_tests` to force re-evaluation after env vars
-    change.
+    Returns ``None`` only when dual-write is disabled OR when an
+    ``ImportError`` fires (psycopg driver missing on a local dev
+    machine that hasn't installed Postgres bindings). All other
+    failures (missing ``DATABASE_URL`` when dual-write is enabled,
+    SQLAlchemy errors building the engine, unexpected exceptions) now
+    raise :class:`PostgresReadError` (M12.0d-2 Stage 2; previously
+    swallowed and returned None per Stage 1 deviation #4).
+
+    The engine is cached at module level; call
+    :func:`reset_engine_for_tests` to force re-evaluation after env
+    vars change.
     """
     global _engine
     if not is_postgres_dual_write_enabled():
@@ -112,11 +120,10 @@ def get_engine() -> Optional[Engine]:
         return _engine
     url = get_database_url()
     if not url:
-        log.warning(
-            "USE_POSTGRES_WRITE=true but DATABASE_URL is empty; "
-            "dual-write disabled."
+        log.error(
+            "USE_POSTGRES_WRITE=true but DATABASE_URL is empty",
         )
-        return None
+        raise PostgresReadError("DATABASE_URL not set")
     try:
         # pool_pre_ping handles dropped connections gracefully on
         # Render free-tier sleeping instances. Pool kept small because
@@ -129,12 +136,22 @@ def get_engine() -> Optional[Engine]:
             future=True,
         )
         return _engine
-    except Exception as exc:  # noqa: BLE001 — never propagate
+    except ImportError as exc:
+        # Driver (psycopg) not installed — keep the local-dev escape
+        # valve so a CI / contributor without Postgres bindings can
+        # still run the rest of the test suite.
         log.warning(
-            "Failed to create Postgres engine: %s. Dual-write disabled.",
+            "Postgres driver not installed: %s. Dual-write disabled.",
             exc,
         )
         return None
+    except Exception as exc:
+        log.error(
+            "Failed to create Postgres engine: %s", exc, exc_info=True,
+        )
+        raise PostgresReadError(
+            f"engine creation failed: {exc}"
+        ) from exc
 
 
 def reset_engine_for_tests() -> None:
@@ -1284,17 +1301,102 @@ def read_job_by_id(job_id: str) -> Optional[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Read helper — M12.0d-2 (embedding cache).
+#
+# Used by ``database.get_cached_embedding`` so the Web and Worker
+# services on Render share a single embedding cache instead of each
+# rebuilding their own SQLite cache from scratch after every restart.
+# Embedding writes have been mirrored into PG since M12.0a; the read
+# side is what M12.0d-2 wires up.
+#
+# Same contract as the other M12.0c/d read helpers:
+#   * Return the parsed vector as ``list[float]`` when the row exists.
+#   * Return None when the engine is not built OR no cache row matches
+#     the (text_hash, provider, model) tuple — caller treats this as a
+#     legitimate cache miss and computes a fresh embedding.
+#   * Raise :class:`PostgresReadError` on real engine / SQL errors.
+# ---------------------------------------------------------------------------
+
+
+def read_cached_embedding(
+    text_hash: str, provider: str, model: str,
+) -> Optional[list]:
+    """Return the cached vector for ``(text_hash, provider, model)`` or
+    None on miss / engine not built.
+
+    Raises :class:`PostgresReadError` on engine / SQL errors (M12.0d-2)."""
+    engine = get_engine()
+    if engine is None:
+        return None
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                sa.select(
+                    embedding_cache_table.c.vector_json,
+                    embedding_cache_table.c.dimensions,
+                ).where(
+                    embedding_cache_table.c.text_hash == text_hash,
+                    embedding_cache_table.c.provider == provider,
+                    embedding_cache_table.c.model == (model or ""),
+                ).limit(1)
+            ).first()
+        if row is None:
+            return None
+        vector_json = row._mapping.get("vector_json")
+        if not vector_json:
+            return None
+    except SQLAlchemyError as exc:
+        log.error(
+            "read_cached_embedding failed: %s", exc, exc_info=True,
+        )
+        raise PostgresReadError(
+            f"read_cached_embedding failed: {exc}"
+        ) from exc
+    # Decode + validate outside the engine context so JSON errors don't
+    # masquerade as SQL errors. A corrupted cache row is best-effort
+    # treated as a miss; we DO NOT raise here because the caller can
+    # always recompute the embedding.
+    try:
+        vector = json.loads(vector_json)
+    except (TypeError, ValueError):
+        log.warning(
+            "read_cached_embedding row had unreadable vector_json; "
+            "treating as cache miss",
+        )
+        return None
+    if not isinstance(vector, list):
+        return None
+    if not all(isinstance(v, (int, float)) for v in vector):
+        return None
+    return [float(v) for v in vector]
+
+
+# ---------------------------------------------------------------------------
 # Diagnostic helper — read-only, used by scripts/check_postgres_health.py.
 # ---------------------------------------------------------------------------
 
 
 def health_check() -> dict:
-    """Returns a stable status dict for diagnostic CLI use. NEVER raises."""
+    """Returns a stable status dict for diagnostic CLI use. NEVER raises.
+
+    M12.0d-2: ``get_engine`` now raises ``PostgresReadError`` on
+    configuration / SQLAlchemy failures (Stage 1 deviation #4 fix).
+    The operator-facing health probe still must not raise, so the
+    engine call is wrapped here — any raise becomes a populated
+    ``error`` field with ``engine_available=False``.
+    """
     enabled = is_postgres_dual_write_enabled()
     url_present = bool(get_database_url())
-    engine = get_engine() if enabled else None
-    can_connect = False
+    engine: Optional[Engine] = None
     error: Optional[str] = None
+    if enabled:
+        try:
+            engine = get_engine()
+        except PostgresReadError as exc:
+            error = str(exc)
+        except Exception as exc:  # noqa: BLE001 — health probe must not raise
+            error = str(exc)
+    can_connect = False
     if engine is not None:
         try:
             with engine.connect() as conn:
