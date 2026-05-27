@@ -8,6 +8,7 @@ from official_site_parsers import (
 )
 from urllib.parse import urljoin, urlparse
 import re
+import threading
 
 from text_utils import sanitize_data, sanitize_text
 
@@ -20,6 +21,20 @@ USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
+
+
+# M16-speed-2a: Playwright serialization lock.
+# Rationale: Render Starter tier = 512MB RAM. Each headless Chromium
+# instance uses ~200-250MB resident. Concurrent fetch_rendered_page
+# invocations from the new parallel fetch_official_evidence pool
+# (default 3 workers) would peak at ~600-750MB → OOM kill on Starter.
+# This module-level Lock ensures at most ONE sync_playwright() block
+# is active at a time, regardless of how many threads call
+# fetch_rendered_page concurrently. HTTP-only candidates still
+# parallelize unimpeded; Playwright-using candidates serialize.
+# The lock is acquired BEFORE sync_playwright() and released after
+# browser.close() (or on exception); see fetch_rendered_page.
+_PLAYWRIGHT_LOCK = threading.Lock()
 
 
 def fetch_rendered_page(url: str, timeout_ms: int = 15000) -> dict:
@@ -44,88 +59,92 @@ def fetch_rendered_page(url: str, timeout_ms: int = 15000) -> dict:
         result["error"] = f"Playwright is not installed: {exc}"
         return result
 
-    try:
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
-            context = browser.new_context(
-                user_agent=USER_AGENT,
-                locale="ko-KR",
-                extra_http_headers={
-                    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+    # M16-speed-2a: serialize Playwright lifecycle on 512MB Render.
+    # The lock is released on success AND on any exception path
+    # below — `with` guarantees release before the function returns.
+    with _PLAYWRIGHT_LOCK:
+        try:
+            with sync_playwright() as playwright:
+                browser = playwright.chromium.launch(headless=True)
+                context = browser.new_context(
+                    user_agent=USER_AGENT,
+                    locale="ko-KR",
+                    extra_http_headers={
+                        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+                    },
+                )
+                page = context.new_page()
+                response = page.goto(url, wait_until="networkidle", timeout=timeout_ms)
+                page.wait_for_timeout(1000)
+
+                result["status_code"] = response.status if response else None
+                result["title"] = sanitize_text(page.title())
+                result["html"] = sanitize_text(page.content())[:500000]
+                result["text"] = sanitize_text(page.locator("body").inner_text(timeout=5000))[:50000]
+                result["raw_links"] = page.evaluate(
+                    """() => Array.from(document.querySelectorAll('a[href]')).map((a) => ({
+                        href: a.href || a.getAttribute('href') || '',
+                        text: (a.innerText || a.textContent || '').trim()
+                    }))"""
+                )
+                result["raw_links"] = sanitize_data(result["raw_links"])
+                result["rendered"] = True
+
+                context.close()
+                browser.close()
+
+        except PlaywrightTimeoutError as exc:
+            # Page navigation / body extraction exceeded the budgeted
+            # timeout. Common on slow gov.kr sites under load. Sentinel
+            # return preserved — the caller (`extract_rendered_links`)
+            # gates downstream work on `result["rendered"]` being True.
+            log.warning(
+                "playwright.page_timeout",
+                extra={
+                    "url": url,
+                    "timeout_ms": timeout_ms,
+                    "exception_type": type(exc).__name__,
+                    "exception_message": str(exc)[:500],
+                    "fallback_returned": "unrendered_result_dict",
                 },
             )
-            page = context.new_page()
-            response = page.goto(url, wait_until="networkidle", timeout=timeout_ms)
-            page.wait_for_timeout(1000)
-
-            result["status_code"] = response.status if response else None
-            result["title"] = sanitize_text(page.title())
-            result["html"] = sanitize_text(page.content())[:500000]
-            result["text"] = sanitize_text(page.locator("body").inner_text(timeout=5000))[:50000]
-            result["raw_links"] = page.evaluate(
-                """() => Array.from(document.querySelectorAll('a[href]')).map((a) => ({
-                    href: a.href || a.getAttribute('href') || '',
-                    text: (a.innerText || a.textContent || '').trim()
-                }))"""
+            result["error"] = str(exc)
+        except PlaywrightError as exc:
+            # Any other Playwright API failure: target closed, navigation
+            # error, content extraction error, browser launch failure.
+            # Catching the broader `Error` base class covers everything
+            # the sync_playwright API can raise other than the timeout
+            # case caught above.
+            log.warning(
+                "playwright.api_error",
+                extra={
+                    "url": url,
+                    "exception_type": type(exc).__name__,
+                    "exception_message": str(exc)[:500],
+                    "fallback_returned": "unrendered_result_dict",
+                },
             )
-            result["raw_links"] = sanitize_data(result["raw_links"])
-            result["rendered"] = True
-
-            context.close()
-            browser.close()
-
-    except PlaywrightTimeoutError as exc:
-        # Page navigation / body extraction exceeded the budgeted
-        # timeout. Common on slow gov.kr sites under load. Sentinel
-        # return preserved — the caller (`extract_rendered_links`)
-        # gates downstream work on `result["rendered"]` being True.
-        log.warning(
-            "playwright.page_timeout",
-            extra={
-                "url": url,
-                "timeout_ms": timeout_ms,
-                "exception_type": type(exc).__name__,
-                "exception_message": str(exc)[:500],
-                "fallback_returned": "unrendered_result_dict",
-            },
-        )
-        result["error"] = str(exc)
-    except PlaywrightError as exc:
-        # Any other Playwright API failure: target closed, navigation
-        # error, content extraction error, browser launch failure.
-        # Catching the broader `Error` base class covers everything
-        # the sync_playwright API can raise other than the timeout
-        # case caught above.
-        log.warning(
-            "playwright.api_error",
-            extra={
-                "url": url,
-                "exception_type": type(exc).__name__,
-                "exception_message": str(exc)[:500],
-                "fallback_returned": "unrendered_result_dict",
-            },
-        )
-        result["error"] = str(exc)
-    except Exception as exc:
-        # Last-resort fallback for genuinely unexpected non-Playwright
-        # errors (e.g., a programmer bug like NameError introduced by
-        # a refactor, or an OSError from the headless browser launcher
-        # that surfaces outside Playwright's own exception hierarchy).
-        # Kept as a separate distinct-event-name path so the operator
-        # can alert on `playwright.unexpected_error` specifically: any
-        # firing of this branch is either a Playwright version drift
-        # or a real bug introduced upstream. Sentinel return preserved
-        # so the pipeline stays available.
-        log.warning(
-            "playwright.unexpected_error",
-            extra={
-                "url": url,
-                "exception_type": type(exc).__name__,
-                "exception_message": str(exc)[:500],
-                "fallback_returned": "unrendered_result_dict",
-            },
-        )
-        result["error"] = str(exc)
+            result["error"] = str(exc)
+        except Exception as exc:
+            # Last-resort fallback for genuinely unexpected non-Playwright
+            # errors (e.g., a programmer bug like NameError introduced by
+            # a refactor, or an OSError from the headless browser launcher
+            # that surfaces outside Playwright's own exception hierarchy).
+            # Kept as a separate distinct-event-name path so the operator
+            # can alert on `playwright.unexpected_error` specifically: any
+            # firing of this branch is either a Playwright version drift
+            # or a real bug introduced upstream. Sentinel return preserved
+            # so the pipeline stays available.
+            log.warning(
+                "playwright.unexpected_error",
+                extra={
+                    "url": url,
+                    "exception_type": type(exc).__name__,
+                    "exception_message": str(exc)[:500],
+                    "fallback_returned": "unrendered_result_dict",
+                },
+            )
+            result["error"] = str(exc)
 
     return result
 

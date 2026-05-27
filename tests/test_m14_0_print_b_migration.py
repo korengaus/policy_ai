@@ -198,16 +198,20 @@ class MigratedFilesContainsBothFilesPin(unittest.TestCase):
 
 
 class PinValueMatches323Pin(unittest.TestCase):
-    """Both `EXPECTED_TOTAL_LOG_CALLS` (329) and
+    """Both `EXPECTED_TOTAL_LOG_CALLS` (331) and
     `EXPECTED_TOTAL_LOG_ERRORS` (16) must reflect the M14.0-print-b
     additions plus subsequent milestones. Lineage:
         ... → 298 (M14.0-print-a) → 323 (M14.0-print-b) → 324
         (M15-dedup-1) → 325 (M15-dedup-2) → 329 (M16-speed-1a:
         gnewsdecoder cache adds 4 log calls — hit/stored info +
-        read/write_failed error)
+        read/write_failed error) → 331 (M16-speed-2a: parallel
+        fetch_official_evidence adds 2 log.info calls — start +
+        complete. The third call — log.exception — uses a method
+        name not matched by _is_log_method_call so it is invisible
+        to the pin.)
     """
 
-    EXPECTED_TOTAL = 329
+    EXPECTED_TOTAL = 331
     EXPECTED_ERRORS = 16
 
     def test_expected_pin_values_after_m14_0_print_b(self):
@@ -230,7 +234,9 @@ class PinValueMatches323Pin(unittest.TestCase):
             f"expected {self.EXPECTED_ERRORS} after M14.0-print-b "
             "(scheduler.py adds 1 log.error inside "
             "`except Exception as error:`; M16-speed-1a adds 2 "
-            "log.error for gnewsdecoder cache IO).",
+            "log.error for gnewsdecoder cache IO; M16-speed-2a's "
+            "log.exception is not counted because the pin matches "
+            "info/warning/error/debug only).",
         )
 
 

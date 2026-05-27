@@ -248,11 +248,28 @@ PRESERVED_REAL_ERRORS: tuple[tuple[str, str], ...] = (
 #     read/write IO-error pattern at L153/L165). Part F1
 #     (ai_reasoner.py timeout=20.0) adds zero log calls and that
 #     file is not in MIGRATED_FILES anyway. 325 + 4 = 329.
+#   * M16-speed-2a (2026-05-28): official_crawler.py gains 2 new log
+#     calls counted by this pin for the parallel
+#     fetch_official_evidence pool:
+#       - log.info "M16-speed-2a fetch_official_evidence parallel start: ..."
+#       - log.info "M16-speed-2a fetch_official_evidence parallel complete: ..."
+#     A third call — log.exception inside the per-candidate failure
+#     handler — IS emitted at ERROR level but is NOT counted by this
+#     pin's _is_log_method_call helper (which matches only the
+#     {info, warning, error, debug} set; log.exception is a distinct
+#     method name even though it logs at ERROR level under the hood).
+#     For the same reason, EXPECTED_TOTAL_LOG_ERRORS and
+#     EXPECTED_EXCEPT_ERRORS are NOT bumped by this milestone.
+#     official_crawler.py IS in MIGRATED_FILES so the 2 info calls
+#     count. official_browser_crawler.py is NOT in MIGRATED_FILES so
+#     the _PLAYWRIGHT_LOCK module-level addition contributes zero
+#     log calls toward the pin (no new log lines added there anyway).
+#     329 + 2 = 331.
 #
 # Any future milestone that legitimately adds log calls bumps this
 # expected count; the contract M14.4 actually pins is the *level
 # distribution*, not the absolute count.
-EXPECTED_TOTAL_LOG_CALLS = 329
+EXPECTED_TOTAL_LOG_CALLS = 331
 
 # Post-M14.4: 12 (down from 17 pre-M14.4 — 5 reclassifications).
 # M13.3d added log.info / log.warning calls only — no new log.error.
@@ -268,6 +285,14 @@ EXPECTED_TOTAL_LOG_CALLS = 329
 # calls for the gnewsdecoder cache IO-error paths (read failed +
 # write failed), mirroring the news_collection cache pattern at
 # L153/L165. Bump from 14 → 16.
+# M16-speed-2a (2026-05-28): official_crawler.py gains 1 new
+# log.exception call inside the ThreadPoolExecutor result-collection
+# `except Exception as exc:` block in fetch_official_evidence
+# (parallel-pool per-candidate failure isolation). It DOES log at
+# ERROR level under the hood but uses the `log.exception` method
+# name, which this pin's _is_log_method_call helper (L301-316) does
+# NOT match — it matches only {info, warning, error, debug}. So
+# this milestone does NOT bump this pin. Unchanged at 16.
 EXPECTED_TOTAL_LOG_ERRORS = 16
 
 
@@ -562,6 +587,12 @@ class ExceptBlockErrorsPreserved(unittest.TestCase):
         # M14.0-print-b: scheduler.run_once catches per-query failures
         # in `except Exception as error:` and logs via log.error.
         "scheduler.py": 1,
+        # M16-speed-2a: official_crawler.py gains a log.exception
+        # inside the parallel-pool per-candidate failure handler. The
+        # _is_log_method_call helper (L301-316) does NOT match
+        # log.exception (only info/warning/error/debug), so it is
+        # invisible to this pin. official_crawler.py stays at 0
+        # except-block log.error calls and so is not listed here.
     }
 
     def test_except_block_errors_pinned(self):

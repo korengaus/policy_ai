@@ -1,5 +1,6 @@
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -1504,13 +1505,128 @@ def fetch_best_official_document(search_result: dict, news_context: dict | None 
     return result
 
 
-def fetch_official_evidence(candidates: list, max_candidates: int = 3, news_context: dict | None = None) -> list:
-    evidence_results = []
+# =========================================================================
+# M16-speed-2a — parallel fetch_official_evidence
+#
+# Replaces the original 5-candidate sequential loop with an
+# index-mapped ThreadPoolExecutor. Mirrors the M15.0d parallel news
+# pattern at main.py:1214-1249 (same future_to_index strategy for
+# byte-identical result ordering regardless of completion order).
+#
+# Concurrency: env-configurable via MAX_PARALLEL_OFFICIAL_CANDIDATES,
+# default 3. Setting to 1 reverts to the byte-identical sequential
+# path (which is the literal pre-M16-speed-2a code).
+#
+# Playwright safety: per-thread `sync_playwright()` calls are
+# serialized by `official_browser_crawler._PLAYWRIGHT_LOCK`. HTTP-
+# only candidates parallelize freely; Playwright-using candidates
+# queue behind the lock. This protects the 512MB Render Starter RAM
+# ceiling (3 parallel Chromium ≈ 750MB peak → OOM without the lock).
+#
+# Per-candidate failure isolation: a failure in
+# `fetch_best_official_document` for one candidate writes a sentinel
+# error dict to the corresponding slot (matching the failure-shape
+# the function itself would have returned). Downstream consumers
+# (evidence_comparator, policy_confidence, verification_card,
+# enrich_official_source_candidates_with_bodies) iterate the list
+# with `.get(...)` — they require dict entries, not None, hence the
+# sentinel rather than None.
+# =========================================================================
 
-    for candidate in candidates[:max_candidates]:
-        evidence_results.append(
-            sanitize_data(fetch_best_official_document(candidate, news_context=news_context))
-        )
+
+def _max_parallel_official_candidates() -> int:
+    """Return the per-pipeline parallel-worker limit for
+    fetch_official_evidence. Defaults to 3 when the env var is
+    unset / invalid. Caller should clamp to len(candidates) so we
+    never spawn more workers than candidates."""
+    raw = os.environ.get("MAX_PARALLEL_OFFICIAL_CANDIDATES", "").strip()
+    if not raw:
+        return 3
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return 3
+    return max(1, value)
+
+
+def _candidate_failure_sentinel(candidate: dict, exc: BaseException) -> dict:
+    """Failure-shape dict written into evidence_results when a per-
+    candidate fetch_best_official_document call raises in the parallel
+    pool. Mirrors the failure-shape fetch_best_official_document itself
+    produces on its internal error paths (see e.g. official_crawler.py
+    :993, :1266, :1382, :1497) so downstream `.get(...)` consumers
+    don't see a structural difference between parallel-pool failure
+    and in-function failure."""
+    return {
+        "source_name": (candidate or {}).get("source_name"),
+        "source_type": (candidate or {}).get("source_type"),
+        "search_query": (candidate or {}).get("search_query"),
+        "fetched": False,
+        "usable": False,
+        "weakly_usable": False,
+        "document_fetched": False,
+        "should_exclude_from_verification": False,
+        "error": f"parallel_pool_failed: {type(exc).__name__}: {str(exc)[:200]}",
+    }
+
+
+def fetch_official_evidence(candidates: list, max_candidates: int = 3, news_context: dict | None = None) -> list:
+    selected_candidates = list(candidates[:max_candidates])
+    total = len(selected_candidates)
+
+    if total == 0:
+        return []
+
+    max_parallel = min(_max_parallel_official_candidates(), total)
+
+    # Sequential fallback: env=1 OR only one candidate. Preserves
+    # byte-identical behavior with the pre-M16-speed-2a code path.
+    # Setting MAX_PARALLEL_OFFICIAL_CANDIDATES=1 is the documented
+    # rollback (mirrors MAX_PARALLEL_NEWS_ITEMS=1 at main.py:1184).
+    if max_parallel <= 1 or total <= 1:
+        evidence_results = []
+        for candidate in selected_candidates:
+            evidence_results.append(
+                sanitize_data(fetch_best_official_document(candidate, news_context=news_context))
+            )
+        return evidence_results
+
+    log.info(
+        "M16-speed-2a fetch_official_evidence parallel start: total=%d workers=%d",
+        total, max_parallel,
+    )
+
+    evidence_results: list = [None] * total
+
+    with ThreadPoolExecutor(
+        max_workers=max_parallel,
+        thread_name_prefix="m16-speed-2-official-fetch",
+    ) as executor:
+        future_to_index = {
+            executor.submit(
+                fetch_best_official_document,
+                candidate,
+                news_context=news_context,
+            ): i
+            for i, candidate in enumerate(selected_candidates)
+        }
+        for future in as_completed(future_to_index):
+            idx = future_to_index[future]
+            try:
+                evidence_results[idx] = sanitize_data(future.result())
+            except Exception as exc:  # noqa: BLE001 — M16-speed-2a: isolate per-candidate failure, mirror M15.0d Phase A pattern at main.py:1240
+                log.exception(
+                    "M16-speed-2a fetch_official_evidence failed for candidate index %d",
+                    idx,
+                )
+                evidence_results[idx] = sanitize_data(
+                    _candidate_failure_sentinel(selected_candidates[idx], exc)
+                )
+
+    log.info(
+        "M16-speed-2a fetch_official_evidence parallel complete: total=%d",
+        total,
+    )
 
     return evidence_results
 
