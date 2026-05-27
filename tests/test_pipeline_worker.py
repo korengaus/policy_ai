@@ -100,12 +100,26 @@ def _sample_report(query: str, max_news: int) -> dict:
     }
 
 
+# M15-dedup-1: stub must return DISTINCT ids for distinct URLs so
+# pipeline_worker._persist_pipeline_news_results' seen_saved_ids
+# dedup (which collapses repeated result_ids) treats two distinct
+# news items as two distinct results. URL-keyed mirrors the real
+# database.save_analysis_result contract: same URL → duplicate=True
+# with the existing id; new URL → new sequential id.
+_save_id_by_url: dict[str, int] = {}
+
+
 def _stub_save_analysis_result(result, query):
-    return {"duplicate": False, "id": 42}
+    url = result.get("original_url") or ""
+    if url in _save_id_by_url:
+        return {"duplicate": True, "id": None}
+    new_id = len(_save_id_by_url) + 1
+    _save_id_by_url[url] = new_id
+    return {"duplicate": False, "id": new_id}
 
 
 def _stub_get_result_id_by_url(url):
-    return None
+    return _save_id_by_url.get(url)
 
 
 def _stub_postgres_dual_write(result, query):
