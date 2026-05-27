@@ -1220,6 +1220,46 @@ def read_verdict_label_attributions(
 
 
 # ---------------------------------------------------------------------------
+# Read helper — M12.0c-jobs (jobs table).
+#
+# Used by ``job_manager.get_job_status`` so the Web service can see job
+# progress that the Worker has written. Mirror-write of jobs rows is
+# wired in job_manager.py (paired write+read milestone, unlike the
+# earlier M12.0c sub-milestones which only added the read side on top
+# of M12.0a writes).
+#
+# Same contract as the other M12.0c read helpers:
+#   * Return RAW dict (caller adds the ``job_id`` alias on top of
+#     ``id``) or None when:
+#       - dual-write is disabled (no engine),
+#       - the row is not present in Postgres,
+#       - any SQLAlchemy / unexpected error fires.
+#   * NEVER raise.
+# ---------------------------------------------------------------------------
+
+
+def read_job_by_id(job_id: str) -> Optional[dict]:
+    """Return the jobs row for ``job_id`` as a RAW dict, or None."""
+    engine = get_engine()
+    if engine is None:
+        return None
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                sa.select(jobs_table).where(
+                    jobs_table.c.id == str(job_id)
+                )
+            ).first()
+        return dict(row._mapping) if row is not None else None
+    except SQLAlchemyError as exc:
+        log.warning("read_job_by_id failed: %s", exc)
+        return None
+    except Exception as exc:  # noqa: BLE001
+        log.warning("read_job_by_id unexpected error: %s", exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Diagnostic helper — read-only, used by scripts/check_postgres_health.py.
 # ---------------------------------------------------------------------------
 

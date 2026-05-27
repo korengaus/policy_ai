@@ -50,6 +50,42 @@ def _pipeline_version() -> str:
     return os.getenv("PIPELINE_VERSION", "phase2-m2")
 
 
+def _mirror_jobs_safe(*, upsert: bool, row_dict: dict) -> None:
+    """M12.0c-jobs — best-effort dual-write to postgres_storage.jobs_table.
+
+    Distinct from ``_postgres_dual_write_job`` below (which writes to the
+    db/postgres.py ``audit_log`` event stream): this helper mirrors the
+    *current state* of a job row into the postgres_storage jobs mirror,
+    matching the table-level mirroring used by analysis_results /
+    review_tasks / etc. since M12.0a.
+
+    NEVER raises. SQLite remains source of truth — any Postgres failure
+    is logged inside ``mirror_write`` / ``mirror_upsert`` and swallowed
+    here as well (belt-and-braces)."""
+    try:
+        from postgres_storage import mirror_upsert, mirror_write
+
+        if upsert:
+            mirror_upsert("jobs", row_dict, ["id"])
+        else:
+            mirror_write("jobs", row_dict)
+    except Exception:  # noqa: BLE001 — Postgres failures must not surface
+        pass
+
+
+def _read_jobs_row_full(job_id: str) -> Optional[dict]:
+    """Internal helper: re-read the full SQLite row for ``job_id`` so the
+    PG mirror_upsert payload contains every column. Returns None if the
+    row vanished between UPDATE and SELECT (e.g. a concurrent delete by
+    an external process) — caller treats None as "skip mirror"."""
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT * FROM jobs WHERE id = ?",
+            (job_id,),
+        ).fetchone()
+    return dict(row) if row is not None else None
+
+
 def _postgres_dual_write_job(payload: dict) -> None:
     """Best-effort dual-write of a job row. Never raises."""
     try:
@@ -160,6 +196,10 @@ def create_job(query: str, max_news: int) -> dict:
         "completed_at": None,
         "pipeline_version": pipeline_version,
     }
+    # M12.0c-jobs — mirror the full row into postgres_storage.jobs_table.
+    # id is a UUID hex so a write (not upsert) is sufficient; retries
+    # against the same id are not expected for create_job.
+    _mirror_jobs_safe(upsert=False, row_dict=record)
     _postgres_dual_write_job({**record, "action": "create"})
     logger.info("Job created: id=%s query=%s max_news=%s", job_id, query, max_news)
     return record
@@ -191,6 +231,12 @@ def start_job(job_id: str) -> None:
             (STATUS_RUNNING, STAGE_RUNNING, 5, now, job_id),
         )
         connection.commit()
+    # M12.0c-jobs — re-read the full row from SQLite (the source of
+    # truth) and upsert it into the PG mirror so all 12 columns stay
+    # byte-identical between the two stores.
+    full_row = _read_jobs_row_full(job_id)
+    if full_row is not None:
+        _mirror_jobs_safe(upsert=True, row_dict=full_row)
     _postgres_dual_write_job({
         "id": job_id,
         "status": STATUS_RUNNING,
@@ -220,6 +266,10 @@ def update_progress(job_id: str, stage: str, percent: int) -> None:
             (stage, safe_percent, job_id),
         )
         connection.commit()
+    # M12.0c-jobs — full-row mirror via SELECT * + mirror_upsert.
+    full_row = _read_jobs_row_full(job_id)
+    if full_row is not None:
+        _mirror_jobs_safe(upsert=True, row_dict=full_row)
     _postgres_dual_write_job({
         "id": job_id,
         "current_stage": stage,
@@ -248,6 +298,10 @@ def complete_job(job_id: str, result_id: Optional[int]) -> None:
             (STATUS_COMPLETED, STAGE_COMPLETED, 100, result_id, now, job_id),
         )
         connection.commit()
+    # M12.0c-jobs — full-row mirror.
+    full_row = _read_jobs_row_full(job_id)
+    if full_row is not None:
+        _mirror_jobs_safe(upsert=True, row_dict=full_row)
     _postgres_dual_write_job({
         "id": job_id,
         "status": STATUS_COMPLETED,
@@ -279,6 +333,10 @@ def fail_job(job_id: str, error_message: str, *, stage: str = STAGE_FAILED, stat
             (status, stage, safe_message, now, job_id),
         )
         connection.commit()
+    # M12.0c-jobs — full-row mirror.
+    full_row = _read_jobs_row_full(job_id)
+    if full_row is not None:
+        _mirror_jobs_safe(upsert=True, row_dict=full_row)
     _postgres_dual_write_job({
         "id": job_id,
         "status": status,
@@ -295,6 +353,21 @@ def timeout_job(job_id: str, error_message: str = "job exceeded timeout") -> Non
 
 
 def get_job_status(job_id: str) -> Optional[dict]:
+    # M12.0c-jobs — PG primary when dual-write is enabled so the Web
+    # service sees jobs that the Worker has updated (separate
+    # filesystems on Render).
+    try:
+        from postgres_storage import (
+            is_postgres_dual_write_enabled,
+            read_job_by_id,
+        )
+        if is_postgres_dual_write_enabled():
+            pg_row = read_job_by_id(job_id)
+            if pg_row is not None:
+                pg_row["job_id"] = pg_row.get("id")
+                return pg_row
+    except Exception:  # noqa: BLE001 — PG read failure must not block SQLite
+        pass
     with get_connection() as connection:
         row = connection.execute(
             "SELECT * FROM jobs WHERE id = ?",

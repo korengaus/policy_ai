@@ -2823,6 +2823,462 @@ class DatabaseOperatorCliFallbackTests(unittest.TestCase):
                 postgres_storage.reset_engine_for_tests()
 
 
+# ---------------------------------------------------------------------------
+# M12.0c-jobs: jobs table write+read mirroring + database.py fallback.
+#
+# Unlike the earlier M12.0c sub-milestones (which only added read
+# fallback on top of pre-existing M12.0a mirror_writes), this milestone
+# is a PAIRED write+read migration: nothing was previously mirroring
+# the jobs table into postgres_storage.jobs_table — the schema existed
+# but no caller wrote to it. So tests cover BOTH the new dual-write
+# path inside job_manager AND the new read fallback in get_job_status.
+#
+# 7 write tests + 5 read tests + 1 parity test = 13 new tests.
+# ---------------------------------------------------------------------------
+
+
+def _seed_job_in_pg(*, job_id, status="queued", query="q", max_news=5,
+                    progress_percent=0, current_stage="queued",
+                    result_id=None, error_message=None,
+                    created_at="2026-05-27T00:00:00",
+                    started_at=None, completed_at=None,
+                    pipeline_version="phase2-m2"):
+    """Helper: write a jobs row directly into the PG mirror so read
+    helpers have something to find. Assumes engine is built and the
+    schema is in place."""
+    import postgres_storage
+
+    postgres_storage.mirror_upsert(
+        "jobs",
+        {
+            "id": job_id, "status": status, "query": query,
+            "max_news": max_news,
+            "progress_percent": progress_percent,
+            "current_stage": current_stage,
+            "result_id": result_id,
+            "error_message": error_message,
+            "created_at": created_at,
+            "started_at": started_at,
+            "completed_at": completed_at,
+            "pipeline_version": pipeline_version,
+        },
+        ["id"],
+    )
+
+
+def _pg_row_for_job(engine, job_id):
+    """Direct PG read for assertions inside dual-write tests."""
+    import postgres_storage
+
+    with engine.connect() as conn:
+        row = conn.execute(
+            sa.select(postgres_storage.jobs_table).where(
+                postgres_storage.jobs_table.c.id == job_id,
+            )
+        ).first()
+    return dict(row._mapping) if row is not None else None
+
+
+# -- Write tests (5 + 2 isolation) ------------------------------------
+
+
+class JobsMirrorWriteTests(unittest.TestCase):
+    def test_create_job_mirrors_full_row_to_postgres(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import job_manager
+                    import postgres_storage
+
+                    database.init_db()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+
+                    record = job_manager.create_job(
+                        query="hello", max_news=7,
+                    )
+                    job_id = record["id"]
+
+                    pg_row = _pg_row_for_job(engine, job_id)
+                    self.assertIsNotNone(pg_row)
+                    self.assertEqual(pg_row["id"], job_id)
+                    self.assertEqual(pg_row["status"], "queued")
+                    self.assertEqual(pg_row["query"], "hello")
+                    self.assertEqual(pg_row["max_news"], 7)
+                    self.assertEqual(pg_row["progress_percent"], 0)
+                    self.assertEqual(pg_row["current_stage"], "queued")
+                    self.assertIsNone(pg_row["result_id"])
+                    self.assertIsNone(pg_row["error_message"])
+                    postgres_storage.reset_engine_for_tests()
+
+    def test_start_job_updates_postgres_mirror(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import job_manager
+                    import postgres_storage
+
+                    database.init_db()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+
+                    record = job_manager.create_job(
+                        query="q", max_news=1,
+                    )
+                    job_id = record["id"]
+                    job_manager.start_job(job_id)
+
+                    pg_row = _pg_row_for_job(engine, job_id)
+                    self.assertIsNotNone(pg_row)
+                    self.assertEqual(pg_row["status"], "running")
+                    self.assertEqual(pg_row["current_stage"], "running")
+                    self.assertEqual(pg_row["progress_percent"], 5)
+                    self.assertIsNotNone(pg_row["started_at"])
+                    postgres_storage.reset_engine_for_tests()
+
+    def test_update_progress_mirrors_to_postgres(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import job_manager
+                    import postgres_storage
+
+                    database.init_db()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+
+                    record = job_manager.create_job(query="q", max_news=1)
+                    job_id = record["id"]
+                    job_manager.start_job(job_id)
+                    job_manager.update_progress(
+                        job_id, "news_collecting", 35,
+                    )
+
+                    pg_row = _pg_row_for_job(engine, job_id)
+                    self.assertEqual(
+                        pg_row["current_stage"], "news_collecting",
+                    )
+                    self.assertEqual(pg_row["progress_percent"], 35)
+                    # Status stays 'running' through progress updates.
+                    self.assertEqual(pg_row["status"], "running")
+                    postgres_storage.reset_engine_for_tests()
+
+    def test_complete_job_mirrors_terminal_state(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import job_manager
+                    import postgres_storage
+
+                    database.init_db()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+
+                    record = job_manager.create_job(query="q", max_news=1)
+                    job_id = record["id"]
+                    job_manager.start_job(job_id)
+                    job_manager.complete_job(job_id, result_id=42)
+
+                    pg_row = _pg_row_for_job(engine, job_id)
+                    self.assertEqual(pg_row["status"], "completed")
+                    self.assertEqual(pg_row["current_stage"], "completed")
+                    self.assertEqual(pg_row["progress_percent"], 100)
+                    self.assertEqual(pg_row["result_id"], 42)
+                    self.assertIsNone(pg_row["error_message"])
+                    self.assertIsNotNone(pg_row["completed_at"])
+                    postgres_storage.reset_engine_for_tests()
+
+    def test_fail_job_mirrors_error_message(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import job_manager
+                    import postgres_storage
+
+                    database.init_db()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+
+                    record = job_manager.create_job(query="q", max_news=1)
+                    job_id = record["id"]
+                    job_manager.start_job(job_id)
+                    job_manager.fail_job(job_id, "boom: openai 500")
+
+                    pg_row = _pg_row_for_job(engine, job_id)
+                    self.assertEqual(pg_row["status"], "failed")
+                    self.assertEqual(
+                        pg_row["error_message"], "boom: openai 500",
+                    )
+                    self.assertIsNotNone(pg_row["completed_at"])
+                    postgres_storage.reset_engine_for_tests()
+
+
+class JobsMirrorIsolationTests(unittest.TestCase):
+    """The SQLite write path must succeed even when the Postgres mirror
+    write raises unexpectedly."""
+
+    def test_create_job_isolated_from_mirror_failure(self):
+        with _EnvScope():
+            _set_env(USE_POSTGRES_WRITE=None, DATABASE_URL=None)
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_iso.db"
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import job_manager
+                    import postgres_storage
+
+                    database.init_db()
+                    with patch.object(
+                        postgres_storage, "mirror_write",
+                        lambda *a, **kw: (_ for _ in ()).throw(
+                            RuntimeError("simulated"),
+                        ),
+                    ):
+                        record = job_manager.create_job(
+                            query="q", max_news=1,
+                        )
+                    self.assertTrue(record["id"])
+                    # SQLite read confirms the row landed.
+                    self.assertEqual(
+                        job_manager.get_job_status(record["id"])["status"],
+                        "queued",
+                    )
+
+    def test_update_isolated_from_mirror_failure(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_iso.db"
+                pg_db = Path(tmp_dir) / "pg.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import job_manager
+                    import postgres_storage
+
+                    database.init_db()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    record = job_manager.create_job(query="q", max_news=1)
+                    job_id = record["id"]
+                    # Now make mirror_upsert raise — start_job's SQLite
+                    # UPDATE must still succeed.
+                    with patch.object(
+                        postgres_storage, "mirror_upsert",
+                        lambda *a, **kw: (_ for _ in ()).throw(
+                            RuntimeError("simulated"),
+                        ),
+                    ):
+                        job_manager.start_job(job_id)
+                    # Disable PG read so we observe the SQLite row.
+                    _set_env(USE_POSTGRES_WRITE=None, DATABASE_URL=None)
+                    sqlite_view = job_manager.get_job_status(job_id)
+                    self.assertEqual(sqlite_view["status"], "running")
+                    postgres_storage.reset_engine_for_tests()
+
+
+# -- Read tests (3 unit + 2 integration) -------------------------------
+
+
+class ReadJobByIdTests(unittest.TestCase):
+    def test_returns_none_when_dual_write_disabled(self):
+        with _EnvScope():
+            _set_env(USE_POSTGRES_WRITE=None, DATABASE_URL=None)
+            import postgres_storage
+
+            self.assertIsNone(postgres_storage.read_job_by_id("any"))
+
+    def test_returns_dict_when_present(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                tmp_db = Path(tmp_dir) / "rjid.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{tmp_db}")
+                import postgres_storage
+
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                _seed_job_in_pg(
+                    job_id="abc-123", status="running",
+                    query="seeded", max_news=3,
+                    progress_percent=42,
+                    current_stage="news_collecting",
+                )
+
+                row = postgres_storage.read_job_by_id("abc-123")
+                self.assertIsNotNone(row)
+                self.assertEqual(row["id"], "abc-123")
+                self.assertEqual(row["status"], "running")
+                self.assertEqual(row["query"], "seeded")
+                self.assertEqual(row["progress_percent"], 42)
+                postgres_storage.reset_engine_for_tests()
+
+    def test_returns_none_when_missing(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                tmp_db = Path(tmp_dir) / "rjid_miss.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{tmp_db}")
+                import postgres_storage
+
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+
+                self.assertIsNone(
+                    postgres_storage.read_job_by_id("never-seeded"),
+                )
+                postgres_storage.reset_engine_for_tests()
+
+
+class JobManagerGetJobStatusFallbackTests(unittest.TestCase):
+    def test_get_job_status_prefers_postgres_when_enabled(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import job_manager
+                    import postgres_storage
+
+                    database.init_db()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    _seed_job_in_pg(
+                        job_id="from-pg", status="running",
+                        query="pg-only-query",
+                        progress_percent=60,
+                    )
+                    # SQLite is empty for this job_id.
+
+                    status = job_manager.get_job_status("from-pg")
+                    self.assertIsNotNone(status)
+                    self.assertEqual(status["id"], "from-pg")
+                    self.assertEqual(status["job_id"], "from-pg")  # alias
+                    self.assertEqual(status["status"], "running")
+                    self.assertEqual(status["query"], "pg-only-query")
+                    self.assertEqual(status["progress_percent"], 60)
+                    postgres_storage.reset_engine_for_tests()
+
+    def test_get_job_status_falls_back_to_sqlite_when_pg_returns_none(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import job_manager
+                    import postgres_storage
+
+                    database.init_db()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    # Suppress PG mirror so create_job writes SQLite only.
+                    with patch.object(
+                        postgres_storage, "mirror_write",
+                        lambda *a, **kw: False,
+                    ):
+                        record = job_manager.create_job(
+                            query="sqlite-only", max_news=2,
+                        )
+
+                    status = job_manager.get_job_status(record["id"])
+                    # PG returned None → SQLite fallback returned the row.
+                    self.assertIsNotNone(status)
+                    self.assertEqual(status["query"], "sqlite-only")
+                    self.assertEqual(status["job_id"], record["id"])
+                    postgres_storage.reset_engine_for_tests()
+
+
+# -- Parity (1) -------------------------------------------------------
+
+
+class JobsDualWriteParityTests(unittest.TestCase):
+    def test_jobs_dual_write_field_parity_all_12_columns(self):
+        """End-to-end lifecycle (create → start → progress → complete)
+        leaves the PG mirror row byte-identical to the SQLite source row
+        across all 12 columns. This is the load-bearing invariant for
+        cross-machine reads."""
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import job_manager
+                    import postgres_storage
+
+                    database.init_db()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+
+                    record = job_manager.create_job(
+                        query="parity-test", max_news=4,
+                    )
+                    job_id = record["id"]
+                    job_manager.start_job(job_id)
+                    job_manager.update_progress(
+                        job_id, "news_collecting", 25,
+                    )
+                    job_manager.update_progress(
+                        job_id, "ai_reasoning", 70,
+                    )
+                    job_manager.complete_job(job_id, result_id=999)
+
+                    # Compare every column between SQLite and PG.
+                    sqlite_row = job_manager._read_jobs_row_full(job_id)
+                    pg_row = _pg_row_for_job(engine, job_id)
+                    self.assertIsNotNone(sqlite_row)
+                    self.assertIsNotNone(pg_row)
+                    expected_columns = {
+                        "id", "status", "query", "max_news",
+                        "progress_percent", "current_stage",
+                        "result_id", "error_message", "created_at",
+                        "started_at", "completed_at", "pipeline_version",
+                    }
+                    self.assertEqual(set(sqlite_row.keys()), expected_columns)
+                    self.assertEqual(set(pg_row.keys()), expected_columns)
+                    for col in expected_columns:
+                        self.assertEqual(
+                            sqlite_row[col], pg_row[col],
+                            msg=f"Column {col} differs: "
+                                f"sqlite={sqlite_row[col]!r}, "
+                                f"pg={pg_row[col]!r}",
+                        )
+                    postgres_storage.reset_engine_for_tests()
+
+
 class ModuleLevelStaticChecks(unittest.TestCase):
     """Pure source-text inspection. Cheap and stable; catches the
     invariant the brief asks for without needing to wrangle Python's
