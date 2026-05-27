@@ -265,6 +265,14 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
 
     report = analyze_pipeline(query=query, max_news=request.max_news)
     results = []
+    # M15-dedup-1 Part B — defensive dedup at response boundary.
+    # main.py's post-resolve URL dedup pass should suppress duplicates
+    # before Phase B, but if any slip through (e.g., gnewsdecoder
+    # returns the same google_link for two different syndications and
+    # both are treated as decode-failures → preserved), we filter the
+    # response array here so the frontend never sees two cards with
+    # the same result_id. Belt-and-suspenders.
+    seen_result_ids: set = set()
     for item in report.get("news_results", []):
         api_result = item.get("api_result") or {}
         if not api_result:
@@ -300,6 +308,14 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
                     )
         except Exception:
             logger.exception("Failed to save analysis result to SQLite")
+
+        # M15-dedup-1 Part B — skip if we've already emitted this
+        # result_id this request. Null result_ids (save failed) are
+        # passed through unfiltered since we have no key to compare.
+        if result_id is not None and result_id in seen_result_ids:
+            continue
+        if result_id is not None:
+            seen_result_ids.add(result_id)
 
         results.append(
             AnalyzeResult(
@@ -458,11 +474,21 @@ def _track_background_task(task: asyncio.Task) -> None:
 def _build_async_analyze_payload(report: dict, query: str) -> dict:
     """Shape the pipeline report like AnalyzeResponse so the UI can render it."""
     results = []
+    # M15-dedup-1 Part B — defensive dedup at response boundary (async
+    # path). main.py's post-resolve dedup is the primary guard;
+    # this is belt-and-suspenders so the UI never sees two cards
+    # with the same result_id even if a duplicate slips through.
+    seen_result_ids: set = set()
     for item in report.get("news_results", []) or []:
         api_result = item.get("api_result") or {}
         if not api_result:
             continue
         api_result = sanitize_data(api_result)
+        rid = api_result.get("result_id")
+        if rid is not None and rid in seen_result_ids:
+            continue
+        if rid is not None:
+            seen_result_ids.add(rid)
         results.append(_api_result_to_dict(api_result))
 
     ai_status_summary = report.get("ai_status_summary") or {}

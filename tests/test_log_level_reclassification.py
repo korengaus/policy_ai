@@ -216,11 +216,19 @@ PRESERVED_REAL_ERRORS: tuple[tuple[str, str], ...] = (
 #     test_m13_1b_obs.py / test_m13_1b_openai_provider.py /
 #     test_llm_judge.py) are also outside the MIGRATED_FILES scope.
 #     323 + 0 = 323): pin stays.
+#   * M15-dedup-1 (2026-05-28): main.analyze_pipeline gains 1
+#     log.info ("M15-dedup-1: skipping duplicate news item") emitted
+#     when the post-resolve URL dedup pass collapses a second news
+#     item whose ``original_url`` equals one already seen this run.
+#     main.py IS in MIGRATED_FILES so this counts. The defensive
+#     dedup additions in api_server.py + pipeline_worker.py emit no
+#     new log calls (silent ``continue``) — both files are also
+#     outside MIGRATED_FILES anyway. 323 + 1 = 324.
 #
 # Any future milestone that legitimately adds log calls bumps this
 # expected count; the contract M14.4 actually pins is the *level
 # distribution*, not the absolute count.
-EXPECTED_TOTAL_LOG_CALLS = 323
+EXPECTED_TOTAL_LOG_CALLS = 324
 
 # Post-M14.4: 12 (down from 17 pre-M14.4 — 5 reclassifications).
 # M13.3d added log.info / log.warning calls only — no new log.error.

@@ -125,6 +125,13 @@ def _persist_results(report: dict, *, query: str) -> list[int]:
     from text_utils import sanitize_data
 
     saved_ids: list[int] = []
+    # M15-dedup-1 Part B — defensive dedup at the saved_ids
+    # boundary. main.py's post-resolve dedup is the primary guard,
+    # but this list flows into _build_summary_payload's
+    # saved_result_ids field used by SSE consumers and the
+    # /v2/jobs/{id} endpoint — a duplicate id here would surface as
+    # a duplicate entry in the operator-visible job summary.
+    seen_saved_ids: set = set()
     for item in report.get("news_results", []) or []:
         api_result = item.get("api_result") or {}
         if not api_result:
@@ -137,8 +144,9 @@ def _persist_results(report: dict, *, query: str) -> list[int]:
                     existing = get_result_id_by_url(
                         api_result.get("original_url") or ""
                     )
-                    if existing is not None:
+                    if existing is not None and int(existing) not in seen_saved_ids:
                         saved_ids.append(int(existing))
+                        seen_saved_ids.add(int(existing))
                 except Exception:  # noqa: BLE001
                     log.warning(
                         "pipeline_worker.dedup_id_lookup_failed",
@@ -146,8 +154,9 @@ def _persist_results(report: dict, *, query: str) -> list[int]:
                     )
             else:
                 new_id = save_status.get("id")
-                if new_id is not None:
+                if new_id is not None and int(new_id) not in seen_saved_ids:
                     saved_ids.append(int(new_id))
+                    seen_saved_ids.add(int(new_id))
                 try:
                     pg_status = postgres_dual_write(api_result, query=query)
                     if pg_status.get("attempted") and not pg_status.get("ok"):

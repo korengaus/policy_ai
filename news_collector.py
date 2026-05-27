@@ -400,6 +400,16 @@ def _fallback_item(title: str, link: str, summary: str, source: str) -> dict:
 
 
 def _dedupe_news_items(items: list[dict]) -> list[dict]:
+    # NOTE (M15-dedup-1): this helper is only called by the
+    # Naver / Daum fallback paths (``_force_select_best`` at L455
+    # and ``_accept_fallback_candidate`` at L513). The Google RSS
+    # path does NOT route through here — its dedup is handled
+    # post-resolve in ``main.analyze_pipeline`` against the decoded
+    # ``original_url`` (see "M15-dedup-1 Part A" block in main.py).
+    # Do not call this from the Google RSS code path without
+    # converting it to use ``original_url`` first; ``google_link``
+    # keys differ between syndications even when they resolve to
+    # the same upstream article.
     seen = set()
     unique = []
 

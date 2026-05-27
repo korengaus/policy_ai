@@ -1248,6 +1248,52 @@ def analyze_pipeline(
                     except Exception:  # noqa: BLE001
                         pass
 
+    # M15-dedup-1 Part A — post-resolve URL dedup. Google News RSS
+    # commonly returns multiple ``<item>`` entries with different
+    # ``google_link`` GUIDs that ``resolve_google_news_url`` (called
+    # inside Phase A) decodes to the same upstream ``original_url``
+    # (different syndications of the same article). Without this
+    # pass the pipeline would process the same article twice in
+    # Phase B (LLM call + memory mutation + report assembly), then
+    # api_server would emit two identical cards.
+    #
+    # Key choices:
+    #   * Dedup key is ``original_url`` (post-decode) — title is too
+    #     coarse, ``google_link`` doesn't match cross-syndication.
+    #   * Items whose ``original_url`` equals their ``google_link``
+    #     are treated as UNIQUE — that equality marks a gnewsdecoder
+    #     failure (see ``news_collector.resolve_google_news_url``
+    #     fallback path). Collapsing decode failures together would
+    #     drop distinct articles.
+    #   * Items missing ``original_url`` (rare; would mean Phase A
+    #     returned a malformed dict) are also treated as unique.
+    seen_urls: set = set()
+    deduped_phase_a_results: list = []
+    for phase_a in phase_a_results:
+        if phase_a is None:
+            deduped_phase_a_results.append(phase_a)
+            continue
+        url = phase_a.get("original_url") or ""
+        google_link = (phase_a.get("news") or {}).get("google_link") or ""
+        if not url or url == google_link:
+            # No decoded URL (or decode failure) — preserve as unique.
+            deduped_phase_a_results.append(phase_a)
+            continue
+        if url in seen_urls:
+            log.info(
+                "M15-dedup-1: skipping duplicate news item",
+                extra={
+                    "duplicate_url": url[:500],
+                    "duplicate_title": (
+                        (phase_a.get("news") or {}).get("title") or ""
+                    )[:200],
+                },
+            )
+            continue
+        seen_urls.add(url)
+        deduped_phase_a_results.append(phase_a)
+    phase_a_results = deduped_phase_a_results
+
     # Phase B — sequential, in original submission order. LLM call +
     # memory mutation + report assembly. Order-deterministic by
     # construction.
