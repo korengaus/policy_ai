@@ -229,10 +229,18 @@ class NewsCollectorResolveGoogleUrlStructuredErrorTests(unittest.TestCase):
     KOREAN_MARKER = "원문 URL 변환 실패"
 
     def setUp(self):
+        # M16-speed-1a Part H: gnewsdecoder cache persists to disk
+        # across test methods. Reset before each test so a prior
+        # happy-decode does not satisfy a later failure-mock with
+        # the cached decoded URL.
+        import news_collector
+        news_collector._reset_gnewsdecoder_cache_for_tests()
         self.handler = _attach_capturing_handler(self.LOGGER_NAME)
 
     def tearDown(self):
         _detach_handler(self.LOGGER_NAME, self.handler)
+        import news_collector
+        news_collector._reset_gnewsdecoder_cache_for_tests()
 
     def test_decoder_failure_emits_korean_error_with_extras(self):
         import news_collector

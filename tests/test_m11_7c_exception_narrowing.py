@@ -307,10 +307,17 @@ class Site3aCatchesLibraryBareExceptionPin(unittest.TestCase):
     KOREAN_MARKER = "원문 URL 변환 실패"
 
     def setUp(self):
+        # M16-speed-1a Part H: reset gnewsdecoder disk cache so a
+        # prior happy-decode (from another test) does not satisfy
+        # this failure-mock with a cached decoded URL.
+        import news_collector
+        news_collector._reset_gnewsdecoder_cache_for_tests()
         self.handler = _attach(self.LOGGER_NAME)
 
     def tearDown(self):
         _detach(self.LOGGER_NAME, self.handler)
+        import news_collector
+        news_collector._reset_gnewsdecoder_cache_for_tests()
 
     def test_bare_library_exception_is_caught(self):
         import news_collector
@@ -410,10 +417,16 @@ class Site3aCatchesRequestsTimeoutPin(unittest.TestCase):
     KOREAN_MARKER = "원문 URL 변환 실패"
 
     def setUp(self):
+        # M16-speed-1a Part H: reset gnewsdecoder disk cache (see
+        # Site3aCatchesLibraryBareExceptionPin for rationale).
+        import news_collector
+        news_collector._reset_gnewsdecoder_cache_for_tests()
         self.handler = _attach(self.LOGGER_NAME)
 
     def tearDown(self):
         _detach(self.LOGGER_NAME, self.handler)
+        import news_collector
+        news_collector._reset_gnewsdecoder_cache_for_tests()
 
     def test_requests_timeout_is_caught(self):
         import news_collector

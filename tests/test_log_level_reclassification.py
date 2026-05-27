@@ -124,6 +124,10 @@ PRESERVED_REAL_ERRORS: tuple[tuple[str, str], ...] = (
     ("news_collector.py", "Google RSS failed"),
     ("main.py", "[AnalysisCache] read failed"),
     ("main.py", "[AnalysisCache] write failed"),
+    # M16-speed-1a Part H — gnewsdecoder URL cache IO error logs,
+    # mirroring the news_collection cache pattern at L153/L165.
+    ("news_collector.py", "gnewsdecoder cache read failed"),
+    ("news_collector.py", "gnewsdecoder cache write failed"),
 )
 
 
@@ -232,11 +236,23 @@ PRESERVED_REAL_ERRORS: tuple[tuple[str, str], ...] = (
 #     case of two cards with identical titles but different
 #     upstream URLs (cross-publisher syndications). Same MIGRATED
 #     file (main.py). 324 + 1 = 325.
+#   * M16-speed-1a (2026-05-28): news_collector.py gains 4 new log
+#     calls for the gnewsdecoder URL cache (Part H):
+#       - log.info  "[NewsCollector] gnewsdecoder cache hit: ..."
+#       - log.info  "[NewsCollector] gnewsdecoder cache stored: ..."
+#       - log.error "[NewsCollector] gnewsdecoder cache read failed: ..."
+#       - log.error "[NewsCollector] gnewsdecoder cache write failed: ..."
+#     news_collector.py IS in MIGRATED_FILES so all 4 count toward
+#     the pin. The two error lines are also added to
+#     PRESERVED_REAL_ERRORS above (mirror the news_collection cache
+#     read/write IO-error pattern at L153/L165). Part F1
+#     (ai_reasoner.py timeout=20.0) adds zero log calls and that
+#     file is not in MIGRATED_FILES anyway. 325 + 4 = 329.
 #
 # Any future milestone that legitimately adds log calls bumps this
 # expected count; the contract M14.4 actually pins is the *level
 # distribution*, not the absolute count.
-EXPECTED_TOTAL_LOG_CALLS = 325
+EXPECTED_TOTAL_LOG_CALLS = 329
 
 # Post-M14.4: 12 (down from 17 pre-M14.4 — 5 reclassifications).
 # M13.3d added log.info / log.warning calls only — no new log.error.
@@ -248,7 +264,11 @@ EXPECTED_TOTAL_LOG_CALLS = 325
 # with 1 log.error in `run_once`'s `except Exception as error:`
 # block (per-query failure path). timeline.py added log.info only.
 # Bump from 13 → 14.
-EXPECTED_TOTAL_LOG_ERRORS = 14
+# M16-speed-1a (2026-05-28): news_collector.py gains 2 new log.error
+# calls for the gnewsdecoder cache IO-error paths (read failed +
+# write failed), mirroring the news_collection cache pattern at
+# L153/L165. Bump from 14 → 16.
+EXPECTED_TOTAL_LOG_ERRORS = 16
 
 
 def _read(filename: str) -> str:
@@ -533,7 +553,11 @@ class ExceptBlockErrorsPreserved(unittest.TestCase):
     # log.error calls that were NOT inside except blocks.
     EXPECTED_EXCEPT_ERRORS: dict[str, int] = {
         "main.py": 2,                # 2 cache except blocks
-        "news_collector.py": 3,      # 2 cache except blocks + URL decoder except
+        # M16-speed-1a Part H: gnewsdecoder cache adds 2 new
+        # log.error inside except blocks (read failed + write
+        # failed), mirroring the news_collection cache pattern at
+        # L153/L165. Bump from 3 → 5.
+        "news_collector.py": 5,      # news + gnewsdecoder cache excepts + URL decoder except
         "article_extractor.py": 6,   # all 6 inside extract except block
         # M14.0-print-b: scheduler.run_once catches per-query failures
         # in `except Exception as error:` and logs via log.error.

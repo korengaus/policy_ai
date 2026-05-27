@@ -32,6 +32,18 @@ REQUEST_HEADERS = {
 NEWS_CACHE_TTL_SECONDS = 30 * 60
 NEWS_CACHE_PATH = Path(".cache") / "news_collection_cache.json"
 
+# M16-speed-1a Part H: gnewsdecoder URL cache.
+# Decoder calls hit news.google.com and take 0.7-2.5s per URL on
+# Render. The decoded URL is deterministic per Google-News URL within
+# Google's redirect-token rotation window (observed >> 24h in
+# practice). Always-on (no env flag) — matches news_collection_cache
+# and analysis_cache precedent (key-value caches are always on; only
+# HTTP-body caches are env-gated). TTL 24h. Failed decodes are NOT
+# cached so a transient gnewsdecoder error does not pin a fallback
+# for 24h.
+GNEWSDECODER_CACHE_TTL_SECONDS = 24 * 60 * 60
+GNEWSDECODER_CACHE_PATH = Path(".cache") / "gnewsdecoder_cache.json"
+
 MEDIA_ONLY_TITLES = {
     "SBS Biz",
     "SBSBiz",
@@ -232,6 +244,103 @@ def _store_news_response(query: str, max_results: int, results: list[dict], debu
     }
     _save_news_cache(cache)
     log.info(f"[NewsCollector] Cache stored: key={key} ttl={NEWS_CACHE_TTL_SECONDS}s")
+
+
+# ---------------------------------------------------------------------------
+# M16-speed-1a Part H — gnewsdecoder URL cache
+#
+# Helpers mirror the news_collection cache pattern above:
+#   * _gnewsdecoder_cache_key  → sha1(url)[:16] (same shape as _cache_key)
+#   * _load_gnewsdecoder_cache / _save_gnewsdecoder_cache  → disk JSON
+#   * _gnewsdecoder_cache_fresh                            → TTL check
+#   * _cached_decoder_response / _store_decoder_response    → public API
+#   * _reset_gnewsdecoder_cache_for_tests                   → test scaffolding
+#
+# Wired into resolve_google_news_url AFTER the non-Google short-circuit
+# (preserves the assert_not_called contract in
+# tests/test_m11_7a_2_exception_logging.py::test_non_google_url_short_circuit_no_error).
+# Decoder failures are NOT cached — a transient gnewsdecoder error
+# would otherwise pin the fallback (original URL) for 24h.
+# ---------------------------------------------------------------------------
+
+
+def _gnewsdecoder_cache_key(url: str) -> str:
+    return hashlib.sha1((url or "").encode("utf-8")).hexdigest()[:16]
+
+
+def _load_gnewsdecoder_cache() -> dict:
+    try:
+        if GNEWSDECODER_CACHE_PATH.exists():
+            return json.loads(GNEWSDECODER_CACHE_PATH.read_text(encoding="utf-8"))
+    except Exception as error:
+        log.error(f"[NewsCollector] gnewsdecoder cache read failed: {error}")
+    return {}
+
+
+def _save_gnewsdecoder_cache(cache: dict) -> None:
+    try:
+        GNEWSDECODER_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        GNEWSDECODER_CACHE_PATH.write_text(
+            json.dumps(cache, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as error:
+        log.error(f"[NewsCollector] gnewsdecoder cache write failed: {error}")
+
+
+def _gnewsdecoder_cache_fresh(entry: dict) -> bool:
+    try:
+        cached_at = datetime.fromisoformat(entry.get("cached_at") or "")
+        if cached_at.tzinfo is None:
+            cached_at = cached_at.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - cached_at).total_seconds()
+        return age <= GNEWSDECODER_CACHE_TTL_SECONDS
+    except Exception:
+        return False
+
+
+def _cached_decoder_response(google_url: str) -> Optional[str]:
+    if not google_url:
+        return None
+    key = _gnewsdecoder_cache_key(google_url)
+    cache = _load_gnewsdecoder_cache()
+    entry = cache.get(key)
+    if not entry or not _gnewsdecoder_cache_fresh(entry):
+        return None
+    decoded = entry.get("decoded_url")
+    if not decoded:
+        return None
+    log.info(
+        f"[NewsCollector] gnewsdecoder cache hit: key={key} url={google_url[:80]}"
+    )
+    return decoded
+
+
+def _store_decoder_response(google_url: str, decoded_url: str) -> None:
+    if not google_url or not decoded_url:
+        return
+    key = _gnewsdecoder_cache_key(google_url)
+    cache = _load_gnewsdecoder_cache()
+    cache[key] = {
+        "cached_at": datetime.now(timezone.utc).isoformat(),
+        "google_news_url": google_url,
+        "decoded_url": decoded_url,
+    }
+    _save_gnewsdecoder_cache(cache)
+    log.info(
+        f"[NewsCollector] gnewsdecoder cache stored: key={key} "
+        f"ttl={GNEWSDECODER_CACHE_TTL_SECONDS}s"
+    )
+
+
+def _reset_gnewsdecoder_cache_for_tests() -> None:
+    """Clear the disk-backed gnewsdecoder cache. Used in test setUp to
+    prevent state leak between methods. Best-effort — never raises."""
+    try:
+        if GNEWSDECODER_CACHE_PATH.exists():
+            GNEWSDECODER_CACHE_PATH.unlink()
+    except Exception:  # noqa: BLE001 — test-only scaffolding
+        pass
 
 
 def _query_terms(query: str) -> list[str]:
@@ -917,13 +1026,32 @@ def search_google_news_rss(query: str, max_results: int = 3):
 def resolve_google_news_url(google_news_url: str) -> str:
     parsed = urlparse(google_news_url or "")
     if parsed.netloc and "news.google.com" not in parsed.netloc:
+        # M16-speed-1a Part H: short-circuit MUST stay before the cache
+        # lookup. Pinned by tests/test_m11_7a_2_exception_logging.py
+        # ::test_non_google_url_short_circuit_no_error which asserts
+        # mocked_decoder.assert_not_called() for non-Google URLs.
         return google_news_url
+
+    # M16-speed-1a Part H: cache lookup before the decoder call. Saves
+    # ~0.7-2.5s per repeat URL. Cache stores only successful decodes
+    # (see store-on-success guard below) so a transient decoder failure
+    # does not pin the fallback for 24h.
+    cached = _cached_decoder_response(google_news_url)
+    if cached is not None:
+        return cached
 
     try:
         result = gnewsdecoder(google_news_url)
 
         if isinstance(result, dict) and result.get("status"):
-            return result.get("decoded_url", google_news_url)
+            decoded = result.get("decoded_url", google_news_url)
+            # Cache only when the decoder actually produced a different
+            # URL — caching `decoded == input` would store a no-op and
+            # the next call would re-attempt anyway, so it's wasted
+            # writes.
+            if decoded and decoded != google_news_url:
+                _store_decoder_response(google_news_url, decoded)
+            return decoded
 
         return google_news_url
 

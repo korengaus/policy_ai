@@ -30,6 +30,17 @@ except ImportError:
 log = get_logger(__name__)
 
 
+# M16-speed-1a Part F1: constructor-level timeout for the OpenAI client.
+# Without this, the SDK default is 600s — a wedged API call could
+# absorb the entire JOB_TIMEOUT_SECONDS budget. 20s gives headroom
+# over llm_judge.py's 15s (the reasoning prompt is 2-4x the judge
+# prompt size). On timeout the SDK raises openai.APITimeoutError,
+# which is a subclass of Exception and is caught cleanly by the
+# existing broad except handler in run_ai_reasoning — no additional
+# exception handling needed. Mirrors llm_judge.py:280 convention.
+_AI_REASONER_TIMEOUT_SECONDS = 20.0
+
+
 def get_openai_client():
     """Return (client, unavailable_reason). client is None when unusable."""
     if OpenAI is None:
@@ -40,7 +51,7 @@ def get_openai_client():
     if not api_key:
         return None, "missing_api_key"
 
-    return OpenAI(api_key=api_key), None
+    return OpenAI(api_key=api_key, timeout=_AI_REASONER_TIMEOUT_SECONDS), None
 
 
 def _unavailable_result(
