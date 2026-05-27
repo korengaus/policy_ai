@@ -46,28 +46,46 @@ def _make_phase_a(*, original_url: str, google_link: str, title: str,
 
 
 def _run_dedup_pass(phase_a_results: list, captured_log_calls: list):
-    """Re-implement the M15-dedup-1 Part A logic locally for direct
-    testing. Kept byte-identical to the production block in
-    ``main.py`` (search for ``M15-dedup-1 Part A``) so this test
-    fails if the production logic drifts."""
+    """Re-implement the M15-dedup-1 + M15-dedup-2 dedup logic locally
+    for direct testing. Kept byte-aligned to the production block in
+    ``main.py`` (search for ``M15-dedup-1 Part A`` / ``M15-dedup-2``)
+    so this helper drifts loudly if the production code changes.
+
+    Each captured log entry carries a ``layer`` key (``"url"`` for
+    M15-dedup-1 URL collisions, ``"title"`` for M15-dedup-2 title
+    collisions) so tests can assert WHICH layer fired."""
     seen_urls: set = set()
+    seen_titles: set = set()
     deduped: list = []
     for phase_a in phase_a_results:
         if phase_a is None:
             deduped.append(phase_a)
             continue
         url = phase_a.get("original_url") or ""
-        google_link = (phase_a.get("news") or {}).get("google_link") or ""
+        news = phase_a.get("news") or {}
+        google_link = news.get("google_link") or ""
+        title_raw = news.get("title") or ""
         if not url or url == google_link:
             deduped.append(phase_a)
             continue
         if url in seen_urls:
             captured_log_calls.append({
+                "layer": "url",
                 "url": url,
-                "title": (phase_a.get("news") or {}).get("title") or "",
+                "title": title_raw,
+            })
+            continue
+        normalized_title = title_raw.strip().lower()
+        if normalized_title and normalized_title in seen_titles:
+            captured_log_calls.append({
+                "layer": "title",
+                "url": url,
+                "title": title_raw,
             })
             continue
         seen_urls.add(url)
+        if normalized_title:
+            seen_titles.add(normalized_title)
         deduped.append(phase_a)
     return deduped
 
@@ -199,13 +217,180 @@ class PostResolveDedupTests(unittest.TestCase):
         scan (cheap, drift-proof)."""
         text = (_PROJECT_ROOT / "main.py").read_text(encoding="utf-8")
         self.assertIn("M15-dedup-1 Part A", text)
+        self.assertIn("M15-dedup-2", text)
         self.assertIn("seen_urls: set = set()", text)
+        self.assertIn("seen_titles: set = set()", text)
         self.assertIn(
             "deduped_phase_a_results: list = []", text,
         )
         self.assertIn(
             "M15-dedup-1: skipping duplicate news item", text,
         )
+        self.assertIn(
+            "M15-dedup-2: skipping duplicate title", text,
+        )
+
+
+# ---------------------------------------------------------------------------
+# M15-dedup-2 — title-based dedup as the second layer.
+# ---------------------------------------------------------------------------
+
+
+class TitleDedupTests(unittest.TestCase):
+    def test_duplicate_titles_collapsed(self):
+        """Two items with DIFFERENT upstream URLs but the SAME title
+        (case-insensitive, trimmed) → only the first survives. This
+        is the operator-reported case: two syndications of the same
+        article carried by different publishers."""
+        phase_a_results = [
+            _make_phase_a(
+                original_url="https://publisher-a.example.com/news/1",
+                google_link="https://news.google.com/articles/AAA",
+                title="청년 버팀목 전세대출 2년 새 반토막 - 아시아투데이",
+                index=1,
+            ),
+            _make_phase_a(
+                original_url="https://publisher-b.example.com/news/2",
+                google_link="https://news.google.com/articles/BBB",
+                title="청년 버팀목 전세대출 2년 새 반토막 - 아시아투데이",
+                index=2,
+            ),
+        ]
+        log_calls: list = []
+        deduped = _run_dedup_pass(phase_a_results, log_calls)
+        self.assertEqual(len(deduped), 1)
+        self.assertEqual(deduped[0]["index"], 1)
+        # The skipped entry must be attributed to the title layer
+        # (NOT the URL layer — the URLs are distinct).
+        self.assertEqual(len(log_calls), 1)
+        self.assertEqual(log_calls[0]["layer"], "title")
+
+    def test_duplicate_titles_normalize_case_and_whitespace(self):
+        """Title normalization is ``.strip().lower()`` — surrounding
+        whitespace and casing must not defeat dedup."""
+        phase_a_results = [
+            _make_phase_a(
+                original_url="https://publisher-a.example.com/news/1",
+                google_link="https://news.google.com/articles/AAA",
+                title="  Hello World  ",
+                index=1,
+            ),
+            _make_phase_a(
+                original_url="https://publisher-b.example.com/news/2",
+                google_link="https://news.google.com/articles/BBB",
+                title="hello world",
+                index=2,
+            ),
+        ]
+        log_calls: list = []
+        deduped = _run_dedup_pass(phase_a_results, log_calls)
+        self.assertEqual(len(deduped), 1)
+        self.assertEqual(log_calls[0]["layer"], "title")
+
+    def test_duplicate_titles_with_decode_failure_preserved(self):
+        """When both items have decode failures (``original_url`` ==
+        ``google_link``) AND identical titles, BOTH must survive.
+        The decode-failure guard short-circuits before the title
+        check — collapsing two failed decodes by title would drop
+        distinct articles we cannot disambiguate."""
+        phase_a_results = [
+            _make_phase_a(
+                original_url="https://news.google.com/articles/AAA",
+                google_link="https://news.google.com/articles/AAA",
+                title="Article (decode failed)",
+                index=1,
+            ),
+            _make_phase_a(
+                original_url="https://news.google.com/articles/BBB",
+                google_link="https://news.google.com/articles/BBB",
+                title="Article (decode failed)",
+                index=2,
+            ),
+        ]
+        log_calls: list = []
+        deduped = _run_dedup_pass(phase_a_results, log_calls)
+        # Both preserved — decode-failure short-circuit beats the
+        # title check.
+        self.assertEqual(len(deduped), 2)
+        self.assertEqual(log_calls, [])
+
+    def test_empty_titles_not_collapsed(self):
+        """Two items with empty/whitespace-only titles must NOT be
+        collapsed (missing metadata is not a duplicate signal)."""
+        phase_a_results = [
+            _make_phase_a(
+                original_url="https://publisher-a.example.com/news/1",
+                google_link="https://news.google.com/articles/AAA",
+                title="",
+                index=1,
+            ),
+            _make_phase_a(
+                original_url="https://publisher-b.example.com/news/2",
+                google_link="https://news.google.com/articles/BBB",
+                title="   ",  # whitespace-only normalizes to empty
+                index=2,
+            ),
+        ]
+        log_calls: list = []
+        deduped = _run_dedup_pass(phase_a_results, log_calls)
+        self.assertEqual(len(deduped), 2)
+        self.assertEqual(log_calls, [])
+
+    def test_url_collision_logs_url_layer_not_title_layer(self):
+        """When BOTH URL and title would match (same upstream
+        article, same title), the URL check fires first — the log
+        entry is attributed to the URL layer, not the title layer.
+        Order matters: title dedup is the second layer."""
+        phase_a_results = [
+            _make_phase_a(
+                original_url="https://example.com/article/1",
+                google_link="https://news.google.com/articles/AAA",
+                title="Same article",
+                index=1,
+            ),
+            _make_phase_a(
+                original_url="https://example.com/article/1",  # same URL
+                google_link="https://news.google.com/articles/BBB",
+                title="Same article",  # also same title
+                index=2,
+            ),
+        ]
+        log_calls: list = []
+        deduped = _run_dedup_pass(phase_a_results, log_calls)
+        self.assertEqual(len(deduped), 1)
+        # URL layer fires; title check never reached for item 2.
+        self.assertEqual(log_calls[0]["layer"], "url")
+
+    def test_mixed_url_and_title_collisions(self):
+        """3 items: #1 unique, #2 URL-duplicate of #1, #3 title-
+        duplicate of #1. Only #1 survives; #2 logged as url layer,
+        #3 logged as title layer."""
+        phase_a_results = [
+            _make_phase_a(
+                original_url="https://example.com/article/1",
+                google_link="https://news.google.com/articles/AAA",
+                title="Original",
+                index=1,
+            ),
+            _make_phase_a(
+                original_url="https://example.com/article/1",  # URL dup
+                google_link="https://news.google.com/articles/BBB",
+                title="Different title here",
+                index=2,
+            ),
+            _make_phase_a(
+                original_url="https://other.example.com/n/9",  # new URL
+                google_link="https://news.google.com/articles/CCC",
+                title="ORIGINAL",  # title dup of #1 after .lower()
+                index=3,
+            ),
+        ]
+        log_calls: list = []
+        deduped = _run_dedup_pass(phase_a_results, log_calls)
+        self.assertEqual(len(deduped), 1)
+        self.assertEqual(deduped[0]["index"], 1)
+        layers = [entry["layer"] for entry in log_calls]
+        self.assertEqual(layers, ["url", "title"])
 
 
 # ---------------------------------------------------------------------------

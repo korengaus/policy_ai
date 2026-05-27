@@ -224,11 +224,19 @@ PRESERVED_REAL_ERRORS: tuple[tuple[str, str], ...] = (
 #     dedup additions in api_server.py + pipeline_worker.py emit no
 #     new log calls (silent ``continue``) — both files are also
 #     outside MIGRATED_FILES anyway. 323 + 1 = 324.
+#   * M15-dedup-2 (2026-05-28): main.analyze_pipeline gains 1
+#     additional log.info ("M15-dedup-2: skipping duplicate title")
+#     emitted when the post-resolve dedup pass collapses a second
+#     news item whose normalized title (``.strip().lower()``)
+#     matches one already seen — handles the operator-observed
+#     case of two cards with identical titles but different
+#     upstream URLs (cross-publisher syndications). Same MIGRATED
+#     file (main.py). 324 + 1 = 325.
 #
 # Any future milestone that legitimately adds log calls bumps this
 # expected count; the contract M14.4 actually pins is the *level
 # distribution*, not the absolute count.
-EXPECTED_TOTAL_LOG_CALLS = 324
+EXPECTED_TOTAL_LOG_CALLS = 325
 
 # Post-M14.4: 12 (down from 17 pre-M14.4 — 5 reclassifications).
 # M13.3d added log.info / log.warning calls only — no new log.error.
