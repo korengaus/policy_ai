@@ -561,7 +561,16 @@ class PollingFlowTests(unittest.TestCase):
 
 
 class PostgresIsolationTests(unittest.TestCase):
-    """Postgres dual-write failures must never break SQLite job writes."""
+    """Postgres dual-write *write* failures must never break SQLite job writes.
+
+    M12.0d-1 update: the read contract changed. Pre-Stage-1, a broken
+    PG engine made ``get_job_status`` silently fall back to SQLite, so
+    this test asserted the SQLite row came back even with PG down.
+    Stage 1 removed that silent fallback — when dual-write is enabled
+    and the engine returns None (e.g., psycopg2 missing in this test
+    env), ``get_job_status`` returns the not-found sentinel (None).
+    The test now asserts the original *write* contract (no raise) and
+    documents the Stage 1 read-contract change."""
 
     def test_postgres_failure_does_not_break_sqlite_job_writes(self):
         with _TempDBScope() as scope:
@@ -578,7 +587,16 @@ class PostgresIsolationTests(unittest.TestCase):
                 scope.job_manager.update_progress(record["id"], "pipeline_started", 50)
                 scope.job_manager.complete_job(record["id"], result_id=None)
 
-            row = scope.job_manager.get_job_status(record["id"])
+            # Writes did not raise — primary contract preserved.
+            # SQLite row check: drop down to the raw connection because
+            # job_manager.get_job_status now prefers PG (and PG engine
+            # is None in this env → returns None per Stage 1).
+            with scope.job_manager.get_connection() as conn:
+                row = conn.execute(
+                    "SELECT status, progress_percent FROM jobs WHERE id = ?",
+                    (record["id"],),
+                ).fetchone()
+            self.assertIsNotNone(row, "SQLite job row must persist even with PG misconfigured")
             self.assertEqual(row["status"], "completed")
             self.assertEqual(row["progress_percent"], 100)
 

@@ -353,21 +353,51 @@ def timeout_job(job_id: str, error_message: str = "job exceeded timeout") -> Non
 
 
 def get_job_status(job_id: str) -> Optional[dict]:
-    # M12.0c-jobs — PG primary when dual-write is enabled so the Web
-    # service sees jobs that the Worker has updated (separate
-    # filesystems on Render).
+    # M12.0c-jobs / M12.0d-1 — PG primary when dual-write is enabled
+    # so the Web service sees jobs that the Worker has updated
+    # (separate filesystems on Render). PG-read errors now raise;
+    # post-PG row mutation is wrapped separately so a malformed PG row
+    # surfaces with a distinct log message instead of masquerading as
+    # a PG read failure.
     try:
         from postgres_storage import (
             is_postgres_dual_write_enabled,
             read_job_by_id,
         )
-        if is_postgres_dual_write_enabled():
+        pg_enabled = is_postgres_dual_write_enabled()
+    except Exception:
+        logger.error(
+            "get_job_status failed to import postgres_storage",
+            exc_info=True,
+            extra={"function": "get_job_status", "job_id": job_id},
+        )
+        raise
+    if pg_enabled:
+        try:
             pg_row = read_job_by_id(job_id)
-            if pg_row is not None:
+        except Exception:
+            logger.error(
+                "get_job_status PG read failed",
+                exc_info=True,
+                extra={"function": "get_job_status", "job_id": job_id},
+            )
+            raise
+        if pg_row is not None:
+            try:
                 pg_row["job_id"] = pg_row.get("id")
-                return pg_row
-    except Exception:  # noqa: BLE001 — PG read failure must not block SQLite
-        pass
+            except Exception:
+                logger.error(
+                    "get_job_status PG row mutation failed",
+                    exc_info=True,
+                    extra={
+                        "function": "get_job_status",
+                        "job_id": job_id,
+                    },
+                )
+                raise
+            return pg_row
+        # PG returned None = job not found (or engine miss).
+        return None
     with get_connection() as connection:
         row = connection.execute(
             "SELECT * FROM jobs WHERE id = ?",

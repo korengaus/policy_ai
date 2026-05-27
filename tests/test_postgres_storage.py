@@ -719,20 +719,33 @@ class ReadAnalysisResultByIdTests(unittest.TestCase):
                 )
                 postgres_storage.reset_engine_for_tests()
 
-    def test_returns_none_when_engine_errors(self):
-        with _EnvScope():
-            _set_env(USE_POSTGRES_WRITE="true",
-                     DATABASE_URL="postgresql+psycopg://"
-                                  "u:p@127.0.0.1:1/none")
-            import postgres_storage
+    def test_raises_postgres_read_error_on_engine_failure(self):
+        """M12.0d-1: real engine / SQL errors raise PostgresReadError
+        (Stage 1 contract). Pre-M12.0d-1 the helper swallowed and
+        returned None; that masked PG outages."""
+        from sqlalchemy.exc import OperationalError
 
-            # Invalid URL → connection error inside the helper. The
-            # contract is to log a warning and return None, NEVER raise.
-            try:
-                result = postgres_storage.read_analysis_result_by_id(1)
-            except Exception as exc:  # noqa: BLE001
-                self.fail(f"read_analysis_result_by_id raised: {exc!r}")
-            self.assertIsNone(result)
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                tmp_db = Path(tmp_dir) / "engine_err.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{tmp_db}")
+                import postgres_storage
+
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+
+                def _boom(*a, **kw):
+                    raise OperationalError(
+                        "simulated", params=None, orig=Exception("boom"),
+                    )
+
+                with patch.object(engine, "connect", side_effect=_boom):
+                    with self.assertRaises(
+                        postgres_storage.PostgresReadError,
+                    ):
+                        postgres_storage.read_analysis_result_by_id(1)
+                postgres_storage.reset_engine_for_tests()
 
 
 class ReadRecentAnalysisResultsTests(unittest.TestCase):
@@ -938,10 +951,11 @@ class DatabaseReadFallbackIntegrationTests(unittest.TestCase):
                         row["original_url"], "https://example.com/sqlite-1",
                     )
 
-    def test_get_result_by_id_falls_back_to_sqlite_when_pg_returns_none(self):
-        """Postgres is enabled and reachable but has no matching row;
-        SQLite does. The caller must fall back to SQLite and return
-        the SQLite row rather than 404."""
+    def test_get_result_by_id_returns_none_when_pg_empty(self):
+        """M12.0d-1: PG is enabled and reachable but has no matching row.
+        Stage 1 contract: function returns None (PG is authoritative for
+        'not found'); the SQLite fallback is unreachable when dual-write
+        is enabled, even if SQLite has the row."""
         from text_utils import sanitize_data
 
         with _EnvScope():
@@ -959,7 +973,8 @@ class DatabaseReadFallbackIntegrationTests(unittest.TestCase):
                     # so read_analysis_result_by_id will return None.
                     engine = postgres_storage.get_engine()
                     postgres_storage.ensure_schema(engine)
-                    # Seed only SQLite.
+                    # Seed only SQLite (would have been the fallback
+                    # source pre-M12.0d-1; now must be ignored).
                     sample = {
                         "title": "from sqlite only",
                         "original_url": "https://example.com/sqlite-only",
@@ -973,8 +988,6 @@ class DatabaseReadFallbackIntegrationTests(unittest.TestCase):
                             "verdict_confidence": 70,
                         },
                     }
-                    # Patch out the mirror_write so save_analysis_result
-                    # writes only to SQLite for this test case.
                     with patch.object(
                         postgres_storage, "mirror_write",
                         lambda *a, **kw: False,
@@ -984,9 +997,9 @@ class DatabaseReadFallbackIntegrationTests(unittest.TestCase):
                         )
                     self.assertTrue(status["saved"])
 
+                    # Stage 1: PG empty + dual-write enabled → None.
                     row = database.get_result_by_id(status["id"])
-                    self.assertIsNotNone(row)
-                    self.assertEqual(row["title"], "from sqlite only")
+                    self.assertIsNone(row)
                     postgres_storage.reset_engine_for_tests()
 
     def test_get_recent_results_prefers_postgres_empty_over_sqlite_rows(self):
@@ -1392,8 +1405,9 @@ class DatabaseReviewFallbackIntegrationTests(unittest.TestCase):
                     )
                     postgres_storage.reset_engine_for_tests()
 
-    def test_get_review_task_falls_back_to_sqlite_when_pg_missing(self):
-        """PG is enabled and reachable but empty; SQLite has the row."""
+    def test_get_review_task_returns_none_when_pg_empty(self):
+        """M12.0d-1: PG enabled + empty → None. SQLite fallback is
+        unreachable when dual-write is enabled."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
                 sqlite_db = Path(tmp_dir) / "sqlite_local.db"
@@ -1409,7 +1423,8 @@ class DatabaseReviewFallbackIntegrationTests(unittest.TestCase):
                     postgres_storage.ensure_schema(engine)
                     # Seed SQLite only; suppress the PG mirror so PG
                     # stays empty and read_review_task_by_task_id
-                    # returns None for the lookup.
+                    # returns None for the lookup. Pre-M12.0d-1 this
+                    # leaked the SQLite row through; Stage 1 hides it.
                     with patch.object(
                         postgres_storage, "mirror_upsert",
                         lambda *a, **kw: False,
@@ -1429,8 +1444,7 @@ class DatabaseReviewFallbackIntegrationTests(unittest.TestCase):
                         )
 
                     task = database.get_review_task("task-sqlite")
-                    self.assertIsNotNone(task)
-                    self.assertEqual(task["claim_text"], "sqlite-only")
+                    self.assertIsNone(task)
                     postgres_storage.reset_engine_for_tests()
 
     # --- get_review_task_by_idempotency_key --------------------------
@@ -1463,7 +1477,8 @@ class DatabaseReviewFallbackIntegrationTests(unittest.TestCase):
                     self.assertEqual(task["claim_text"], "pg idem hit")
                     postgres_storage.reset_engine_for_tests()
 
-    def test_get_review_task_by_idempotency_key_falls_back_to_sqlite_when_pg_missing(self):
+    def test_get_review_task_by_idempotency_key_returns_none_when_pg_empty(self):
+        """M12.0d-1: PG enabled + empty → None."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
                 sqlite_db = Path(tmp_dir) / "sqlite_local.db"
@@ -1498,8 +1513,7 @@ class DatabaseReviewFallbackIntegrationTests(unittest.TestCase):
                     task = database.get_review_task_by_idempotency_key(
                         "idem-sqlite-only",
                     )
-                    self.assertIsNotNone(task)
-                    self.assertEqual(task["task_id"], "t-only-sqlite")
+                    self.assertIsNone(task)
                     postgres_storage.reset_engine_for_tests()
 
     # --- list_review_tasks -------------------------------------------
@@ -1604,7 +1618,8 @@ class DatabaseReviewFallbackIntegrationTests(unittest.TestCase):
                     self.assertEqual(rec["metadata"], {"src": "pg"})
                     postgres_storage.reset_engine_for_tests()
 
-    def test_get_review_decision_falls_back_when_pg_missing(self):
+    def test_get_review_decision_returns_none_when_pg_empty(self):
+        """M12.0d-1: PG enabled + empty → None."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
                 sqlite_db = Path(tmp_dir) / "sqlite_local.db"
@@ -1646,9 +1661,7 @@ class DatabaseReviewFallbackIntegrationTests(unittest.TestCase):
                         )
 
                     rec = database.get_review_decision("d-sqlite")
-                    self.assertIsNotNone(rec)
-                    self.assertEqual(rec["decision_id"], "d-sqlite")
-                    self.assertEqual(rec["decision"], "approve")
+                    self.assertIsNone(rec)
                     postgres_storage.reset_engine_for_tests()
 
     # --- list_review_decisions ---------------------------------------
@@ -1995,10 +2008,9 @@ class DatabaseDuplicateDetectionFallbackTests(unittest.TestCase):
                     )
                     postgres_storage.reset_engine_for_tests()
 
-    def test_get_result_id_by_url_falls_back_to_sqlite_when_pg_returns_none(self):
-        """PG is enabled and reachable but has no matching row; SQLite
-        does. The caller falls back to SQLite — same as the M12.0c-minimal
-        single-id-lookup pattern."""
+    def test_get_result_id_by_url_returns_none_when_pg_empty(self):
+        """M12.0d-1: PG enabled + empty → None. SQLite fallback is
+        unreachable when dual-write is enabled."""
         from text_utils import sanitize_data
 
         with _EnvScope():
@@ -2037,14 +2049,13 @@ class DatabaseDuplicateDetectionFallbackTests(unittest.TestCase):
                             query="sqlite-id-test",
                         )
                     self.assertTrue(status["saved"])
-                    sqlite_id = status["id"]
 
-                    # PG returns None for this URL → fall back to SQLite.
-                    self.assertEqual(
+                    # PG returns None for this URL → function returns
+                    # None (SQLite row is ignored under Stage 1).
+                    self.assertIsNone(
                         database.get_result_id_by_url(
                             "https://example.com/sqlite-id-only",
                         ),
-                        sqlite_id,
                     )
                     postgres_storage.reset_engine_for_tests()
 
@@ -3187,7 +3198,9 @@ class JobManagerGetJobStatusFallbackTests(unittest.TestCase):
                     self.assertEqual(status["progress_percent"], 60)
                     postgres_storage.reset_engine_for_tests()
 
-    def test_get_job_status_falls_back_to_sqlite_when_pg_returns_none(self):
+    def test_get_job_status_returns_none_when_pg_empty(self):
+        """M12.0d-1: PG enabled + empty → None. SQLite fallback is
+        unreachable when dual-write is enabled."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
                 sqlite_db = Path(tmp_dir) / "sqlite_local.db"
@@ -3203,6 +3216,8 @@ class JobManagerGetJobStatusFallbackTests(unittest.TestCase):
                     engine = postgres_storage.get_engine()
                     postgres_storage.ensure_schema(engine)
                     # Suppress PG mirror so create_job writes SQLite only.
+                    # Pre-M12.0d-1 the SQLite row leaked through; Stage 1
+                    # hides it under the PG-authoritative contract.
                     with patch.object(
                         postgres_storage, "mirror_write",
                         lambda *a, **kw: False,
@@ -3212,10 +3227,7 @@ class JobManagerGetJobStatusFallbackTests(unittest.TestCase):
                         )
 
                     status = job_manager.get_job_status(record["id"])
-                    # PG returned None → SQLite fallback returned the row.
-                    self.assertIsNotNone(status)
-                    self.assertEqual(status["query"], "sqlite-only")
-                    self.assertEqual(status["job_id"], record["id"])
+                    self.assertIsNone(status)
                     postgres_storage.reset_engine_for_tests()
 
 

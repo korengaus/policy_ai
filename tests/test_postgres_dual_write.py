@@ -207,9 +207,19 @@ class SqliteSavePathIntegrationTests(unittest.TestCase):
                     self.assertFalse(pg_status["ok"])
 
                     # SQLite remains source of truth and is unaffected.
-                    rows = database.get_recent_results(limit=5)
+                    # M12.0d-1: read via raw SQLite — get_recent_results
+                    # now prefers PG and (with PG engine missing in
+                    # this env) returns [] per Stage 1 contract.
+                    with database.get_connection() as conn:
+                        rows = conn.execute(
+                            "SELECT original_url FROM analysis_results "
+                            "ORDER BY id DESC LIMIT 5"
+                        ).fetchall()
                     self.assertEqual(len(rows), 1)
-                    self.assertEqual(rows[0]["original_url"], SAMPLE_RESULT["original_url"])
+                    self.assertEqual(
+                        rows[0]["original_url"],
+                        SAMPLE_RESULT["original_url"],
+                    )
 
 
 if __name__ == "__main__":

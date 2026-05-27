@@ -554,12 +554,19 @@ class ModuleAdoptionPin(unittest.TestCase):
 # ai_reasoner.failed (log.warning) events alongside the existing
 # OpenAI Responses-API call. This is the documented escape valve
 # the pin's comment describes ("future PR adding the import with
-# a clear justification"). The remaining 4 entries below stay
-# pinned.
+# a clear justification").
+#
+# M12.0d-1 (2026-05-27): database.py was removed from this list.
+# Stage 1 of the SQLite-fallback-removal arc needed a module-level
+# ``log = get_logger(__name__)`` so the 14 PG-primary read functions
+# could emit ``log.error(..., exc_info=True)`` before re-raising on
+# PG read failure. Same explicit-approval escape valve as M13.1b-obs.
+# job_manager.py was NOT migrated — it keeps its
+# ``logger = logging.getLogger("policy_ai.job_manager")`` pattern and
+# stays on this list.
 _LEGACY_FILES = (
     "api_server.py",
     "policy_scoring.py",
-    "database.py",
     "job_manager.py",
 )
 

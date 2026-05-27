@@ -44,6 +44,29 @@ log = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Stage 1 (M12.0d-1) — read-helper exception type.
+#
+# Read helpers previously swallowed every SQLAlchemy / unexpected error
+# and returned ``None`` so callers in database.py / job_manager.py
+# could silently fall back to SQLite. That contract masked real PG
+# outages and schema drift. After M12.0d-1, read helpers raise
+# :class:`PostgresReadError` (wrapping the underlying cause) on engine
+# / driver / SQL errors. ``None`` and ``[]`` returns are now reserved
+# for legitimate "row not present" / "zero rows" outcomes only.
+#
+# Callers in database.py wrap the read in their own ``try / except
+# Exception`` and re-raise after logging with their own function-name
+# context, so a bare ``Exception`` subclass is sufficient — no need
+# for a finer hierarchy.
+# ---------------------------------------------------------------------------
+
+
+class PostgresReadError(Exception):
+    """Raised by ``read_*`` helpers when a real engine / SQL error
+    fires. ``None`` / ``[]`` returns now mean "no row" only."""
+
+
+# ---------------------------------------------------------------------------
 # Feature-flag helpers
 # ---------------------------------------------------------------------------
 
@@ -587,27 +610,34 @@ def mirror_upsert(
 
 
 # ---------------------------------------------------------------------------
-# Read helpers — M12.0c-minimal.
+# Read helpers — M12.0c-minimal (semantic updated in M12.0d-1).
 #
 # Used by ``database.get_result_by_id`` / ``get_recent_results`` when
 # dual-write is enabled, so the Web service on Render can see rows
 # the Worker process wrote (the two services run on separate
 # ephemeral filesystems and never share a SQLite file).
 #
-# These helpers return ``None`` to signal "Postgres is unavailable or
-# raised an error" so the caller can fall back to SQLite. An empty
-# list from ``read_recent_analysis_results`` is a VALID result
-# meaning "Postgres has 0 rows" and is treated as authoritative — the
-# caller MUST NOT fall back to SQLite in that case. NEVER raise.
+# M12.0d-1 (Stage 1 of staged SQLite-fallback removal) narrowed the
+# exception contract:
+#
+#   * ``None`` (single-row helpers) → row not present in PG (or engine
+#     not built because dual-write is disabled / URL missing). NOT an
+#     error signal anymore — callers treat as "not found".
+#   * ``[]`` (list helpers) → PG has zero matching rows
+#     (authoritative). Unchanged from M12.0c.
+#   * Real engine / SQL errors now RAISE :class:`PostgresReadError`
+#     instead of being swallowed. The caller in database.py logs +
+#     re-raises so PG failures surface instead of silently falling
+#     back to a (possibly stale) SQLite row.
 # ---------------------------------------------------------------------------
 
 
 def read_analysis_result_by_id(result_id: int) -> Optional[dict]:
     """Return the analysis_results row as a dict, or None when:
     - dual-write is disabled (no engine),
-    - the row is not present in Postgres,
-    - any SQLAlchemy / unexpected error fires (the caller falls back
-      to SQLite, so a transient Postgres outage is non-fatal).
+    - the row is not present in Postgres.
+
+    Raises :class:`PostgresReadError` on engine / SQL errors (M12.0d-1).
     """
     engine = get_engine()
     if engine is None:
@@ -621,24 +651,22 @@ def read_analysis_result_by_id(result_id: int) -> Optional[dict]:
             ).first()
         return dict(row._mapping) if row is not None else None
     except SQLAlchemyError as exc:
-        log.warning("read_analysis_result_by_id failed: %s", exc)
-        return None
-    except Exception as exc:  # noqa: BLE001
-        log.warning(
-            "read_analysis_result_by_id unexpected error: %s", exc,
+        log.error(
+            "read_analysis_result_by_id failed: %s", exc, exc_info=True,
         )
-        return None
+        raise PostgresReadError(
+            f"read_analysis_result_by_id failed: {exc}"
+        ) from exc
 
 
 def read_recent_analysis_results(limit: int = 20) -> Optional[list]:
     """Return the newest analysis_results rows as a list of dicts, or
-    None when the engine is unavailable or any error fires.
+    None when the engine is unavailable.
 
-    An empty list IS a valid hit ("Postgres has 0 rows") — the caller
-    MUST treat None and ``[]`` differently:
+    * None → engine not built (dual-write disabled / URL missing).
+    * ``[]`` → Postgres is authoritative and says zero rows.
 
-    * None → Postgres unavailable, caller should fall back to SQLite.
-    * ``[]`` → Postgres is authoritative and says zero rows; trust it.
+    Raises :class:`PostgresReadError` on engine / SQL errors (M12.0d-1).
 
     Limit is clamped to ``[1, 100]`` to match the SQLite-side helper
     so the contract stays identical between paths.
@@ -656,17 +684,16 @@ def read_recent_analysis_results(limit: int = 20) -> Optional[list]:
             ).all()
         return [dict(row._mapping) for row in rows]
     except SQLAlchemyError as exc:
-        log.warning("read_recent_analysis_results failed: %s", exc)
-        return None
-    except Exception as exc:  # noqa: BLE001
-        log.warning(
-            "read_recent_analysis_results unexpected error: %s", exc,
+        log.error(
+            "read_recent_analysis_results failed: %s", exc, exc_info=True,
         )
-        return None
+        raise PostgresReadError(
+            f"read_recent_analysis_results failed: {exc}"
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
-# Read helpers — M12.0c-2 (reviewer dashboard path).
+# Read helpers — M12.0c-2 (reviewer dashboard path; semantic updated in M12.0d-1).
 #
 # These mirror the M12.0c-minimal pattern for the reviewer dashboard
 # read functions in database.py:
@@ -675,15 +702,13 @@ def read_recent_analysis_results(limit: int = 20) -> Optional[list]:
 #   - list_review_tasks
 #   - get_review_decision / list_review_decisions
 #
-# Same contract as the M12.0c-minimal helpers above:
+# Same contract as the M12.0c-minimal helpers above (post-M12.0d-1):
 #
-#   * Return None when dual-write is disabled, the row is missing
-#     (single-row helpers), or any SQLAlchemy / unexpected error fires.
-#   * Return ``[]`` for list helpers when Postgres has zero matching
-#     rows — this is AUTHORITATIVE. The caller in database.py MUST
-#     treat None and [] differently:
-#       - None → Postgres unavailable, fall back to SQLite.
-#       - [] → Postgres is authoritative and says zero rows; trust it.
+#   * Return None (single-row helpers) when dual-write is disabled or
+#     the row is missing. NOT an error signal anymore.
+#   * Return ``[]`` (list helpers) when Postgres has zero matching
+#     rows — authoritative.
+#   * Raise :class:`PostgresReadError` on real engine / SQL errors.
 #   * Return RAW dicts (``dict(row._mapping)``) without applying the
 #     SQLite-side ``_row_to_review_task`` / ``_row_to_review_decision``
 #     normalizations. Those live in database.py and the wrapper there
@@ -691,14 +716,15 @@ def read_recent_analysis_results(limit: int = 20) -> Optional[list]:
 #     duck-typed for ``[k]`` + ``keys()``). Keeping the normalization
 #     out of postgres_storage avoids a forbidden import of database
 #     (pinned by test_does_not_import_database_module).
-#   * NEVER raise.
 # ---------------------------------------------------------------------------
 
 
 def read_review_task_by_task_id(task_id: str) -> Optional[dict]:
     """Return the review_tasks row for ``task_id`` as a RAW dict, or
-    None when dual-write is disabled, the row is missing, or any error
-    fires. ``task_id`` is the SQLite PRIMARY KEY column."""
+    None when dual-write is disabled or the row is missing.
+    ``task_id`` is the SQLite PRIMARY KEY column.
+
+    Raises :class:`PostgresReadError` on engine / SQL errors (M12.0d-1)."""
     engine = get_engine()
     if engine is None:
         return None
@@ -711,20 +737,21 @@ def read_review_task_by_task_id(task_id: str) -> Optional[dict]:
             ).first()
         return dict(row._mapping) if row is not None else None
     except SQLAlchemyError as exc:
-        log.warning("read_review_task_by_task_id failed: %s", exc)
-        return None
-    except Exception as exc:  # noqa: BLE001
-        log.warning(
-            "read_review_task_by_task_id unexpected error: %s", exc,
+        log.error(
+            "read_review_task_by_task_id failed: %s", exc, exc_info=True,
         )
-        return None
+        raise PostgresReadError(
+            f"read_review_task_by_task_id failed: {exc}"
+        ) from exc
 
 
 def read_review_task_by_idempotency_key(
     idempotency_key: str,
 ) -> Optional[dict]:
     """Return the review_tasks row for ``idempotency_key`` as a RAW
-    dict, or None. UNIQUE on the PG side guarantees at most one row."""
+    dict, or None. UNIQUE on the PG side guarantees at most one row.
+
+    Raises :class:`PostgresReadError` on engine / SQL errors (M12.0d-1)."""
     engine = get_engine()
     if engine is None:
         return None
@@ -737,16 +764,13 @@ def read_review_task_by_idempotency_key(
             ).first()
         return dict(row._mapping) if row is not None else None
     except SQLAlchemyError as exc:
-        log.warning(
-            "read_review_task_by_idempotency_key failed: %s", exc,
+        log.error(
+            "read_review_task_by_idempotency_key failed: %s",
+            exc, exc_info=True,
         )
-        return None
-    except Exception as exc:  # noqa: BLE001
-        log.warning(
-            "read_review_task_by_idempotency_key unexpected error: %s",
-            exc,
-        )
-        return None
+        raise PostgresReadError(
+            f"read_review_task_by_idempotency_key failed: {exc}"
+        ) from exc
 
 
 def read_review_tasks(
@@ -760,7 +784,9 @@ def read_review_tasks(
     identical to the SQLite-side ``list_review_tasks`` contract.
 
     Returns ``[]`` when Postgres has zero matching rows (authoritative);
-    None when the engine is unavailable or an error fires.
+    None when the engine is unavailable.
+
+    Raises :class:`PostgresReadError` on engine / SQL errors (M12.0d-1).
 
     Sort order matches SQLite: ``ORDER BY created_at DESC, task_id DESC``.
     """
@@ -785,17 +811,18 @@ def read_review_tasks(
             rows = conn.execute(stmt).all()
         return [dict(row._mapping) for row in rows]
     except SQLAlchemyError as exc:
-        log.warning("read_review_tasks failed: %s", exc)
-        return None
-    except Exception as exc:  # noqa: BLE001
-        log.warning("read_review_tasks unexpected error: %s", exc)
-        return None
+        log.error("read_review_tasks failed: %s", exc, exc_info=True)
+        raise PostgresReadError(
+            f"read_review_tasks failed: {exc}"
+        ) from exc
 
 
 def read_review_decision_by_id(decision_id: str) -> Optional[dict]:
     """Return the review_decisions row for ``decision_id`` as a RAW
-    dict, or None on engine miss / missing row / error.
-    ``decision_id`` is the SQLite PRIMARY KEY column."""
+    dict, or None on engine miss / missing row.
+    ``decision_id`` is the SQLite PRIMARY KEY column.
+
+    Raises :class:`PostgresReadError` on engine / SQL errors (M12.0d-1)."""
     engine = get_engine()
     if engine is None:
         return None
@@ -808,13 +835,12 @@ def read_review_decision_by_id(decision_id: str) -> Optional[dict]:
             ).first()
         return dict(row._mapping) if row is not None else None
     except SQLAlchemyError as exc:
-        log.warning("read_review_decision_by_id failed: %s", exc)
-        return None
-    except Exception as exc:  # noqa: BLE001
-        log.warning(
-            "read_review_decision_by_id unexpected error: %s", exc,
+        log.error(
+            "read_review_decision_by_id failed: %s", exc, exc_info=True,
         )
-        return None
+        raise PostgresReadError(
+            f"read_review_decision_by_id failed: {exc}"
+        ) from exc
 
 
 def read_review_decisions_for_task(task_id: str) -> Optional[list]:
@@ -823,7 +849,9 @@ def read_review_decisions_for_task(task_id: str) -> Optional[list]:
     append-only history reads in occurrence order — matches SQLite.
 
     Returns ``[]`` when Postgres has zero rows for the task
-    (authoritative); None when engine miss / error.
+    (authoritative); None when engine miss.
+
+    Raises :class:`PostgresReadError` on engine / SQL errors (M12.0d-1).
     """
     engine = get_engine()
     if engine is None:
@@ -840,13 +868,12 @@ def read_review_decisions_for_task(task_id: str) -> Optional[list]:
             ).all()
         return [dict(row._mapping) for row in rows]
     except SQLAlchemyError as exc:
-        log.warning("read_review_decisions_for_task failed: %s", exc)
-        return None
-    except Exception as exc:  # noqa: BLE001
-        log.warning(
-            "read_review_decisions_for_task unexpected error: %s", exc,
+        log.error(
+            "read_review_decisions_for_task failed: %s", exc, exc_info=True,
         )
-        return None
+        raise PostgresReadError(
+            f"read_review_decisions_for_task failed: {exc}"
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -865,16 +892,16 @@ def read_review_decisions_for_task(task_id: str) -> Optional[list]:
 #       - False → PG authoritatively has zero matching rows; caller
 #                 MUST trust this and NOT fall back to SQLite. Same
 #                 ``[]`` = PG truth contract as M12.0c-2.
-#       - None  → engine unavailable / error; caller falls back to
-#                 SQLite as best-effort.
+#       - None  → engine unavailable (dual-write disabled / URL
+#                 missing). Real errors RAISE PostgresReadError.
 #
 #   * ``read_analysis_result_id_by_url`` returns Optional[int]:
 #       - int   → the latest analysis_results.id matching the URL.
 #       - None  → engine miss OR row missing (conflated, same as the
 #                 M12.0c-minimal ``read_analysis_result_by_id`` helper).
-#                 Caller falls back to SQLite for single-id lookups.
 #
-# NEVER raise.
+# M12.0d-1: real engine / SQL errors now raise :class:`PostgresReadError`
+# instead of being swallowed into a None return.
 # ---------------------------------------------------------------------------
 
 
@@ -882,9 +909,11 @@ def read_analysis_result_exists_by_url(
     original_url: str,
 ) -> Optional[bool]:
     """True / False AUTHORITATIVELY when the engine is reachable; None
-    on engine miss or error. See module docstring above for the full
-    semantics — True AND False are both PG-authoritative; only None
-    triggers SQLite fallback in the caller."""
+    on engine miss (dual-write disabled / URL missing). See module
+    docstring above for the full semantics — True AND False are both
+    PG-authoritative.
+
+    Raises :class:`PostgresReadError` on engine / SQL errors (M12.0d-1)."""
     engine = get_engine()
     if engine is None:
         return None
@@ -903,14 +932,13 @@ def read_analysis_result_exists_by_url(
             hit = conn.execute(stmt).scalar()
         return hit is not None
     except SQLAlchemyError as exc:
-        log.warning("read_analysis_result_exists_by_url failed: %s", exc)
-        return None
-    except Exception as exc:  # noqa: BLE001
-        log.warning(
-            "read_analysis_result_exists_by_url unexpected error: %s",
-            exc,
+        log.error(
+            "read_analysis_result_exists_by_url failed: %s",
+            exc, exc_info=True,
         )
-        return None
+        raise PostgresReadError(
+            f"read_analysis_result_exists_by_url failed: {exc}"
+        ) from exc
 
 
 def read_analysis_result_id_by_url(
@@ -919,12 +947,12 @@ def read_analysis_result_id_by_url(
     """Return the most recent ``analysis_results.id`` for ``original_url``
     (``ORDER BY id DESC LIMIT 1``), or None when:
       * dual-write disabled (no engine),
-      * no matching row in Postgres,
-      * any SQLAlchemy / unexpected error fires.
+      * no matching row in Postgres.
+
+    Raises :class:`PostgresReadError` on engine / SQL errors (M12.0d-1).
 
     None conflates 'no row' with 'engine miss' — the caller in
-    database.py falls back to SQLite in either case, which is the
-    M12.0c-minimal single-id-lookup contract."""
+    database.py handles both as 'no row found'."""
     engine = get_engine()
     if engine is None:
         return None
@@ -941,17 +969,16 @@ def read_analysis_result_id_by_url(
             return None
         return int(row_id)
     except SQLAlchemyError as exc:
-        log.warning("read_analysis_result_id_by_url failed: %s", exc)
-        return None
-    except Exception as exc:  # noqa: BLE001
-        log.warning(
-            "read_analysis_result_id_by_url unexpected error: %s", exc,
+        log.error(
+            "read_analysis_result_id_by_url failed: %s", exc, exc_info=True,
         )
-        return None
+        raise PostgresReadError(
+            f"read_analysis_result_id_by_url failed: {exc}"
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
-# Read helpers — M12.0c-4 (operator CLI tables).
+# Read helpers — M12.0c-4 (operator CLI tables; semantic updated in M12.0d-1).
 #
 # These mirror the M12.0c-minimal / M12.0c-2 pattern for the five
 # operator-facing read functions in database.py:
@@ -962,18 +989,19 @@ def read_analysis_result_id_by_url(
 #   - get_producer_comparisons       (verdict_producer_comparisons)
 #   - get_verdict_label_attributions (verdict_label_attributions)
 #
-# Contract (identical across all five):
+# Contract (identical across all five; post-M12.0d-1):
 #
 #   * Return ``[]`` when Postgres has zero matching rows — AUTHORITATIVE.
 #     The caller in database.py MUST treat ``[]`` and None differently:
-#       - None → engine unavailable / error → fall back to SQLite.
+#       - None → engine unavailable (dual-write disabled / URL missing).
 #       - ``[]`` → PG is authoritative and says zero rows; trust it.
 #   * Return RAW dicts (``dict(row._mapping)``) without applying the
 #     SQLite-side ``_row_to_*`` normalizations. Those live in
 #     database.py and the wrapper there applies them to both SQLite
 #     Rows and PG raw dicts (both are duck-typed).
-#   * NEVER raise. Any SQLAlchemy / unexpected error → log.warning +
-#     return None.
+#   * Raise :class:`PostgresReadError` on real engine / SQL errors
+#     (M12.0d-1). Callers in database.py log + re-raise so PG failures
+#     surface instead of silently leaking stale SQLite rows.
 #   * Filter args are keyword-only. Truthy guards on free-text filters
 #     so a passed ``""`` does not produce a ``WHERE col = ''`` clause
 #     (matches the SQLite-side ``if analysis_id is not None and
@@ -1013,11 +1041,10 @@ def read_fetch_artifacts(
             rows = conn.execute(stmt).all()
         return [dict(row._mapping) for row in rows]
     except SQLAlchemyError as exc:
-        log.warning("read_fetch_artifacts failed: %s", exc)
-        return None
-    except Exception as exc:  # noqa: BLE001
-        log.warning("read_fetch_artifacts unexpected error: %s", exc)
-        return None
+        log.error("read_fetch_artifacts failed: %s", exc, exc_info=True)
+        raise PostgresReadError(
+            f"read_fetch_artifacts failed: {exc}"
+        ) from exc
 
 
 def read_extraction_results(
@@ -1057,11 +1084,10 @@ def read_extraction_results(
             rows = conn.execute(stmt).all()
         return [dict(row._mapping) for row in rows]
     except SQLAlchemyError as exc:
-        log.warning("read_extraction_results failed: %s", exc)
-        return None
-    except Exception as exc:  # noqa: BLE001
-        log.warning("read_extraction_results unexpected error: %s", exc)
-        return None
+        log.error("read_extraction_results failed: %s", exc, exc_info=True)
+        raise PostgresReadError(
+            f"read_extraction_results failed: {exc}"
+        ) from exc
 
 
 def read_evidence_candidates(
@@ -1108,11 +1134,10 @@ def read_evidence_candidates(
             rows = conn.execute(stmt).all()
         return [dict(row._mapping) for row in rows]
     except SQLAlchemyError as exc:
-        log.warning("read_evidence_candidates failed: %s", exc)
-        return None
-    except Exception as exc:  # noqa: BLE001
-        log.warning("read_evidence_candidates unexpected error: %s", exc)
-        return None
+        log.error("read_evidence_candidates failed: %s", exc, exc_info=True)
+        raise PostgresReadError(
+            f"read_evidence_candidates failed: {exc}"
+        ) from exc
 
 
 def read_producer_comparisons(
@@ -1158,11 +1183,10 @@ def read_producer_comparisons(
             rows = conn.execute(stmt).all()
         return [dict(row._mapping) for row in rows]
     except SQLAlchemyError as exc:
-        log.warning("read_producer_comparisons failed: %s", exc)
-        return None
-    except Exception as exc:  # noqa: BLE001
-        log.warning("read_producer_comparisons unexpected error: %s", exc)
-        return None
+        log.error("read_producer_comparisons failed: %s", exc, exc_info=True)
+        raise PostgresReadError(
+            f"read_producer_comparisons failed: {exc}"
+        ) from exc
 
 
 def read_verdict_label_attributions(
@@ -1210,13 +1234,12 @@ def read_verdict_label_attributions(
             rows = conn.execute(stmt).all()
         return [dict(row._mapping) for row in rows]
     except SQLAlchemyError as exc:
-        log.warning("read_verdict_label_attributions failed: %s", exc)
-        return None
-    except Exception as exc:  # noqa: BLE001
-        log.warning(
-            "read_verdict_label_attributions unexpected error: %s", exc,
+        log.error(
+            "read_verdict_label_attributions failed: %s", exc, exc_info=True,
         )
-        return None
+        raise PostgresReadError(
+            f"read_verdict_label_attributions failed: {exc}"
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -1228,18 +1251,20 @@ def read_verdict_label_attributions(
 # earlier M12.0c sub-milestones which only added the read side on top
 # of M12.0a writes).
 #
-# Same contract as the other M12.0c read helpers:
+# Same contract as the other M12.0c read helpers (post-M12.0d-1):
 #   * Return RAW dict (caller adds the ``job_id`` alias on top of
 #     ``id``) or None when:
 #       - dual-write is disabled (no engine),
-#       - the row is not present in Postgres,
-#       - any SQLAlchemy / unexpected error fires.
-#   * NEVER raise.
+#       - the row is not present in Postgres.
+#   * Raise :class:`PostgresReadError` on real engine / SQL errors
+#     (M12.0d-1).
 # ---------------------------------------------------------------------------
 
 
 def read_job_by_id(job_id: str) -> Optional[dict]:
-    """Return the jobs row for ``job_id`` as a RAW dict, or None."""
+    """Return the jobs row for ``job_id`` as a RAW dict, or None.
+
+    Raises :class:`PostgresReadError` on engine / SQL errors (M12.0d-1)."""
     engine = get_engine()
     if engine is None:
         return None
@@ -1252,11 +1277,10 @@ def read_job_by_id(job_id: str) -> Optional[dict]:
             ).first()
         return dict(row._mapping) if row is not None else None
     except SQLAlchemyError as exc:
-        log.warning("read_job_by_id failed: %s", exc)
-        return None
-    except Exception as exc:  # noqa: BLE001
-        log.warning("read_job_by_id unexpected error: %s", exc)
-        return None
+        log.error("read_job_by_id failed: %s", exc, exc_info=True)
+        raise PostgresReadError(
+            f"read_job_by_id failed: {exc}"
+        ) from exc
 
 
 # ---------------------------------------------------------------------------

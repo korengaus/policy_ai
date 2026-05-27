@@ -3,7 +3,17 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+from structured_logging import get_logger
 from text_utils import sanitize_data, sanitize_text
+
+
+# M12.0d-1 (Stage 1) — module-level logger for new ``log.error`` calls
+# in the PG-primary read functions (get_result_by_id et al.). Imported
+# lazily-free at module load because structured_logging.get_logger
+# only configures handlers idempotently. Existing ``_embedding_logger``
+# alias at the bottom of this file is kept for the embedding-cache
+# helpers and is unrelated to this logger.
+log = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -222,22 +232,44 @@ def result_exists_by_url(original_url: str) -> bool:
     if not original_url:
         return False
 
-    # M12.0c-3: PG primary for duplicate detection. Both True AND False
-    # are AUTHORITATIVE — only None (engine miss) triggers SQLite fallback.
-    # This is the same ``[]`` = PG truth contract as M12.0c-2; trusting PG
-    # False is what prevents duplicate INSERTs when the Worker has already
-    # saved a URL that Web's local SQLite doesn't know about.
+    # M12.0c-3 / M12.0d-1: PG primary for duplicate detection. Both
+    # True AND False are AUTHORITATIVE. The SQLite block below is
+    # unreachable when dual-write is enabled (Stage 1: PG-read errors
+    # now raise instead of silently falling back). SQLite remains
+    # reachable when dual-write is disabled (local dev / tests).
     try:
         from postgres_storage import (
             is_postgres_dual_write_enabled,
             read_analysis_result_exists_by_url,
         )
-        if is_postgres_dual_write_enabled():
+        pg_enabled = is_postgres_dual_write_enabled()
+    except Exception:
+        log.error(
+            "result_exists_by_url failed to import postgres_storage",
+            exc_info=True,
+            extra={"function": "result_exists_by_url"},
+        )
+        raise
+    if pg_enabled:
+        try:
             pg_result = read_analysis_result_exists_by_url(original_url)
-            if pg_result is not None:
-                return pg_result
-    except Exception:  # noqa: BLE001 — PG read failure must not block SQLite
-        pass
+        except Exception:
+            log.error(
+                "result_exists_by_url PG read failed",
+                exc_info=True,
+                extra={
+                    "function": "result_exists_by_url",
+                    "original_url": original_url,
+                },
+            )
+            raise
+        if pg_result is not None:
+            return pg_result
+        # PG returned None — engine None despite dual-write enabled
+        # (DATABASE_URL missing / engine build failed). Treat as
+        # "no row" per the Stage 1 contract; do NOT fall through to
+        # SQLite. Operator should investigate via check_postgres_health.
+        return False
 
     with get_connection() as connection:
         row = connection.execute(
@@ -261,19 +293,38 @@ def get_result_id_by_url(original_url: str):
     """
     if not original_url:
         return None
-    # M12.0c-3: standard single-id-lookup pattern (M12.0c-minimal). PG
-    # primary; PG None (engine miss OR row missing) falls back to SQLite.
+    # M12.0c-3 / M12.0d-1: PG primary; SQLite block below is
+    # unreachable when dual-write enabled. PG-read errors now raise.
     try:
         from postgres_storage import (
             is_postgres_dual_write_enabled,
             read_analysis_result_id_by_url,
         )
-        if is_postgres_dual_write_enabled():
+        pg_enabled = is_postgres_dual_write_enabled()
+    except Exception:
+        log.error(
+            "get_result_id_by_url failed to import postgres_storage",
+            exc_info=True,
+            extra={"function": "get_result_id_by_url"},
+        )
+        raise
+    if pg_enabled:
+        try:
             pg_id = read_analysis_result_id_by_url(original_url)
-            if pg_id is not None:
-                return pg_id
-    except Exception:  # noqa: BLE001 — PG read failure must not block SQLite
-        pass
+        except Exception:
+            log.error(
+                "get_result_id_by_url PG read failed",
+                exc_info=True,
+                extra={
+                    "function": "get_result_id_by_url",
+                    "original_url": original_url,
+                },
+            )
+            raise
+        if pg_id is not None:
+            return pg_id
+        # PG returned None = no matching row (or engine miss).
+        return None
     with get_connection() as connection:
         row = connection.execute(
             """
@@ -476,26 +527,40 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
 
 def get_recent_results(limit: int = 20):
     safe_limit = max(1, min(int(limit or 20), 100))
-    # M12.0c-minimal: prefer Postgres when dual-write is enabled so the
-    # Web service can see rows the Worker process wrote (Web and Worker
-    # run on separate ephemeral filesystems on Render and don't share
-    # SQLite). Lazy import preserved per the
-    # test_database_uses_lazy_import_inside_helpers pin.
-    #
-    # Empty list from Postgres is AUTHORITATIVE (== "PG has 0 rows") —
-    # we trust it and do NOT fall back to SQLite. Only None
-    # (disabled / engine error) triggers the SQLite fallback below.
+    # M12.0c-minimal / M12.0d-1: PG primary when dual-write is enabled.
+    # Empty list from PG is AUTHORITATIVE (== "PG has 0 rows"); None
+    # means engine-not-built. SQLite block is unreachable when
+    # dual-write enabled (Stage 1: PG-read errors now raise).
     try:
         from postgres_storage import (
             is_postgres_dual_write_enabled,
             read_recent_analysis_results,
         )
-        if is_postgres_dual_write_enabled():
+        pg_enabled = is_postgres_dual_write_enabled()
+    except Exception:
+        log.error(
+            "get_recent_results failed to import postgres_storage",
+            exc_info=True,
+            extra={"function": "get_recent_results"},
+        )
+        raise
+    if pg_enabled:
+        try:
             pg_rows = read_recent_analysis_results(safe_limit)
-            if pg_rows is not None:
-                return pg_rows
-    except Exception:  # noqa: BLE001 — PG read failure must not block SQLite
-        pass
+        except Exception:
+            log.error(
+                "get_recent_results PG read failed",
+                exc_info=True,
+                extra={
+                    "function": "get_recent_results",
+                    "limit": safe_limit,
+                },
+            )
+            raise
+        if pg_rows is not None:
+            return pg_rows
+        # PG returned None — engine None despite dual-write enabled.
+        return []
     with get_connection() as connection:
         rows = connection.execute(
             """
@@ -510,21 +575,38 @@ def get_recent_results(limit: int = 20):
 
 
 def get_result_by_id(result_id: int):
-    # M12.0c-minimal: see the comment in get_recent_results. The same
-    # rationale applies — Web reads must consult Postgres first when
-    # dual-write is enabled, otherwise /history/{id} returns 404 for
-    # rows the Worker wrote on a different filesystem.
+    # M12.0c-minimal / M12.0d-1: PG primary; SQLite block unreachable
+    # when dual-write enabled. PG-read errors now raise.
     try:
         from postgres_storage import (
             is_postgres_dual_write_enabled,
             read_analysis_result_by_id,
         )
-        if is_postgres_dual_write_enabled():
+        pg_enabled = is_postgres_dual_write_enabled()
+    except Exception:
+        log.error(
+            "get_result_by_id failed to import postgres_storage",
+            exc_info=True,
+            extra={"function": "get_result_by_id"},
+        )
+        raise
+    if pg_enabled:
+        try:
             pg_row = read_analysis_result_by_id(result_id)
-            if pg_row is not None:
-                return pg_row
-    except Exception:  # noqa: BLE001 — PG read failure must not block SQLite
-        pass
+        except Exception:
+            log.error(
+                "get_result_by_id PG read failed",
+                exc_info=True,
+                extra={
+                    "function": "get_result_by_id",
+                    "result_id": result_id,
+                },
+            )
+            raise
+        if pg_row is not None:
+            return pg_row
+        # PG returned None = row not found (or engine miss).
+        return None
     with get_connection() as connection:
         row = connection.execute(
             """
@@ -756,21 +838,38 @@ def get_review_task_by_idempotency_key(idempotency_key: str):
     """Return the existing task for an idempotency key, or None."""
     if not idempotency_key:
         return None
-    # M12.0c-2: prefer Postgres when dual-write is enabled so that
-    # Web and Worker (separate filesystems on Render) see each other's
-    # review_tasks rows for idempotency checks. Lazy import preserved
-    # per test_database_uses_lazy_import_inside_helpers.
+    # M12.0c-2 / M12.0d-1: PG primary; SQLite block unreachable when
+    # dual-write enabled. PG-read errors now raise.
     try:
         from postgres_storage import (
             is_postgres_dual_write_enabled,
             read_review_task_by_idempotency_key,
         )
-        if is_postgres_dual_write_enabled():
+        pg_enabled = is_postgres_dual_write_enabled()
+    except Exception:
+        log.error(
+            "get_review_task_by_idempotency_key failed to import "
+            "postgres_storage",
+            exc_info=True,
+            extra={"function": "get_review_task_by_idempotency_key"},
+        )
+        raise
+    if pg_enabled:
+        try:
             pg_row = read_review_task_by_idempotency_key(idempotency_key)
-            if pg_row is not None:
-                return _row_to_review_task(pg_row)
-    except Exception:  # noqa: BLE001 — PG read failure must not block SQLite
-        pass
+        except Exception:
+            log.error(
+                "get_review_task_by_idempotency_key PG read failed",
+                exc_info=True,
+                extra={
+                    "function": "get_review_task_by_idempotency_key",
+                    "idempotency_key": idempotency_key,
+                },
+            )
+            raise
+        if pg_row is not None:
+            return _row_to_review_task(pg_row)
+        return None
     with get_connection() as connection:
         _ensure_review_tables(connection)
         row = connection.execute(
@@ -874,18 +973,37 @@ def get_review_task(task_id: str):
     """Return a single review_task dict, or None when not found."""
     if not task_id:
         return None
-    # M12.0c-2: see comment in get_review_task_by_idempotency_key.
+    # M12.0c-2 / M12.0d-1: PG primary; SQLite block unreachable when
+    # dual-write enabled. PG-read errors now raise.
     try:
         from postgres_storage import (
             is_postgres_dual_write_enabled,
             read_review_task_by_task_id,
         )
-        if is_postgres_dual_write_enabled():
+        pg_enabled = is_postgres_dual_write_enabled()
+    except Exception:
+        log.error(
+            "get_review_task failed to import postgres_storage",
+            exc_info=True,
+            extra={"function": "get_review_task"},
+        )
+        raise
+    if pg_enabled:
+        try:
             pg_row = read_review_task_by_task_id(task_id)
-            if pg_row is not None:
-                return _row_to_review_task(pg_row)
-    except Exception:  # noqa: BLE001 — PG read failure must not block SQLite
-        pass
+        except Exception:
+            log.error(
+                "get_review_task PG read failed",
+                exc_info=True,
+                extra={
+                    "function": "get_review_task",
+                    "task_id": task_id,
+                },
+            )
+            raise
+        if pg_row is not None:
+            return _row_to_review_task(pg_row)
+        return None
     with get_connection() as connection:
         _ensure_review_tables(connection)
         row = connection.execute(
@@ -900,22 +1018,43 @@ def list_review_tasks(*, status=None, limit: int = 50, offset: int = 0) -> list:
     so a single API call cannot pull the whole table."""
     limit = max(1, min(int(limit or 50), 100))
     offset = max(0, int(offset or 0))
-    # M12.0c-2: prefer Postgres when dual-write is enabled. Empty list
-    # from Postgres is AUTHORITATIVE — we trust it and do NOT fall back
-    # to SQLite. Only None (disabled / engine error) triggers fallback.
+    # M12.0c-2 / M12.0d-1: PG primary; [] is PG truth, None means
+    # engine-not-built. SQLite block unreachable when dual-write
+    # enabled. PG-read errors now raise.
     try:
         from postgres_storage import (
             is_postgres_dual_write_enabled,
             read_review_tasks,
         )
-        if is_postgres_dual_write_enabled():
+        pg_enabled = is_postgres_dual_write_enabled()
+    except Exception:
+        log.error(
+            "list_review_tasks failed to import postgres_storage",
+            exc_info=True,
+            extra={"function": "list_review_tasks"},
+        )
+        raise
+    if pg_enabled:
+        try:
             pg_rows = read_review_tasks(
                 status=status, limit=limit, offset=offset,
             )
-            if pg_rows is not None:
-                return [_row_to_review_task(r) for r in pg_rows]
-    except Exception:  # noqa: BLE001 — PG read failure must not block SQLite
-        pass
+        except Exception:
+            log.error(
+                "list_review_tasks PG read failed",
+                exc_info=True,
+                extra={
+                    "function": "list_review_tasks",
+                    "status": status,
+                    "limit": limit,
+                    "offset": offset,
+                },
+            )
+            raise
+        if pg_rows is not None:
+            return [_row_to_review_task(r) for r in pg_rows]
+        # PG returned None — engine not built.
+        return []
     with get_connection() as connection:
         _ensure_review_tables(connection)
         if status:
@@ -1013,18 +1152,37 @@ def record_review_decision(*, decision_id: str, task_id: str, decision: str,
 def get_review_decision(decision_id: str):
     if not decision_id:
         return None
-    # M12.0c-2: see comment in get_review_task_by_idempotency_key.
+    # M12.0c-2 / M12.0d-1: PG primary; SQLite block unreachable when
+    # dual-write enabled. PG-read errors now raise.
     try:
         from postgres_storage import (
             is_postgres_dual_write_enabled,
             read_review_decision_by_id,
         )
-        if is_postgres_dual_write_enabled():
+        pg_enabled = is_postgres_dual_write_enabled()
+    except Exception:
+        log.error(
+            "get_review_decision failed to import postgres_storage",
+            exc_info=True,
+            extra={"function": "get_review_decision"},
+        )
+        raise
+    if pg_enabled:
+        try:
             pg_row = read_review_decision_by_id(decision_id)
-            if pg_row is not None:
-                return _row_to_review_decision(pg_row)
-    except Exception:  # noqa: BLE001 — PG read failure must not block SQLite
-        pass
+        except Exception:
+            log.error(
+                "get_review_decision PG read failed",
+                exc_info=True,
+                extra={
+                    "function": "get_review_decision",
+                    "decision_id": decision_id,
+                },
+            )
+            raise
+        if pg_row is not None:
+            return _row_to_review_decision(pg_row)
+        return None
     with get_connection() as connection:
         _ensure_review_tables(connection)
         row = connection.execute(
@@ -1037,18 +1195,38 @@ def get_review_decision(decision_id: str):
 def list_review_decisions(task_id: str) -> list:
     if not task_id:
         return []
-    # M12.0c-2: empty list from Postgres is AUTHORITATIVE (PG truth).
+    # M12.0c-2 / M12.0d-1: PG primary; [] is PG truth, None means
+    # engine-not-built. SQLite block unreachable when dual-write
+    # enabled. PG-read errors now raise.
     try:
         from postgres_storage import (
             is_postgres_dual_write_enabled,
             read_review_decisions_for_task,
         )
-        if is_postgres_dual_write_enabled():
+        pg_enabled = is_postgres_dual_write_enabled()
+    except Exception:
+        log.error(
+            "list_review_decisions failed to import postgres_storage",
+            exc_info=True,
+            extra={"function": "list_review_decisions"},
+        )
+        raise
+    if pg_enabled:
+        try:
             pg_rows = read_review_decisions_for_task(task_id)
-            if pg_rows is not None:
-                return [_row_to_review_decision(r) for r in pg_rows]
-    except Exception:  # noqa: BLE001 — PG read failure must not block SQLite
-        pass
+        except Exception:
+            log.error(
+                "list_review_decisions PG read failed",
+                exc_info=True,
+                extra={
+                    "function": "list_review_decisions",
+                    "task_id": task_id,
+                },
+            )
+            raise
+        if pg_rows is not None:
+            return [_row_to_review_decision(r) for r in pg_rows]
+        return []
     with get_connection() as connection:
         _ensure_review_tables(connection)
         rows = connection.execute(
@@ -1208,22 +1386,42 @@ def get_fetch_artifacts(source_id: str = None, limit: int = 50) -> list:
         capped_limit = max(1, min(int(limit or 50), 500))
     except (TypeError, ValueError):
         capped_limit = 50
-    # M12.0c-4: no db_path arg on this function — always use default DB.
-    # Standard M12.0c-2 pattern: PG primary, [] = PG truth, None →
-    # SQLite fallback.
+    # M12.0c-4 / M12.0d-1: no db_path arg on this function — always
+    # default DB. PG primary; [] is PG truth, None means engine-not-built.
+    # SQLite block unreachable when dual-write enabled. PG-read errors
+    # now raise.
     try:
         from postgres_storage import (
             is_postgres_dual_write_enabled,
             read_fetch_artifacts,
         )
-        if is_postgres_dual_write_enabled():
+        pg_enabled = is_postgres_dual_write_enabled()
+    except Exception:
+        log.error(
+            "get_fetch_artifacts failed to import postgres_storage",
+            exc_info=True,
+            extra={"function": "get_fetch_artifacts"},
+        )
+        raise
+    if pg_enabled:
+        try:
             pg_rows = read_fetch_artifacts(
                 source_id=source_id, limit=capped_limit,
             )
-            if pg_rows is not None:
-                return [_row_to_fetch_artifact(r) for r in pg_rows]
-    except Exception:  # noqa: BLE001 — PG read failure must not block SQLite
-        pass
+        except Exception:
+            log.error(
+                "get_fetch_artifacts PG read failed",
+                exc_info=True,
+                extra={
+                    "function": "get_fetch_artifacts",
+                    "source_id": source_id,
+                    "limit": capped_limit,
+                },
+            )
+            raise
+        if pg_rows is not None:
+            return [_row_to_fetch_artifact(r) for r in pg_rows]
+        return []
     with get_connection() as connection:
         _ensure_source_fetch_artifacts_table(connection)
         if source_id:
@@ -1419,25 +1617,47 @@ def get_extraction_results(source_id: str = None, artifact_id: int = None,
         capped_limit = max(1, min(int(limit or 50), 500))
     except (TypeError, ValueError):
         capped_limit = 50
-    # M12.0c-4: PG fallback ONLY when db_path is None. An explicit
-    # db_path means the caller is opting into a specific SQLite file
-    # (CLI --db-path / isolated tests) — Postgres MUST be skipped.
+    # M12.0c-4 / M12.0d-1: PG primary ONLY when db_path is None.
+    # Explicit db_path opts into a specific SQLite file (CLI / tests) —
+    # PG MUST be skipped and no PG-related raises can fire. When
+    # db_path is None: SQLite block below is unreachable when dual-
+    # write enabled. PG-read errors now raise.
     if db_path is None:
         try:
             from postgres_storage import (
                 is_postgres_dual_write_enabled,
                 read_extraction_results,
             )
-            if is_postgres_dual_write_enabled():
+            pg_enabled = is_postgres_dual_write_enabled()
+        except Exception:
+            log.error(
+                "get_extraction_results failed to import postgres_storage",
+                exc_info=True,
+                extra={"function": "get_extraction_results"},
+            )
+            raise
+        if pg_enabled:
+            try:
                 pg_rows = read_extraction_results(
                     source_id=source_id,
                     artifact_id=artifact_id,
                     limit=capped_limit,
                 )
-                if pg_rows is not None:
-                    return [_row_to_extraction_result(r) for r in pg_rows]
-        except Exception:  # noqa: BLE001 — PG read failure must not block SQLite
-            pass
+            except Exception:
+                log.error(
+                    "get_extraction_results PG read failed",
+                    exc_info=True,
+                    extra={
+                        "function": "get_extraction_results",
+                        "source_id": source_id,
+                        "artifact_id": artifact_id,
+                        "limit": capped_limit,
+                    },
+                )
+                raise
+            if pg_rows is not None:
+                return [_row_to_extraction_result(r) for r in pg_rows]
+            return []
     connection = _open_connection(db_path)
     try:
         _ensure_artifact_text_extractions_table(connection)
@@ -1669,25 +1889,47 @@ def get_evidence_candidates(
         capped_limit = max(1, min(int(limit or 50), 500))
     except (TypeError, ValueError):
         capped_limit = 50
-    # M12.0c-4: PG fallback ONLY when db_path is None (see comment in
-    # get_extraction_results for the rationale).
+    # M12.0c-4 / M12.0d-1: PG primary ONLY when db_path is None (see
+    # comment in get_extraction_results for the rationale). PG-read
+    # errors now raise.
     if db_path is None:
         try:
             from postgres_storage import (
                 is_postgres_dual_write_enabled,
                 read_evidence_candidates,
             )
-            if is_postgres_dual_write_enabled():
+            pg_enabled = is_postgres_dual_write_enabled()
+        except Exception:
+            log.error(
+                "get_evidence_candidates failed to import postgres_storage",
+                exc_info=True,
+                extra={"function": "get_evidence_candidates"},
+            )
+            raise
+        if pg_enabled:
+            try:
                 pg_rows = read_evidence_candidates(
                     analysis_id=analysis_id,
                     source_id=source_id,
                     extraction_id=extraction_id,
                     limit=capped_limit,
                 )
-                if pg_rows is not None:
-                    return [_row_to_evidence_candidate(r) for r in pg_rows]
-        except Exception:  # noqa: BLE001 — PG read failure must not block SQLite
-            pass
+            except Exception:
+                log.error(
+                    "get_evidence_candidates PG read failed",
+                    exc_info=True,
+                    extra={
+                        "function": "get_evidence_candidates",
+                        "analysis_id": analysis_id,
+                        "source_id": source_id,
+                        "extraction_id": extraction_id,
+                        "limit": capped_limit,
+                    },
+                )
+                raise
+            if pg_rows is not None:
+                return [_row_to_evidence_candidate(r) for r in pg_rows]
+            return []
     connection = _open_connection(db_path)
     try:
         _ensure_artifact_evidence_candidates_table(connection)
@@ -1954,24 +2196,46 @@ def get_producer_comparisons(
         capped_limit = max(1, min(int(limit or 50), 500))
     except (TypeError, ValueError):
         capped_limit = 50
-    # M12.0c-4: PG fallback ONLY when db_path is None.
+    # M12.0c-4 / M12.0d-1: PG primary ONLY when db_path is None.
+    # PG-read errors now raise.
     if db_path is None:
         try:
             from postgres_storage import (
                 is_postgres_dual_write_enabled,
                 read_producer_comparisons,
             )
-            if is_postgres_dual_write_enabled():
+            pg_enabled = is_postgres_dual_write_enabled()
+        except Exception:
+            log.error(
+                "get_producer_comparisons failed to import postgres_storage",
+                exc_info=True,
+                extra={"function": "get_producer_comparisons"},
+            )
+            raise
+        if pg_enabled:
+            try:
                 pg_rows = read_producer_comparisons(
                     analysis_id=analysis_id,
                     disagreement_pattern=disagreement_pattern,
                     only_disagreements=only_disagreements,
                     limit=capped_limit,
                 )
-                if pg_rows is not None:
-                    return [_row_to_producer_comparison(r) for r in pg_rows]
-        except Exception:  # noqa: BLE001 — PG read failure must not block SQLite
-            pass
+            except Exception:
+                log.error(
+                    "get_producer_comparisons PG read failed",
+                    exc_info=True,
+                    extra={
+                        "function": "get_producer_comparisons",
+                        "analysis_id": analysis_id,
+                        "disagreement_pattern": disagreement_pattern,
+                        "only_disagreements": only_disagreements,
+                        "limit": capped_limit,
+                    },
+                )
+                raise
+            if pg_rows is not None:
+                return [_row_to_producer_comparison(r) for r in pg_rows]
+            return []
     connection = _open_connection(db_path)
     try:
         _ensure_verdict_producer_comparisons_table(connection)
@@ -2222,27 +2486,51 @@ def get_verdict_label_attributions(
         capped_limit = max(1, min(int(limit or 100), 500))
     except (TypeError, ValueError):
         capped_limit = 100
-    # M12.0c-4: PG fallback ONLY when db_path is None.
+    # M12.0c-4 / M12.0d-1: PG primary ONLY when db_path is None.
+    # PG-read errors now raise.
     if db_path is None:
         try:
             from postgres_storage import (
                 is_postgres_dual_write_enabled,
                 read_verdict_label_attributions,
             )
-            if is_postgres_dual_write_enabled():
+            pg_enabled = is_postgres_dual_write_enabled()
+        except Exception:
+            log.error(
+                "get_verdict_label_attributions failed to import "
+                "postgres_storage",
+                exc_info=True,
+                extra={"function": "get_verdict_label_attributions"},
+            )
+            raise
+        if pg_enabled:
+            try:
                 pg_rows = read_verdict_label_attributions(
                     analysis_id=analysis_id,
                     attributed_branch_id=attributed_branch_id,
                     only_weak_evidence_verified=only_weak_evidence_verified,
                     limit=capped_limit,
                 )
-                if pg_rows is not None:
-                    return [
-                        _row_to_verdict_label_attribution(r)
-                        for r in pg_rows
-                    ]
-        except Exception:  # noqa: BLE001 — PG read failure must not block SQLite
-            pass
+            except Exception:
+                log.error(
+                    "get_verdict_label_attributions PG read failed",
+                    exc_info=True,
+                    extra={
+                        "function": "get_verdict_label_attributions",
+                        "analysis_id": analysis_id,
+                        "attributed_branch_id": attributed_branch_id,
+                        "only_weak_evidence_verified":
+                            only_weak_evidence_verified,
+                        "limit": capped_limit,
+                    },
+                )
+                raise
+            if pg_rows is not None:
+                return [
+                    _row_to_verdict_label_attribution(r)
+                    for r in pg_rows
+                ]
+            return []
     connection = _open_connection(db_path)
     try:
         _ensure_verdict_label_attributions_table(connection)
