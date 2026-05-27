@@ -198,13 +198,13 @@ class MigratedFilesContainsBothFilesPin(unittest.TestCase):
 
 
 class PinValueMatches323Pin(unittest.TestCase):
-    """Both `EXPECTED_TOTAL_LOG_CALLS` (323) and
+    """Both `EXPECTED_TOTAL_LOG_CALLS` (324) and
     `EXPECTED_TOTAL_LOG_ERRORS` (14) must reflect the M14.0-print-b
     additions. Lineage:
-        ... → 298 (M14.0-print-a) → 323 (M14.0-print-b)
+        ... → 298 (M14.0-print-a) → 323 (M14.0-print-b) → 324 (M15-dedup-1)
     """
 
-    EXPECTED_TOTAL = 323
+    EXPECTED_TOTAL = 324
     EXPECTED_ERRORS = 14
 
     def test_expected_pin_values_after_m14_0_print_b(self):
