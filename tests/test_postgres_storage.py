@@ -1040,6 +1040,701 @@ class DatabaseReadFallbackIntegrationTests(unittest.TestCase):
                     postgres_storage.reset_engine_for_tests()
 
 
+# ---------------------------------------------------------------------------
+# M12.0c-2: reviewer dashboard read helpers + database.py fallback.
+#
+# Mirrors the M12.0c-minimal test structure for the five new helpers:
+#
+#   * read_review_task_by_task_id
+#   * read_review_task_by_idempotency_key
+#   * read_review_tasks (status filter + pagination, [] = PG truth)
+#   * read_review_decision_by_id
+#   * read_review_decisions_for_task ([] = PG truth)
+#
+# Each helper gets 2 unit tests, paired with 2 database.py integration
+# tests, for 4 per function × 5 functions = 20 new tests in total.
+# ---------------------------------------------------------------------------
+
+
+def _seed_review_task_in_pg(*, task_id, idempotency_key, status="open",
+                            claim_text="claim", created_at="2026-05-27T00:00:00",
+                            updated_at="2026-05-27T00:00:00",
+                            human_review_required=1, item_index=0,
+                            snapshot_json="{}"):
+    """Helper: write a review_tasks row directly through the PG mirror
+    so the read helpers have something to find. Assumes the engine is
+    already built and the schema is in place."""
+    import postgres_storage
+
+    postgres_storage.mirror_upsert(
+        "review_tasks",
+        {
+            "task_id": task_id,
+            "status": status,
+            "claim_text": claim_text,
+            "snapshot_json": snapshot_json,
+            "created_at": created_at,
+            "updated_at": updated_at,
+            "idempotency_key": idempotency_key,
+            "human_review_required": human_review_required,
+            "item_index": item_index,
+        },
+        ["idempotency_key"],
+    )
+
+
+def _seed_review_decision_in_pg(*, decision_id, task_id,
+                                 decision="approve",
+                                 created_at="2026-05-27T00:00:00",
+                                 metadata_json="{}"):
+    """Helper: write a review_decisions row through the PG mirror.
+    review_decisions is append-only, so this uses mirror_write (insert)."""
+    import postgres_storage
+
+    postgres_storage.mirror_write(
+        "review_decisions",
+        {
+            "decision_id": decision_id,
+            "task_id": task_id,
+            "decision": decision,
+            "created_at": created_at,
+            "metadata_json": metadata_json,
+        },
+    )
+
+
+class ReadReviewTaskByTaskIdTests(unittest.TestCase):
+    def test_returns_none_when_dual_write_disabled(self):
+        with _EnvScope():
+            _set_env(USE_POSTGRES_WRITE=None, DATABASE_URL=None)
+            import postgres_storage
+
+            self.assertIsNone(
+                postgres_storage.read_review_task_by_task_id("t1"),
+            )
+
+    def test_returns_dict_when_row_present(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                tmp_db = Path(tmp_dir) / "read_task_by_id.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{tmp_db}")
+                import postgres_storage
+
+                engine = postgres_storage.get_engine()
+                self.assertIsNotNone(engine)
+                postgres_storage.ensure_schema(engine)
+                _seed_review_task_in_pg(
+                    task_id="task-1", idempotency_key="idem-task-1",
+                    claim_text="from pg",
+                )
+
+                row = postgres_storage.read_review_task_by_task_id("task-1")
+                self.assertIsNotNone(row)
+                self.assertIsInstance(row, dict)
+                self.assertEqual(row["task_id"], "task-1")
+                self.assertEqual(row["claim_text"], "from pg")
+                # RAW dict contract: snapshot_json present (TEXT), not
+                # the database.py-normalized ``snapshot`` key.
+                self.assertIn("snapshot_json", row)
+                self.assertNotIn("snapshot", row)
+                postgres_storage.reset_engine_for_tests()
+
+
+class ReadReviewTaskByIdempotencyKeyTests(unittest.TestCase):
+    def test_returns_none_when_dual_write_disabled(self):
+        with _EnvScope():
+            _set_env(USE_POSTGRES_WRITE=None, DATABASE_URL=None)
+            import postgres_storage
+
+            self.assertIsNone(
+                postgres_storage.read_review_task_by_idempotency_key(
+                    "idem-x",
+                ),
+            )
+
+    def test_returns_dict_when_row_present(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                tmp_db = Path(tmp_dir) / "read_task_by_idem.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{tmp_db}")
+                import postgres_storage
+
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                _seed_review_task_in_pg(
+                    task_id="task-idem", idempotency_key="my-idem-key",
+                    claim_text="found by idem",
+                )
+
+                row = postgres_storage.read_review_task_by_idempotency_key(
+                    "my-idem-key",
+                )
+                self.assertIsNotNone(row)
+                self.assertEqual(row["task_id"], "task-idem")
+                self.assertEqual(row["idempotency_key"], "my-idem-key")
+                self.assertEqual(row["claim_text"], "found by idem")
+                postgres_storage.reset_engine_for_tests()
+
+
+class ReadReviewTasksTests(unittest.TestCase):
+    def test_returns_none_when_disabled(self):
+        with _EnvScope():
+            _set_env(USE_POSTGRES_WRITE=None, DATABASE_URL=None)
+            import postgres_storage
+
+            self.assertIsNone(postgres_storage.read_review_tasks())
+
+    def test_status_filter_pagination_and_order(self):
+        """Single test covers three contracts at once: status filter,
+        newest-first ordering (created_at DESC, task_id DESC), and the
+        clamped limit/offset window. Also asserts that an empty result
+        is the empty list ``[]`` (PG authoritative zero), not None."""
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                tmp_db = Path(tmp_dir) / "read_tasks_filter.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{tmp_db}")
+                import postgres_storage
+
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                # Three open + one closed task. created_at increments
+                # so order should be: t-open-3, t-open-2, t-open-1
+                # for status="open".
+                _seed_review_task_in_pg(
+                    task_id="t-open-1", idempotency_key="i1",
+                    status="open", created_at="2026-05-27T00:00:01",
+                )
+                _seed_review_task_in_pg(
+                    task_id="t-open-2", idempotency_key="i2",
+                    status="open", created_at="2026-05-27T00:00:02",
+                )
+                _seed_review_task_in_pg(
+                    task_id="t-open-3", idempotency_key="i3",
+                    status="open", created_at="2026-05-27T00:00:03",
+                )
+                _seed_review_task_in_pg(
+                    task_id="t-closed-1", idempotency_key="i4",
+                    status="closed", created_at="2026-05-27T00:00:04",
+                )
+
+                # status filter narrows to 3 open tasks, newest first.
+                open_rows = postgres_storage.read_review_tasks(
+                    status="open", limit=10,
+                )
+                self.assertEqual(len(open_rows), 3)
+                self.assertEqual(open_rows[0]["task_id"], "t-open-3")
+                self.assertEqual(open_rows[2]["task_id"], "t-open-1")
+
+                # limit + offset pagination on the same filter.
+                page = postgres_storage.read_review_tasks(
+                    status="open", limit=1, offset=1,
+                )
+                self.assertEqual(len(page), 1)
+                self.assertEqual(page[0]["task_id"], "t-open-2")
+
+                # No filter → 4 rows total, newest first across statuses.
+                all_rows = postgres_storage.read_review_tasks(limit=10)
+                self.assertEqual(len(all_rows), 4)
+                self.assertEqual(all_rows[0]["task_id"], "t-closed-1")
+
+                # status with no matches → authoritative [] (NOT None).
+                empty = postgres_storage.read_review_tasks(
+                    status="nonexistent",
+                )
+                self.assertEqual(empty, [])
+                self.assertIsNotNone(empty)
+                postgres_storage.reset_engine_for_tests()
+
+
+class ReadReviewDecisionByIdTests(unittest.TestCase):
+    def test_returns_none_when_disabled(self):
+        with _EnvScope():
+            _set_env(USE_POSTGRES_WRITE=None, DATABASE_URL=None)
+            import postgres_storage
+
+            self.assertIsNone(
+                postgres_storage.read_review_decision_by_id("d1"),
+            )
+
+    def test_returns_dict_when_present(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                tmp_db = Path(tmp_dir) / "read_decision_by_id.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{tmp_db}")
+                import postgres_storage
+
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                _seed_review_decision_in_pg(
+                    decision_id="dec-1", task_id="task-x",
+                    decision="approve", metadata_json='{"k":"v"}',
+                )
+
+                row = postgres_storage.read_review_decision_by_id("dec-1")
+                self.assertIsNotNone(row)
+                self.assertEqual(row["decision_id"], "dec-1")
+                self.assertEqual(row["task_id"], "task-x")
+                self.assertEqual(row["decision"], "approve")
+                # RAW dict contract: metadata_json present (TEXT), not
+                # the database.py-normalized ``metadata`` key.
+                self.assertIn("metadata_json", row)
+                self.assertNotIn("metadata", row)
+                postgres_storage.reset_engine_for_tests()
+
+
+class ReadReviewDecisionsForTaskTests(unittest.TestCase):
+    def test_returns_none_when_disabled(self):
+        with _EnvScope():
+            _set_env(USE_POSTGRES_WRITE=None, DATABASE_URL=None)
+            import postgres_storage
+
+            self.assertIsNone(
+                postgres_storage.read_review_decisions_for_task("task-1"),
+            )
+
+    def test_returns_rows_oldest_first(self):
+        """Append-only history reads in occurrence order
+        (created_at ASC, decision_id ASC). Also asserts the empty case
+        returns ``[]`` (PG authoritative zero)."""
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                tmp_db = Path(tmp_dir) / "read_decisions_for_task.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{tmp_db}")
+                import postgres_storage
+
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                # Three decisions on one task, plus one on a different
+                # task that must NOT appear in the result.
+                _seed_review_decision_in_pg(
+                    decision_id="d-a", task_id="task-hist",
+                    created_at="2026-05-27T00:00:01",
+                )
+                _seed_review_decision_in_pg(
+                    decision_id="d-b", task_id="task-hist",
+                    created_at="2026-05-27T00:00:02",
+                )
+                _seed_review_decision_in_pg(
+                    decision_id="d-c", task_id="task-hist",
+                    created_at="2026-05-27T00:00:03",
+                )
+                _seed_review_decision_in_pg(
+                    decision_id="other", task_id="task-OTHER",
+                    created_at="2026-05-27T00:00:00",
+                )
+
+                rows = postgres_storage.read_review_decisions_for_task(
+                    "task-hist",
+                )
+                self.assertEqual(len(rows), 3)
+                # Oldest first (asc).
+                self.assertEqual(rows[0]["decision_id"], "d-a")
+                self.assertEqual(rows[2]["decision_id"], "d-c")
+                # Foreign-task row must be excluded.
+                for r in rows:
+                    self.assertEqual(r["task_id"], "task-hist")
+
+                # No matches → authoritative [], not None.
+                empty = postgres_storage.read_review_decisions_for_task(
+                    "task-DOES-NOT-EXIST",
+                )
+                self.assertEqual(empty, [])
+                self.assertIsNotNone(empty)
+                postgres_storage.reset_engine_for_tests()
+
+
+class DatabaseReviewFallbackIntegrationTests(unittest.TestCase):
+    """Integration tests for the database.py side of M12.0c-2.
+
+    Each case sets up two SQLite files: one is the local SQLite source
+    of truth (``database.DB_PATH``) and one is the Postgres substitute
+    behind ``DATABASE_URL``. We assert that the database.py read
+    functions prefer the Postgres row when enabled, fall back to
+    SQLite when Postgres is disabled or returns None for a single-row
+    lookup, and trust an authoritative empty list from Postgres over
+    any stale SQLite rows for list-shaped lookups.
+    """
+
+    # --- get_review_task ---------------------------------------------
+
+    def test_get_review_task_prefers_postgres_when_enabled(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg_substitute.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    database.init_review_tables()  # SQLite-only schema.
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    _seed_review_task_in_pg(
+                        task_id="task-pg", idempotency_key="idem-pg",
+                        claim_text="from postgres",
+                    )
+
+                    task = database.get_review_task("task-pg")
+                    self.assertIsNotNone(task)
+                    self.assertEqual(task["claim_text"], "from postgres")
+                    # _row_to_review_task transformation applied.
+                    self.assertIn("snapshot", task)
+                    self.assertNotIn("snapshot_json", task)
+                    self.assertIsInstance(
+                        task["human_review_required"], bool,
+                    )
+                    postgres_storage.reset_engine_for_tests()
+
+    def test_get_review_task_falls_back_to_sqlite_when_pg_missing(self):
+        """PG is enabled and reachable but empty; SQLite has the row."""
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg_substitute.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    database.init_review_tables()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    # Seed SQLite only; suppress the PG mirror so PG
+                    # stays empty and read_review_task_by_task_id
+                    # returns None for the lookup.
+                    with patch.object(
+                        postgres_storage, "mirror_upsert",
+                        lambda *a, **kw: False,
+                    ):
+                        database.create_review_task(
+                            task_id="task-sqlite",
+                            result_id="r1", job_id="j1", item_index=0,
+                            status="open", query="q",
+                            claim_text="sqlite-only", title="t", url="u",
+                            final_decision="WATCH",
+                            policy_confidence="60",
+                            human_review_required=True,
+                            snapshot={"k": "v"},
+                            idempotency_key="idem-sqlite",
+                            created_at="2026-05-27T00:00:00",
+                            updated_at="2026-05-27T00:00:00",
+                        )
+
+                    task = database.get_review_task("task-sqlite")
+                    self.assertIsNotNone(task)
+                    self.assertEqual(task["claim_text"], "sqlite-only")
+                    postgres_storage.reset_engine_for_tests()
+
+    # --- get_review_task_by_idempotency_key --------------------------
+
+    def test_get_review_task_by_idempotency_key_prefers_postgres(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg_substitute.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    database.init_review_tables()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    _seed_review_task_in_pg(
+                        task_id="t-pg-idem",
+                        idempotency_key="idem-from-pg",
+                        claim_text="pg idem hit",
+                    )
+
+                    task = database.get_review_task_by_idempotency_key(
+                        "idem-from-pg",
+                    )
+                    self.assertIsNotNone(task)
+                    self.assertEqual(task["task_id"], "t-pg-idem")
+                    self.assertEqual(task["claim_text"], "pg idem hit")
+                    postgres_storage.reset_engine_for_tests()
+
+    def test_get_review_task_by_idempotency_key_falls_back_to_sqlite_when_pg_missing(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg_substitute.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    database.init_review_tables()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    with patch.object(
+                        postgres_storage, "mirror_upsert",
+                        lambda *a, **kw: False,
+                    ):
+                        database.create_review_task(
+                            task_id="t-only-sqlite",
+                            result_id="r1", job_id="j1", item_index=0,
+                            status="open", query="q",
+                            claim_text="sqlite idem", title="t", url="u",
+                            final_decision="WATCH",
+                            policy_confidence="60",
+                            human_review_required=True,
+                            snapshot={"k": "v"},
+                            idempotency_key="idem-sqlite-only",
+                            created_at="2026-05-27T00:00:00",
+                            updated_at="2026-05-27T00:00:00",
+                        )
+
+                    task = database.get_review_task_by_idempotency_key(
+                        "idem-sqlite-only",
+                    )
+                    self.assertIsNotNone(task)
+                    self.assertEqual(task["task_id"], "t-only-sqlite")
+                    postgres_storage.reset_engine_for_tests()
+
+    # --- list_review_tasks -------------------------------------------
+
+    def test_list_review_tasks_prefers_postgres_when_enabled(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg_substitute.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    database.init_review_tables()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    _seed_review_task_in_pg(
+                        task_id="t-pg-a", idempotency_key="i-a",
+                        created_at="2026-05-27T00:00:01",
+                    )
+                    _seed_review_task_in_pg(
+                        task_id="t-pg-b", idempotency_key="i-b",
+                        created_at="2026-05-27T00:00:02",
+                    )
+
+                    rows = database.list_review_tasks(limit=10)
+                    self.assertEqual(len(rows), 2)
+                    # Newest first.
+                    self.assertEqual(rows[0]["task_id"], "t-pg-b")
+                    self.assertEqual(rows[1]["task_id"], "t-pg-a")
+                    postgres_storage.reset_engine_for_tests()
+
+    def test_list_review_tasks_pg_empty_list_authoritative(self):
+        """Load-bearing invariant: PG ``[]`` overrides any SQLite rows."""
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg_substitute.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    database.init_review_tables()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    # Seed a SQLite row that must NOT leak through.
+                    with patch.object(
+                        postgres_storage, "mirror_upsert",
+                        lambda *a, **kw: False,
+                    ):
+                        database.create_review_task(
+                            task_id="stale-sqlite",
+                            result_id="r1", job_id="j1", item_index=0,
+                            status="open", query="q",
+                            claim_text="stale", title="t", url="u",
+                            final_decision="WATCH",
+                            policy_confidence="60",
+                            human_review_required=True,
+                            snapshot={"k": "v"},
+                            idempotency_key="idem-stale",
+                            created_at="2026-05-27T00:00:00",
+                            updated_at="2026-05-27T00:00:00",
+                        )
+
+                    rows = database.list_review_tasks(limit=10)
+                    # PG has 0 rows → [] authoritative; SQLite row hidden.
+                    self.assertEqual(rows, [])
+                    postgres_storage.reset_engine_for_tests()
+
+    # --- get_review_decision -----------------------------------------
+
+    def test_get_review_decision_prefers_postgres(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg_substitute.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    database.init_review_tables()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    _seed_review_decision_in_pg(
+                        decision_id="d-pg", task_id="t-pg",
+                        decision="approve", metadata_json='{"src":"pg"}',
+                    )
+
+                    rec = database.get_review_decision("d-pg")
+                    self.assertIsNotNone(rec)
+                    self.assertEqual(rec["decision_id"], "d-pg")
+                    self.assertEqual(rec["decision"], "approve")
+                    # _row_to_review_decision transformation applied.
+                    self.assertIn("metadata", rec)
+                    self.assertNotIn("metadata_json", rec)
+                    self.assertEqual(rec["metadata"], {"src": "pg"})
+                    postgres_storage.reset_engine_for_tests()
+
+    def test_get_review_decision_falls_back_when_pg_missing(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg_substitute.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    database.init_review_tables()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    # Parent task so the FK-implicit relationship is sane.
+                    with patch.object(
+                        postgres_storage, "mirror_upsert",
+                        lambda *a, **kw: False,
+                    ):
+                        database.create_review_task(
+                            task_id="t-decis", result_id="r1", job_id="j1",
+                            item_index=0, status="open", query="q",
+                            claim_text="c", title="t", url="u",
+                            final_decision="WATCH",
+                            policy_confidence="60",
+                            human_review_required=True,
+                            snapshot={"k": "v"},
+                            idempotency_key="idem-decis",
+                            created_at="2026-05-27T00:00:00",
+                            updated_at="2026-05-27T00:00:00",
+                        )
+                    with patch.object(
+                        postgres_storage, "mirror_write",
+                        lambda *a, **kw: False,
+                    ):
+                        database.record_review_decision(
+                            decision_id="d-sqlite", task_id="t-decis",
+                            decision="approve",
+                            created_at="2026-05-27T00:00:01",
+                        )
+
+                    rec = database.get_review_decision("d-sqlite")
+                    self.assertIsNotNone(rec)
+                    self.assertEqual(rec["decision_id"], "d-sqlite")
+                    self.assertEqual(rec["decision"], "approve")
+                    postgres_storage.reset_engine_for_tests()
+
+    # --- list_review_decisions ---------------------------------------
+
+    def test_list_review_decisions_prefers_postgres_when_enabled(self):
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg_substitute.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    database.init_review_tables()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    _seed_review_decision_in_pg(
+                        decision_id="d-old", task_id="task-list",
+                        created_at="2026-05-27T00:00:01",
+                    )
+                    _seed_review_decision_in_pg(
+                        decision_id="d-new", task_id="task-list",
+                        created_at="2026-05-27T00:00:02",
+                    )
+
+                    rows = database.list_review_decisions("task-list")
+                    self.assertEqual(len(rows), 2)
+                    # Oldest first (asc).
+                    self.assertEqual(rows[0]["decision_id"], "d-old")
+                    self.assertEqual(rows[1]["decision_id"], "d-new")
+                    # metadata key from _row_to_review_decision.
+                    for r in rows:
+                        self.assertIn("metadata", r)
+                        self.assertNotIn("metadata_json", r)
+                    postgres_storage.reset_engine_for_tests()
+
+    def test_list_review_decisions_pg_empty_list_authoritative(self):
+        """PG empty → [] returned, SQLite decisions hidden."""
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
+                pg_db = Path(tmp_dir) / "pg_substitute.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    database.init_review_tables()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    # Seed SQLite-only parent + decision.
+                    with patch.object(
+                        postgres_storage, "mirror_upsert",
+                        lambda *a, **kw: False,
+                    ):
+                        database.create_review_task(
+                            task_id="t-empty", result_id="r1", job_id="j1",
+                            item_index=0, status="open", query="q",
+                            claim_text="c", title="t", url="u",
+                            final_decision="WATCH",
+                            policy_confidence="60",
+                            human_review_required=True,
+                            snapshot={"k": "v"},
+                            idempotency_key="idem-empty",
+                            created_at="2026-05-27T00:00:00",
+                            updated_at="2026-05-27T00:00:00",
+                        )
+                    with patch.object(
+                        postgres_storage, "mirror_write",
+                        lambda *a, **kw: False,
+                    ):
+                        database.record_review_decision(
+                            decision_id="d-stale", task_id="t-empty",
+                            decision="approve",
+                            created_at="2026-05-27T00:00:01",
+                        )
+
+                    rows = database.list_review_decisions("t-empty")
+                    # PG has 0 rows for this task → [] authoritative.
+                    self.assertEqual(rows, [])
+                    postgres_storage.reset_engine_for_tests()
+
+
 class ModuleLevelStaticChecks(unittest.TestCase):
     """Pure source-text inspection. Cheap and stable; catches the
     invariant the brief asks for without needing to wrangle Python's

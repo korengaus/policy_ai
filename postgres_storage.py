@@ -666,6 +666,190 @@ def read_recent_analysis_results(limit: int = 20) -> Optional[list]:
 
 
 # ---------------------------------------------------------------------------
+# Read helpers — M12.0c-2 (reviewer dashboard path).
+#
+# These mirror the M12.0c-minimal pattern for the reviewer dashboard
+# read functions in database.py:
+#
+#   - get_review_task / get_review_task_by_idempotency_key
+#   - list_review_tasks
+#   - get_review_decision / list_review_decisions
+#
+# Same contract as the M12.0c-minimal helpers above:
+#
+#   * Return None when dual-write is disabled, the row is missing
+#     (single-row helpers), or any SQLAlchemy / unexpected error fires.
+#   * Return ``[]`` for list helpers when Postgres has zero matching
+#     rows — this is AUTHORITATIVE. The caller in database.py MUST
+#     treat None and [] differently:
+#       - None → Postgres unavailable, fall back to SQLite.
+#       - [] → Postgres is authoritative and says zero rows; trust it.
+#   * Return RAW dicts (``dict(row._mapping)``) without applying the
+#     SQLite-side ``_row_to_review_task`` / ``_row_to_review_decision``
+#     normalizations. Those live in database.py and the wrapper there
+#     applies them to both SQLite Rows and PG raw dicts (both are
+#     duck-typed for ``[k]`` + ``keys()``). Keeping the normalization
+#     out of postgres_storage avoids a forbidden import of database
+#     (pinned by test_does_not_import_database_module).
+#   * NEVER raise.
+# ---------------------------------------------------------------------------
+
+
+def read_review_task_by_task_id(task_id: str) -> Optional[dict]:
+    """Return the review_tasks row for ``task_id`` as a RAW dict, or
+    None when dual-write is disabled, the row is missing, or any error
+    fires. ``task_id`` is the SQLite PRIMARY KEY column."""
+    engine = get_engine()
+    if engine is None:
+        return None
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                sa.select(review_tasks_table).where(
+                    review_tasks_table.c.task_id == task_id
+                )
+            ).first()
+        return dict(row._mapping) if row is not None else None
+    except SQLAlchemyError as exc:
+        log.warning("read_review_task_by_task_id failed: %s", exc)
+        return None
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "read_review_task_by_task_id unexpected error: %s", exc,
+        )
+        return None
+
+
+def read_review_task_by_idempotency_key(
+    idempotency_key: str,
+) -> Optional[dict]:
+    """Return the review_tasks row for ``idempotency_key`` as a RAW
+    dict, or None. UNIQUE on the PG side guarantees at most one row."""
+    engine = get_engine()
+    if engine is None:
+        return None
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                sa.select(review_tasks_table).where(
+                    review_tasks_table.c.idempotency_key == idempotency_key
+                )
+            ).first()
+        return dict(row._mapping) if row is not None else None
+    except SQLAlchemyError as exc:
+        log.warning(
+            "read_review_task_by_idempotency_key failed: %s", exc,
+        )
+        return None
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "read_review_task_by_idempotency_key unexpected error: %s",
+            exc,
+        )
+        return None
+
+
+def read_review_tasks(
+    *,
+    status: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> Optional[list]:
+    """Return review_tasks rows as RAW dicts, newest first. ``limit``
+    clamped to ``[1, 100]``, ``offset`` clamped to ``[0, ∞)`` —
+    identical to the SQLite-side ``list_review_tasks`` contract.
+
+    Returns ``[]`` when Postgres has zero matching rows (authoritative);
+    None when the engine is unavailable or an error fires.
+
+    Sort order matches SQLite: ``ORDER BY created_at DESC, task_id DESC``.
+    """
+    engine = get_engine()
+    if engine is None:
+        return None
+    safe_limit = max(1, min(int(limit or 50), 100))
+    safe_offset = max(0, int(offset or 0))
+    try:
+        stmt = sa.select(review_tasks_table)
+        if status:
+            stmt = stmt.where(review_tasks_table.c.status == status)
+        stmt = (
+            stmt.order_by(
+                review_tasks_table.c.created_at.desc(),
+                review_tasks_table.c.task_id.desc(),
+            )
+            .limit(safe_limit)
+            .offset(safe_offset)
+        )
+        with engine.connect() as conn:
+            rows = conn.execute(stmt).all()
+        return [dict(row._mapping) for row in rows]
+    except SQLAlchemyError as exc:
+        log.warning("read_review_tasks failed: %s", exc)
+        return None
+    except Exception as exc:  # noqa: BLE001
+        log.warning("read_review_tasks unexpected error: %s", exc)
+        return None
+
+
+def read_review_decision_by_id(decision_id: str) -> Optional[dict]:
+    """Return the review_decisions row for ``decision_id`` as a RAW
+    dict, or None on engine miss / missing row / error.
+    ``decision_id`` is the SQLite PRIMARY KEY column."""
+    engine = get_engine()
+    if engine is None:
+        return None
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                sa.select(review_decisions_table).where(
+                    review_decisions_table.c.decision_id == decision_id
+                )
+            ).first()
+        return dict(row._mapping) if row is not None else None
+    except SQLAlchemyError as exc:
+        log.warning("read_review_decision_by_id failed: %s", exc)
+        return None
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "read_review_decision_by_id unexpected error: %s", exc,
+        )
+        return None
+
+
+def read_review_decisions_for_task(task_id: str) -> Optional[list]:
+    """Return review_decisions rows for ``task_id`` as RAW dicts,
+    oldest first (``ORDER BY created_at ASC, decision_id ASC``) so the
+    append-only history reads in occurrence order — matches SQLite.
+
+    Returns ``[]`` when Postgres has zero rows for the task
+    (authoritative); None when engine miss / error.
+    """
+    engine = get_engine()
+    if engine is None:
+        return None
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                sa.select(review_decisions_table)
+                .where(review_decisions_table.c.task_id == task_id)
+                .order_by(
+                    review_decisions_table.c.created_at.asc(),
+                    review_decisions_table.c.decision_id.asc(),
+                )
+            ).all()
+        return [dict(row._mapping) for row in rows]
+    except SQLAlchemyError as exc:
+        log.warning("read_review_decisions_for_task failed: %s", exc)
+        return None
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "read_review_decisions_for_task unexpected error: %s", exc,
+        )
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Diagnostic helper — read-only, used by scripts/check_postgres_health.py.
 # ---------------------------------------------------------------------------
 

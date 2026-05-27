@@ -726,6 +726,21 @@ def get_review_task_by_idempotency_key(idempotency_key: str):
     """Return the existing task for an idempotency key, or None."""
     if not idempotency_key:
         return None
+    # M12.0c-2: prefer Postgres when dual-write is enabled so that
+    # Web and Worker (separate filesystems on Render) see each other's
+    # review_tasks rows for idempotency checks. Lazy import preserved
+    # per test_database_uses_lazy_import_inside_helpers.
+    try:
+        from postgres_storage import (
+            is_postgres_dual_write_enabled,
+            read_review_task_by_idempotency_key,
+        )
+        if is_postgres_dual_write_enabled():
+            pg_row = read_review_task_by_idempotency_key(idempotency_key)
+            if pg_row is not None:
+                return _row_to_review_task(pg_row)
+    except Exception:  # noqa: BLE001 — PG read failure must not block SQLite
+        pass
     with get_connection() as connection:
         _ensure_review_tables(connection)
         row = connection.execute(
@@ -829,6 +844,18 @@ def get_review_task(task_id: str):
     """Return a single review_task dict, or None when not found."""
     if not task_id:
         return None
+    # M12.0c-2: see comment in get_review_task_by_idempotency_key.
+    try:
+        from postgres_storage import (
+            is_postgres_dual_write_enabled,
+            read_review_task_by_task_id,
+        )
+        if is_postgres_dual_write_enabled():
+            pg_row = read_review_task_by_task_id(task_id)
+            if pg_row is not None:
+                return _row_to_review_task(pg_row)
+    except Exception:  # noqa: BLE001 — PG read failure must not block SQLite
+        pass
     with get_connection() as connection:
         _ensure_review_tables(connection)
         row = connection.execute(
@@ -843,6 +870,22 @@ def list_review_tasks(*, status=None, limit: int = 50, offset: int = 0) -> list:
     so a single API call cannot pull the whole table."""
     limit = max(1, min(int(limit or 50), 100))
     offset = max(0, int(offset or 0))
+    # M12.0c-2: prefer Postgres when dual-write is enabled. Empty list
+    # from Postgres is AUTHORITATIVE — we trust it and do NOT fall back
+    # to SQLite. Only None (disabled / engine error) triggers fallback.
+    try:
+        from postgres_storage import (
+            is_postgres_dual_write_enabled,
+            read_review_tasks,
+        )
+        if is_postgres_dual_write_enabled():
+            pg_rows = read_review_tasks(
+                status=status, limit=limit, offset=offset,
+            )
+            if pg_rows is not None:
+                return [_row_to_review_task(r) for r in pg_rows]
+    except Exception:  # noqa: BLE001 — PG read failure must not block SQLite
+        pass
     with get_connection() as connection:
         _ensure_review_tables(connection)
         if status:
@@ -940,6 +983,18 @@ def record_review_decision(*, decision_id: str, task_id: str, decision: str,
 def get_review_decision(decision_id: str):
     if not decision_id:
         return None
+    # M12.0c-2: see comment in get_review_task_by_idempotency_key.
+    try:
+        from postgres_storage import (
+            is_postgres_dual_write_enabled,
+            read_review_decision_by_id,
+        )
+        if is_postgres_dual_write_enabled():
+            pg_row = read_review_decision_by_id(decision_id)
+            if pg_row is not None:
+                return _row_to_review_decision(pg_row)
+    except Exception:  # noqa: BLE001 — PG read failure must not block SQLite
+        pass
     with get_connection() as connection:
         _ensure_review_tables(connection)
         row = connection.execute(
@@ -952,6 +1007,18 @@ def get_review_decision(decision_id: str):
 def list_review_decisions(task_id: str) -> list:
     if not task_id:
         return []
+    # M12.0c-2: empty list from Postgres is AUTHORITATIVE (PG truth).
+    try:
+        from postgres_storage import (
+            is_postgres_dual_write_enabled,
+            read_review_decisions_for_task,
+        )
+        if is_postgres_dual_write_enabled():
+            pg_rows = read_review_decisions_for_task(task_id)
+            if pg_rows is not None:
+                return [_row_to_review_decision(r) for r in pg_rows]
+    except Exception:  # noqa: BLE001 — PG read failure must not block SQLite
+        pass
     with get_connection() as connection:
         _ensure_review_tables(connection)
         rows = connection.execute(
