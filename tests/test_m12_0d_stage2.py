@@ -364,10 +364,12 @@ class UpdateReviewTaskStatusMirrorTests(unittest.TestCase):
         )
 
     def test_status_change_propagates_to_pg(self):
-        """Stage 2 / Blocker 1: after update_review_task_status the PG
-        row reflects the new status. Pre-M12.0d-2 the PG row was frozen
-        at insert-time so get_review_task (PG-primary post-Stage-1) saw
-        the stale value."""
+        """M12.0d Stage 3c-2: update_review_task_status now performs a
+        direct PG UPDATE via postgres_storage.pg_update_review_task_status,
+        no SQLite write involved. The end-to-end invariant — that the PG
+        row reflects the new status and updated_at — is unchanged; only
+        the mechanism is direct UPDATE instead of SQLite-UPDATE then
+        SQLite-re-read then mirror_upsert."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
                 sqlite_db = Path(tmp_dir) / "sqlite_local.db"
@@ -394,14 +396,15 @@ class UpdateReviewTaskStatusMirrorTests(unittest.TestCase):
                     self.assertIsNotNone(pre)
                     self.assertEqual(pre["status"], "open")
 
-                    # Now flip status to "approved".
+                    # Direct PG UPDATE via pg_update_review_task_status.
                     database.update_review_task_status(
                         "task-status-mirror",
                         new_status="approved",
                         updated_at="2026-05-28T01:00:00",
                     )
 
-                    # PG row reflects the new status.
+                    # PG row reflects the new status — directly, not via
+                    # an SQLite re-read + mirror_upsert round-trip.
                     post = postgres_storage.read_review_task_by_task_id(
                         "task-status-mirror",
                     )
@@ -413,9 +416,8 @@ class UpdateReviewTaskStatusMirrorTests(unittest.TestCase):
                     postgres_storage.reset_engine_for_tests()
 
     def test_get_review_task_pg_primary_sees_updated_status(self):
-        """End-to-end: after update_review_task_status, the PG-primary
-        get_review_task returns the updated status (not the stale
-        insert-time value)."""
+        """M12.0d Stage 3c-2: end-to-end — after the direct PG UPDATE,
+        the PG-primary get_review_task returns the new status."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
                 sqlite_db = Path(tmp_dir) / "sqlite_local.db"

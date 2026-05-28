@@ -267,32 +267,44 @@ class BackfillIntegrationTests(unittest.TestCase):
                 database.save_analysis_result(sample, query=f"q-{index}")
 
             # 2 review_tasks rows with distinct idempotency keys.
-            for index in range(2):
-                database.create_review_task(
-                    task_id=f"t-{index}",
-                    result_id=str(index + 1),
-                    job_id=f"j-{index}",
-                    item_index=0,
-                    status="open",
-                    query=f"q-{index}",
-                    claim_text="주장",
-                    title=f"row-{index}",
-                    url=f"https://example.com/r{index}",
-                    final_decision="WATCH",
-                    policy_confidence="60",
-                    human_review_required=True,
-                    snapshot={"k": "v"},
-                    idempotency_key=f"idem-{index}",
-                    created_at="2026-05-23T00:00:00",
-                    updated_at="2026-05-23T00:00:00",
-                )
+            # M12.0d Stage 3c-2: database.create_review_task no longer
+            # writes to SQLite (PG-only), so seed via raw SQL against the
+            # local SQLite source the backfill tool reads. The backfill
+            # tool itself still supports these tables — we just bypass
+            # the production write path for test seeding.
+            with database.get_connection() as connection:
+                for index in range(2):
+                    connection.execute(
+                        """
+                        INSERT INTO review_tasks (
+                            task_id, result_id, job_id, item_index, status,
+                            query, claim_text, title, url,
+                            final_decision, policy_confidence,
+                            human_review_required, snapshot_json,
+                            created_at, updated_at, idempotency_key
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            f"t-{index}", str(index + 1), f"j-{index}", 0,
+                            "open", f"q-{index}", "주장", f"row-{index}",
+                            f"https://example.com/r{index}",
+                            "WATCH", "60", 1, '{"k": "v"}',
+                            "2026-05-23T00:00:00", "2026-05-23T00:00:00",
+                            f"idem-{index}",
+                        ),
+                    )
 
-            # 1 review_decision row.
-            database.record_review_decision(
-                decision_id="d-1", task_id="t-0",
-                decision="approve",
-                created_at="2026-05-23T00:00:01",
-            )
+                # 1 review_decision row.
+                connection.execute(
+                    """
+                    INSERT INTO review_decisions (
+                        decision_id, task_id, decision,
+                        created_at, metadata_json
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    ("d-1", "t-0", "approve", "2026-05-23T00:00:01", "{}"),
+                )
+                connection.commit()
 
             # 1 source_fetch_artifact row.
             database.save_fetch_artifact({

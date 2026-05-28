@@ -80,12 +80,34 @@ def _synthetic_result_payload(*, claim: str = "정부가 청년 보조금을 신
 
 
 class _ReviewAPIBase(unittest.TestCase):
-    """Spin up a fresh SQLite DB + FastAPI TestClient per test."""
+    """Spin up a fresh SQLite-as-PG substitute + FastAPI TestClient per test.
+
+    M12.0d Stage 3c-2: review_tasks / review_decisions writes are
+    PG-only. The fixture provisions a fresh SQLite file as the
+    dual-write substitute (``USE_POSTGRES_WRITE=true`` +
+    ``DATABASE_URL=sqlite:///<tmp>``) so the production write path
+    (mirror_upsert / mirror_write into postgres_storage) lands in the
+    substitute and the PG-primary reads return what was just written.
+    The local SQLite DB remains for legacy paths that fall back to
+    SQLite when PG is disabled.
+    """
 
     def setUp(self) -> None:
         self._tmp_ctx = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self._tmp_dir = Path(self._tmp_ctx.__enter__())
         self._db_path = self._tmp_dir / "review.db"
+        self._pg_db_path = self._tmp_dir / "pg_substitute.db"
+
+        self._env_snapshot = {
+            key: os.environ.get(key)
+            for key in ("USE_POSTGRES_WRITE", "DATABASE_URL")
+        }
+        os.environ["USE_POSTGRES_WRITE"] = "true"
+        os.environ["DATABASE_URL"] = f"sqlite:///{self._pg_db_path}"
+
+        import postgres_storage
+        postgres_storage.reset_engine_for_tests()
+        self._postgres_storage = postgres_storage
 
         import database
         self._database = database
@@ -101,8 +123,19 @@ class _ReviewAPIBase(unittest.TestCase):
         importlib.reload(api_server)
         self._api_server = api_server
 
+        # Build the PG-substitute engine so ensure_schema (via the
+        # 3c-1 hotfix inside get_engine) creates the mirror tables
+        # in the substitute SQLite file before any write fires.
+        postgres_storage.get_engine()
+
     def tearDown(self) -> None:
         self._database.DB_PATH = self._previous_db_path
+        self._postgres_storage.reset_engine_for_tests()
+        for key, value in self._env_snapshot.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
         try:
             self._tmp_ctx.__exit__(None, None, None)
         except Exception:

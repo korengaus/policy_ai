@@ -77,9 +77,25 @@ CLI_TIMEOUT_SECONDS = 10.0
 
 def _init_temp_db(path: str) -> None:
     """Create the full schema in a temp DB by swapping DB_PATH and
-    calling init_db (the same pattern existing tests use)."""
+    calling init_db (the same pattern existing tests use).
+
+    M12.0d Stage 3c-2: review_tasks / review_decisions writes are
+    PG-only. We also point ``DATABASE_URL`` at the same temp file so
+    SQLAlchemy writes land in it (visible to direct sqlite3 reads
+    like ``_count_review_tasks``). ``database.DB_PATH`` is restored on
+    return; the env vars remain set so subsequent enrollment calls in
+    the test see them — the next ``_init_temp_db`` call will overwrite
+    ``DATABASE_URL`` for the next test's fresh DB.
+    """
     original = database.DB_PATH
     database.DB_PATH = Path(path)
+    os.environ["USE_POSTGRES_WRITE"] = "true"
+    os.environ["DATABASE_URL"] = f"sqlite:///{path}"
+    try:
+        import postgres_storage
+        postgres_storage.reset_engine_for_tests()
+    except Exception:
+        pass
     try:
         database.init_db()
     finally:

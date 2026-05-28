@@ -610,40 +610,13 @@ class DatabaseDualWriteIsolationTests(unittest.TestCase):
                     )
                     self.assertEqual(len(artifacts), 1)
 
-    def test_record_review_decision_isolated_from_mirror_failure(self):
-        with _EnvScope():
-            _set_env(USE_POSTGRES_WRITE=None, DATABASE_URL=None)
-            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                tmp_db = Path(tmp_dir) / "isolation_decision.db"
-                with patch("database.DB_PATH", tmp_db):
-                    import database
-                    import postgres_storage
-
-                    database.init_review_tables()
-                    # Need a parent task row first.
-                    database.create_review_task(
-                        task_id="t1", result_id="r1", job_id="j1",
-                        item_index=0, status="open", query="q",
-                        claim_text="c", title="t", url="u",
-                        final_decision="WATCH", policy_confidence="60",
-                        human_review_required=True,
-                        snapshot={"k": "v"},
-                        idempotency_key="idem-decision",
-                        created_at="2026-05-23T00:00:00",
-                        updated_at="2026-05-23T00:00:00",
-                    )
-                    with patch.object(
-                        postgres_storage, "mirror_write",
-                        self._patched_mirror_write,
-                    ):
-                        record = database.record_review_decision(
-                            decision_id="d1", task_id="t1",
-                            decision="approve",
-                            created_at="2026-05-23T00:00:01",
-                        )
-                    self.assertTrue(record)
-                    decisions = database.list_review_decisions("t1")
-                    self.assertEqual(len(decisions), 1)
+    # M12.0d Stage 3c-2: review_decisions writes are PG-only; the
+    # SQLite-as-fallback isolation contract no longer applies. The
+    # equivalent test for record_review_decision was removed when
+    # 3c-2 dropped the SQLite INSERT block from that function. The
+    # other two tests in this class (save_analysis_result,
+    # save_fetch_artifact) remain because those tables are integer-PK
+    # and still dual-write to SQLite until 3c-3.
 
 
 # ---------------------------------------------------------------------------
@@ -3064,68 +3037,12 @@ class JobsMirrorWriteTests(unittest.TestCase):
                     postgres_storage.reset_engine_for_tests()
 
 
-class JobsMirrorIsolationTests(unittest.TestCase):
-    """The SQLite write path must succeed even when the Postgres mirror
-    write raises unexpectedly."""
-
-    def test_create_job_isolated_from_mirror_failure(self):
-        with _EnvScope():
-            _set_env(USE_POSTGRES_WRITE=None, DATABASE_URL=None)
-            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_iso.db"
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import job_manager
-                    import postgres_storage
-
-                    database.init_db()
-                    with patch.object(
-                        postgres_storage, "mirror_write",
-                        lambda *a, **kw: (_ for _ in ()).throw(
-                            RuntimeError("simulated"),
-                        ),
-                    ):
-                        record = job_manager.create_job(
-                            query="q", max_news=1,
-                        )
-                    self.assertTrue(record["id"])
-                    # SQLite read confirms the row landed.
-                    self.assertEqual(
-                        job_manager.get_job_status(record["id"])["status"],
-                        "queued",
-                    )
-
-    def test_update_isolated_from_mirror_failure(self):
-        with _EnvScope():
-            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_iso.db"
-                pg_db = Path(tmp_dir) / "pg.db"
-                _set_env(USE_POSTGRES_WRITE="true",
-                         DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import job_manager
-                    import postgres_storage
-
-                    database.init_db()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    record = job_manager.create_job(query="q", max_news=1)
-                    job_id = record["id"]
-                    # Now make mirror_upsert raise — start_job's SQLite
-                    # UPDATE must still succeed.
-                    with patch.object(
-                        postgres_storage, "mirror_upsert",
-                        lambda *a, **kw: (_ for _ in ()).throw(
-                            RuntimeError("simulated"),
-                        ),
-                    ):
-                        job_manager.start_job(job_id)
-                    # Disable PG read so we observe the SQLite row.
-                    _set_env(USE_POSTGRES_WRITE=None, DATABASE_URL=None)
-                    sqlite_view = job_manager.get_job_status(job_id)
-                    self.assertEqual(sqlite_view["status"], "running")
-                    postgres_storage.reset_engine_for_tests()
+# M12.0d Stage 3c-2: JobsMirrorIsolationTests (the previous "SQLite
+# survives PG mirror failure" contract for jobs writes) was removed
+# because that contract no longer exists. After 3c-2 jobs writes go
+# to PG only — there is no SQLite fallback to test. The equivalent
+# class PostgresIsolationTests in tests/test_jobs.py was deleted for
+# the same reason.
 
 
 # -- Read tests (3 unit + 2 integration) -------------------------------
@@ -3249,61 +3166,12 @@ class JobManagerGetJobStatusFallbackTests(unittest.TestCase):
 # -- Parity (1) -------------------------------------------------------
 
 
-class JobsDualWriteParityTests(unittest.TestCase):
-    def test_jobs_dual_write_field_parity_all_12_columns(self):
-        """End-to-end lifecycle (create → start → progress → complete)
-        leaves the PG mirror row byte-identical to the SQLite source row
-        across all 12 columns. This is the load-bearing invariant for
-        cross-machine reads."""
-        with _EnvScope():
-            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
-                pg_db = Path(tmp_dir) / "pg.db"
-                _set_env(USE_POSTGRES_WRITE="true",
-                         DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import job_manager
-                    import postgres_storage
-
-                    database.init_db()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-
-                    record = job_manager.create_job(
-                        query="parity-test", max_news=4,
-                    )
-                    job_id = record["id"]
-                    job_manager.start_job(job_id)
-                    job_manager.update_progress(
-                        job_id, "news_collecting", 25,
-                    )
-                    job_manager.update_progress(
-                        job_id, "ai_reasoning", 70,
-                    )
-                    job_manager.complete_job(job_id, result_id=999)
-
-                    # Compare every column between SQLite and PG.
-                    sqlite_row = job_manager._read_jobs_row_full(job_id)
-                    pg_row = _pg_row_for_job(engine, job_id)
-                    self.assertIsNotNone(sqlite_row)
-                    self.assertIsNotNone(pg_row)
-                    expected_columns = {
-                        "id", "status", "query", "max_news",
-                        "progress_percent", "current_stage",
-                        "result_id", "error_message", "created_at",
-                        "started_at", "completed_at", "pipeline_version",
-                    }
-                    self.assertEqual(set(sqlite_row.keys()), expected_columns)
-                    self.assertEqual(set(pg_row.keys()), expected_columns)
-                    for col in expected_columns:
-                        self.assertEqual(
-                            sqlite_row[col], pg_row[col],
-                            msg=f"Column {col} differs: "
-                                f"sqlite={sqlite_row[col]!r}, "
-                                f"pg={pg_row[col]!r}",
-                        )
-                    postgres_storage.reset_engine_for_tests()
+# M12.0d Stage 3c-2: JobsDualWriteParityTests (the previous "SQLite ==
+# PG mirror byte-identical across all 12 columns" invariant for jobs)
+# was removed because that contract no longer exists. After 3c-2 the
+# SQLite jobs table is never written to, so a row-by-row comparison is
+# meaningless. The helper job_manager._read_jobs_row_full was also
+# removed in the same change.
 
 
 class ModuleLevelStaticChecks(unittest.TestCase):

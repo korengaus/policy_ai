@@ -968,79 +968,33 @@ def create_review_task(*, task_id: str, result_id, job_id, item_index: int,
     if existing:
         return existing, True
     snapshot_json = json.dumps(snapshot or {}, ensure_ascii=False)
-    was_existing = False
-    insert_succeeded = False
-    with get_connection() as connection:
-        _ensure_review_tables(connection)
-        try:
-            connection.execute(
-                """
-                INSERT INTO review_tasks (
-                    task_id, result_id, job_id, item_index, status,
-                    query, claim_text, title, url,
-                    final_decision, policy_confidence,
-                    human_review_required, snapshot_json,
-                    created_at, updated_at, idempotency_key
-                ) VALUES (
-                    ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?,
-                    ?, ?,
-                    ?, ?,
-                    ?, ?, ?
-                )
-                """,
-                (
-                    task_id,
-                    str(result_id) if result_id is not None else None,
-                    str(job_id) if job_id is not None else None,
-                    int(item_index or 0),
-                    status,
-                    query, claim_text, title, url,
-                    final_decision, policy_confidence,
-                    1 if human_review_required else 0,
-                    snapshot_json,
-                    created_at, updated_at, idempotency_key,
-                ),
-            )
-            connection.commit()
-            insert_succeeded = True
-        except sqlite3.IntegrityError:
-            # A concurrent writer beat us to it — fetch the canonical row.
-            existing = get_review_task_by_idempotency_key(idempotency_key)
-            if existing:
-                return existing, True
-            raise
-
-    if insert_succeeded:
-        # M12.0a — mirror to Postgres. Use upsert against idempotency_key
-        # because that's the SQLite UNIQUE constraint that gates which
-        # row wins; on the very unlikely event the Postgres side already
-        # has a row with this idempotency_key (e.g. resumed dual-write
-        # after a partial outage), ON CONFLICT DO UPDATE keeps the
-        # mirror eventually consistent with SQLite.
-        _mirror_upsert_safe(
-            "review_tasks",
-            {
-                "task_id": task_id,
-                "result_id": str(result_id) if result_id is not None else None,
-                "job_id": str(job_id) if job_id is not None else None,
-                "item_index": int(item_index or 0),
-                "status": status,
-                "query": query,
-                "claim_text": claim_text,
-                "title": title,
-                "url": url,
-                "final_decision": final_decision,
-                "policy_confidence": policy_confidence,
-                "human_review_required": 1 if human_review_required else 0,
-                "snapshot_json": snapshot_json,
-                "created_at": created_at,
-                "updated_at": updated_at,
-                "idempotency_key": idempotency_key,
-            },
-            ["idempotency_key"],
-        )
-    return (get_review_task(task_id) or {}), was_existing
+    # M12.0d Stage 3c-2: Postgres is the sole write target. The SQLite
+    # INSERT (and the concurrent-writer IntegrityError fallback that
+    # re-fetched the row) is gone; the PG ON CONFLICT DO UPDATE on
+    # idempotency_key is now the only collision-resolution path.
+    _mirror_upsert_safe(
+        "review_tasks",
+        {
+            "task_id": task_id,
+            "result_id": str(result_id) if result_id is not None else None,
+            "job_id": str(job_id) if job_id is not None else None,
+            "item_index": int(item_index or 0),
+            "status": status,
+            "query": query,
+            "claim_text": claim_text,
+            "title": title,
+            "url": url,
+            "final_decision": final_decision,
+            "policy_confidence": policy_confidence,
+            "human_review_required": 1 if human_review_required else 0,
+            "snapshot_json": snapshot_json,
+            "created_at": created_at,
+            "updated_at": updated_at,
+            "idempotency_key": idempotency_key,
+        },
+        ["idempotency_key"],
+    )
+    return (get_review_task(task_id) or {}), False
 
 
 def get_review_task(task_id: str):
@@ -1158,34 +1112,17 @@ def update_review_task_status(task_id: str, *, new_status: str,
     """Update a task's status row. Caller is responsible for
     transition validation via review_workflow.validate_status_transition.
 
-    M12.0d-2 (Stage 2): after the SQLite UPDATE we re-read the row
-    directly from SQLite (NOT via ``get_review_task``, which would
-    return the PG row whose status is still pre-UPDATE) and mirror it
-    to PG via ``mirror_upsert`` on ``task_id``. Before this change PG
-    ``review_tasks.status`` was frozen at insert-time forever, masking
-    every status transition from operators reading via the PG-primary
-    ``get_review_task`` path."""
-    with get_connection() as connection:
-        _ensure_review_tables(connection)
-        connection.execute(
-            "UPDATE review_tasks SET status = ?, updated_at = ? WHERE task_id = ?",
-            (new_status, updated_at, task_id),
-        )
-        connection.commit()
-        # Re-read the fresh row from SQLite (the source of truth)
-        # within the SAME connection scope so the mirror payload
-        # reflects the just-committed UPDATE.
-        sqlite_row = connection.execute(
-            "SELECT * FROM review_tasks WHERE task_id = ?",
-            (task_id,),
-        ).fetchone()
-    if sqlite_row is not None:
-        # mirror_upsert filters payload columns against the PG schema
-        # so passing the raw SQLite row dict is safe even though it
-        # contains all columns. Conflict key is task_id (PRIMARY KEY).
-        _mirror_upsert_safe(
-            "review_tasks", dict(sqlite_row), ["task_id"],
-        )
+    M12.0d Stage 3c-2: Postgres is the sole write target. The previous
+    SQLite UPDATE + SQLite re-read + ``mirror_upsert(full row)`` pattern
+    is replaced by a direct PG ``UPDATE`` on ``status`` and ``updated_at``
+    via :func:`postgres_storage.pg_update_review_task_status`. The final
+    ``get_review_task`` re-read is PG-primary, so callers see the
+    just-committed state."""
+    try:
+        from postgres_storage import pg_update_review_task_status
+        pg_update_review_task_status(task_id, new_status, updated_at)
+    except Exception:  # noqa: BLE001 — Postgres failures must not surface
+        pass
     return get_review_task(task_id) or {}
 
 
@@ -1203,29 +1140,9 @@ def record_review_decision(*, decision_id: str, task_id: str, decision: str,
     that to ``unknown`` at the wire layer.
     """
     metadata_json = json.dumps(metadata or {}, ensure_ascii=False)
-    with get_connection() as connection:
-        _ensure_review_tables(connection)
-        connection.execute(
-            """
-            INSERT INTO review_decisions (
-                decision_id, task_id, decision, reviewer_id,
-                comment, public_note, previous_status, new_status,
-                created_at, metadata_json, decision_source
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                decision_id, task_id, decision,
-                reviewer_id, comment, public_note,
-                previous_status, new_status,
-                created_at, metadata_json,
-                decision_source,
-            ),
-        )
-        connection.commit()
-
-    # M12.0a — mirror to Postgres. Append-only table; mirror_write (not
-    # upsert) matches the SQLite contract that review_decisions is
-    # never UPDATEd in place.
+    # M12.0d Stage 3c-2: Postgres is the sole write target. The SQLite
+    # INSERT is gone; the PG mirror_write (append-only, no upsert) is
+    # now the only persistence step.
     _mirror_write_safe(
         "review_decisions",
         {

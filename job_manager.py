@@ -1,10 +1,14 @@
 """Job lifecycle manager for the async verification pipeline.
 
-SQLite is the source of truth for writes. Postgres mirroring of job rows
-via :func:`postgres_storage.mirror_write` / :func:`mirror_upsert` is
-best-effort and must never break the SQLite path. This module deliberately
-keeps the interface tiny so the FastAPI layer (and tests) can call it
-without knowing about persistence details.
+M12.0d Stage 3c-2: Postgres is the sole write target for the ``jobs``
+table. ``create_job`` mirrors a fresh row via
+:func:`postgres_storage.mirror_write`; ``start_job`` / ``update_progress``
+/ ``complete_job`` / ``fail_job`` apply field-level updates via
+:func:`postgres_storage.pg_update_job_fields`. SQLite ``jobs`` rows are
+no longer written; the ``_current_status`` / ``get_job_status`` SQLite
+fallback branches remain in place for local-dev (``USE_POSTGRES_WRITE``
+unset) and are dead code on the production Worker. They will be removed
+in 3c-4 cleanup.
 """
 from __future__ import annotations
 
@@ -72,45 +76,29 @@ def _mirror_jobs_safe(*, upsert: bool, row_dict: dict) -> None:
         pass
 
 
-def _read_jobs_row_full(job_id: str) -> Optional[dict]:
-    """Internal helper: re-read the full SQLite row for ``job_id`` so the
-    PG mirror_upsert payload contains every column. Returns None if the
-    row vanished between UPDATE and SELECT (e.g. a concurrent delete by
-    an external process) — caller treats None as "skip mirror"."""
-    with get_connection() as connection:
-        row = connection.execute(
-            "SELECT * FROM jobs WHERE id = ?",
-            (job_id,),
-        ).fetchone()
-    return dict(row) if row is not None else None
+def _pg_update_job_fields_safe(job_id: str, fields: dict) -> None:
+    """M12.0d Stage 3c-2 — lazy-import wrapper around
+    :func:`postgres_storage.pg_update_job_fields`. Swallows ImportError
+    so the module loads on a dev box without psycopg installed. The
+    underlying helper already swallows DB errors and never raises."""
+    try:
+        from postgres_storage import pg_update_job_fields
+
+        pg_update_job_fields(job_id, fields)
+    except Exception:  # noqa: BLE001 — Postgres failures must not surface
+        pass
 
 
 def create_job(query: str, max_news: int) -> dict:
-    """Insert a fresh job row in 'queued' state and return it."""
+    """Insert a fresh job row in 'queued' state and return it.
+
+    M12.0d Stage 3c-2: Postgres is the sole write target. The SQLite
+    INSERT was removed; the PG mirror_write is now the only persistence
+    step. Caller-supplied UUID-hex ``id`` means a plain INSERT (not
+    upsert) is correct."""
     job_id = uuid.uuid4().hex
     now = _utc_now_iso()
     pipeline_version = _pipeline_version()
-
-    with get_connection() as connection:
-        connection.execute(
-            """
-            INSERT INTO jobs (
-                id, status, query, max_news, progress_percent, current_stage,
-                created_at, pipeline_version
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                job_id,
-                STATUS_QUEUED,
-                query,
-                int(max_news or 0),
-                0,
-                STAGE_QUEUED,
-                now,
-                pipeline_version,
-            ),
-        )
-        connection.commit()
 
     record = {
         "id": job_id,
@@ -126,9 +114,6 @@ def create_job(query: str, max_news: int) -> dict:
         "completed_at": None,
         "pipeline_version": pipeline_version,
     }
-    # M12.0c-jobs — mirror the full row into postgres_storage.jobs_table.
-    # id is a UUID hex so a write (not upsert) is sufficient; retries
-    # against the same id are not expected for create_job.
     _mirror_jobs_safe(upsert=False, row_dict=record)
     logger.info("Job created: id=%s query=%s max_news=%s", job_id, query, max_news)
     return record
@@ -176,22 +161,15 @@ def start_job(job_id: str) -> None:
     if current in TERMINAL_STATUSES:
         logger.debug("start_job skipped (terminal): id=%s status=%s", job_id, current)
         return
-    with get_connection() as connection:
-        connection.execute(
-            """
-            UPDATE jobs
-            SET status = ?, current_stage = ?, progress_percent = ?, started_at = ?
-            WHERE id = ?
-            """,
-            (STATUS_RUNNING, STAGE_RUNNING, 5, now, job_id),
-        )
-        connection.commit()
-    # M12.0c-jobs — re-read the full row from SQLite (the source of
-    # truth) and upsert it into the PG mirror so all 12 columns stay
-    # byte-identical between the two stores.
-    full_row = _read_jobs_row_full(job_id)
-    if full_row is not None:
-        _mirror_jobs_safe(upsert=True, row_dict=full_row)
+    _pg_update_job_fields_safe(
+        job_id,
+        {
+            "status": STATUS_RUNNING,
+            "current_stage": STAGE_RUNNING,
+            "progress_percent": 5,
+            "started_at": now,
+        },
+    )
     logger.info("Job started: id=%s", job_id)
 
 
@@ -204,20 +182,10 @@ def update_progress(job_id: str, stage: str, percent: int) -> None:
             job_id, current, stage,
         )
         return
-    with get_connection() as connection:
-        connection.execute(
-            """
-            UPDATE jobs
-            SET current_stage = ?, progress_percent = ?
-            WHERE id = ?
-            """,
-            (stage, safe_percent, job_id),
-        )
-        connection.commit()
-    # M12.0c-jobs — full-row mirror via SELECT * + mirror_upsert.
-    full_row = _read_jobs_row_full(job_id)
-    if full_row is not None:
-        _mirror_jobs_safe(upsert=True, row_dict=full_row)
+    _pg_update_job_fields_safe(
+        job_id,
+        {"current_stage": stage, "progress_percent": safe_percent},
+    )
 
 
 def complete_job(job_id: str, result_id: Optional[int]) -> None:
@@ -229,21 +197,17 @@ def complete_job(job_id: str, result_id: Optional[int]) -> None:
             job_id, current,
         )
         return
-    with get_connection() as connection:
-        connection.execute(
-            """
-            UPDATE jobs
-            SET status = ?, current_stage = ?, progress_percent = ?,
-                result_id = ?, completed_at = ?, error_message = NULL
-            WHERE id = ?
-            """,
-            (STATUS_COMPLETED, STAGE_COMPLETED, 100, result_id, now, job_id),
-        )
-        connection.commit()
-    # M12.0c-jobs — full-row mirror.
-    full_row = _read_jobs_row_full(job_id)
-    if full_row is not None:
-        _mirror_jobs_safe(upsert=True, row_dict=full_row)
+    _pg_update_job_fields_safe(
+        job_id,
+        {
+            "status": STATUS_COMPLETED,
+            "current_stage": STAGE_COMPLETED,
+            "progress_percent": 100,
+            "result_id": result_id,
+            "completed_at": now,
+            "error_message": None,
+        },
+    )
     logger.info("Job completed: id=%s result_id=%s", job_id, result_id)
 
 
@@ -257,20 +221,15 @@ def fail_job(job_id: str, error_message: str, *, stage: str = STAGE_FAILED, stat
             job_id, current, status,
         )
         return
-    with get_connection() as connection:
-        connection.execute(
-            """
-            UPDATE jobs
-            SET status = ?, current_stage = ?, error_message = ?, completed_at = ?
-            WHERE id = ?
-            """,
-            (status, stage, safe_message, now, job_id),
-        )
-        connection.commit()
-    # M12.0c-jobs — full-row mirror.
-    full_row = _read_jobs_row_full(job_id)
-    if full_row is not None:
-        _mirror_jobs_safe(upsert=True, row_dict=full_row)
+    _pg_update_job_fields_safe(
+        job_id,
+        {
+            "status": status,
+            "current_stage": stage,
+            "error_message": safe_message,
+            "completed_at": now,
+        },
+    )
     logger.warning("Job %s: id=%s reason=%s", status, job_id, safe_message)
 
 

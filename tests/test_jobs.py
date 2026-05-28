@@ -19,7 +19,6 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -72,18 +71,31 @@ def _fake_pipeline_report(query: str, max_news: int) -> dict:
 
 
 class _TempDBScope:
-    """Run each test against a fresh SQLite DB and clean Postgres env."""
+    """Run each test against a fresh SQLite-as-Postgres substitute.
+
+    M12.0d Stage 3c-2: jobs writes are PG-only. The fixture provisions
+    a fresh SQLite file as the dual-write substitute
+    (``USE_POSTGRES_WRITE=true`` + ``DATABASE_URL=sqlite:///<tmp>``),
+    matching the pattern used in ``tests/test_postgres_storage.py``.
+    The local SQLite file is still initialised via
+    ``database.init_db()`` for legacy read paths that fall back to
+    SQLite when PG is disabled; 3c-2 no longer writes to it for
+    ``jobs`` / ``review_tasks`` / ``review_decisions``.
+    """
 
     def __enter__(self):
         self._tmp_ctx = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         tmp_dir = self._tmp_ctx.__enter__()
         self._db_path = Path(tmp_dir) / "jobs_test.db"
+        self._pg_db_path = Path(tmp_dir) / "pg_substitute.db"
         self._pg_snapshot = {
             key: os.environ.get(key) for key in ("DATABASE_URL", "USE_POSTGRES_WRITE")
         }
-        os.environ.pop("DATABASE_URL", None)
-        os.environ.pop("USE_POSTGRES_WRITE", None)
+        os.environ["USE_POSTGRES_WRITE"] = "true"
+        os.environ["DATABASE_URL"] = f"sqlite:///{self._pg_db_path}"
         pg.reset_state_for_tests()
+        import postgres_storage
+        postgres_storage.reset_engine_for_tests()
 
         # Make sure modules see a clean DB_PATH before any connection is opened.
         import database
@@ -93,6 +105,11 @@ class _TempDBScope:
 
         import job_manager
         importlib.reload(job_manager)
+
+        # Build the PG-substitute engine so ensure_schema (which runs
+        # inside get_engine via the 3c-1 hotfix) creates the mirror
+        # tables in the substitute SQLite file before any write fires.
+        postgres_storage.get_engine()
 
         self.database = database
         self.job_manager = job_manager
@@ -105,6 +122,8 @@ class _TempDBScope:
             else:
                 os.environ[key] = value
         pg.reset_state_for_tests()
+        import postgres_storage
+        postgres_storage.reset_engine_for_tests()
         try:
             self._tmp_ctx.__exit__(*exc)
         except Exception:
@@ -558,47 +577,6 @@ class PollingFlowTests(unittest.TestCase):
             result_payload = client.get(f"/jobs/{job_id}/result").json()
             self.assertEqual(result_payload["job_status"], "completed")
             self.assertIsNotNone(result_payload["result"])
-
-
-class PostgresIsolationTests(unittest.TestCase):
-    """Postgres dual-write *write* failures must never break SQLite job writes.
-
-    M12.0d-1 update: the read contract changed. Pre-Stage-1, a broken
-    PG engine made ``get_job_status`` silently fall back to SQLite, so
-    this test asserted the SQLite row came back even with PG down.
-    Stage 1 removed that silent fallback — when dual-write is enabled
-    and the engine returns None (e.g., psycopg2 missing in this test
-    env), ``get_job_status`` returns the not-found sentinel (None).
-    The test now asserts the original *write* contract (no raise) and
-    documents the Stage 1 read-contract change."""
-
-    def test_postgres_failure_does_not_break_sqlite_job_writes(self):
-        with _TempDBScope() as scope:
-            os.environ["DATABASE_URL"] = "postgresql://invalid:invalid@127.0.0.1:1/none"
-            os.environ["USE_POSTGRES_WRITE"] = "true"
-            pg.reset_state_for_tests()
-
-            with patch.object(pg, "get_session", side_effect=RuntimeError("pg-down")):
-                try:
-                    record = scope.job_manager.create_job("q", 1)
-                except Exception as error:
-                    self.fail(f"create_job must not raise on pg failure: {error}")
-                scope.job_manager.start_job(record["id"])
-                scope.job_manager.update_progress(record["id"], "pipeline_started", 50)
-                scope.job_manager.complete_job(record["id"], result_id=None)
-
-            # Writes did not raise — primary contract preserved.
-            # SQLite row check: drop down to the raw connection because
-            # job_manager.get_job_status now prefers PG (and PG engine
-            # is None in this env → returns None per Stage 1).
-            with scope.job_manager.get_connection() as conn:
-                row = conn.execute(
-                    "SELECT status, progress_percent FROM jobs WHERE id = ?",
-                    (record["id"],),
-                ).fetchone()
-            self.assertIsNotNone(row, "SQLite job row must persist even with PG misconfigured")
-            self.assertEqual(row["status"], "completed")
-            self.assertEqual(row["progress_percent"], 100)
 
 
 if __name__ == "__main__":

@@ -233,9 +233,28 @@ def _runbook_lines(db_path: Path, token: str, *, url: str) -> List[str]:
 def _override_database_path(target: Path):
     """Switch ``database.DB_PATH`` to ``target`` for the duration of the
     block; reload ``api_server`` so any cached imports see the new path;
-    restore the previous value on exit."""
+    restore the previous value on exit.
+
+    M12.0d Stage 3c-2: review_tasks / review_decisions writes are
+    PG-only. The block also points ``DATABASE_URL`` at the same demo
+    SQLite file so SQLAlchemy writes from create_review_task /
+    record_review_decision / update_review_task_status land in the
+    demo file (readable by both SQLite-direct legacy fallback reads
+    and SQLAlchemy PG-primary reads). Env values are restored on exit.
+    """
     import database
     previous = database.DB_PATH
+    env_snapshot = {
+        key: os.environ.get(key)
+        for key in ("USE_POSTGRES_WRITE", "DATABASE_URL")
+    }
+    os.environ["USE_POSTGRES_WRITE"] = "true"
+    os.environ["DATABASE_URL"] = f"sqlite:///{target}"
+    try:
+        import postgres_storage
+        postgres_storage.reset_engine_for_tests()
+    except Exception:
+        postgres_storage = None  # type: ignore
     database.DB_PATH = target
     try:
         try:
@@ -244,9 +263,26 @@ def _override_database_path(target: Path):
         except Exception:
             # api_server may not have been imported yet; that's fine.
             pass
+        # Build PG-substitute engine so ensure_schema creates the
+        # mirror tables before any write fires.
+        if postgres_storage is not None:
+            try:
+                postgres_storage.get_engine()
+            except Exception:
+                pass
         yield database
     finally:
         database.DB_PATH = previous
+        if postgres_storage is not None:
+            try:
+                postgres_storage.reset_engine_for_tests()
+            except Exception:
+                pass
+        for key, value in env_snapshot.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 def _seed_demo_db(db_path: Path) -> List[str]:

@@ -75,20 +75,44 @@ def _env(**values):
 
 @contextmanager
 def _temp_db():
-    """Point ``database.DB_PATH`` at a fresh temp file and reload api_server."""
+    """Point ``database.DB_PATH`` at a fresh temp file and reload api_server.
+
+    M12.0d Stage 3c-2: review_tasks / review_decisions writes are PG-only.
+    The fixture also provisions a SQLite-as-PG substitute so the
+    production write path lands in the substitute and the PG-primary
+    reads resolve correctly.
+    """
     import database
     tmp_dir = tempfile.TemporaryDirectory()
     try:
         db_path = Path(tmp_dir.name) / "audit_test.db"
+        pg_db_path = Path(tmp_dir.name) / "audit_test_pg.db"
         previous = database.DB_PATH
+        env_snapshot = {
+            key: os.environ.get(key)
+            for key in ("USE_POSTGRES_WRITE", "DATABASE_URL")
+        }
+        os.environ["USE_POSTGRES_WRITE"] = "true"
+        os.environ["DATABASE_URL"] = f"sqlite:///{pg_db_path}"
+        import postgres_storage
+        postgres_storage.reset_engine_for_tests()
         database.DB_PATH = db_path
         try:
             database.init_db()
             import api_server
             importlib.reload(api_server)
+            # Build PG-substitute engine so ensure_schema creates the
+            # mirror tables before any write fires.
+            postgres_storage.get_engine()
             yield database, api_server, db_path
         finally:
             database.DB_PATH = previous
+            postgres_storage.reset_engine_for_tests()
+            for key, value in env_snapshot.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
     finally:
         try:
             tmp_dir.cleanup()

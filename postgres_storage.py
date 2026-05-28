@@ -658,6 +658,93 @@ def mirror_write_returning(table_name: str, row_dict: dict) -> Optional[int]:
         return None
 
 
+def pg_update_job_fields(job_id: str, fields: dict) -> bool:
+    """Update arbitrary columns of ``jobs`` for the given ``job_id``.
+
+    M12.0d Stage 3c-2 helper. Replaces the SQLite-UPDATE + SQLite-re-read +
+    mirror_upsert pattern used by ``job_manager.start_job`` /
+    ``update_progress`` / ``complete_job`` / ``fail_job``. After 3c-2,
+    Postgres is the sole write target for the ``jobs`` table.
+
+    Returns ``True`` on success, ``False`` when dual-write is disabled,
+    ``fields`` is empty, or any DB error fires. NEVER raises.
+    """
+    engine = get_engine()
+    if engine is None:
+        return False
+    if not fields:
+        return False
+    table = _metadata.tables.get("jobs")
+    if table is None:
+        log.warning("pg_update_job_fields: jobs table not registered")
+        return False
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                sa.update(table)
+                .where(table.c.id == job_id)
+                .values(**fields)
+            )
+        return True
+    except SQLAlchemyError as exc:
+        log.warning(
+            "pg_update_job_fields failed for %s: %s", job_id, exc,
+        )
+        return False
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "pg_update_job_fields unexpected error for %s: %s",
+            job_id, exc,
+        )
+        return False
+
+
+def pg_update_review_task_status(
+    task_id: str, new_status: str, updated_at: str,
+) -> bool:
+    """Update ``review_tasks.status`` and ``updated_at`` directly in
+    Postgres for the given ``task_id``.
+
+    M12.0d Stage 3c-2 helper. Replaces the SQLite-UPDATE + SQLite-re-read
+    + mirror_upsert pattern in ``database.update_review_task_status``.
+    After 3c-2, Postgres is the sole write target for the
+    ``review_tasks`` table; the re-read pattern (which assumed SQLite
+    had a fresh row to mirror) no longer applies.
+
+    Returns ``True`` on success, ``False`` when dual-write is disabled
+    or any DB error fires. NEVER raises.
+    """
+    engine = get_engine()
+    if engine is None:
+        return False
+    table = _metadata.tables.get("review_tasks")
+    if table is None:
+        log.warning(
+            "pg_update_review_task_status: review_tasks table not registered",
+        )
+        return False
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                sa.update(table)
+                .where(table.c.task_id == task_id)
+                .values(status=new_status, updated_at=updated_at)
+            )
+        return True
+    except SQLAlchemyError as exc:
+        log.warning(
+            "pg_update_review_task_status failed for %s: %s",
+            task_id, exc,
+        )
+        return False
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "pg_update_review_task_status unexpected error for %s: %s",
+            task_id, exc,
+        )
+        return False
+
+
 def mirror_upsert(
     table_name: str,
     row_dict: dict,

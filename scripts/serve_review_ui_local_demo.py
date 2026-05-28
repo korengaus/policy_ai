@@ -128,6 +128,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     import database
     database.DB_PATH = db_path
 
+    # M12.0d Stage 3c-2: review_tasks / review_decisions are PG-only.
+    # Point the dual-write substrate at the same demo SQLite file so
+    # the seeded rows (written by prepare_review_ui_local_demo via
+    # SQLAlchemy) are visible to PG-primary reads.
+    import os as _os
+    _os.environ.setdefault("USE_POSTGRES_WRITE", "true")
+    _os.environ.setdefault("DATABASE_URL", f"sqlite:///{db_path}")
+
     # Defensive: never print the token. We deliberately do not even
     # echo its presence; the operator already set it themselves.
     print(f"[serve-demo] starting uvicorn with demo DB: {db_path}")

@@ -143,19 +143,45 @@ def _temp_sqlite_database():
     The original DB_PATH is restored on exit; the reloaded api_server module
     is left in place intentionally so subsequent operations within the same
     process see a consistent FastAPI app.
+
+    M12.0d Stage 3c-2: review_tasks / review_decisions writes are
+    PG-only. The smoke now also provisions a fresh SQLite-as-PG substitute
+    (``USE_POSTGRES_WRITE=true`` + ``DATABASE_URL=sqlite:///<tmp>``) so
+    the production write path lands in the substitute and PG-primary
+    reads resolve correctly. The contract that the smoke needs no real
+    Postgres server is preserved — the substitute is a local SQLite file.
     """
     import database
     tmp_dir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
     db_path = Path(tmp_dir.name) / "review_smoke.db"
+    pg_db_path = Path(tmp_dir.name) / "review_smoke_pg.db"
     previous = database.DB_PATH
+    env_snapshot = {
+        key: os.environ.get(key)
+        for key in ("USE_POSTGRES_WRITE", "DATABASE_URL")
+    }
+    os.environ["USE_POSTGRES_WRITE"] = "true"
+    os.environ["DATABASE_URL"] = f"sqlite:///{pg_db_path}"
+    import postgres_storage
+    postgres_storage.reset_engine_for_tests()
     database.DB_PATH = db_path
     try:
         database.init_db()
         import api_server  # noqa: F401
         importlib.reload(api_server)
+        # Build the PG-substitute engine so ensure_schema (via the
+        # 3c-1 hotfix inside get_engine) creates the mirror tables
+        # before any write fires.
+        postgres_storage.get_engine()
         yield database, api_server, db_path
     finally:
         database.DB_PATH = previous
+        postgres_storage.reset_engine_for_tests()
+        for key, value in env_snapshot.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
         try:
             tmp_dir.cleanup()
         except Exception:
