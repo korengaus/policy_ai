@@ -64,6 +64,23 @@ def _mirror_upsert_safe(
         pass
 
 
+def _mirror_write_returning_safe(table_name: str, row_dict: dict):
+    """Best-effort mirror write that returns the PG-assigned integer id.
+
+    M12.0d Stage 3c-1: used by ``save_analysis_result`` so the id stored
+    in ``jobs.result_id`` and returned to the frontend matches the row
+    that actually lives in Postgres. Returns ``None`` when dual-write
+    is disabled, the import fails, or the insert fails — callers fall
+    back to the SQLite-assigned id in that case.
+    """
+    try:
+        from postgres_storage import mirror_write_returning
+
+        return mirror_write_returning(table_name, row_dict)
+    except Exception:  # noqa: BLE001 — Postgres failures must not surface
+        return None
+
+
 DB_PATH = Path("policy_ai.db")
 
 
@@ -526,10 +543,16 @@ def save_analysis_result(result: dict, query: str):
         "bias_framing_summary", "debug_summary", "created_at",
     )
     row_dict = dict(zip(_ANALYSIS_RESULTS_COLUMN_ORDER, values))
-    row_dict["id"] = row_id
-    _mirror_write_safe("analysis_results", row_dict)
+    # M12.0d Stage 3c-1: do NOT inject the SQLite-assigned id into the
+    # mirror payload. PG's SERIAL sequence assigns the id and that id
+    # is the durable handle the rest of the system uses (jobs.result_id,
+    # frontend localStorage, GET /history/{id}). When PG is disabled or
+    # the mirror fails, ``pg_id`` is None and we fall back to the SQLite
+    # id so local-dev / single-store flows still link correctly.
+    pg_id = _mirror_write_returning_safe("analysis_results", row_dict)
+    returned_id = pg_id if pg_id is not None else row_id
 
-    return {"saved": True, "duplicate": False, "id": row_id}
+    return {"saved": True, "duplicate": False, "id": returned_id}
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -1432,7 +1455,6 @@ def save_fetch_artifact(fetch_result: dict) -> int:
     _mirror_write_safe(
         "source_fetch_artifacts",
         {
-            "id": row_id,
             "source_id": row_values[0],
             "url": row_values[1],
             "fetch_timestamp": row_values[2],
@@ -1657,7 +1679,6 @@ def save_extraction_result(result_dict: dict, db_path: str = None) -> int:
         _mirror_write_safe(
             "artifact_text_extractions",
             {
-                "id": row_id,
                 "artifact_id": row_values[0],
                 "source_id": row_values[1],
                 "url": row_values[2],
@@ -1928,7 +1949,6 @@ def save_evidence_candidate(candidate_dict: dict, db_path: str = None) -> int:
         _mirror_write_safe(
             "artifact_evidence_candidates",
             {
-                "id": row_id,
                 "extraction_id": row_values[0],
                 "source_id": row_values[1],
                 "url": row_values[2],
@@ -2224,7 +2244,6 @@ def save_producer_comparison(comparison_dict: dict, db_path: str = None) -> int:
         _mirror_upsert_safe(
             "verdict_producer_comparisons",
             {
-                "id": row_id,
                 "analysis_id": row_values[0],
                 "source": row_values[1],
                 "input_hash": row_values[2],
@@ -2518,7 +2537,6 @@ def save_verdict_label_attribution(
         _mirror_upsert_safe(
             "verdict_label_attributions",
             {
-                "id": row_id,
                 "analysis_id": row_values[0],
                 "stored_verdict_label": row_values[1],
                 "stored_verdict_confidence": row_values[2],

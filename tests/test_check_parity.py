@@ -544,6 +544,8 @@ class ReadOnlyContractTests(unittest.TestCase):
         ), patch.object(
             postgres_storage, "mirror_write",
         ) as write_mock, patch.object(
+            postgres_storage, "mirror_write_returning",
+        ) as write_returning_mock, patch.object(
             postgres_storage, "mirror_upsert",
         ) as upsert_mock, patch.object(
             postgres_storage, "ensure_schema",
@@ -551,6 +553,7 @@ class ReadOnlyContractTests(unittest.TestCase):
             check_parity.collect_parity_report()
 
         write_mock.assert_not_called()
+        write_returning_mock.assert_not_called()
         upsert_mock.assert_not_called()
         ensure_mock.assert_not_called()
 

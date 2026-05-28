@@ -463,22 +463,84 @@ verdict_label_attributions_table = sa.Table(
 MIRROR_TABLE_NAMES: tuple = tuple(sorted(_metadata.tables.keys()))
 
 
+# M12.0d Stage 3c-1 — Postgres SERIAL sequence alignment.
+#
+# After 3c-1 strips the SQLite-assigned id from mirror payloads, PG's
+# SERIAL sequences must be at-or-above the current max id of each
+# integer-PK mirror table; otherwise the next nextval would reuse an
+# existing id and re-trigger the same UniqueViolation we are fixing.
+#
+# This is idempotent: ``setval(seq, GREATEST(nextval(seq), MAX(id)))``
+# advances the sequence forward only — never backwards. It runs once
+# per ``ensure_schema`` call (i.e., on app startup) and is a no-op on
+# any non-PostgreSQL dialect (the SQLite-as-Postgres test substitute
+# has no sequences).
+_INT_PK_MIRROR_TABLES: tuple = (
+    "analysis_results",
+    "embedding_cache",
+    "source_fetch_artifacts",
+    "artifact_text_extractions",
+    "artifact_evidence_candidates",
+    "verdict_producer_comparisons",
+    "verdict_label_attributions",
+)
+
+
+def _align_serial_sequences(engine: Engine) -> None:
+    """Advance each INT-PK mirror table's SERIAL sequence past the
+    current max id. PostgreSQL-only; no-op on other dialects. Swallows
+    per-table errors so one missing table cannot block the others.
+    """
+    if engine.dialect.name != "postgresql":
+        return
+    for table_name in _INT_PK_MIRROR_TABLES:
+        # Table name interpolated directly (not as a bind param) because
+        # PG does not allow parameterising table identifiers. ``table_name``
+        # comes from the hardcoded ``_INT_PK_MIRROR_TABLES`` tuple, never
+        # from user input, so SQL injection is not in scope here.
+        try:
+            with engine.begin() as conn:
+                conn.execute(
+                    sa.text(
+                        f"SELECT setval("
+                        f"pg_get_serial_sequence(:t, 'id'), "
+                        f"(SELECT COALESCE(MAX(id), 1) FROM {table_name}), "
+                        f"true"
+                        f")"
+                    ).bindparams(t=table_name)
+                )
+        except SQLAlchemyError as exc:
+            log.warning(
+                "sequence alignment for %s failed: %s", table_name, exc,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "sequence alignment for %s unexpected error: %s",
+                table_name, exc,
+            )
+
+
 def ensure_schema(engine: Optional[Engine]) -> bool:
     """Create all mirror tables if they don't exist. Safe to call
     repeatedly. Returns True on success, False on any failure or when
     ``engine`` is None. NEVER raises.
+
+    M12.0d Stage 3c-1: also aligns SERIAL sequences past current max id
+    on PostgreSQL so PG-assigned ids cannot collide with pre-existing
+    rows after we stop injecting SQLite ids into mirror payloads.
     """
     if engine is None:
         return False
     try:
         _metadata.create_all(engine, checkfirst=True)
-        return True
     except SQLAlchemyError as exc:
         log.warning("Postgres schema create_all failed: %s", exc)
         return False
     except Exception as exc:  # noqa: BLE001
         log.warning("Postgres schema create_all unexpected error: %s", exc)
         return False
+    _align_serial_sequences(engine)
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -520,6 +582,55 @@ def mirror_write(table_name: str, row_dict: dict) -> bool:
             "mirror_write %s unexpected error: %s", table_name, exc,
         )
         return False
+
+
+def mirror_write_returning(table_name: str, row_dict: dict) -> Optional[int]:
+    """Insert one row into the named Postgres mirror table and return
+    the **PG-assigned** integer primary key.
+
+    M12.0d Stage 3c-1: this is the id-authoritative variant of
+    :func:`mirror_write`. Any ``id`` key in ``row_dict`` is stripped
+    before the INSERT so PG's SERIAL sequence (or the SQLite substitute's
+    autoincrement) assigns the id. The returned id is then the durable
+    identifier the caller stores in ``jobs.result_id`` and serves to the
+    frontend, eliminating the SQLite-id vs PG-id divergence that caused
+    the ``UniqueViolation`` on ``analysis_results.id=1``.
+
+    Returns ``None`` when dual-write is disabled, the table is unknown,
+    the insert fails, or no primary key was assigned. NEVER raises.
+    """
+    engine = get_engine()
+    if engine is None:
+        return None
+    table = _metadata.tables.get(table_name)
+    if table is None:
+        log.warning("mirror_write_returning: unknown table %s", table_name)
+        return None
+    try:
+        filtered = {
+            k: v for k, v in _filter_row(table, row_dict).items()
+            if k != "id"
+        }
+        with engine.begin() as conn:
+            result = conn.execute(sa.insert(table).values(**filtered))
+            pk = result.inserted_primary_key
+        if pk is None:
+            return None
+        try:
+            return int(pk[0])
+        except (TypeError, ValueError, IndexError):
+            return None
+    except SQLAlchemyError as exc:
+        log.warning(
+            "mirror_write_returning %s failed: %s", table_name, exc,
+        )
+        return None
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "mirror_write_returning %s unexpected error: %s",
+            table_name, exc,
+        )
+        return None
 
 
 def mirror_upsert(

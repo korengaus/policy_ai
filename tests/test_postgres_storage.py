@@ -566,6 +566,9 @@ class DatabaseDualWriteIsolationTests(unittest.TestCase):
                     with patch.object(
                         postgres_storage, "mirror_write",
                         self._patched_mirror_write,
+                    ), patch.object(
+                        postgres_storage, "mirror_write_returning",
+                        self._patched_mirror_write,
                     ):
                         status = database.save_analysis_result(
                             sanitize_data(sample), query="iso-test",
@@ -991,6 +994,9 @@ class DatabaseReadFallbackIntegrationTests(unittest.TestCase):
                     with patch.object(
                         postgres_storage, "mirror_write",
                         lambda *a, **kw: False,
+                    ), patch.object(
+                        postgres_storage, "mirror_write_returning",
+                        lambda *a, **kw: None,
                     ):
                         status = database.save_analysis_result(
                             sanitize_data(sample), query="fallback-miss",
@@ -1041,6 +1047,9 @@ class DatabaseReadFallbackIntegrationTests(unittest.TestCase):
                     with patch.object(
                         postgres_storage, "mirror_write",
                         lambda *a, **kw: False,
+                    ), patch.object(
+                        postgres_storage, "mirror_write_returning",
+                        lambda *a, **kw: None,
                     ):
                         database.save_analysis_result(
                             sanitize_data(sample), query="empty-pg",
@@ -1960,6 +1969,9 @@ class DatabaseDuplicateDetectionFallbackTests(unittest.TestCase):
                     with patch.object(
                         postgres_storage, "mirror_write",
                         lambda *a, **kw: False,
+                    ), patch.object(
+                        postgres_storage, "mirror_write_returning",
+                        lambda *a, **kw: None,
                     ):
                         database.save_analysis_result(
                             sanitize_data(sample),
@@ -2043,6 +2055,9 @@ class DatabaseDuplicateDetectionFallbackTests(unittest.TestCase):
                     with patch.object(
                         postgres_storage, "mirror_write",
                         lambda *a, **kw: False,
+                    ), patch.object(
+                        postgres_storage, "mirror_write_returning",
+                        lambda *a, **kw: None,
                     ):
                         status = database.save_analysis_result(
                             sanitize_data(sample),
