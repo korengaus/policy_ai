@@ -98,6 +98,19 @@ def get_database_url() -> Optional[str]:
 _engine: Optional[Engine] = None
 
 
+# M12.0d Stage 3c-1 hotfix — one-shot guard for sequence alignment.
+#
+# ``ensure_schema`` is invoked once per process, on the first successful
+# ``get_engine`` build, so ``_align_serial_sequences`` actually runs on
+# Worker / Web startup. Prior to this guard the alignment lived inside
+# ``ensure_schema`` but nothing on the hot startup path called it, so
+# PG's SERIAL sequence stayed at its post-create value and the first
+# nextval() returned id=1 — colliding with rows that M12.0a wrote with
+# explicit ids. Reset by ``reset_engine_for_tests`` so test isolation
+# is preserved.
+_schema_ensured: bool = False
+
+
 def get_engine() -> Optional[Engine]:
     """Lazy engine creation.
 
@@ -113,7 +126,7 @@ def get_engine() -> Optional[Engine]:
     :func:`reset_engine_for_tests` to force re-evaluation after env
     vars change.
     """
-    global _engine
+    global _engine, _schema_ensured
     if not is_postgres_dual_write_enabled():
         return None
     if _engine is not None:
@@ -135,7 +148,6 @@ def get_engine() -> Optional[Engine]:
             max_overflow=2,
             future=True,
         )
-        return _engine
     except ImportError as exc:
         # Driver (psycopg) not installed — keep the local-dev escape
         # valve so a CI / contributor without Postgres bindings can
@@ -152,18 +164,31 @@ def get_engine() -> Optional[Engine]:
         raise PostgresReadError(
             f"engine creation failed: {exc}"
         ) from exc
+    # M12.0d Stage 3c-1 hotfix — run ensure_schema once per process so
+    # _align_serial_sequences advances PG's SERIAL past any rows that
+    # M12.0a wrote with explicit ids. ensure_schema is idempotent and
+    # swallows errors (returns False on failure) so it can never block
+    # engine creation. Guarded by _schema_ensured so a dropped+rebuilt
+    # engine (after reset_engine_for_tests) re-runs alignment cleanly.
+    if not _schema_ensured:
+        ensure_schema(_engine)
+        _schema_ensured = True
+    return _engine
 
 
 def reset_engine_for_tests() -> None:
     """Test helper: forces the next ``get_engine()`` call to re-evaluate
-    env vars. Disposes the cached engine if one exists."""
-    global _engine
+    env vars. Disposes the cached engine if one exists. Also resets the
+    one-shot ``_schema_ensured`` guard so the next build re-runs
+    ``ensure_schema`` / sequence alignment."""
+    global _engine, _schema_ensured
     if _engine is not None:
         try:
             _engine.dispose()
         except Exception:  # noqa: BLE001
             pass
     _engine = None
+    _schema_ensured = False
 
 
 # ---------------------------------------------------------------------------
