@@ -561,6 +561,22 @@ def _query_tokens_for_scoring(query: str) -> set[str]:
     return {tok for tok in normalized.split() if len(tok) >= 2}
 
 
+def _title_has_query_overlap(title: str, query: str) -> bool:
+    """Return True if title contains at least one query token (len >= 2).
+
+    M17b: hard relevance filter. Articles with zero overlap are rejected
+    entirely, not just deprioritized. Prevents Google News RSS from
+    surfacing unrelated trending articles for niche queries.
+    """
+    if not title or not query:
+        return False
+    query_tokens = _query_tokens_for_scoring(query)
+    if not query_tokens:
+        return False
+    title_lower = title.lower()
+    return any(tok in title_lower for tok in query_tokens)
+
+
 def _candidate_score(item: dict, query: str | None = None) -> int:
     title = _normalize_spaces(item.get("title", ""))
     url = item.get("original_url") or item.get("link") or ""
@@ -597,6 +613,16 @@ def _force_select_best(items: list[dict], source: str, query: str | None = None)
     unique = _dedupe_news_items([item for item in items if item])
     if not unique:
         return []
+
+    # M17b: hard relevance filter — reject articles with zero query-token
+    # overlap before forced selection. Prevents 전세대출 articles from
+    # being surfaced for queries like "노인 복지" just because they have
+    # the highest score among unrelated candidates.
+    if query:
+        relevant = [item for item in unique if _title_has_query_overlap(item.get("title", ""), query)]
+        if not relevant:
+            return []
+        unique = relevant
 
     best = max(unique, key=lambda candidate: _candidate_score(candidate, query=query))
     log.info("[NewsCollector] Forcing fallback selection: 1 item")
@@ -717,6 +743,17 @@ def search_naver_news_fallback(query: str, max_results: int = 3) -> tuple[list[d
         if not items:
             items = _force_select_best(raw_candidates, "naver_fallback", query=query)
 
+        # M17b: hard relevance filter — drop zero-overlap items from the
+        # Naver candidate set. Naver's URL-based search already biases
+        # toward query-relevant pages, but its HTML scraping can pick up
+        # sidebar/related links that share no token with the query.
+        if query and items:
+            relevant_items = [
+                item for item in items
+                if _title_has_query_overlap(item.get("title", ""), query)
+            ]
+            items = relevant_items
+
         log.info(f"[NewsCollector] Fallback selected: {len(items)}")
         return items[:max_results], None
     except Exception as error:
@@ -755,6 +792,16 @@ def search_daum_news_fallback(query: str, max_results: int = 3) -> tuple[list[di
 
         if not items:
             items = _force_select_best(raw_candidates, "daum_fallback", query=query)
+
+        # M17b: hard relevance filter — same defence-in-depth as the
+        # Naver fallback. Daum search URL is query-keyed, but scraped
+        # candidates can still include unrelated sidebar links.
+        if query and items:
+            relevant_items = [
+                item for item in items
+                if _title_has_query_overlap(item.get("title", ""), query)
+            ]
+            items = relevant_items
 
         log.info(f"[NewsCollector] Fallback selected: {len(items)}")
         return items[:max_results], None
@@ -954,6 +1001,21 @@ def search_google_news_rss_with_meta(query: str, max_results: int = 3):
     feed = _parse_google_news_rss(rss_url)
     raw_results = _stable_sort_news([_entry_to_news(entry) for entry in feed.entries])
     raw_rss_count = len(raw_results)
+
+    # M17b: hard relevance filter — drop zero-overlap entries from the
+    # candidate pool BEFORE the recent-window / relaxed / unfiltered
+    # selection ladder. Google News RSS sometimes returns trending
+    # articles whose titles share no token with the query; scoring
+    # alone (M17) would just rank them lower, not remove them.
+    if query and raw_results:
+        relevant_raw = [
+            item for item in raw_results
+            if _title_has_query_overlap(item.get("title", ""), query)
+        ]
+        if relevant_raw:
+            raw_results = relevant_raw
+        else:
+            raw_results = []
     recent_results = [
         item for item in raw_results if is_recent(item.get("published", ""), days=RECENT_DAYS)
     ]

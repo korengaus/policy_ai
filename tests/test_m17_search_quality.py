@@ -169,5 +169,59 @@ class ForceSelectBestQueryRelevanceTests(unittest.TestCase):
         self.assertNotIn("전세대출", selected[0]["title"])
 
 
+class TitleQueryOverlapFilterTests(unittest.TestCase):
+    """M17b: hard relevance filter rejects articles with zero query-token overlap."""
+
+    def test_title_with_query_token_passes(self):
+        # query "노인 복지" → title "노인 복지 정책 발표" has overlap
+        self.assertTrue(news_collector._title_has_query_overlap("노인 복지 정책 발표", "노인 복지"))
+
+    def test_title_without_query_token_rejected(self):
+        # query "노인 복지" → title "금융당국 전세대출 규제" has no overlap
+        self.assertFalse(news_collector._title_has_query_overlap("금융당국 전세대출 규제", "노인 복지"))
+
+    def test_empty_title_rejected(self):
+        self.assertFalse(news_collector._title_has_query_overlap("", "노인 복지"))
+
+    def test_empty_query_rejected(self):
+        self.assertFalse(news_collector._title_has_query_overlap("어떤 기사", ""))
+
+    def test_partial_token_match(self):
+        # query "기후변화" → title "기후변화 대응 정책" has overlap
+        self.assertTrue(news_collector._title_has_query_overlap("기후변화 대응 정책", "기후변화"))
+
+    def test_single_char_query_token_filtered_out(self):
+        # query "이 복지" → only "복지" qualifies (len >= 2);
+        # title "복지 정책" has overlap via "복지".
+        self.assertTrue(news_collector._title_has_query_overlap("복지 정책", "이 복지"))
+
+
+class ForceSelectBestRelevanceFilterTests(unittest.TestCase):
+    """M17b: _force_select_best rejects items with zero query-token overlap.
+
+    Returns an empty list (existing list[dict] signature) when no
+    candidate matches; returns a one-element list with the matching
+    candidate when overlap exists.
+    """
+
+    def test_returns_empty_when_no_overlap(self):
+        items = [
+            _candidate("금융당국 전세대출 규제 강화 추진 한국경제", url="https://example.com/url1"),
+            _candidate("주택 청약 1순위 자격 변경 발표 - 연합뉴스", url="https://example.com/url2"),
+        ]
+        result = news_collector._force_select_best(items, "naver_fallback", query="노인 복지 정책")
+        # All items filtered out → no selection possible.
+        self.assertEqual(result, [])
+
+    def test_returns_relevant_when_overlap_exists(self):
+        items = [
+            _candidate("금융당국 전세대출 규제 강화 추진 한국경제", url="https://example.com/url1"),
+            _candidate("노인 복지 정책 발표 보건복지부 보도자료", url="https://example.com/url2"),
+        ]
+        result = news_collector._force_select_best(items, "naver_fallback", query="노인 복지")
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["link"], "https://example.com/url2")
+
+
 if __name__ == "__main__":
     unittest.main()
