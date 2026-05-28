@@ -7,6 +7,7 @@ from official_site_parsers import (
     get_site_key,
 )
 from urllib.parse import urljoin, urlparse
+import os
 import re
 import threading
 
@@ -23,18 +24,31 @@ USER_AGENT = (
 )
 
 
-# M16-speed-2a: Playwright serialization lock.
-# Rationale: Render Starter tier = 512MB RAM. Each headless Chromium
-# instance uses ~200-250MB resident. Concurrent fetch_rendered_page
-# invocations from the new parallel fetch_official_evidence pool
-# (default 3 workers) would peak at ~600-750MB → OOM kill on Starter.
-# This module-level Lock ensures at most ONE sync_playwright() block
-# is active at a time, regardless of how many threads call
-# fetch_rendered_page concurrently. HTTP-only candidates still
-# parallelize unimpeded; Playwright-using candidates serialize.
-# The lock is acquired BEFORE sync_playwright() and released after
-# browser.close() (or on exception); see fetch_rendered_page.
-_PLAYWRIGHT_LOCK = threading.Lock()
+def _max_parallel_playwright() -> int:
+    """Return max concurrent Playwright browsers.
+
+    M16-speed-2b: default 3. Override via MAX_PARALLEL_PLAYWRIGHT env var.
+    Set to 1 to reproduce the pre-M16-speed-2b serialized-Lock behavior
+    (a Semaphore(1) is equivalent to a Lock for single-acquire patterns).
+
+    On Render Standard (2GB), 3 concurrent headless Chromium instances peak
+    at ~750MB, well within budget. Set to 1 if reverting to a 512MB tier.
+    """
+    try:
+        value = int(os.environ.get("MAX_PARALLEL_PLAYWRIGHT", "3"))
+        return max(1, value)
+    except (TypeError, ValueError):
+        return 3
+
+
+# M16-speed-2b: bounded Playwright concurrency.
+# Was a threading.Lock() (M16-speed-2a) to serialize Playwright on the
+# 512MB Starter tier (concurrent Chromium would OOM). Worker is now Standard
+# (2GB), so we allow up to MAX_PARALLEL_PLAYWRIGHT (default 3) concurrent
+# browsers. Work is I/O-bound (networkidle page loads dominate), so concurrency
+# gives ~2-2.5x speedup on the Playwright portion of Phase A even with 1 CPU.
+# Semaphore(1) reproduces the old Lock behavior exactly.
+_PLAYWRIGHT_SEMAPHORE = threading.Semaphore(_max_parallel_playwright())
 
 
 def fetch_rendered_page(url: str, timeout_ms: int = 15000) -> dict:
@@ -59,10 +73,10 @@ def fetch_rendered_page(url: str, timeout_ms: int = 15000) -> dict:
         result["error"] = f"Playwright is not installed: {exc}"
         return result
 
-    # M16-speed-2a: serialize Playwright lifecycle on 512MB Render.
-    # The lock is released on success AND on any exception path
+    # M16-speed-2b: bound Playwright lifecycle to MAX_PARALLEL_PLAYWRIGHT.
+    # The semaphore permit is released on success AND on any exception path
     # below — `with` guarantees release before the function returns.
-    with _PLAYWRIGHT_LOCK:
+    with _PLAYWRIGHT_SEMAPHORE:
         try:
             with sync_playwright() as playwright:
                 browser = playwright.chromium.launch(headless=True)
