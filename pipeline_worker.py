@@ -113,15 +113,13 @@ def report_progress(
 def _persist_results(report: dict, *, query: str) -> list[int]:
     """Persist per-news api_result rows via save_analysis_result.
 
-    Mirrors the existing api_server.analyze loop at L266-301 exactly,
-    including the Postgres dual-write call when enabled. Returns the
-    list of saved row ids (may include None for dedup hits).
+    Mirrors the existing api_server.analyze loop at L266-301 exactly.
+    Returns the list of saved row ids (may include None for dedup hits).
     """
     from database import (
         get_result_id_by_url,
         save_analysis_result,
     )
-    from db.postgres import postgres_dual_write
     from text_utils import sanitize_data
 
     saved_ids: list[int] = []
@@ -157,21 +155,6 @@ def _persist_results(report: dict, *, query: str) -> list[int]:
                 if new_id is not None and int(new_id) not in seen_saved_ids:
                     saved_ids.append(int(new_id))
                     seen_saved_ids.add(int(new_id))
-                try:
-                    pg_status = postgres_dual_write(api_result, query=query)
-                    if pg_status.get("attempted") and not pg_status.get("ok"):
-                        log.warning(
-                            "pipeline_worker.postgres_dual_write_failed",
-                            extra={
-                                "job_query": query,
-                                "pg_error": str(pg_status.get("error"))[:200],
-                            },
-                        )
-                except Exception:  # noqa: BLE001
-                    log.warning(
-                        "pipeline_worker.postgres_dual_write_raised",
-                        extra={"job_query": query},
-                    )
         except Exception as exc:  # noqa: BLE001
             log.warning(
                 "pipeline_worker.save_failed",

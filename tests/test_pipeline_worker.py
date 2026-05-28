@@ -122,10 +122,6 @@ def _stub_get_result_id_by_url(url):
     return _save_id_by_url.get(url)
 
 
-def _stub_postgres_dual_write(result, query):
-    return {"attempted": False, "ok": True}
-
-
 # ---------------------------------------------------------------------------
 # report_progress contracts
 # ---------------------------------------------------------------------------
@@ -253,10 +249,6 @@ class RunAnalyzePipelineJobTests(unittest.TestCase):
                 "database.get_result_id_by_url",
                 side_effect=_stub_get_result_id_by_url,
             ),
-            mock.patch(
-                "db.postgres.postgres_dual_write",
-                side_effect=_stub_postgres_dual_write,
-            ),
         ]
 
     def test_returns_serializable_summary_dict(self):
@@ -264,10 +256,9 @@ class RunAnalyzePipelineJobTests(unittest.TestCase):
         with mock.patch("main.analyze_pipeline", return_value=report):
             with mock.patch("database.save_analysis_result", side_effect=_stub_save_analysis_result):
                 with mock.patch("database.get_result_id_by_url", side_effect=_stub_get_result_id_by_url):
-                    with mock.patch("db.postgres.postgres_dual_write", side_effect=_stub_postgres_dual_write):
-                        summary = pipeline_worker.run_analyze_pipeline_job(
-                            "전세사기", 2, "job-xyz-001",
-                        )
+                    summary = pipeline_worker.run_analyze_pipeline_job(
+                        "전세사기", 2, "job-xyz-001",
+                    )
         # Serializable (round-trips through json).
         json.dumps(summary, ensure_ascii=False)
         self.assertEqual(summary["status"], "ok")
@@ -291,10 +282,9 @@ class RunAnalyzePipelineJobTests(unittest.TestCase):
                 with mock.patch("main.analyze_pipeline", return_value=report):
                     with mock.patch("database.save_analysis_result", side_effect=_stub_save_analysis_result):
                         with mock.patch("database.get_result_id_by_url", side_effect=_stub_get_result_id_by_url):
-                            with mock.patch("db.postgres.postgres_dual_write", side_effect=_stub_postgres_dual_write):
-                                pipeline_worker.run_analyze_pipeline_job(
-                                    "청년 월세", 1, "progress-test",
-                                )
+                            pipeline_worker.run_analyze_pipeline_job(
+                                "청년 월세", 1, "progress-test",
+                            )
                 # Drain — expect at least 3 events: pipeline_started,
                 # saving_results, completed.
                 stages_seen: list[str] = []
@@ -331,15 +321,14 @@ class RunAnalyzePipelineJobTests(unittest.TestCase):
         with mock.patch("main.analyze_pipeline", return_value=report):
             with mock.patch("database.save_analysis_result", side_effect=_stub_save_analysis_result):
                 with mock.patch("database.get_result_id_by_url", side_effect=_stub_get_result_id_by_url):
-                    with mock.patch("db.postgres.postgres_dual_write", side_effect=_stub_postgres_dual_write):
-                        # No REDIS_URL → report_progress returns False
-                        # every time; the wrapper must still complete.
-                        import os
-                        with mock.patch.dict(os.environ, {}, clear=False):
-                            os.environ.pop("REDIS_URL", None)
-                            summary = pipeline_worker.run_analyze_pipeline_job(
-                                "주담대", 1, "no-pubsub-job",
-                            )
+                    # No REDIS_URL → report_progress returns False
+                    # every time; the wrapper must still complete.
+                    import os
+                    with mock.patch.dict(os.environ, {}, clear=False):
+                        os.environ.pop("REDIS_URL", None)
+                        summary = pipeline_worker.run_analyze_pipeline_job(
+                            "주담대", 1, "no-pubsub-job",
+                        )
         self.assertEqual(summary["status"], "ok")
         self.assertEqual(summary["total_news_count"], 1)
         self.assertEqual(len(summary["saved_result_ids"]), 1)

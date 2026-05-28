@@ -1,4 +1,14 @@
-"""Tests for Phase 2 M1 Postgres dual-write plumbing.
+"""Feature-flag tests for the db.postgres connection helpers.
+
+Historically this module exercised the ``postgres_dual_write`` audit_log
+INSERT path. That dual-write was removed in M12.0d Stage 3a (zero readers
+and the table never existed in production); the canonical dual-write now
+flows through :mod:`postgres_storage`. The remaining tests cover the
+small surface that survives in ``db.postgres``:
+
+    * ``is_postgres_enabled`` / ``is_dual_write_enabled`` feature-flag
+      gating off ``DATABASE_URL`` + ``USE_POSTGRES_WRITE``.
+    * ``reset_state_for_tests`` for env-toggle test scaffolding.
 
 Run with: python tests/test_postgres_dual_write.py
 """
@@ -6,35 +16,12 @@ from __future__ import annotations
 
 import os
 import sys
-import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from db import postgres as pg
-
-
-SAMPLE_RESULT = {
-    "title": "테스트 정책 뉴스",
-    "original_url": "https://example.com/test-dual-write",
-    "topic": "금융/정책",
-    "claim_text": "테스트 주장",
-    "verdict_label": "draft_likely_true",
-    "verdict_confidence": 80,
-    "ai_model": "gpt-4o-mini",
-    "verification_card": {
-        "claim_text": "테스트 주장",
-        "verdict_label": "draft_likely_true",
-        "verdict_confidence": 80,
-        "last_checked_at": "2026-05-19T00:00:00+00:00",
-    },
-    "final_decision": {
-        "policy_alert_level": "WATCH",
-    },
-    "normalized_claims": [{"normalized": "정상화된 테스트 주장"}],
-}
 
 
 class _EnvScope:
@@ -78,148 +65,6 @@ class FeatureFlagTests(unittest.TestCase):
             os.environ["USE_POSTGRES_WRITE"] = "true"
             pg.reset_state_for_tests()
             self.assertTrue(pg.is_dual_write_enabled())
-
-    def test_dual_write_skipped_without_database_url(self):
-        with _EnvScope():
-            os.environ.pop("DATABASE_URL", None)
-            os.environ["USE_POSTGRES_WRITE"] = "true"
-            pg.reset_state_for_tests()
-            status = pg.postgres_dual_write(SAMPLE_RESULT, query="test")
-            self.assertFalse(status["attempted"])
-            self.assertFalse(status["ok"])
-            self.assertIn("DATABASE_URL", status["skipped_reason"] or "")
-
-    def test_dual_write_skipped_when_flag_false(self):
-        with _EnvScope():
-            os.environ["DATABASE_URL"] = "postgresql://example/test"
-            os.environ["USE_POSTGRES_WRITE"] = "false"
-            pg.reset_state_for_tests()
-            status = pg.postgres_dual_write(SAMPLE_RESULT, query="test")
-            self.assertFalse(status["attempted"])
-            self.assertFalse(status["ok"])
-
-
-class DualWriteFailureIsolationTests(unittest.TestCase):
-    def test_failure_does_not_raise_to_caller(self):
-        """Even if Postgres explodes, dual-write must return a status dict."""
-        with _EnvScope():
-            os.environ["DATABASE_URL"] = "postgresql://invalid:invalid@127.0.0.1:1/none"
-            os.environ["USE_POSTGRES_WRITE"] = "true"
-            pg.reset_state_for_tests()
-
-            with patch.object(pg, "get_session", return_value=None):
-                status = pg.postgres_dual_write(SAMPLE_RESULT, query="test")
-            self.assertTrue(status["attempted"])
-            self.assertFalse(status["ok"])
-            self.assertIsNotNone(status["error"])
-
-    def test_session_exception_is_swallowed(self):
-        """Session-level exceptions during dual-write must not propagate."""
-        with _EnvScope():
-            os.environ["DATABASE_URL"] = "postgresql://example/test"
-            os.environ["USE_POSTGRES_WRITE"] = "true"
-            pg.reset_state_for_tests()
-
-            class FakeSession:
-                def execute(self, *args, **kwargs):
-                    raise RuntimeError("simulated postgres failure")
-
-                def rollback(self):
-                    pass
-
-                def commit(self):
-                    pass
-
-                def close(self):
-                    pass
-
-            with patch.object(pg, "get_session", return_value=FakeSession()):
-                status = pg.postgres_dual_write(SAMPLE_RESULT, query="test")
-            self.assertTrue(status["attempted"])
-            self.assertFalse(status["ok"])
-            self.assertIn("simulated postgres failure", status["error"])
-
-
-class SqliteSavePathIntegrationTests(unittest.TestCase):
-    """Confirm SQLite save path is unaffected by Postgres dual-write failures."""
-
-    def test_sqlite_save_still_works_without_database_url(self):
-        from text_utils import sanitize_data
-
-        with _EnvScope():
-            os.environ.pop("DATABASE_URL", None)
-            os.environ.pop("USE_POSTGRES_WRITE", None)
-            pg.reset_state_for_tests()
-
-            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                tmp_db = Path(tmp_dir) / "sqlite_test.db"
-                with patch("database.DB_PATH", tmp_db):
-                    import database
-
-                    database.init_db()
-                    save_status = database.save_analysis_result(
-                        sanitize_data(SAMPLE_RESULT),
-                        query="dual-write-test",
-                    )
-                    self.assertTrue(save_status["saved"])
-
-                    # Dual-write should silently skip since DATABASE_URL is missing.
-                    pg_status = pg.postgres_dual_write(SAMPLE_RESULT, query="dual-write-test")
-                    self.assertFalse(pg_status["attempted"])
-                    self.assertFalse(pg_status["ok"])
-
-                    rows = database.get_recent_results(limit=5)
-                    self.assertEqual(len(rows), 1)
-                    self.assertEqual(rows[0]["original_url"], SAMPLE_RESULT["original_url"])
-
-    def test_sqlite_save_unaffected_by_pg_exception(self):
-        """If Postgres throws, SQLite row must still be intact."""
-        from text_utils import sanitize_data
-
-        with _EnvScope():
-            os.environ["DATABASE_URL"] = "postgresql://example/test"
-            os.environ["USE_POSTGRES_WRITE"] = "true"
-            pg.reset_state_for_tests()
-
-            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                tmp_db = Path(tmp_dir) / "sqlite_test.db"
-                with patch("database.DB_PATH", tmp_db):
-                    import database
-
-                    database.init_db()
-                    save_status = database.save_analysis_result(
-                        sanitize_data(SAMPLE_RESULT),
-                        query="dual-write-test",
-                    )
-                    self.assertTrue(save_status["saved"])
-
-                    # Simulate Postgres failure after the SQLite save.
-                    with patch.object(pg, "get_session", side_effect=RuntimeError("boom")):
-                        try:
-                            pg_status = pg.postgres_dual_write(
-                                SAMPLE_RESULT, query="dual-write-test"
-                            )
-                        except Exception as error:
-                            self.fail(
-                                f"postgres_dual_write must not raise: {error}"
-                            )
-                    self.assertTrue(pg_status["attempted"])
-                    self.assertFalse(pg_status["ok"])
-
-                    # SQLite remains source of truth and is unaffected.
-                    # M12.0d-1: read via raw SQLite — get_recent_results
-                    # now prefers PG and (with PG engine missing in
-                    # this env) returns [] per Stage 1 contract.
-                    with database.get_connection() as conn:
-                        rows = conn.execute(
-                            "SELECT original_url FROM analysis_results "
-                            "ORDER BY id DESC LIMIT 5"
-                        ).fetchall()
-                    self.assertEqual(len(rows), 1)
-                    self.assertEqual(
-                        rows[0]["original_url"],
-                        SAMPLE_RESULT["original_url"],
-                    )
 
 
 if __name__ == "__main__":

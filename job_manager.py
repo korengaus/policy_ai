@@ -1,9 +1,10 @@
 """Job lifecycle manager for the async verification pipeline.
 
-SQLite is the source of truth. Postgres dual-write of job rows is best-effort
-and must never break the SQLite path. This module deliberately keeps the
-interface tiny so the FastAPI layer (and tests) can call it without knowing
-about persistence details.
+SQLite is the source of truth for writes. Postgres mirroring of job rows
+via :func:`postgres_storage.mirror_write` / :func:`mirror_upsert` is
+best-effort and must never break the SQLite path. This module deliberately
+keeps the interface tiny so the FastAPI layer (and tests) can call it
+without knowing about persistence details.
 """
 from __future__ import annotations
 
@@ -12,7 +13,7 @@ import os
 import sqlite3
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Optional
 
 from database import get_connection, get_result_by_id
 
@@ -53,11 +54,9 @@ def _pipeline_version() -> str:
 def _mirror_jobs_safe(*, upsert: bool, row_dict: dict) -> None:
     """M12.0c-jobs — best-effort dual-write to postgres_storage.jobs_table.
 
-    Distinct from ``_postgres_dual_write_job`` below (which writes to the
-    db/postgres.py ``audit_log`` event stream): this helper mirrors the
-    *current state* of a job row into the postgres_storage jobs mirror,
-    matching the table-level mirroring used by analysis_results /
-    review_tasks / etc. since M12.0a.
+    Mirrors the *current state* of a job row into the postgres_storage
+    jobs mirror, matching the table-level mirroring used by
+    analysis_results / review_tasks / etc. since M12.0a.
 
     NEVER raises. SQLite remains source of truth — any Postgres failure
     is logged inside ``mirror_write`` / ``mirror_upsert`` and swallowed
@@ -84,75 +83,6 @@ def _read_jobs_row_full(job_id: str) -> Optional[dict]:
             (job_id,),
         ).fetchone()
     return dict(row) if row is not None else None
-
-
-def _postgres_dual_write_job(payload: dict) -> None:
-    """Best-effort dual-write of a job row. Never raises."""
-    try:
-        from db import postgres as pg
-    except Exception:
-        return
-
-    if not pg.is_dual_write_enabled():
-        return
-
-    try:
-        from sqlalchemy import text
-    except Exception as error:
-        logger.debug("Postgres jobs dual-write skipped (sqlalchemy import): %s", error)
-        return
-
-    try:
-        session = pg.get_session()
-    except Exception as error:
-        logger.debug("Postgres jobs dual-write skipped (session): %s", error)
-        return
-
-    if session is None:
-        return
-
-    try:
-        session.execute(
-            text(
-                """
-                INSERT INTO audit_log (entity, entity_id, action, actor, payload, created_at)
-                VALUES (:entity, :entity_id, :action, :actor, CAST(:payload AS JSONB), :created_at)
-                """
-            ),
-            {
-                "entity": "job",
-                "entity_id": str(payload.get("id") or ""),
-                "action": payload.get("action") or "job_event",
-                "actor": "job_manager",
-                "payload": _payload_json(payload),
-                "created_at": datetime.now(timezone.utc),
-            },
-        )
-        session.commit()
-    except Exception as error:
-        try:
-            session.rollback()
-        except Exception:
-            pass
-        logger.warning(
-            "Postgres jobs dual-write failed (SQLite remains source of truth): %s",
-            error,
-        )
-    finally:
-        try:
-            session.close()
-        except Exception:
-            pass
-
-
-def _payload_json(payload: dict) -> str:
-    import json
-
-    safe = {k: v for k, v in payload.items() if k != "action"}
-    try:
-        return json.dumps(safe, ensure_ascii=False, default=str)
-    except Exception:
-        return "{}"
 
 
 def create_job(query: str, max_news: int) -> dict:
@@ -200,16 +130,41 @@ def create_job(query: str, max_news: int) -> dict:
     # id is a UUID hex so a write (not upsert) is sufficient; retries
     # against the same id are not expected for create_job.
     _mirror_jobs_safe(upsert=False, row_dict=record)
-    _postgres_dual_write_job({**record, "action": "create"})
     logger.info("Job created: id=%s query=%s max_news=%s", job_id, query, max_news)
     return record
 
 
-def _current_status(connection, job_id: str) -> Optional[str]:
-    row = connection.execute(
-        "SELECT status FROM jobs WHERE id = ?",
-        (job_id,),
-    ).fetchone()
+def _current_status(job_id: str) -> Optional[str]:
+    """Return the current ``status`` of a job, or None if unknown.
+
+    M12.0d Stage 3b: PG-primary for the idempotency guard so the read
+    survives Worker restarts (SQLite is ephemeral on Render). Falls
+    back to SQLite when PG dual-write is disabled (local dev / tests),
+    matching the ``database.py`` lazy-import + PG-primary pattern."""
+    try:
+        from postgres_storage import (
+            is_postgres_dual_write_enabled,
+            read_job_status,
+        )
+        pg_enabled = is_postgres_dual_write_enabled()
+    except Exception:
+        logger.error(
+            "_current_status failed to import postgres_storage",
+            exc_info=True,
+            extra={"function": "_current_status", "job_id": job_id},
+        )
+        raise
+    if pg_enabled:
+        return read_job_status(job_id)
+    # SQLite fallback — only reached when dual-write is disabled (no
+    # DATABASE_URL or USE_POSTGRES_DUAL_WRITE off). Stage 3c will
+    # remove the SQLite jobs writes; until then this fallback keeps
+    # local-dev / test environments correct.
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT status FROM jobs WHERE id = ?",
+            (job_id,),
+        ).fetchone()
     if row is None:
         return None
     return row["status"]
@@ -217,11 +172,11 @@ def _current_status(connection, job_id: str) -> Optional[str]:
 
 def start_job(job_id: str) -> None:
     now = _utc_now_iso()
+    current = _current_status(job_id)
+    if current in TERMINAL_STATUSES:
+        logger.debug("start_job skipped (terminal): id=%s status=%s", job_id, current)
+        return
     with get_connection() as connection:
-        current = _current_status(connection, job_id)
-        if current in TERMINAL_STATUSES:
-            logger.debug("start_job skipped (terminal): id=%s status=%s", job_id, current)
-            return
         connection.execute(
             """
             UPDATE jobs
@@ -237,26 +192,19 @@ def start_job(job_id: str) -> None:
     full_row = _read_jobs_row_full(job_id)
     if full_row is not None:
         _mirror_jobs_safe(upsert=True, row_dict=full_row)
-    _postgres_dual_write_job({
-        "id": job_id,
-        "status": STATUS_RUNNING,
-        "current_stage": STAGE_RUNNING,
-        "started_at": now,
-        "action": "start",
-    })
     logger.info("Job started: id=%s", job_id)
 
 
 def update_progress(job_id: str, stage: str, percent: int) -> None:
     safe_percent = max(0, min(int(percent or 0), 100))
+    current = _current_status(job_id)
+    if current in TERMINAL_STATUSES:
+        logger.debug(
+            "update_progress skipped (terminal): id=%s status=%s stage=%s",
+            job_id, current, stage,
+        )
+        return
     with get_connection() as connection:
-        current = _current_status(connection, job_id)
-        if current in TERMINAL_STATUSES:
-            logger.debug(
-                "update_progress skipped (terminal): id=%s status=%s stage=%s",
-                job_id, current, stage,
-            )
-            return
         connection.execute(
             """
             UPDATE jobs
@@ -270,24 +218,18 @@ def update_progress(job_id: str, stage: str, percent: int) -> None:
     full_row = _read_jobs_row_full(job_id)
     if full_row is not None:
         _mirror_jobs_safe(upsert=True, row_dict=full_row)
-    _postgres_dual_write_job({
-        "id": job_id,
-        "current_stage": stage,
-        "progress_percent": safe_percent,
-        "action": "progress",
-    })
 
 
 def complete_job(job_id: str, result_id: Optional[int]) -> None:
     now = _utc_now_iso()
+    current = _current_status(job_id)
+    if current in TERMINAL_STATUSES:
+        logger.debug(
+            "complete_job skipped (already terminal): id=%s status=%s",
+            job_id, current,
+        )
+        return
     with get_connection() as connection:
-        current = _current_status(connection, job_id)
-        if current in TERMINAL_STATUSES:
-            logger.debug(
-                "complete_job skipped (already terminal): id=%s status=%s",
-                job_id, current,
-            )
-            return
         connection.execute(
             """
             UPDATE jobs
@@ -302,28 +244,20 @@ def complete_job(job_id: str, result_id: Optional[int]) -> None:
     full_row = _read_jobs_row_full(job_id)
     if full_row is not None:
         _mirror_jobs_safe(upsert=True, row_dict=full_row)
-    _postgres_dual_write_job({
-        "id": job_id,
-        "status": STATUS_COMPLETED,
-        "current_stage": STAGE_COMPLETED,
-        "result_id": result_id,
-        "completed_at": now,
-        "action": "complete",
-    })
     logger.info("Job completed: id=%s result_id=%s", job_id, result_id)
 
 
 def fail_job(job_id: str, error_message: str, *, stage: str = STAGE_FAILED, status: str = STATUS_FAILED) -> None:
     now = _utc_now_iso()
     safe_message = (error_message or "")[:2000]
+    current = _current_status(job_id)
+    if current in TERMINAL_STATUSES:
+        logger.debug(
+            "fail_job skipped (already terminal): id=%s status=%s -> %s",
+            job_id, current, status,
+        )
+        return
     with get_connection() as connection:
-        current = _current_status(connection, job_id)
-        if current in TERMINAL_STATUSES:
-            logger.debug(
-                "fail_job skipped (already terminal): id=%s status=%s -> %s",
-                job_id, current, status,
-            )
-            return
         connection.execute(
             """
             UPDATE jobs
@@ -337,14 +271,6 @@ def fail_job(job_id: str, error_message: str, *, stage: str = STAGE_FAILED, stat
     full_row = _read_jobs_row_full(job_id)
     if full_row is not None:
         _mirror_jobs_safe(upsert=True, row_dict=full_row)
-    _postgres_dual_write_job({
-        "id": job_id,
-        "status": status,
-        "current_stage": stage,
-        "error_message": safe_message,
-        "completed_at": now,
-        "action": "fail",
-    })
     logger.warning("Job %s: id=%s reason=%s", status, job_id, safe_message)
 
 

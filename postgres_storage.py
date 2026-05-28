@@ -1300,6 +1300,21 @@ def read_job_by_id(job_id: str) -> Optional[dict]:
         ) from exc
 
 
+def read_job_status(job_id: str) -> Optional[str]:
+    """Return just the ``status`` column for ``job_id`` (PG-primary).
+
+    M12.0d Stage 3b: idempotency-guard read path for
+    :func:`job_manager._current_status`. Thin wrapper over
+    :func:`read_job_by_id` — reuses the engine / error-handling /
+    not-found semantics. Returns None when the row is missing or the
+    engine is unavailable; raises :class:`PostgresReadError` on real
+    SQL errors (inherited from :func:`read_job_by_id`)."""
+    row = read_job_by_id(job_id)
+    if row is None:
+        return None
+    return row.get("status")
+
+
 # ---------------------------------------------------------------------------
 # Read helper — M12.0d-2 (embedding cache).
 #

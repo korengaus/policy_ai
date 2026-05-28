@@ -113,10 +113,6 @@ def _stub_get_result_id_by_url(url):
     return None
 
 
-def _stub_postgres_dual_write(result, query):
-    return {"attempted": False, "ok": True}
-
-
 def _stub_get_result_by_id(result_id):
     return {
         "id": result_id,
@@ -201,31 +197,27 @@ class V2EndToEndFlowTests(unittest.TestCase):
                             "database.get_result_id_by_url",
                             side_effect=_stub_get_result_id_by_url,
                         ):
-                            with mock.patch(
-                                "db.postgres.postgres_dual_write",
-                                side_effect=_stub_postgres_dual_write,
-                            ):
-                                # 1. POST /v2/analyze
-                                enq = self.client.post(
-                                    "/v2/analyze",
-                                    json={"query": "전세사기", "max_news": 1},
-                                )
-                                self.assertEqual(enq.status_code, 202)
-                                job_id = enq.json()["job_id"]
+                            # 1. POST /v2/analyze
+                            enq = self.client.post(
+                                "/v2/analyze",
+                                json={"query": "전세사기", "max_news": 1},
+                            )
+                            self.assertEqual(enq.status_code, 202)
+                            job_id = enq.json()["job_id"]
 
-                                # 2. Run the worker in burst mode.
-                                self._execute_pending_jobs_via_simpleworker()
+                            # 2. Run the worker in burst mode.
+                            self._execute_pending_jobs_via_simpleworker()
 
-                                # 3. Status check.
-                                status = self.client.get(f"/v2/jobs/{job_id}")
-                                self.assertEqual(status.status_code, 200)
-                                body = status.json()
-                                self.assertEqual(body["status"], "finished")
-                                result = body.get("result") or {}
-                                self.assertEqual(result.get("status"), "ok")
-                                self.assertEqual(result.get("query"), "전세사기")
-                                self.assertEqual(result.get("total_news_count"), 1)
-                                self.assertEqual(len(result.get("saved_result_ids") or []), 1)
+                            # 3. Status check.
+                            status = self.client.get(f"/v2/jobs/{job_id}")
+                            self.assertEqual(status.status_code, 200)
+                            body = status.json()
+                            self.assertEqual(body["status"], "finished")
+                            result = body.get("result") or {}
+                            self.assertEqual(result.get("status"), "ok")
+                            self.assertEqual(result.get("query"), "전세사기")
+                            self.assertEqual(result.get("total_news_count"), 1)
+                            self.assertEqual(len(result.get("saved_result_ids") or []), 1)
 
     def test_enqueue_then_execute_then_inflate_via_history_endpoint(self):
         """Simulates the M15.0c frontend completion path: after the
@@ -245,46 +237,42 @@ class V2EndToEndFlowTests(unittest.TestCase):
                             "database.get_result_id_by_url",
                             side_effect=_stub_get_result_id_by_url,
                         ):
-                            with mock.patch(
-                                "db.postgres.postgres_dual_write",
-                                side_effect=_stub_postgres_dual_write,
-                            ):
-                                enq = self.client.post(
-                                    "/v2/analyze",
-                                    json={"query": "DSR", "max_news": 2},
-                                )
-                                job_id = enq.json()["job_id"]
-                                self._execute_pending_jobs_via_simpleworker()
-                                status = self.client.get(f"/v2/jobs/{job_id}")
-                                ids = status.json()["result"]["saved_result_ids"]
-                                self.assertEqual(len(ids), 2)
+                            enq = self.client.post(
+                                "/v2/analyze",
+                                json={"query": "DSR", "max_news": 2},
+                            )
+                            job_id = enq.json()["job_id"]
+                            self._execute_pending_jobs_via_simpleworker()
+                            status = self.client.get(f"/v2/jobs/{job_id}")
+                            ids = status.json()["result"]["saved_result_ids"]
+                            self.assertEqual(len(ids), 2)
 
-                                # 4. Inflate each result via /history/{id}.
-                                # /history/{id} uses get_result_by_id which
-                                # we stub so tests run offline (no SQLite
-                                # row was actually written by the in-process
-                                # mocked persist call).
-                                with mock.patch(
-                                    "api_server.get_result_by_id",
-                                    side_effect=_stub_get_result_by_id,
-                                ):
-                                    for result_id in ids:
-                                        history = self.client.get(
-                                            f"/history/{result_id}"
-                                        )
-                                        self.assertEqual(history.status_code, 200)
-                                        body = history.json()
-                                        self.assertEqual(body["status"], "ok")
-                                        self.assertIn("result", body)
-                                        # Fields the frontend's
-                                        # mapHistoryRowToResult needs:
-                                        for key in (
-                                            "id", "title", "original_url",
-                                            "topic", "verdict_label",
-                                            "verdict_confidence", "claims",
-                                            "evidence_summary",
-                                        ):
-                                            self.assertIn(key, body["result"])
+                            # 4. Inflate each result via /history/{id}.
+                            # /history/{id} uses get_result_by_id which
+                            # we stub so tests run offline (no SQLite
+                            # row was actually written by the in-process
+                            # mocked persist call).
+                            with mock.patch(
+                                "api_server.get_result_by_id",
+                                side_effect=_stub_get_result_by_id,
+                            ):
+                                for result_id in ids:
+                                    history = self.client.get(
+                                        f"/history/{result_id}"
+                                    )
+                                    self.assertEqual(history.status_code, 200)
+                                    body = history.json()
+                                    self.assertEqual(body["status"], "ok")
+                                    self.assertIn("result", body)
+                                    # Fields the frontend's
+                                    # mapHistoryRowToResult needs:
+                                    for key in (
+                                        "id", "title", "original_url",
+                                        "topic", "verdict_label",
+                                        "verdict_confidence", "claims",
+                                        "evidence_summary",
+                                    ):
+                                        self.assertIn(key, body["result"])
 
 
 # ---------------------------------------------------------------------------

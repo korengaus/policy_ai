@@ -30,7 +30,6 @@ from database import (
 from db.postgres import (
     is_dual_write_enabled,
     is_postgres_enabled,
-    postgres_dual_write,
 )
 import job_manager
 from main import analyze_pipeline
@@ -295,17 +294,6 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
                     )
             else:
                 result_id = save_status.get("id")
-                try:
-                    pg_status = postgres_dual_write(api_result, query=query)
-                    if pg_status.get("attempted") and not pg_status.get("ok"):
-                        logger.warning(
-                            "Postgres dual-write failed (SQLite remains source of truth): %s",
-                            pg_status.get("error"),
-                        )
-                except Exception:
-                    logger.exception(
-                        "Postgres dual-write raised unexpectedly; SQLite remains source of truth"
-                    )
         except Exception:
             logger.exception("Failed to save analysis result to SQLite")
 
@@ -571,17 +559,6 @@ def _persist_pipeline_report(report: dict, *, query: str) -> Optional[int]:
                 if saved_id is not None:
                     api_result["result_id"] = saved_id
                     item["api_result"] = api_result
-                try:
-                    pg_status = postgres_dual_write(api_result, query=query)
-                    if pg_status.get("attempted") and not pg_status.get("ok"):
-                        logger.warning(
-                            "Postgres dual-write failed during job save: %s",
-                            pg_status.get("error"),
-                        )
-                except Exception:
-                    logger.exception(
-                        "Postgres dual-write raised during job save; SQLite remains source of truth"
-                    )
             else:
                 logger.info(
                     "Duplicate skipped in SQLite during job save: %s",

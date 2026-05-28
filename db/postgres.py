@@ -1,16 +1,19 @@
-"""Postgres dual-write plumbing.
+"""Postgres connection plumbing.
 
-SQLite remains the source of truth. Postgres is opt-in via DATABASE_URL +
-USE_POSTGRES_WRITE feature flag. Any failure in this module must never break
-the SQLite save path; callers must catch and continue.
+Provides the engine / session factory + feature-flag helpers
+(``is_postgres_enabled`` / ``is_dual_write_enabled``) used by callers that
+need to detect or initialize Postgres connectivity.
+
+M12.0d Stage 3a: the ``postgres_dual_write`` function (audit_log INSERT
+path) has been removed. It was a write-only telemetry surface with zero
+readers and a table that never existed in production. All canonical
+dual-write now flows through :mod:`postgres_storage`.
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
-from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Optional
 
 logger = logging.getLogger("policy_ai.db.postgres")
 
@@ -103,152 +106,3 @@ def reset_state_for_tests() -> None:
     _SESSION_FACTORY = None
     _INIT_ATTEMPTED = False
     _INIT_ERROR = None
-
-
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _coerce_json(value: Any) -> Any:
-    if value is None:
-        return None
-    if isinstance(value, (dict, list)):
-        return value
-    if isinstance(value, str):
-        stripped = value.strip()
-        if not stripped:
-            return None
-        try:
-            return json.loads(stripped)
-        except Exception:
-            return stripped
-    return value
-
-
-def _coerce_int(value: Any) -> Optional[int]:
-    if value is None or value == "":
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _parse_iso(value: Any) -> Optional[datetime]:
-    if not value or not isinstance(value, str):
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed
-    except Exception:
-        return None
-
-
-def postgres_dual_write(result: dict, *, query: str = "") -> dict:
-    """Best-effort dual-write to Postgres after a successful SQLite save.
-
-    M12.0d-2 (Stage 2 / Option 5B): trimmed to write only to the
-    ``audit_log`` table. The previous stories / claims / verdicts
-    INSERTs have been removed — those tables were never read by any
-    code in the project (verified by grep) and were write-only
-    dead weight. The actual verification data flows through
-    :mod:`postgres_storage` (analysis_results, review_tasks, jobs,
-    artifact_* tables) as the canonical dual-write surface. This
-    module is retained for the audit_log write path used by
-    :mod:`api_server` and :mod:`job_manager` (see
-    ``_postgres_dual_write_job``).
-
-    Returns a small status dict describing what happened. Never raises.
-    """
-    status = {"attempted": False, "ok": False, "skipped_reason": None, "error": None}
-
-    if not is_dual_write_enabled():
-        if not is_postgres_enabled():
-            status["skipped_reason"] = "DATABASE_URL not set"
-        else:
-            status["skipped_reason"] = "USE_POSTGRES_WRITE disabled"
-        return status
-
-    status["attempted"] = True
-
-    try:
-        from sqlalchemy import text  # local import to keep module importable without sqlalchemy
-    except Exception as error:
-        status["error"] = f"sqlalchemy import failed: {error}"
-        logger.warning("Postgres dual-write skipped: %s", status["error"])
-        return status
-
-    try:
-        session = get_session()
-    except Exception as error:
-        status["error"] = f"session acquisition failed: {error}"
-        logger.warning("Postgres dual-write skipped: %s", status["error"])
-        return status
-
-    if session is None:
-        status["error"] = _INIT_ERROR or "session unavailable"
-        logger.warning("Postgres dual-write skipped: %s", status["error"])
-        return status
-
-    try:
-        result = result or {}
-        verification_card = result.get("verification_card") or {}
-        final_decision = result.get("final_decision") or {}
-
-        news_url = result.get("original_url") or ""
-        verdict_label = (
-            verification_card.get("verdict_label")
-            or result.get("verdict_label")
-            or ""
-        )
-        now = _utc_now()
-
-        session.execute(
-            text(
-                """
-                INSERT INTO audit_log (entity, entity_id, action, actor, payload, created_at)
-                VALUES (:entity, :entity_id, :action, :actor, CAST(:payload AS JSONB), :created_at)
-                """
-            ),
-            {
-                "entity": "analysis_result",
-                "entity_id": news_url,
-                "action": "dual_write",
-                "actor": "api_server",
-                "payload": json.dumps(
-                    {
-                        "query": query,
-                        "verdict_label": verdict_label,
-                        "policy_alert_level": final_decision.get("policy_alert_level"),
-                    },
-                    ensure_ascii=False,
-                ),
-                "created_at": now,
-            },
-        )
-
-        session.commit()
-        status["ok"] = True
-        logger.info(
-            "Postgres audit-log dual-write ok: entity=analysis_result url=%s",
-            news_url,
-        )
-    except Exception as error:
-        try:
-            session.rollback()
-        except Exception:
-            pass
-        status["error"] = str(error)
-        logger.warning(
-            "Postgres dual-write failed (SQLite remains source of truth): %s",
-            error,
-        )
-    finally:
-        try:
-            session.close()
-        except Exception:
-            pass
-
-    return status
