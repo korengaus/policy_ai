@@ -3239,8 +3239,10 @@ class DatabaseOperatorCliFallbackTests(unittest.TestCase):
 # fallback on top of pre-existing M12.0a mirror_writes), this milestone
 # is a PAIRED write+read migration: nothing was previously mirroring
 # the jobs table into postgres_storage.jobs_table — the schema existed
-# but no caller wrote to it. So tests cover BOTH the new dual-write
-# path inside job_manager AND the new read fallback in get_job_status.
+# but no caller wrote to it. So tests cover BOTH the dual-write path
+# inside job_manager AND the PG-primary read in get_job_status. (M12.0d
+# Stage 3c-4 removed get_job_status's SQLite fallback — jobs are PG-only
+# reads now — so these tests exercise the PG branch only.)
 #
 # 7 write tests + 5 read tests + 1 parity test = 13 new tests.
 # ---------------------------------------------------------------------------

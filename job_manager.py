@@ -17,12 +17,11 @@ from __future__ import annotations
 
 import logging
 import os
-import sqlite3
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from database import get_connection, get_result_by_id
+from database import get_result_by_id
 
 logger = logging.getLogger("policy_ai.job_manager")
 
@@ -46,12 +45,6 @@ STAGE_TIMEOUT = "timeout"
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _row_to_dict(row: sqlite3.Row | None) -> Optional[dict]:
-    if row is None:
-        return None
-    return dict(row)
 
 
 def _pipeline_version() -> str:
