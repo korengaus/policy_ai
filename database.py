@@ -81,6 +81,27 @@ def _mirror_write_returning_safe(table_name: str, row_dict: dict):
         return None
 
 
+def _mirror_upsert_returning_safe(
+    table_name: str, row_dict: dict, conflict_columns: list,
+):
+    """Best-effort mirror upsert that returns the PG-assigned/updated id.
+
+    M12.0d Stage 3c-3: the upsert analogue of
+    :func:`_mirror_write_returning_safe`, used by
+    ``save_producer_comparison`` (conflict on ``input_hash``) and
+    ``save_verdict_label_attribution`` (conflict on ``analysis_id``) once
+    those tables become PG-only writes. Returns ``None`` when dual-write
+    is disabled, the import fails, or the upsert fails — callers treat
+    None as an explicit write failure.
+    """
+    try:
+        from postgres_storage import mirror_upsert_returning
+
+        return mirror_upsert_returning(table_name, row_dict, conflict_columns)
+    except Exception:  # noqa: BLE001 — Postgres failures must not surface
+        return None
+
+
 DB_PATH = Path("policy_ai.db")
 
 
@@ -2185,6 +2206,62 @@ def save_producer_comparison(comparison_dict: dict, db_path: str = None) -> int:
         1,
         created_at,
     )
+    # M12.0d Stage 3c-3: build the Postgres mirror payload once. INSERT OR
+    # REPLACE on the SQLite side maps to ON CONFLICT (input_hash) DO UPDATE
+    # on the PG side.
+    mirror_payload = {
+        "analysis_id": row_values[0],
+        "source": row_values[1],
+        "input_hash": row_values[2],
+        "producer1_label": row_values[3],
+        "producer1_score": row_values[4],
+        "producer1_extra": row_values[5],
+        "producer2_label": row_values[6],
+        "producer2_alert_level": row_values[7],
+        "producer2_score": row_values[8],
+        "producer2_extra": row_values[9],
+        "producer3_label": row_values[10],
+        "producer3_extra": row_values[11],
+        "all_three_agree": row_values[12],
+        "p1_p2_agree": row_values[13],
+        "p1_p3_agree": row_values[14],
+        "p2_p3_agree": row_values[15],
+        "disagreement_pattern": row_values[16],
+        "most_conservative_label": row_values[17],
+        "comparison_timestamp": row_values[18],
+        "notes": row_values[19],
+        "truth_claim": row_values[20],
+        "operator_review_required": row_values[21],
+        "created_at": row_values[22],
+    }
+
+    # M12.0d Stage 3c-3: Postgres is the sole write target when dual-write
+    # is enabled AND no explicit db_path was supplied. An explicit db_path
+    # opts into an isolated SQLite file (CLI --db-path / tests) and MUST
+    # keep the SQLite write. PG assigns the id via ON CONFLICT ... RETURNING
+    # (mirror_upsert_returning); the function keeps its ``-> int`` contract,
+    # returning the sentinel ``-1`` on PG write failure (the 3c-1 data-loss
+    # class, surfaced via log.error).
+    from postgres_storage import is_postgres_dual_write_enabled
+
+    if is_postgres_dual_write_enabled() and db_path is None:
+        pg_id = _mirror_upsert_returning_safe(
+            "verdict_producer_comparisons", mirror_payload, ["input_hash"],
+        )
+        if pg_id is None:
+            log.error(
+                "save_producer_comparison PG write returned no id",
+                extra={
+                    "function": "save_producer_comparison",
+                    "analysis_id": row_values[0],
+                    "input_hash": row_values[2],
+                },
+            )
+            return -1
+        return pg_id
+
+    # Dual-write disabled OR explicit db_path — SQLite is the write target
+    # (unchanged behaviour). SQLite's AUTOINCREMENT assigns the id.
     connection = _open_connection(db_path)
     try:
         _ensure_verdict_producer_comparisons_table(connection)
@@ -2208,39 +2285,6 @@ def save_producer_comparison(comparison_dict: dict, db_path: str = None) -> int:
         row_id = int(cursor.lastrowid)
     finally:
         connection.close()
-
-    # M12.0a — mirror to Postgres. INSERT OR REPLACE on the SQLite side
-    # maps to ON CONFLICT (input_hash) DO UPDATE on the PG side.
-    if db_path is None:
-        _mirror_upsert_safe(
-            "verdict_producer_comparisons",
-            {
-                "analysis_id": row_values[0],
-                "source": row_values[1],
-                "input_hash": row_values[2],
-                "producer1_label": row_values[3],
-                "producer1_score": row_values[4],
-                "producer1_extra": row_values[5],
-                "producer2_label": row_values[6],
-                "producer2_alert_level": row_values[7],
-                "producer2_score": row_values[8],
-                "producer2_extra": row_values[9],
-                "producer3_label": row_values[10],
-                "producer3_extra": row_values[11],
-                "all_three_agree": row_values[12],
-                "p1_p2_agree": row_values[13],
-                "p1_p3_agree": row_values[14],
-                "p2_p3_agree": row_values[15],
-                "disagreement_pattern": row_values[16],
-                "most_conservative_label": row_values[17],
-                "comparison_timestamp": row_values[18],
-                "notes": row_values[19],
-                "truth_claim": row_values[20],
-                "operator_review_required": row_values[21],
-                "created_at": row_values[22],
-            },
-            ["input_hash"],
-        )
     return row_id
 
 
@@ -2476,6 +2520,57 @@ def save_verdict_label_attribution(
         1,
         created_at,
     )
+    # M12.0d Stage 3c-3: build the Postgres mirror payload once. INSERT OR
+    # REPLACE on the SQLite side maps to ON CONFLICT (analysis_id) DO UPDATE
+    # on the PG side.
+    mirror_payload = {
+        "analysis_id": row_values[0],
+        "stored_verdict_label": row_values[1],
+        "stored_verdict_confidence": row_values[2],
+        "stored_policy_alert_level": row_values[3],
+        "stored_policy_confidence_score": row_values[4],
+        "stored_verification_strength": row_values[5],
+        "stored_claim_text": row_values[6],
+        "stored_evidence_summary": row_values[7],
+        "reconstructed_inputs": row_values[8],
+        "attributed_branch_id": row_values[9],
+        "attribution_confidence": row_values[10],
+        "attribution_reason": row_values[11],
+        "is_weak_evidence_verified": row_values[12],
+        "weak_evidence_signals": row_values[13],
+        "diagnostic_timestamp": row_values[14],
+        "notes": row_values[15],
+        "truth_claim": row_values[16],
+        "operator_review_required": row_values[17],
+        "created_at": row_values[18],
+    }
+
+    # M12.0d Stage 3c-3: Postgres is the sole write target when dual-write
+    # is enabled AND no explicit db_path was supplied. An explicit db_path
+    # opts into an isolated SQLite file (CLI --db-path / tests) and MUST
+    # keep the SQLite write. PG assigns the id via ON CONFLICT ... RETURNING
+    # (mirror_upsert_returning); the function keeps its ``-> int`` contract,
+    # returning the sentinel ``-1`` on PG write failure (the 3c-1 data-loss
+    # class, surfaced via log.error).
+    from postgres_storage import is_postgres_dual_write_enabled
+
+    if is_postgres_dual_write_enabled() and db_path is None:
+        pg_id = _mirror_upsert_returning_safe(
+            "verdict_label_attributions", mirror_payload, ["analysis_id"],
+        )
+        if pg_id is None:
+            log.error(
+                "save_verdict_label_attribution PG write returned no id",
+                extra={
+                    "function": "save_verdict_label_attribution",
+                    "analysis_id": row_values[0],
+                },
+            )
+            return -1
+        return pg_id
+
+    # Dual-write disabled OR explicit db_path — SQLite is the write target
+    # (unchanged behaviour). SQLite's AUTOINCREMENT assigns the id.
     connection = _open_connection(db_path)
     try:
         _ensure_verdict_label_attributions_table(connection)
@@ -2501,35 +2596,6 @@ def save_verdict_label_attribution(
         row_id = int(cursor.lastrowid)
     finally:
         connection.close()
-
-    # M12.0a — mirror to Postgres. INSERT OR REPLACE on the SQLite side
-    # maps to ON CONFLICT (analysis_id) DO UPDATE on the PG side.
-    if db_path is None:
-        _mirror_upsert_safe(
-            "verdict_label_attributions",
-            {
-                "analysis_id": row_values[0],
-                "stored_verdict_label": row_values[1],
-                "stored_verdict_confidence": row_values[2],
-                "stored_policy_alert_level": row_values[3],
-                "stored_policy_confidence_score": row_values[4],
-                "stored_verification_strength": row_values[5],
-                "stored_claim_text": row_values[6],
-                "stored_evidence_summary": row_values[7],
-                "reconstructed_inputs": row_values[8],
-                "attributed_branch_id": row_values[9],
-                "attribution_confidence": row_values[10],
-                "attribution_reason": row_values[11],
-                "is_weak_evidence_verified": row_values[12],
-                "weak_evidence_signals": row_values[13],
-                "diagnostic_timestamp": row_values[14],
-                "notes": row_values[15],
-                "truth_claim": row_values[16],
-                "operator_review_required": row_values[17],
-                "created_at": row_values[18],
-            },
-            ["analysis_id"],
-        )
     return row_id
 
 

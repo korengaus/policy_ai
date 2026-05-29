@@ -849,6 +849,166 @@ def mirror_upsert(
         return False
 
 
+def _select_id_by_conflict(
+    engine: Engine,
+    table: sa.Table,
+    filtered: dict,
+    conflict_columns: list,
+) -> Optional[int]:
+    """Return the ``id`` of the row whose conflict-column values match
+    ``filtered``, or None when no such row exists / the conflict columns
+    are absent from ``filtered``.
+
+    Helper for :func:`mirror_upsert_returning` — used on the SQLite-as-
+    Postgres substitute (where RETURNING on the UPDATE branch is
+    unreliable) and as the ``on_conflict_do_nothing`` fallback on real
+    Postgres. Runs in its own short-lived connection AFTER the upsert
+    transaction has committed, so the row is guaranteed visible."""
+    where_clauses = [
+        table.c[col] == filtered[col]
+        for col in conflict_columns
+        if col in filtered
+    ]
+    if not where_clauses:
+        return None
+    with engine.connect() as conn:
+        row_id = conn.execute(
+            sa.select(table.c.id).where(*where_clauses).limit(1)
+        ).scalar()
+    if row_id is None:
+        return None
+    try:
+        return int(row_id)
+    except (TypeError, ValueError):
+        return None
+
+
+def mirror_upsert_returning(
+    table_name: str,
+    row_dict: dict,
+    conflict_columns: list,
+) -> Optional[int]:
+    """``INSERT ... ON CONFLICT DO UPDATE`` that returns the integer
+    primary key of the inserted-or-updated row.
+
+    M12.0d Stage 3c-3: the id-authoritative variant of
+    :func:`mirror_upsert`, used by ``database.save_producer_comparison``
+    (conflict on ``input_hash``) and
+    ``database.save_verdict_label_attribution`` (conflict on
+    ``analysis_id``) once those tables become PG-only writes. Any ``id``
+    key in ``row_dict`` is stripped before the statement so PG's SERIAL
+    sequence (or the SQLite substitute's autoincrement) owns id
+    assignment.
+
+    On a real Postgres engine the ``RETURNING id`` clause yields the id
+    for BOTH the insert branch and the on-conflict-update branch. On the
+    SQLite-as-Postgres test substitute (non-postgresql dialect) RETURNING
+    on the UPDATE branch is unreliable across SQLAlchemy versions, so the
+    id is recovered with a follow-up ``SELECT id ... WHERE <conflict
+    cols>`` via :func:`_select_id_by_conflict`.
+
+    Returns ``None`` when dual-write is disabled, the table is unknown,
+    ``conflict_columns`` is empty, the operation fails, or no id could be
+    determined. NEVER raises.
+    """
+    engine = get_engine()
+    if engine is None:
+        return None
+    table = _metadata.tables.get(table_name)
+    if table is None:
+        log.warning("mirror_upsert_returning: unknown table %s", table_name)
+        return None
+    if not conflict_columns:
+        # An upsert without a conflict target degenerates to a plain
+        # insert — call mirror_write_returning instead. Defensive: return
+        # None so the caller surfaces the bug.
+        log.warning(
+            "mirror_upsert_returning %s called with empty conflict_columns",
+            table_name,
+        )
+        return None
+    try:
+        filtered = {
+            k: v for k, v in _filter_row(table, row_dict).items()
+            if k != "id"
+        }
+        dialect = engine.dialect.name
+        if dialect == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+            stmt = pg_insert(table).values(**filtered)
+            # On conflict, update everything except the conflict keys
+            # themselves and the synthetic ``id`` column.
+            excluded = set(conflict_columns) | {"id"}
+            update_cols = {
+                k: stmt.excluded[k]
+                for k in filtered.keys()
+                if k not in excluded
+            }
+            if update_cols:
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=list(conflict_columns),
+                    set_=update_cols,
+                )
+            else:
+                stmt = stmt.on_conflict_do_nothing(
+                    index_elements=list(conflict_columns),
+                )
+            stmt = stmt.returning(table.c.id)
+            with engine.begin() as conn:
+                new_id = conn.execute(stmt).scalar()
+            if new_id is not None:
+                return int(new_id)
+            # on_conflict_do_nothing yields no RETURNING row when the row
+            # already exists — recover the existing id by conflict match.
+            return _select_id_by_conflict(
+                engine, table, filtered, conflict_columns,
+            )
+        # Non-Postgres dialect — exercised by the SQLite-as-Postgres
+        # substitute in the test suite. INSERT-or-UPDATE inside one
+        # transaction, then SELECT the id (RETURNING on the UPDATE branch
+        # is unreliable here). Mirrors mirror_upsert's substitute path.
+        with engine.begin() as conn:
+            inserted = False
+            try:
+                conn.execute(sa.insert(table).values(**filtered))
+                inserted = True
+            except SQLAlchemyError:
+                # Likely UNIQUE conflict — fall through to UPDATE.
+                inserted = False
+            if not inserted:
+                update_values = {
+                    k: v
+                    for k, v in filtered.items()
+                    if k not in set(conflict_columns) and k != "id"
+                }
+                where_clauses = [
+                    table.c[col] == filtered[col]
+                    for col in conflict_columns
+                    if col in filtered
+                ]
+                if update_values and where_clauses:
+                    conn.execute(
+                        sa.update(table).where(*where_clauses).values(
+                            **update_values,
+                        ),
+                    )
+        return _select_id_by_conflict(
+            engine, table, filtered, conflict_columns,
+        )
+    except SQLAlchemyError as exc:
+        log.warning(
+            "mirror_upsert_returning %s failed: %s", table_name, exc,
+        )
+        return None
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "mirror_upsert_returning %s unexpected error: %s",
+            table_name, exc,
+        )
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Read helpers — M12.0c-minimal (semantic updated in M12.0d-1).
 #

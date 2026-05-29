@@ -425,6 +425,55 @@ class SqliteSubstituteIntegrationTests(unittest.TestCase):
                 self.assertEqual(row[0], "second")
                 postgres_storage.reset_engine_for_tests()
 
+    def test_mirror_upsert_returning_inserts_then_updates_same_id(self):
+        """M12.0d Stage 3c-3: mirror_upsert_returning returns the row id on
+        insert and the SAME id on a conflicting re-upsert (which updates),
+        exercised against the SQLite-as-Postgres substitute (the id is
+        recovered via the follow-up SELECT-by-conflict path)."""
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                tmp_db = Path(tmp_dir) / "upsert_returning.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{tmp_db}")
+                import postgres_storage
+
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                base_row = {
+                    "analysis_id": "ana-1",
+                    "source": "s",
+                    "input_hash": "h-1",
+                    "producer1_label": "first",
+                    "comparison_timestamp": "2026-05-27T00:00:00",
+                    "truth_claim": 0,
+                    "operator_review_required": 1,
+                    "created_at": "2026-05-27T00:00:00+00:00",
+                }
+                first_id = postgres_storage.mirror_upsert_returning(
+                    "verdict_producer_comparisons", base_row, ["input_hash"],
+                )
+                self.assertIsInstance(first_id, int)
+                self.assertGreater(first_id, 0)
+
+                updated_row = dict(base_row, producer1_label="second")
+                second_id = postgres_storage.mirror_upsert_returning(
+                    "verdict_producer_comparisons", updated_row,
+                    ["input_hash"],
+                )
+                # Same conflict key → same row id, value updated.
+                self.assertEqual(second_id, first_id)
+                with engine.connect() as conn:
+                    row = conn.execute(
+                        sa.text(
+                            "SELECT producer1_label FROM "
+                            "verdict_producer_comparisons "
+                            "WHERE input_hash = :h"
+                        ),
+                        {"h": "h-1"},
+                    ).fetchone()
+                self.assertEqual(row[0], "second")
+                postgres_storage.reset_engine_for_tests()
+
     def test_mirror_write_with_invalid_url_returns_false(self):
         with _EnvScope():
             _set_env(USE_POSTGRES_WRITE="true",
@@ -710,12 +759,136 @@ class DatabaseDualWriteIsolationTests(unittest.TestCase):
                     self.assertEqual(database.get_fetch_artifacts(), [])
                     postgres_storage.reset_engine_for_tests()
 
-    # M12.0d Stage 3c-2/3c-3: review_decisions (3c-2), analysis_results and
-    # source_fetch_artifacts (3c-3) writes are all PG-only when dual-write
-    # is enabled; the SQLite-as-fallback isolation contract no longer
-    # applies. The pre-3c-3 ``..._isolated_from_mirror_write_failure`` tests
-    # were replaced by the PG-only happy-path + pg_write_failed / sentinel
-    # failure-path tests above.
+    def test_save_producer_comparison_pg_only_returns_pg_assigned_id(self):
+        """M12.0d Stage 3c-3: with dual-write enabled and no db_path,
+        save_producer_comparison upserts ONLY to Postgres and returns the
+        PG-assigned id."""
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "iso_pc_local.db"
+                pg_db = Path(tmp_dir) / "iso_pc_substitute.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    row_id = database.save_producer_comparison({
+                        "analysis_id": "ana-pc",
+                        "source": "s",
+                        "input_hash": "h-pc",
+                        "comparison_timestamp": "2026-05-27T00:00:00",
+                    })
+                    self.assertIsInstance(row_id, int)
+                    self.assertGreater(row_id, 0)
+
+                    rows = database.get_producer_comparisons(
+                        analysis_id="ana-pc",
+                    )
+                    self.assertEqual(len(rows), 1)
+                    self.assertEqual(rows[0]["id"], row_id)
+                    postgres_storage.reset_engine_for_tests()
+
+    def test_save_producer_comparison_pg_write_failure_returns_sentinel(self):
+        """M12.0d Stage 3c-3 (Q1 decision, int-return variant): on PG write
+        failure save_producer_comparison returns the sentinel -1 rather than
+        a phantom positive id, with the SQLite write path NOT taken."""
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "iso_pc_fail_local.db"
+                pg_db = Path(tmp_dir) / "iso_pc_fail_substitute.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    with patch.object(
+                        postgres_storage, "mirror_upsert_returning",
+                        lambda *a, **kw: None,
+                    ):
+                        row_id = database.save_producer_comparison({
+                            "analysis_id": "ana-pc-fail",
+                            "source": "s",
+                            "input_hash": "h-pc-fail",
+                            "comparison_timestamp": "2026-05-27T00:00:00",
+                        })
+                    self.assertEqual(row_id, -1)
+                    self.assertEqual(database.get_producer_comparisons(), [])
+                    postgres_storage.reset_engine_for_tests()
+
+    def test_save_verdict_label_attribution_pg_only_returns_pg_assigned_id(self):
+        """M12.0d Stage 3c-3: with dual-write enabled and no db_path,
+        save_verdict_label_attribution upserts ONLY to Postgres and returns
+        the PG-assigned id."""
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "iso_vla_local.db"
+                pg_db = Path(tmp_dir) / "iso_vla_substitute.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    row_id = database.save_verdict_label_attribution({
+                        "analysis_id": "ana-vla",
+                        "diagnostic_timestamp": "2026-05-27T00:00:00",
+                    })
+                    self.assertIsInstance(row_id, int)
+                    self.assertGreater(row_id, 0)
+
+                    rows = database.get_verdict_label_attributions(
+                        analysis_id="ana-vla",
+                    )
+                    self.assertEqual(len(rows), 1)
+                    self.assertEqual(rows[0]["id"], row_id)
+                    postgres_storage.reset_engine_for_tests()
+
+    def test_save_verdict_label_attribution_pg_write_failure_returns_sentinel(self):
+        """M12.0d Stage 3c-3 (Q1 decision, int-return variant): on PG write
+        failure save_verdict_label_attribution returns the sentinel -1
+        rather than a phantom positive id, with the SQLite write path NOT
+        taken."""
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "iso_vla_fail_local.db"
+                pg_db = Path(tmp_dir) / "iso_vla_fail_substitute.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    with patch.object(
+                        postgres_storage, "mirror_upsert_returning",
+                        lambda *a, **kw: None,
+                    ):
+                        row_id = database.save_verdict_label_attribution({
+                            "analysis_id": "ana-vla-fail",
+                            "diagnostic_timestamp": "2026-05-27T00:00:00",
+                        })
+                    self.assertEqual(row_id, -1)
+                    self.assertEqual(
+                        database.get_verdict_label_attributions(), [],
+                    )
+                    postgres_storage.reset_engine_for_tests()
+
+    # M12.0d Stage 3c-2/3c-3: review_decisions (3c-2), analysis_results,
+    # source_fetch_artifacts, verdict_producer_comparisons and
+    # verdict_label_attributions (3c-3) writes are all PG-only when
+    # dual-write is enabled; the SQLite-as-fallback isolation contract no
+    # longer applies. The pre-3c-3 ``..._isolated_from_mirror_write_failure``
+    # tests were replaced by the PG-only happy-path + pg_write_failed /
+    # sentinel failure-path tests above.
 
 
 # ---------------------------------------------------------------------------
@@ -2747,16 +2920,25 @@ class DatabaseOperatorCliFallbackTests(unittest.TestCase):
                     database.init_verdict_producer_comparisons_table()
                     engine = postgres_storage.get_engine()
                     postgres_storage.ensure_schema(engine)
-                    with patch.object(
-                        postgres_storage, "mirror_upsert",
-                        lambda *a, **kw: False,
-                    ):
-                        database.save_producer_comparison({
-                            "analysis_id": "ana-stale",
-                            "source": "s",
-                            "input_hash": "h-stale",
-                            "comparison_timestamp": "2026-05-27T00:00:00",
-                        })
+                    # M12.0d Stage 3c-3: seed a STALE row directly into
+                    # SQLite via raw SQL. Under dual-write, save_producer_
+                    # comparison no longer writes SQLite (PG-only), so we
+                    # bypass it to reproduce the "stale SQLite, empty PG"
+                    # scenario this test pins (PG-empty [] must win).
+                    with database.get_connection() as conn:
+                        conn.execute(
+                            "INSERT INTO verdict_producer_comparisons "
+                            "(analysis_id, source, input_hash, "
+                            "comparison_timestamp, truth_claim, "
+                            "operator_review_required, created_at) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            (
+                                "ana-stale", "s", "h-stale",
+                                "2026-05-27T00:00:00", 0, 1,
+                                "2026-05-27T00:00:00+00:00",
+                            ),
+                        )
+                        conn.commit()
 
                     rows = database.get_producer_comparisons()
                     self.assertEqual(rows, [])
@@ -2812,14 +2994,24 @@ class DatabaseOperatorCliFallbackTests(unittest.TestCase):
                     database.init_verdict_label_attributions_table()
                     engine = postgres_storage.get_engine()
                     postgres_storage.ensure_schema(engine)
-                    with patch.object(
-                        postgres_storage, "mirror_upsert",
-                        lambda *a, **kw: False,
-                    ):
-                        database.save_verdict_label_attribution({
-                            "analysis_id": "ana-stale-vla",
-                            "diagnostic_timestamp": "2026-05-27T00:00:00",
-                        })
+                    # M12.0d Stage 3c-3: seed a STALE row directly into
+                    # SQLite via raw SQL. Under dual-write, save_verdict_
+                    # label_attribution no longer writes SQLite (PG-only),
+                    # so we bypass it to reproduce the "stale SQLite, empty
+                    # PG" scenario this test pins (PG-empty [] must win).
+                    with database.get_connection() as conn:
+                        conn.execute(
+                            "INSERT INTO verdict_label_attributions "
+                            "(analysis_id, diagnostic_timestamp, "
+                            "is_weak_evidence_verified, truth_claim, "
+                            "operator_review_required, created_at) "
+                            "VALUES (?, ?, ?, ?, ?, ?)",
+                            (
+                                "ana-stale-vla", "2026-05-27T00:00:00",
+                                0, 0, 1, "2026-05-27T00:00:00+00:00",
+                            ),
+                        )
+                        conn.commit()
 
                     rows = database.get_verdict_label_attributions()
                     self.assertEqual(rows, [])
