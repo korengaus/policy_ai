@@ -269,6 +269,10 @@ PRESERVED_REAL_ERRORS: tuple[tuple[str, str], ...] = (
 # Any future milestone that legitimately adds log calls bumps this
 # expected count; the contract M14.4 actually pins is the *level
 # distribution*, not the absolute count.
+# M12.0d Stage 3c-3 commit 1 (analysis_results PG-only write): the new
+# log.error in database.py:save_analysis_result (pg_write_failed path)
+# does NOT bump this pin — database.py is NOT in MIGRATED_FILES (the pin
+# scans only the print()-migrated pipeline files). Unchanged at 331.
 EXPECTED_TOTAL_LOG_CALLS = 331
 
 # Post-M14.4: 12 (down from 17 pre-M14.4 — 5 reclassifications).
@@ -293,6 +297,10 @@ EXPECTED_TOTAL_LOG_CALLS = 331
 # name, which this pin's _is_log_method_call helper (L301-316) does
 # NOT match — it matches only {info, warning, error, debug}. So
 # this milestone does NOT bump this pin. Unchanged at 16.
+# M12.0d Stage 3c-3 commit 1 (analysis_results PG-only write): the new
+# log.error in database.py does NOT bump this pin — database.py is NOT
+# in MIGRATED_FILES (the pin scans only the print()-migrated pipeline
+# files). Unchanged at 16.
 EXPECTED_TOTAL_LOG_ERRORS = 16
 
 

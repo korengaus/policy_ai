@@ -474,6 +474,61 @@ def save_analysis_result(result: dict, query: str):
         created_at,
     )
 
+    # M12.0d Stage 3c-3: build the Postgres mirror payload once. The
+    # column order here matches the historical analysis_results INSERT
+    # column list exactly (and the order of the ``values`` tuple above).
+    _ANALYSIS_RESULTS_COLUMN_ORDER = (
+        "query", "title", "original_url", "topic", "policy_alert_level",
+        "market_signal", "policy_confidence_score", "verification_strength",
+        "risk_level", "action_priority", "impact_level", "impact_direction",
+        "market_sensitivity", "consumer_sensitivity", "business_sensitivity",
+        "claim_text", "verdict_label", "verdict_confidence",
+        "evidence_sources", "source_reliability_score",
+        "source_reliability_reason", "evidence_summary", "missing_context",
+        "last_checked_at", "review_status", "claims", "normalized_claims",
+        "source_candidates", "source_queries", "source_reliability_summary",
+        "evidence_snippets", "claim_evidence_map",
+        "evidence_extraction_summary", "contradiction_checks",
+        "contradiction_summary", "bias_framing_analysis",
+        "bias_framing_summary", "debug_summary", "created_at",
+    )
+    row_dict = dict(zip(_ANALYSIS_RESULTS_COLUMN_ORDER, values))
+
+    # M12.0d Stage 3c-3: Postgres is the sole write target when dual-write
+    # is enabled. PG's SERIAL sequence assigns the id (captured via
+    # mirror_write_returning), and that id is the durable handle the rest
+    # of the system uses (jobs.result_id, frontend localStorage,
+    # GET /history/{id}). The 3c-1 sequence-alignment hotfix guarantees
+    # the SERIAL is past any explicitly-written id, so the RETURNING id
+    # never collides. save_analysis_result takes no db_path arg, so the
+    # gate is purely the dual-write flag (matches the 3c-2 model).
+    from postgres_storage import is_postgres_dual_write_enabled
+
+    if is_postgres_dual_write_enabled():
+        pg_id = _mirror_write_returning_safe("analysis_results", row_dict)
+        if pg_id is None:
+            # With the SQLite INSERT gone on this path, a None id means
+            # the row was persisted nowhere. Surface an explicit failure
+            # (the 3c-1 data-loss class) rather than reporting a phantom
+            # save with a fabricated id.
+            log.error(
+                "save_analysis_result PG write returned no id",
+                extra={
+                    "function": "save_analysis_result",
+                    "original_url": original_url,
+                },
+            )
+            return {
+                "saved": False,
+                "duplicate": False,
+                "id": None,
+                "error": "pg_write_failed",
+            }
+        return {"saved": True, "duplicate": False, "id": pg_id}
+
+    # Dual-write disabled (local dev / tests / backfill seeding with
+    # USE_POSTGRES_WRITE unset) — SQLite is the sole store, unchanged
+    # from the pre-3c-3 behaviour. SQLite's AUTOINCREMENT assigns the id.
     with get_connection() as connection:
         cursor = connection.execute(
             """
@@ -523,36 +578,7 @@ def save_analysis_result(result: dict, query: str):
         )
         connection.commit()
 
-    row_id = cursor.lastrowid
-
-    # M12.0a — mirror to Postgres. No-op when USE_POSTGRES_WRITE is
-    # unset. The column order here matches the INSERT above exactly.
-    _ANALYSIS_RESULTS_COLUMN_ORDER = (
-        "query", "title", "original_url", "topic", "policy_alert_level",
-        "market_signal", "policy_confidence_score", "verification_strength",
-        "risk_level", "action_priority", "impact_level", "impact_direction",
-        "market_sensitivity", "consumer_sensitivity", "business_sensitivity",
-        "claim_text", "verdict_label", "verdict_confidence",
-        "evidence_sources", "source_reliability_score",
-        "source_reliability_reason", "evidence_summary", "missing_context",
-        "last_checked_at", "review_status", "claims", "normalized_claims",
-        "source_candidates", "source_queries", "source_reliability_summary",
-        "evidence_snippets", "claim_evidence_map",
-        "evidence_extraction_summary", "contradiction_checks",
-        "contradiction_summary", "bias_framing_analysis",
-        "bias_framing_summary", "debug_summary", "created_at",
-    )
-    row_dict = dict(zip(_ANALYSIS_RESULTS_COLUMN_ORDER, values))
-    # M12.0d Stage 3c-1: do NOT inject the SQLite-assigned id into the
-    # mirror payload. PG's SERIAL sequence assigns the id and that id
-    # is the durable handle the rest of the system uses (jobs.result_id,
-    # frontend localStorage, GET /history/{id}). When PG is disabled or
-    # the mirror fails, ``pg_id`` is None and we fall back to the SQLite
-    # id so local-dev / single-store flows still link correctly.
-    pg_id = _mirror_write_returning_safe("analysis_results", row_dict)
-    returned_id = pg_id if pg_id is not None else row_id
-
-    return {"saved": True, "duplicate": False, "id": returned_id}
+    return {"saved": True, "duplicate": False, "id": cursor.lastrowid}
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:

@@ -538,21 +538,31 @@ class DatabaseDualWriteIsolationTests(unittest.TestCase):
     def _patched_mirror_upsert(self, *args, **kwargs):
         raise RuntimeError("simulated mirror_upsert failure")
 
-    def test_save_analysis_result_isolated_from_mirror_write_failure(self):
+    def test_save_analysis_result_pg_only_returns_pg_assigned_id(self):
+        """M12.0d Stage 3c-3: with dual-write enabled, save_analysis_result
+        writes ONLY to Postgres and returns the PG-assigned (SERIAL) id.
+        Exercised against the SQLite-as-Postgres substitute. Replaces the
+        pre-3c-3 ``..._isolated_from_mirror_write_failure`` test, whose
+        SQLite-survives-mirror-failure contract no longer applies now that
+        the dual-write-enabled path never touches SQLite."""
         from text_utils import sanitize_data
 
         with _EnvScope():
-            _set_env(USE_POSTGRES_WRITE=None, DATABASE_URL=None)
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                tmp_db = Path(tmp_dir) / "isolation_analysis.db"
-                with patch("database.DB_PATH", tmp_db):
+                sqlite_db = Path(tmp_dir) / "iso_pg_local.db"
+                pg_db = Path(tmp_dir) / "iso_pg_substitute.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
                     import database
                     import postgres_storage
 
                     database.init_db()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
                     sample = {
-                        "title": "isolation test",
-                        "original_url": "https://example.com/iso-1",
+                        "title": "pg-only write",
+                        "original_url": "https://example.com/pg-only-1",
                         "topic": "정책",
                         "claim_text": "주장",
                         "verdict_label": "draft_likely_true",
@@ -563,25 +573,75 @@ class DatabaseDualWriteIsolationTests(unittest.TestCase):
                             "verdict_confidence": 70,
                         },
                     }
-                    with patch.object(
-                        postgres_storage, "mirror_write",
-                        self._patched_mirror_write,
-                    ), patch.object(
-                        postgres_storage, "mirror_write_returning",
-                        self._patched_mirror_write,
-                    ):
-                        status = database.save_analysis_result(
-                            sanitize_data(sample), query="iso-test",
-                        )
-                    self.assertTrue(status["saved"])
-                    self.assertEqual(
-                        status["duplicate"], False,
+                    status = database.save_analysis_result(
+                        sanitize_data(sample), query="pg-only-test",
                     )
+                    self.assertTrue(status["saved"])
+                    self.assertFalse(status["duplicate"])
+                    self.assertIsInstance(status["id"], int)
+
+                    # The id is PG-assigned; the row must be readable from
+                    # the PG substitute (get_recent_results is PG-primary).
                     rows = database.get_recent_results(limit=5)
                     self.assertEqual(len(rows), 1)
                     self.assertEqual(
                         rows[0]["original_url"], sample["original_url"],
                     )
+                    self.assertEqual(rows[0]["id"], status["id"])
+                    postgres_storage.reset_engine_for_tests()
+
+    def test_save_analysis_result_pg_write_failure_reports_not_saved(self):
+        """M12.0d Stage 3c-3 (Q1 decision): when the PG write returns no
+        id and the SQLite fallback is gone, save_analysis_result reports an
+        explicit failure (saved=False, id=None, error='pg_write_failed')
+        rather than a phantom save with a fabricated id. Guards against the
+        3c-1 data-loss class."""
+        from text_utils import sanitize_data
+
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "iso_fail_local.db"
+                pg_db = Path(tmp_dir) / "iso_fail_substitute.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    database.init_db()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    sample = {
+                        "title": "pg write fails",
+                        "original_url": "https://example.com/pg-fail-1",
+                        "topic": "정책",
+                        "claim_text": "주장",
+                        "verdict_label": "draft_likely_true",
+                        "verdict_confidence": 70,
+                        "verification_card": {
+                            "claim_text": "주장",
+                            "verdict_label": "draft_likely_true",
+                            "verdict_confidence": 70,
+                        },
+                    }
+                    # mirror_write_returning → None simulates a PG insert
+                    # that assigned no id (driver/SQL failure swallowed by
+                    # _mirror_write_returning_safe).
+                    with patch.object(
+                        postgres_storage, "mirror_write_returning",
+                        lambda *a, **kw: None,
+                    ):
+                        status = database.save_analysis_result(
+                            sanitize_data(sample), query="pg-fail-test",
+                        )
+                    self.assertFalse(status["saved"])
+                    self.assertIsNone(status["id"])
+                    self.assertEqual(status.get("error"), "pg_write_failed")
+
+                    # Nothing persisted to PG, and the SQLite write path is
+                    # NOT taken under dual-write — so PG stays empty.
+                    self.assertEqual(database.get_recent_results(limit=5), [])
+                    postgres_storage.reset_engine_for_tests()
 
     def test_save_fetch_artifact_isolated_from_mirror_write_failure(self):
         with _EnvScope():
@@ -949,35 +1009,27 @@ class DatabaseReadFallbackIntegrationTests(unittest.TestCase):
                     # so read_analysis_result_by_id will return None.
                     engine = postgres_storage.get_engine()
                     postgres_storage.ensure_schema(engine)
-                    # Seed only SQLite (would have been the fallback
-                    # source pre-M12.0d-1; now must be ignored).
-                    sample = {
-                        "title": "from sqlite only",
-                        "original_url": "https://example.com/sqlite-only",
-                        "topic": "정책",
-                        "claim_text": "주장",
-                        "verdict_label": "draft_likely_true",
-                        "verdict_confidence": 70,
-                        "verification_card": {
-                            "claim_text": "주장",
-                            "verdict_label": "draft_likely_true",
-                            "verdict_confidence": 70,
-                        },
-                    }
-                    with patch.object(
-                        postgres_storage, "mirror_write",
-                        lambda *a, **kw: False,
-                    ), patch.object(
-                        postgres_storage, "mirror_write_returning",
-                        lambda *a, **kw: None,
-                    ):
-                        status = database.save_analysis_result(
-                            sanitize_data(sample), query="fallback-miss",
+                    # M12.0d Stage 3c-3: seed a STALE row directly into
+                    # SQLite via raw SQL. Under dual-write,
+                    # save_analysis_result no longer writes SQLite, so we
+                    # bypass it to reproduce the "stale SQLite, empty PG"
+                    # scenario this test pins (PG-empty must win).
+                    with database.get_connection() as conn:
+                        conn.execute(
+                            "INSERT INTO analysis_results "
+                            "(id, query, title, original_url, created_at) "
+                            "VALUES (?, ?, ?, ?, ?)",
+                            (
+                                42, "fallback-miss", "from sqlite only",
+                                "https://example.com/sqlite-only",
+                                "2026-05-27T00:00:00+00:00",
+                            ),
                         )
-                    self.assertTrue(status["saved"])
+                        conn.commit()
 
-                    # Stage 1: PG empty + dual-write enabled → None.
-                    row = database.get_result_by_id(status["id"])
+                    # Stage 1: PG empty + dual-write enabled → None, even
+                    # though SQLite holds id=42.
+                    row = database.get_result_by_id(42)
                     self.assertIsNone(row)
                     postgres_storage.reset_engine_for_tests()
 
@@ -1002,31 +1054,22 @@ class DatabaseReadFallbackIntegrationTests(unittest.TestCase):
                     database.init_db()
                     engine = postgres_storage.get_engine()
                     postgres_storage.ensure_schema(engine)
-                    # Seed SQLite with a row that should NOT leak
-                    # through, but DO NOT mirror to PG.
-                    sample = {
-                        "title": "stale sqlite row",
-                        "original_url": "https://example.com/stale",
-                        "topic": "정책",
-                        "claim_text": "주장",
-                        "verdict_label": "draft_likely_true",
-                        "verdict_confidence": 70,
-                        "verification_card": {
-                            "claim_text": "주장",
-                            "verdict_label": "draft_likely_true",
-                            "verdict_confidence": 70,
-                        },
-                    }
-                    with patch.object(
-                        postgres_storage, "mirror_write",
-                        lambda *a, **kw: False,
-                    ), patch.object(
-                        postgres_storage, "mirror_write_returning",
-                        lambda *a, **kw: None,
-                    ):
-                        database.save_analysis_result(
-                            sanitize_data(sample), query="empty-pg",
+                    # M12.0d Stage 3c-3: seed the stale SQLite row via raw
+                    # SQL (save_analysis_result no longer writes SQLite
+                    # under dual-write). PG stays empty; the stale row must
+                    # NOT leak through.
+                    with database.get_connection() as conn:
+                        conn.execute(
+                            "INSERT INTO analysis_results "
+                            "(id, query, title, original_url, created_at) "
+                            "VALUES (?, ?, ?, ?, ?)",
+                            (
+                                7, "empty-pg", "stale sqlite row",
+                                "https://example.com/stale",
+                                "2026-05-27T00:00:00+00:00",
+                            ),
                         )
+                        conn.commit()
 
                     rows = database.get_recent_results(limit=5)
                     # PG has 0 rows → [] returned authoritatively.
@@ -1925,31 +1968,21 @@ class DatabaseDuplicateDetectionFallbackTests(unittest.TestCase):
                     database.init_db()
                     engine = postgres_storage.get_engine()
                     postgres_storage.ensure_schema(engine)
-                    # Seed SQLite with a row but DO NOT mirror to PG.
-                    sample = {
-                        "title": "stale sqlite row",
-                        "original_url": "https://example.com/stale-only",
-                        "topic": "정책",
-                        "claim_text": "주장",
-                        "verdict_label": "draft_likely_true",
-                        "verdict_confidence": 70,
-                        "verification_card": {
-                            "claim_text": "주장",
-                            "verdict_label": "draft_likely_true",
-                            "verdict_confidence": 70,
-                        },
-                    }
-                    with patch.object(
-                        postgres_storage, "mirror_write",
-                        lambda *a, **kw: False,
-                    ), patch.object(
-                        postgres_storage, "mirror_write_returning",
-                        lambda *a, **kw: None,
-                    ):
-                        database.save_analysis_result(
-                            sanitize_data(sample),
-                            query="stale-test",
+                    # M12.0d Stage 3c-3: seed the stale SQLite row via raw
+                    # SQL (save_analysis_result no longer writes SQLite
+                    # under dual-write). PG stays empty for this URL.
+                    with database.get_connection() as conn:
+                        conn.execute(
+                            "INSERT INTO analysis_results "
+                            "(id, query, title, original_url, created_at) "
+                            "VALUES (?, ?, ?, ?, ?)",
+                            (
+                                1, "stale-test", "stale sqlite row",
+                                "https://example.com/stale-only",
+                                "2026-05-27T00:00:00+00:00",
+                            ),
                         )
+                        conn.commit()
 
                     # PG has 0 rows for this URL → False authoritative.
                     # SQLite has 1 stale row but must be IGNORED.
@@ -2011,32 +2044,21 @@ class DatabaseDuplicateDetectionFallbackTests(unittest.TestCase):
                     database.init_db()
                     engine = postgres_storage.get_engine()
                     postgres_storage.ensure_schema(engine)
-                    # Seed SQLite only; PG stays empty for this URL.
-                    sample = {
-                        "title": "sqlite-only id source",
-                        "original_url": "https://example.com/sqlite-id-only",
-                        "topic": "정책",
-                        "claim_text": "주장",
-                        "verdict_label": "draft_likely_true",
-                        "verdict_confidence": 70,
-                        "verification_card": {
-                            "claim_text": "주장",
-                            "verdict_label": "draft_likely_true",
-                            "verdict_confidence": 70,
-                        },
-                    }
-                    with patch.object(
-                        postgres_storage, "mirror_write",
-                        lambda *a, **kw: False,
-                    ), patch.object(
-                        postgres_storage, "mirror_write_returning",
-                        lambda *a, **kw: None,
-                    ):
-                        status = database.save_analysis_result(
-                            sanitize_data(sample),
-                            query="sqlite-id-test",
+                    # M12.0d Stage 3c-3: seed SQLite only via raw SQL
+                    # (save_analysis_result no longer writes SQLite under
+                    # dual-write). PG stays empty for this URL.
+                    with database.get_connection() as conn:
+                        conn.execute(
+                            "INSERT INTO analysis_results "
+                            "(id, query, title, original_url, created_at) "
+                            "VALUES (?, ?, ?, ?, ?)",
+                            (
+                                3, "sqlite-id-test", "sqlite-only id source",
+                                "https://example.com/sqlite-id-only",
+                                "2026-05-27T00:00:00+00:00",
+                            ),
                         )
-                    self.assertTrue(status["saved"])
+                        conn.commit()
 
                     # PG returns None for this URL → function returns
                     # None (SQLite row is ignored under Stage 1).
