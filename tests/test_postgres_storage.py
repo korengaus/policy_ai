@@ -882,13 +882,145 @@ class DatabaseDualWriteIsolationTests(unittest.TestCase):
                     )
                     postgres_storage.reset_engine_for_tests()
 
-    # M12.0d Stage 3c-2/3c-3: review_decisions (3c-2), analysis_results,
-    # source_fetch_artifacts, verdict_producer_comparisons and
-    # verdict_label_attributions (3c-3) writes are all PG-only when
-    # dual-write is enabled; the SQLite-as-fallback isolation contract no
-    # longer applies. The pre-3c-3 ``..._isolated_from_mirror_write_failure``
-    # tests were replaced by the PG-only happy-path + pg_write_failed /
-    # sentinel failure-path tests above.
+    def test_save_extraction_result_pg_only_returns_pg_assigned_id(self):
+        """M12.0d Stage 3c-3: with dual-write enabled and no db_path,
+        save_extraction_result inserts ONLY to Postgres and returns the
+        PG-assigned id."""
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "iso_ext_local.db"
+                pg_db = Path(tmp_dir) / "iso_ext_substitute.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    row_id = database.save_extraction_result({
+                        "artifact_id": 1,
+                        "source_id": "ext-src",
+                        "url": "https://ext/x",
+                        "extraction_timestamp": "2026-05-27T00:00:00",
+                        "success": True,
+                    })
+                    self.assertIsInstance(row_id, int)
+                    self.assertGreater(row_id, 0)
+
+                    rows = database.get_extraction_results(
+                        source_id="ext-src",
+                    )
+                    self.assertEqual(len(rows), 1)
+                    self.assertEqual(rows[0]["id"], row_id)
+                    postgres_storage.reset_engine_for_tests()
+
+    def test_save_extraction_result_pg_write_failure_returns_sentinel(self):
+        """M12.0d Stage 3c-3 (Q1 decision, int-return variant): on PG write
+        failure save_extraction_result returns the sentinel -1 rather than a
+        phantom positive id, with the SQLite write path NOT taken."""
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "iso_ext_fail_local.db"
+                pg_db = Path(tmp_dir) / "iso_ext_fail_substitute.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    with patch.object(
+                        postgres_storage, "mirror_write_returning",
+                        lambda *a, **kw: None,
+                    ):
+                        row_id = database.save_extraction_result({
+                            "artifact_id": 1,
+                            "source_id": "ext-src-fail",
+                            "url": "https://ext/fail",
+                            "extraction_timestamp": "2026-05-27T00:00:00",
+                            "success": True,
+                        })
+                    self.assertEqual(row_id, -1)
+                    self.assertEqual(database.get_extraction_results(), [])
+                    postgres_storage.reset_engine_for_tests()
+
+    def test_save_evidence_candidate_pg_only_returns_pg_assigned_id(self):
+        """M12.0d Stage 3c-3: with dual-write enabled and no db_path,
+        save_evidence_candidate inserts ONLY to Postgres and returns the
+        PG-assigned id."""
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "iso_ec_local.db"
+                pg_db = Path(tmp_dir) / "iso_ec_substitute.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    row_id = database.save_evidence_candidate({
+                        "extraction_id": 1,
+                        "source_id": "ec-src",
+                        "url": "https://ec/x",
+                        "analysis_id": "ana-ec",
+                        "claim_text": "claim",
+                        "candidate_timestamp": "2026-05-27T00:00:00",
+                    })
+                    self.assertIsInstance(row_id, int)
+                    self.assertGreater(row_id, 0)
+
+                    rows = database.get_evidence_candidates(
+                        analysis_id="ana-ec",
+                    )
+                    self.assertEqual(len(rows), 1)
+                    self.assertEqual(rows[0]["id"], row_id)
+                    postgres_storage.reset_engine_for_tests()
+
+    def test_save_evidence_candidate_pg_write_failure_returns_sentinel(self):
+        """M12.0d Stage 3c-3 (Q1 decision, int-return variant): on PG write
+        failure save_evidence_candidate returns the sentinel -1 rather than a
+        phantom positive id, with the SQLite write path NOT taken."""
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "iso_ec_fail_local.db"
+                pg_db = Path(tmp_dir) / "iso_ec_fail_substitute.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    with patch.object(
+                        postgres_storage, "mirror_write_returning",
+                        lambda *a, **kw: None,
+                    ):
+                        row_id = database.save_evidence_candidate({
+                            "extraction_id": 1,
+                            "source_id": "ec-src-fail",
+                            "url": "https://ec/fail",
+                            "analysis_id": "ana-ec-fail",
+                            "claim_text": "claim",
+                            "candidate_timestamp": "2026-05-27T00:00:00",
+                        })
+                    self.assertEqual(row_id, -1)
+                    self.assertEqual(database.get_evidence_candidates(), [])
+                    postgres_storage.reset_engine_for_tests()
+
+    # M12.0d Stage 3c-2/3c-3: review_decisions (3c-2) plus the six
+    # integer-PK tables of 3c-3 — analysis_results, source_fetch_artifacts,
+    # verdict_producer_comparisons, verdict_label_attributions,
+    # artifact_text_extractions and artifact_evidence_candidates — are all
+    # PG-only writes when dual-write is enabled; the SQLite-as-fallback
+    # isolation contract no longer applies. The pre-3c-3
+    # ``..._isolated_from_mirror_write_failure`` tests were replaced by the
+    # PG-only happy-path + pg_write_failed / sentinel failure-path tests
+    # above. (embedding_cache remains dual-write — Q4 deferral.)
 
 
 # ---------------------------------------------------------------------------
@@ -2796,17 +2928,25 @@ class DatabaseOperatorCliFallbackTests(unittest.TestCase):
                     database.init_artifact_text_extractions_table()
                     engine = postgres_storage.get_engine()
                     postgres_storage.ensure_schema(engine)
-                    with patch.object(
-                        postgres_storage, "mirror_write",
-                        lambda *a, **kw: False,
-                    ):
-                        database.save_extraction_result({
-                            "artifact_id": 1,
-                            "source_id": "stale",
-                            "url": "https://stale/y",
-                            "extraction_timestamp": "2026-05-27T00:00:00",
-                            "success": True,
-                        })
+                    # M12.0d Stage 3c-3: seed a STALE row directly into
+                    # SQLite via raw SQL. Under dual-write, save_extraction_
+                    # result no longer writes SQLite (PG-only), so we bypass
+                    # it to reproduce the "stale SQLite, empty PG" scenario
+                    # this test pins (PG-empty [] must win).
+                    with database.get_connection() as conn:
+                        conn.execute(
+                            "INSERT INTO artifact_text_extractions "
+                            "(artifact_id, source_id, url, "
+                            "extraction_timestamp, success, truth_claim, "
+                            "official_source_candidate, created_at) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                            (
+                                1, "stale", "https://stale/y",
+                                "2026-05-27T00:00:00", 1, 0, 0,
+                                "2026-05-27T00:00:00+00:00",
+                            ),
+                        )
+                        conn.commit()
 
                     rows = database.get_extraction_results()
                     self.assertEqual(rows, [])
@@ -2861,16 +3001,26 @@ class DatabaseOperatorCliFallbackTests(unittest.TestCase):
                     database.init_artifact_evidence_candidates_table()
                     engine = postgres_storage.get_engine()
                     postgres_storage.ensure_schema(engine)
-                    with patch.object(
-                        postgres_storage, "mirror_write",
-                        lambda *a, **kw: False,
-                    ):
-                        database.save_evidence_candidate({
-                            "extraction_id": 1, "source_id": "stale",
-                            "url": "u", "analysis_id": "ana-stale",
-                            "claim_text": "c",
-                            "candidate_timestamp": "2026-05-27T00:00:00",
-                        })
+                    # M12.0d Stage 3c-3: seed a STALE row directly into
+                    # SQLite via raw SQL. Under dual-write, save_evidence_
+                    # candidate no longer writes SQLite (PG-only), so we
+                    # bypass it to reproduce the "stale SQLite, empty PG"
+                    # scenario this test pins (PG-empty [] must win).
+                    with database.get_connection() as conn:
+                        conn.execute(
+                            "INSERT INTO artifact_evidence_candidates "
+                            "(extraction_id, source_id, url, analysis_id, "
+                            "claim_text, candidate_timestamp, match_score, "
+                            "truth_claim, official_source_candidate, "
+                            "operator_review_required, created_at) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            (
+                                1, "stale", "u", "ana-stale", "c",
+                                "2026-05-27T00:00:00", 0.0, 0, 0, 1,
+                                "2026-05-27T00:00:00+00:00",
+                            ),
+                        )
+                        conn.commit()
 
                     rows = database.get_evidence_candidates()
                     self.assertEqual(rows, [])

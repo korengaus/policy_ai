@@ -1644,6 +1644,53 @@ def save_extraction_result(result_dict: dict, db_path: str = None) -> int:
         1 if result_dict.get("official_source_candidate") else 0,
         created_at,
     )
+    # M12.0d Stage 3c-3: build the Postgres mirror payload once (column
+    # order matches the historical artifact_text_extractions INSERT).
+    mirror_payload = {
+        "artifact_id": row_values[0],
+        "source_id": row_values[1],
+        "url": row_values[2],
+        "extraction_timestamp": row_values[3],
+        "extraction_duration_ms": row_values[4],
+        "success": row_values[5],
+        "error": row_values[6],
+        "title": row_values[7],
+        "main_text": row_values[8],
+        "sections": row_values[9],
+        "word_count": row_values[10],
+        "language_hint": row_values[11],
+        "truth_claim": row_values[12],
+        "official_source_candidate": row_values[13],
+        "created_at": row_values[14],
+    }
+
+    # M12.0d Stage 3c-3: Postgres is the sole write target when dual-write
+    # is enabled AND no explicit db_path was supplied. An explicit db_path
+    # opts into an isolated SQLite file (CLI --db-path / tests) and MUST
+    # keep the SQLite write. PG's SERIAL sequence assigns the id (captured
+    # via mirror_write_returning); the function keeps its ``-> int``
+    # contract, returning the sentinel ``-1`` on PG write failure (the
+    # 3c-1 data-loss class, surfaced via log.error).
+    from postgres_storage import is_postgres_dual_write_enabled
+
+    if is_postgres_dual_write_enabled() and db_path is None:
+        pg_id = _mirror_write_returning_safe(
+            "artifact_text_extractions", mirror_payload,
+        )
+        if pg_id is None:
+            log.error(
+                "save_extraction_result PG write returned no id",
+                extra={
+                    "function": "save_extraction_result",
+                    "artifact_id": row_values[0],
+                    "source_id": row_values[1],
+                },
+            )
+            return -1
+        return pg_id
+
+    # Dual-write disabled OR explicit db_path — SQLite is the write target
+    # (unchanged behaviour). SQLite's AUTOINCREMENT assigns the id.
     connection = _open_connection(db_path)
     try:
         _ensure_artifact_text_extractions_table(connection)
@@ -1662,32 +1709,6 @@ def save_extraction_result(result_dict: dict, db_path: str = None) -> int:
         row_id = int(cursor.lastrowid)
     finally:
         connection.close()
-
-    # M12.0a — mirror to Postgres. Honoured only when db_path was None
-    # (i.e. the real DB_PATH). Tests that pass a custom db_path are
-    # exercising isolated SQLite files; mirroring those to a shared
-    # Postgres would corrupt the mirror's ids.
-    if db_path is None:
-        _mirror_write_safe(
-            "artifact_text_extractions",
-            {
-                "artifact_id": row_values[0],
-                "source_id": row_values[1],
-                "url": row_values[2],
-                "extraction_timestamp": row_values[3],
-                "extraction_duration_ms": row_values[4],
-                "success": row_values[5],
-                "error": row_values[6],
-                "title": row_values[7],
-                "main_text": row_values[8],
-                "sections": row_values[9],
-                "word_count": row_values[10],
-                "language_hint": row_values[11],
-                "truth_claim": row_values[12],
-                "official_source_candidate": row_values[13],
-                "created_at": row_values[14],
-            },
-        )
     return row_id
 
 
@@ -1915,6 +1936,52 @@ def save_evidence_candidate(candidate_dict: dict, db_path: str = None) -> int:
         candidate_dict.get("notes"),
         created_at,
     )
+    # M12.0d Stage 3c-3: build the Postgres mirror payload once (column
+    # order matches the historical artifact_evidence_candidates INSERT).
+    mirror_payload = {
+        "extraction_id": row_values[0],
+        "source_id": row_values[1],
+        "url": row_values[2],
+        "analysis_id": row_values[3],
+        "claim_text": row_values[4],
+        "match_score": row_values[5],
+        "matched_tokens": row_values[6],
+        "supporting_passage": row_values[7],
+        "candidate_timestamp": row_values[8],
+        "truth_claim": row_values[9],
+        "official_source_candidate": row_values[10],
+        "operator_review_required": row_values[11],
+        "notes": row_values[12],
+        "created_at": row_values[13],
+    }
+
+    # M12.0d Stage 3c-3: Postgres is the sole write target when dual-write
+    # is enabled AND no explicit db_path was supplied. An explicit db_path
+    # opts into an isolated SQLite file (CLI --db-path / tests) and MUST
+    # keep the SQLite write. PG's SERIAL sequence assigns the id (captured
+    # via mirror_write_returning); the function keeps its ``-> int``
+    # contract, returning the sentinel ``-1`` on PG write failure (the
+    # 3c-1 data-loss class, surfaced via log.error).
+    from postgres_storage import is_postgres_dual_write_enabled
+
+    if is_postgres_dual_write_enabled() and db_path is None:
+        pg_id = _mirror_write_returning_safe(
+            "artifact_evidence_candidates", mirror_payload,
+        )
+        if pg_id is None:
+            log.error(
+                "save_evidence_candidate PG write returned no id",
+                extra={
+                    "function": "save_evidence_candidate",
+                    "analysis_id": row_values[3],
+                    "extraction_id": row_values[0],
+                },
+            )
+            return -1
+        return pg_id
+
+    # Dual-write disabled OR explicit db_path — SQLite is the write target
+    # (unchanged behaviour). SQLite's AUTOINCREMENT assigns the id.
     connection = _open_connection(db_path)
     try:
         _ensure_artifact_evidence_candidates_table(connection)
@@ -1934,29 +2001,6 @@ def save_evidence_candidate(candidate_dict: dict, db_path: str = None) -> int:
         row_id = int(cursor.lastrowid)
     finally:
         connection.close()
-
-    # M12.0a — mirror to Postgres. Skip when db_path is custom (test
-    # SQLite files use their own id-space).
-    if db_path is None:
-        _mirror_write_safe(
-            "artifact_evidence_candidates",
-            {
-                "extraction_id": row_values[0],
-                "source_id": row_values[1],
-                "url": row_values[2],
-                "analysis_id": row_values[3],
-                "claim_text": row_values[4],
-                "match_score": row_values[5],
-                "matched_tokens": row_values[6],
-                "supporting_passage": row_values[7],
-                "candidate_timestamp": row_values[8],
-                "truth_claim": row_values[9],
-                "official_source_candidate": row_values[10],
-                "operator_review_required": row_values[11],
-                "notes": row_values[12],
-                "created_at": row_values[13],
-            },
-        )
     return row_id
 
 
