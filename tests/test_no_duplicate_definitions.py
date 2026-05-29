@@ -265,7 +265,6 @@ _KNOWN_CROSS_FILE_NAME_COLLISIONS: frozenset[str] = frozenset({
     "_reconstruct_claim_count",
     "_reconstruct_evidence_comparison",
     "_response_from_cache_entry",
-    "_row_to_dict",
     "_safe_json_load",
     "_same_domain",
     "_split_sentences",
