@@ -4,11 +4,14 @@ M12.0d Stage 3c-2: Postgres is the sole write target for the ``jobs``
 table. ``create_job`` mirrors a fresh row via
 :func:`postgres_storage.mirror_write`; ``start_job`` / ``update_progress``
 / ``complete_job`` / ``fail_job`` apply field-level updates via
-:func:`postgres_storage.pg_update_job_fields`. SQLite ``jobs`` rows are
-no longer written; the ``_current_status`` / ``get_job_status`` SQLite
-fallback branches remain in place for local-dev (``USE_POSTGRES_WRITE``
-unset) and are dead code on the production Worker. They will be removed
-in 3c-4 cleanup.
+:func:`postgres_storage.pg_update_job_fields`.
+
+M12.0d Stage 3c-4: the ``_current_status`` / ``get_job_status`` SQLite
+read fallbacks were removed. Since 3c-2 the ``jobs`` table has had no
+SQLite writer on any supported path (``create_job`` is PG-mirror-only and
+there is no ``db_path`` path for jobs), so those fallbacks read a
+permanently empty table — behaviourally identical to the PG read helpers
+returning None when dual-write is disabled. Reads are now PG-only.
 """
 from __future__ import annotations
 
@@ -55,23 +58,22 @@ def _pipeline_version() -> str:
     return os.getenv("PIPELINE_VERSION", "phase2-m2")
 
 
-def _mirror_jobs_safe(*, upsert: bool, row_dict: dict) -> None:
-    """M12.0c-jobs — best-effort dual-write to postgres_storage.jobs_table.
+def _mirror_jobs_safe(row_dict: dict) -> None:
+    """M12.0c-jobs / M12.0d Stage 3c-4 — best-effort PG mirror write of a
+    fresh ``jobs`` row.
 
-    Mirrors the *current state* of a job row into the postgres_storage
-    jobs mirror, matching the table-level mirroring used by
-    analysis_results / review_tasks / etc. since M12.0a.
+    ``create_job`` is the only caller and always inserts a brand-new row
+    (caller-supplied UUID-hex id), so a plain ``mirror_write`` is correct.
+    The prior ``upsert`` branch was dead (no caller ever passed
+    ``upsert=True``) and was removed in 3c-4.
 
-    NEVER raises. SQLite remains source of truth — any Postgres failure
-    is logged inside ``mirror_write`` / ``mirror_upsert`` and swallowed
-    here as well (belt-and-braces)."""
+    NEVER raises. Postgres is the source of truth; any Postgres failure is
+    logged inside ``mirror_write`` and swallowed here as well
+    (belt-and-braces)."""
     try:
-        from postgres_storage import mirror_upsert, mirror_write
+        from postgres_storage import mirror_write
 
-        if upsert:
-            mirror_upsert("jobs", row_dict, ["id"])
-        else:
-            mirror_write("jobs", row_dict)
+        mirror_write("jobs", row_dict)
     except Exception:  # noqa: BLE001 — Postgres failures must not surface
         pass
 
@@ -114,7 +116,7 @@ def create_job(query: str, max_news: int) -> dict:
         "completed_at": None,
         "pipeline_version": pipeline_version,
     }
-    _mirror_jobs_safe(upsert=False, row_dict=record)
+    _mirror_jobs_safe(row_dict=record)
     logger.info("Job created: id=%s query=%s max_news=%s", job_id, query, max_news)
     return record
 
@@ -123,9 +125,13 @@ def _current_status(job_id: str) -> Optional[str]:
     """Return the current ``status`` of a job, or None if unknown.
 
     M12.0d Stage 3b: PG-primary for the idempotency guard so the read
-    survives Worker restarts (SQLite is ephemeral on Render). Falls
-    back to SQLite when PG dual-write is disabled (local dev / tests),
-    matching the ``database.py`` lazy-import + PG-primary pattern."""
+    survives Worker restarts (SQLite is ephemeral on Render).
+
+    M12.0d Stage 3c-4: the SQLite fallback was removed. Jobs have had no
+    SQLite writer since 3c-2 (``create_job`` is PG-mirror-only, no
+    ``db_path`` path), so the fallback read a permanently empty table —
+    behaviourally identical to ``read_job_status`` returning None when
+    dual-write is disabled (engine is None)."""
     try:
         from postgres_storage import (
             is_postgres_dual_write_enabled,
@@ -141,18 +147,10 @@ def _current_status(job_id: str) -> Optional[str]:
         raise
     if pg_enabled:
         return read_job_status(job_id)
-    # SQLite fallback — only reached when dual-write is disabled (no
-    # DATABASE_URL or USE_POSTGRES_DUAL_WRITE off). Stage 3c will
-    # remove the SQLite jobs writes; until then this fallback keeps
-    # local-dev / test environments correct.
-    with get_connection() as connection:
-        row = connection.execute(
-            "SELECT status FROM jobs WHERE id = ?",
-            (job_id,),
-        ).fetchone()
-    if row is None:
-        return None
-    return row["status"]
+    # Dual-write disabled: no jobs writer exists on any supported path, so
+    # there is nothing to read (read_job_status would also return None here
+    # via the engine-None path).
+    return None
 
 
 def start_job(job_id: str) -> None:
@@ -283,16 +281,11 @@ def get_job_status(job_id: str) -> Optional[dict]:
             return pg_row
         # PG returned None = job not found (or engine miss).
         return None
-    with get_connection() as connection:
-        row = connection.execute(
-            "SELECT * FROM jobs WHERE id = ?",
-            (job_id,),
-        ).fetchone()
-    record = _row_to_dict(row)
-    if record is None:
-        return None
-    record["job_id"] = record.get("id")
-    return record
+    # M12.0d Stage 3c-4: SQLite fallback removed. Jobs have no SQLite
+    # writer on any supported path (see module docstring / _current_status),
+    # so this point — reached only when dual-write is disabled — has
+    # nothing to return.
+    return None
 
 
 def get_job_result(job_id: str) -> Optional[dict]:
