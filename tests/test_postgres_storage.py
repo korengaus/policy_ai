@@ -528,15 +528,11 @@ class SchemaParityTests(unittest.TestCase):
 
 
 class DatabaseDualWriteIsolationTests(unittest.TestCase):
-    """Confirms that even if postgres_storage's exported helpers raise
-    unexpectedly, the SQLite write path in database.py still succeeds
-    and returns its normal payload."""
-
-    def _patched_mirror_write(self, *args, **kwargs):
-        raise RuntimeError("simulated mirror_write failure")
-
-    def _patched_mirror_upsert(self, *args, **kwargs):
-        raise RuntimeError("simulated mirror_upsert failure")
+    """M12.0d Stage 3c-3: exercises the PG-only write contract for the
+    integer-PK tables (analysis_results, source_fetch_artifacts) under the
+    SQLite-as-Postgres substitute — the PG-assigned id is returned on
+    success, and a failed PG write surfaces an explicit failure (no phantom
+    id) rather than silently falling back to SQLite."""
 
     def test_save_analysis_result_pg_only_returns_pg_assigned_id(self):
         """M12.0d Stage 3c-3: with dual-write enabled, save_analysis_result
@@ -643,16 +639,60 @@ class DatabaseDualWriteIsolationTests(unittest.TestCase):
                     self.assertEqual(database.get_recent_results(limit=5), [])
                     postgres_storage.reset_engine_for_tests()
 
-    def test_save_fetch_artifact_isolated_from_mirror_write_failure(self):
+    def test_save_fetch_artifact_pg_only_returns_pg_assigned_id(self):
+        """M12.0d Stage 3c-3: with dual-write enabled, save_fetch_artifact
+        writes ONLY to Postgres and returns the PG-assigned id (the value
+        the operator CLI prints as saved_row_id). Replaces the pre-3c-3
+        ``..._isolated_from_mirror_write_failure`` test."""
         with _EnvScope():
-            _set_env(USE_POSTGRES_WRITE=None, DATABASE_URL=None)
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                tmp_db = Path(tmp_dir) / "isolation_fetch.db"
-                with patch("database.DB_PATH", tmp_db):
+                sqlite_db = Path(tmp_dir) / "iso_fetch_local.db"
+                pg_db = Path(tmp_dir) / "iso_fetch_substitute.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
                     import database
                     import postgres_storage
 
                     database.init_source_fetch_artifacts_table()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
+                    fetch_result = {
+                        "source_id": "kr_law_open_data_candidate",
+                        "url": "https://www.law.go.kr/x",
+                        "fetch_timestamp": "2026-05-23T00:00:00",
+                        "success": True,
+                    }
+                    row_id = database.save_fetch_artifact(fetch_result)
+                    self.assertIsInstance(row_id, int)
+                    self.assertGreater(row_id, 0)
+
+                    artifacts = database.get_fetch_artifacts(
+                        source_id="kr_law_open_data_candidate",
+                    )
+                    self.assertEqual(len(artifacts), 1)
+                    self.assertEqual(artifacts[0]["id"], row_id)
+                    postgres_storage.reset_engine_for_tests()
+
+    def test_save_fetch_artifact_pg_write_failure_returns_sentinel(self):
+        """M12.0d Stage 3c-3 (Q1 decision, int-return variant): when the
+        PG write returns no id and the SQLite fallback is gone,
+        save_fetch_artifact returns the sentinel -1 (never a real row id)
+        rather than a phantom positive id. Guards the 3c-1 data-loss class
+        while preserving the ``-> int`` contract."""
+        with _EnvScope():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+                sqlite_db = Path(tmp_dir) / "iso_fetch_fail_local.db"
+                pg_db = Path(tmp_dir) / "iso_fetch_fail_substitute.db"
+                _set_env(USE_POSTGRES_WRITE="true",
+                         DATABASE_URL=f"sqlite:///{pg_db}")
+                with patch("database.DB_PATH", sqlite_db):
+                    import database
+                    import postgres_storage
+
+                    database.init_source_fetch_artifacts_table()
+                    engine = postgres_storage.get_engine()
+                    postgres_storage.ensure_schema(engine)
                     fetch_result = {
                         "source_id": "kr_law_open_data_candidate",
                         "url": "https://www.law.go.kr/x",
@@ -660,23 +700,22 @@ class DatabaseDualWriteIsolationTests(unittest.TestCase):
                         "success": True,
                     }
                     with patch.object(
-                        postgres_storage, "mirror_write",
-                        self._patched_mirror_write,
+                        postgres_storage, "mirror_write_returning",
+                        lambda *a, **kw: None,
                     ):
                         row_id = database.save_fetch_artifact(fetch_result)
-                    self.assertGreater(row_id, 0)
-                    artifacts = database.get_fetch_artifacts(
-                        source_id="kr_law_open_data_candidate",
-                    )
-                    self.assertEqual(len(artifacts), 1)
+                    self.assertEqual(row_id, -1)
 
-    # M12.0d Stage 3c-2: review_decisions writes are PG-only; the
-    # SQLite-as-fallback isolation contract no longer applies. The
-    # equivalent test for record_review_decision was removed when
-    # 3c-2 dropped the SQLite INSERT block from that function. The
-    # other two tests in this class (save_analysis_result,
-    # save_fetch_artifact) remain because those tables are integer-PK
-    # and still dual-write to SQLite until 3c-3.
+                    # Nothing persisted to PG; SQLite write path NOT taken.
+                    self.assertEqual(database.get_fetch_artifacts(), [])
+                    postgres_storage.reset_engine_for_tests()
+
+    # M12.0d Stage 3c-2/3c-3: review_decisions (3c-2), analysis_results and
+    # source_fetch_artifacts (3c-3) writes are all PG-only when dual-write
+    # is enabled; the SQLite-as-fallback isolation contract no longer
+    # applies. The pre-3c-3 ``..._isolated_from_mirror_write_failure`` tests
+    # were replaced by the PG-only happy-path + pg_write_failed / sentinel
+    # failure-path tests above.
 
 
 # ---------------------------------------------------------------------------
@@ -2519,17 +2558,24 @@ class DatabaseOperatorCliFallbackTests(unittest.TestCase):
                     database.init_source_fetch_artifacts_table()
                     engine = postgres_storage.get_engine()
                     postgres_storage.ensure_schema(engine)
-                    # Seed SQLite only; suppress PG mirror.
-                    with patch.object(
-                        postgres_storage, "mirror_write",
-                        lambda *a, **kw: False,
-                    ):
-                        database.save_fetch_artifact({
-                            "source_id": "sqlite-only",
-                            "url": "https://stale/x",
-                            "fetch_timestamp": "2026-05-27T00:00:00",
-                            "success": True,
-                        })
+                    # M12.0d Stage 3c-3: seed a STALE row directly into
+                    # SQLite via raw SQL. Under dual-write, save_fetch_artifact
+                    # no longer writes SQLite (PG-only), so we bypass it to
+                    # reproduce the "stale SQLite, empty PG" scenario this
+                    # test pins (PG-empty [] must win).
+                    with database.get_connection() as conn:
+                        conn.execute(
+                            "INSERT INTO source_fetch_artifacts "
+                            "(source_id, url, fetch_timestamp, success, "
+                            "truth_claim, official_source_candidate, "
+                            "created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            (
+                                "sqlite-only", "https://stale/x",
+                                "2026-05-27T00:00:00", 1, 0, 0,
+                                "2026-05-27T00:00:00+00:00",
+                            ),
+                        )
+                        conn.commit()
 
                     rows = database.get_fetch_artifacts()
                     self.assertEqual(rows, [])

@@ -1377,6 +1377,54 @@ def save_fetch_artifact(fetch_result: dict) -> int:
         1 if fetch_result.get("official_source_candidate") else 0,
         created_at,
     )
+    # M12.0d Stage 3c-3: build the Postgres mirror payload once (column
+    # order matches the historical source_fetch_artifacts INSERT).
+    mirror_payload = {
+        "source_id": row_values[0],
+        "url": row_values[1],
+        "fetch_timestamp": row_values[2],
+        "status_code": row_values[3],
+        "content_type": row_values[4],
+        "success": row_values[5],
+        "error": row_values[6],
+        "text_content": row_values[7],
+        "raw_html": row_values[8],
+        "fetch_duration_ms": row_values[9],
+        "truth_claim": row_values[10],
+        "official_source_candidate": row_values[11],
+        "created_at": row_values[12],
+    }
+
+    # M12.0d Stage 3c-3: Postgres is the sole write target when dual-write
+    # is enabled. PG's SERIAL sequence assigns the id (captured via
+    # mirror_write_returning); the returned id is the value the operator
+    # CLI (scripts/fetch_registry_source.py) prints as ``saved_row_id``.
+    # save_fetch_artifact takes no db_path arg, so the gate is purely the
+    # dual-write flag (matches the 3c-2 model). The function keeps its
+    # ``-> int`` contract: on PG write failure it returns the sentinel
+    # ``-1`` (an impossible real row id) rather than a phantom positive id
+    # — the 3c-1 data-loss class, surfaced explicitly via log.error.
+    from postgres_storage import is_postgres_dual_write_enabled
+
+    if is_postgres_dual_write_enabled():
+        pg_id = _mirror_write_returning_safe(
+            "source_fetch_artifacts", mirror_payload,
+        )
+        if pg_id is None:
+            log.error(
+                "save_fetch_artifact PG write returned no id",
+                extra={
+                    "function": "save_fetch_artifact",
+                    "source_id": row_values[0],
+                    "url": row_values[1],
+                },
+            )
+            return -1
+        return pg_id
+
+    # Dual-write disabled (local dev / tests / backfill seeding with
+    # USE_POSTGRES_WRITE unset) — SQLite is the sole store, unchanged
+    # from the pre-3c-3 behaviour. SQLite's AUTOINCREMENT assigns the id.
     with get_connection() as connection:
         _ensure_source_fetch_artifacts_table(connection)
         cursor = connection.execute(
@@ -1393,26 +1441,6 @@ def save_fetch_artifact(fetch_result: dict) -> int:
         )
         connection.commit()
         row_id = int(cursor.lastrowid)
-
-    # M12.0a — mirror to Postgres.
-    _mirror_write_safe(
-        "source_fetch_artifacts",
-        {
-            "source_id": row_values[0],
-            "url": row_values[1],
-            "fetch_timestamp": row_values[2],
-            "status_code": row_values[3],
-            "content_type": row_values[4],
-            "success": row_values[5],
-            "error": row_values[6],
-            "text_content": row_values[7],
-            "raw_html": row_values[8],
-            "fetch_duration_ms": row_values[9],
-            "truth_claim": row_values[10],
-            "official_source_candidate": row_values[11],
-            "created_at": row_values[12],
-        },
-    )
     return row_id
 
 
