@@ -251,11 +251,13 @@ class SeedingTests(_DemoTestBase):
         result = demo.prepare_demo(db_path=target, reset=True)
         self.assertTrue(result.passed, msg=result.errors)
         self.assertGreaterEqual(len(result.seeded_task_ids), 1)
-        # Inspect the seeded row via the database helpers directly.
-        import database, review_workflow
-        original = database.DB_PATH
-        database.DB_PATH = target
-        try:
+        # M12.0d Stage 3d Commit A: read the seeded rows through the
+        # substitute (dual-write ON) so list_review_tasks /
+        # list_review_decisions take the PG-primary branch. The previous
+        # bare DB_PATH swap (dual-write OFF) hit the SQLite-direct fallback
+        # that Commit B removes; reusing _override_database_path keeps this
+        # test off that fallback.
+        with demo._override_database_path(target) as database:
             tasks = database.list_review_tasks()
             self.assertGreaterEqual(len(tasks), 1)
             task = tasks[0]
@@ -271,8 +273,6 @@ class SeedingTests(_DemoTestBase):
             self.assertEqual(
                 decisions[0]["decision"], "needs_more_evidence",
             )
-        finally:
-            database.DB_PATH = original
 
 
 # ---------------------------------------------------------------------------
@@ -385,10 +385,10 @@ class KoreanReadabilityTests(_DemoTestBase):
         target = self._new_demo_db()
         result = demo.prepare_demo(db_path=target, reset=True)
         self.assertTrue(result.passed)
-        import database
-        original = database.DB_PATH
-        database.DB_PATH = target
-        try:
+        # M12.0d Stage 3d Commit A: read via the substitute (dual-write ON)
+        # so list_review_tasks takes the PG-primary branch instead of the
+        # SQLite-direct fallback that Commit B removes.
+        with demo._override_database_path(target) as database:
             tasks = database.list_review_tasks()
             self.assertGreaterEqual(len(tasks), 1)
             self.assertIn(
@@ -397,8 +397,6 @@ class KoreanReadabilityTests(_DemoTestBase):
             )
             self.assertIn("청년 월세 지원", tasks[0]["query"])
             self.assertIn("청년 월세 지원", tasks[0]["title"])
-        finally:
-            database.DB_PATH = original
 
 
 # ---------------------------------------------------------------------------
