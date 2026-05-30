@@ -991,13 +991,8 @@ def get_review_task_by_idempotency_key(idempotency_key: str):
         if pg_row is not None:
             return _row_to_review_task(pg_row)
         return None
-    with get_connection() as connection:
-        _ensure_review_tables(connection)
-        row = connection.execute(
-            "SELECT * FROM review_tasks WHERE idempotency_key = ?",
-            (idempotency_key,),
-        ).fetchone()
-    return _row_to_review_task(row) if row else None
+    # Stage 3d Commit B: SQLite read-fallback removed (dual-write OFF → no review data)
+    return None
 
 
 def create_review_task(*, task_id: str, result_id, job_id, item_index: int,
@@ -1079,13 +1074,8 @@ def get_review_task(task_id: str):
         if pg_row is not None:
             return _row_to_review_task(pg_row)
         return None
-    with get_connection() as connection:
-        _ensure_review_tables(connection)
-        row = connection.execute(
-            "SELECT * FROM review_tasks WHERE task_id = ?",
-            (task_id,),
-        ).fetchone()
-    return _row_to_review_task(row) if row else None
+    # Stage 3d Commit B: SQLite read-fallback removed (dual-write OFF → no review data)
+    return None
 
 
 def list_review_tasks(*, status=None, limit: int = 50, offset: int = 0) -> list:
@@ -1130,28 +1120,8 @@ def list_review_tasks(*, status=None, limit: int = 50, offset: int = 0) -> list:
             return [_row_to_review_task(r) for r in pg_rows]
         # PG returned None — engine not built.
         return []
-    with get_connection() as connection:
-        _ensure_review_tables(connection)
-        if status:
-            rows = connection.execute(
-                """
-                SELECT * FROM review_tasks
-                WHERE status = ?
-                ORDER BY created_at DESC, task_id DESC
-                LIMIT ? OFFSET ?
-                """,
-                (status, limit, offset),
-            ).fetchall()
-        else:
-            rows = connection.execute(
-                """
-                SELECT * FROM review_tasks
-                ORDER BY created_at DESC, task_id DESC
-                LIMIT ? OFFSET ?
-                """,
-                (limit, offset),
-            ).fetchall()
-    return [_row_to_review_task(r) for r in rows]
+    # Stage 3d Commit B: SQLite read-fallback removed (dual-write OFF → no review data)
+    return []
 
 
 def update_review_task_status(task_id: str, *, new_status: str,
@@ -1243,13 +1213,8 @@ def get_review_decision(decision_id: str):
         if pg_row is not None:
             return _row_to_review_decision(pg_row)
         return None
-    with get_connection() as connection:
-        _ensure_review_tables(connection)
-        row = connection.execute(
-            "SELECT * FROM review_decisions WHERE decision_id = ?",
-            (decision_id,),
-        ).fetchone()
-    return _row_to_review_decision(row) if row else None
+    # Stage 3d Commit B: SQLite read-fallback removed (dual-write OFF → no review data)
+    return None
 
 
 def list_review_decisions(task_id: str) -> list:
@@ -1287,17 +1252,8 @@ def list_review_decisions(task_id: str) -> list:
         if pg_rows is not None:
             return [_row_to_review_decision(r) for r in pg_rows]
         return []
-    with get_connection() as connection:
-        _ensure_review_tables(connection)
-        rows = connection.execute(
-            """
-            SELECT * FROM review_decisions
-            WHERE task_id = ?
-            ORDER BY created_at ASC, decision_id ASC
-            """,
-            (task_id,),
-        ).fetchall()
-    return [_row_to_review_decision(r) for r in rows]
+    # Stage 3d Commit B: SQLite read-fallback removed (dual-write OFF → no review data)
+    return []
 
 
 # ---------------------------------------------------------------------------
