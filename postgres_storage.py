@@ -1769,6 +1769,41 @@ def read_cached_embedding(
     return [float(v) for v in vector]
 
 
+def embedding_cache_stats_pg():
+    """Return ``(total, per_provider)`` for the Postgres embedding_cache
+    mirror, or ``None`` when the engine is not built / dual-write is off.
+
+    M12.0e-1: PG-primary counterpart to ``database.embedding_cache_stats``
+    so the diagnostic still works when SQLite is no longer written. This
+    is a PURE DIAGNOSTIC — it uses the SOFT failure contract (returns
+    ``None`` on any SQL error, NEVER raises ``PostgresReadError``), mirroring
+    the SQLite version's ``{"available": False, ...}`` behaviour rather than
+    the Stage-1 raise-on-read contract."""
+    engine = get_engine()
+    if engine is None:
+        return None
+    try:
+        with engine.connect() as conn:
+            total = conn.execute(
+                sa.select(sa.func.count()).select_from(embedding_cache_table)
+            ).scalar()
+            rows = conn.execute(
+                sa.select(
+                    embedding_cache_table.c.provider,
+                    sa.func.count().label("n"),
+                )
+                .group_by(embedding_cache_table.c.provider)
+                .order_by(sa.func.count().desc())
+            ).all()
+    except SQLAlchemyError as exc:
+        log.warning("embedding_cache_stats_pg failed: %s", exc)
+        return None
+    per_provider = {
+        row._mapping["provider"]: int(row._mapping["n"] or 0) for row in rows
+    }
+    return int(total or 0), per_provider
+
+
 # ---------------------------------------------------------------------------
 # Diagnostic helper — read-only, used by scripts/check_postgres_health.py.
 # ---------------------------------------------------------------------------

@@ -254,7 +254,13 @@ class GetCachedEmbeddingWrapperTests(unittest.TestCase):
     def test_pg_miss_does_not_fall_through_to_sqlite(self):
         """Stage 2 contract: a PG cache miss returns None — caller
         recomputes the embedding. We must NOT silently substitute the
-        SQLite row (which would be stale across Render restarts)."""
+        SQLite row (which would be stale across Render restarts).
+
+        M12.0e-1 note: under PG-primary, save_cached_embedding skips the
+        SQLite INSERT entirely when dual-write is ON, so the "seed SQLite
+        only" step below is now effectively a no-op (mirror is also
+        patched off). The assertion still holds because PG stays empty —
+        get_cached_embedding returns None either way."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
                 sqlite_db = Path(tmp_dir) / "sqlite_local.db"

@@ -802,29 +802,38 @@ def save_cached_embedding(
         return False
     preview = (text_preview or "")[:200]
     created_at = datetime.now(timezone.utc).isoformat()
-    try:
-        with get_connection() as connection:
-            connection.execute(
-                """
-                INSERT OR REPLACE INTO embedding_cache (
-                    text_hash, provider, model, dimensions,
-                    vector_json, text_preview, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    text_hash,
-                    provider,
-                    model or "",
-                    len(vector),
-                    vector_json,
-                    preview,
-                    created_at,
-                ),
-            )
-            connection.commit()
-    except sqlite3.Error as error:
-        _embedding_logger.warning("embedding_cache write failed: %s", error)
-        return False
+
+    # M12.0e-1: PG-primary. When dual-write is enabled the Postgres mirror
+    # below is the durable copy and get_cached_embedding never consults
+    # SQLite, so the SQLite INSERT is redundant — skip it. When dual-write
+    # is disabled (local dev / tests) the SQLite write remains the sole
+    # durable path and runs unchanged.
+    from postgres_storage import is_postgres_dual_write_enabled
+
+    if not is_postgres_dual_write_enabled():
+        try:
+            with get_connection() as connection:
+                connection.execute(
+                    """
+                    INSERT OR REPLACE INTO embedding_cache (
+                        text_hash, provider, model, dimensions,
+                        vector_json, text_preview, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        text_hash,
+                        provider,
+                        model or "",
+                        len(vector),
+                        vector_json,
+                        preview,
+                        created_at,
+                    ),
+                )
+                connection.commit()
+        except sqlite3.Error as error:
+            _embedding_logger.warning("embedding_cache write failed: %s", error)
+            return False
 
     # M12.0a — mirror to Postgres. INSERT OR REPLACE on the SQLite side
     # maps to ON CONFLICT (text_hash, provider, model) DO UPDATE on the
@@ -2702,6 +2711,25 @@ def _open_connection(db_path):
 
 def embedding_cache_stats() -> dict:
     """Optional diagnostic — total rows + per-provider counts."""
+    # M12.0e-1: PG-primary. When dual-write is enabled the durable cache
+    # lives in Postgres (SQLite is no longer written), so read the stats
+    # from the PG mirror. Falls back to the SQLite body below when
+    # dual-write is disabled (local dev / tests).
+    from postgres_storage import (
+        embedding_cache_stats_pg,
+        is_postgres_dual_write_enabled,
+    )
+
+    if is_postgres_dual_write_enabled():
+        stats = embedding_cache_stats_pg()
+        if stats is None:
+            return {"available": False, "error": "postgres embedding_cache unavailable"}
+        total, per_provider = stats
+        return {
+            "available": True,
+            "total": total,
+            "per_provider": per_provider,
+        }
     try:
         with get_connection() as connection:
             total = connection.execute(
