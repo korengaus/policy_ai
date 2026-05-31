@@ -46,6 +46,7 @@ if str(ROOT) not in sys.path:
 
 import artifact_evidence_linker as linker  # noqa: E402
 import database  # noqa: E402
+import postgres_storage  # noqa: E402
 import scripts.link_artifact_evidence as link_cli  # noqa: E402
 
 
@@ -392,11 +393,31 @@ class MultiClaimTests(unittest.TestCase):
 
 class DatabaseRoundTripTests(unittest.TestCase):
     def setUp(self):
+        # M12.0e-3a: round-trip via the PG-primary path. Point a private
+        # sqlite:// substitute at a per-test temp file (USE_POSTGRES_WRITE
+        # ON) and reset the cached engine so each test binds to its own
+        # fresh DB. Env vars are snapshot/restored so the rest of the
+        # process (and validate.py's dual-write-disabled determinism) is
+        # untouched. Pattern copied from the #1-migrated
+        # tests/test_artifact_extractor.py.
         self._tmp_dir = tempfile.TemporaryDirectory()
-        self._db_path = str(Path(self._tmp_dir.name) / "linker_test.db")
+        self._pg_db = str(Path(self._tmp_dir.name) / "pg.db")
+        self._env_snapshot = {
+            k: os.environ.get(k)
+            for k in ("USE_POSTGRES_WRITE", "DATABASE_URL")
+        }
+        os.environ["USE_POSTGRES_WRITE"] = "true"
+        os.environ["DATABASE_URL"] = f"sqlite:///{self._pg_db}"
+        postgres_storage.reset_engine_for_tests()
 
     def tearDown(self):
         import gc as _gc
+        for key, value in self._env_snapshot.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        postgres_storage.reset_engine_for_tests()
         _gc.collect()
         try:
             self._tmp_dir.cleanup()
@@ -415,15 +436,13 @@ class DatabaseRoundTripTests(unittest.TestCase):
         if lie:
             d["truth_claim"] = True
             d["operator_review_required"] = False
-        return database.save_evidence_candidate(d, db_path=self._db_path)
+        return database.save_evidence_candidate(d)
 
     def test_round_trip_basic(self):
         row_id = self._save_one()
         self.assertIsInstance(row_id, int)
         self.assertGreater(row_id, 0)
-        rows = database.get_evidence_candidates(
-            analysis_id="42", db_path=self._db_path,
-        )
+        rows = database.get_evidence_candidates(analysis_id="42")
         self.assertEqual(len(rows), 1)
         r = rows[0]
         self.assertEqual(r["analysis_id"], "42")
@@ -439,17 +458,13 @@ class DatabaseRoundTripTests(unittest.TestCase):
 
     def test_save_forces_truth_claim_zero_even_when_caller_lies(self):
         self._save_one(lie=True)
-        rows = database.get_evidence_candidates(
-            db_path=self._db_path,
-        )
+        rows = database.get_evidence_candidates()
         self.assertEqual(len(rows), 1)
         self.assertIs(rows[0]["truth_claim"], False)
 
     def test_save_forces_operator_review_required_one_even_when_lied(self):
         self._save_one(lie=True)
-        rows = database.get_evidence_candidates(
-            db_path=self._db_path,
-        )
+        rows = database.get_evidence_candidates()
         self.assertEqual(len(rows), 1)
         self.assertIs(rows[0]["operator_review_required"], True)
 
@@ -457,13 +472,9 @@ class DatabaseRoundTripTests(unittest.TestCase):
         self._save_one(analysis_id="1", extraction_id=1)
         self._save_one(analysis_id="2", extraction_id=2)
         self._save_one(analysis_id="1", extraction_id=3)
-        ones = database.get_evidence_candidates(
-            analysis_id="1", db_path=self._db_path,
-        )
-        twos = database.get_evidence_candidates(
-            analysis_id="2", db_path=self._db_path,
-        )
-        all_rows = database.get_evidence_candidates(db_path=self._db_path)
+        ones = database.get_evidence_candidates(analysis_id="1")
+        twos = database.get_evidence_candidates(analysis_id="2")
+        all_rows = database.get_evidence_candidates()
         self.assertEqual(len(ones), 2)
         self.assertEqual(len(twos), 1)
         self.assertEqual(len(all_rows), 3)
@@ -471,12 +482,8 @@ class DatabaseRoundTripTests(unittest.TestCase):
     def test_get_filters_by_source_id(self):
         self._save_one(analysis_id="1", source_id="src_a", extraction_id=1)
         self._save_one(analysis_id="1", source_id="src_b", extraction_id=2)
-        only_a = database.get_evidence_candidates(
-            source_id="src_a", db_path=self._db_path,
-        )
-        only_b = database.get_evidence_candidates(
-            source_id="src_b", db_path=self._db_path,
-        )
+        only_a = database.get_evidence_candidates(source_id="src_a")
+        only_b = database.get_evidence_candidates(source_id="src_b")
         self.assertEqual(len(only_a), 1)
         self.assertEqual(only_a[0]["source_id"], "src_a")
         self.assertEqual(len(only_b), 1)
@@ -485,9 +492,7 @@ class DatabaseRoundTripTests(unittest.TestCase):
     def test_get_filters_by_extraction_id(self):
         self._save_one(analysis_id="1", extraction_id=1)
         self._save_one(analysis_id="1", extraction_id=2)
-        rows = database.get_evidence_candidates(
-            extraction_id=2, db_path=self._db_path,
-        )
+        rows = database.get_evidence_candidates(extraction_id=2)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["extraction_id"], 2)
 
@@ -505,9 +510,30 @@ class DatabaseRoundTripTests(unittest.TestCase):
         ):
             with self.subTest(bad=bad):
                 with self.assertRaises(ValueError):
-                    database.save_evidence_candidate(
-                        bad, db_path=self._db_path,
-                    )
+                    database.save_evidence_candidate(bad)
+
+
+# ---------------------------------------------------------------------------
+# O. init_db() creates the artifact_evidence_candidates table — SQLite-specific.
+#
+# Deliberately NOT migrated to the PG-substitute path: this pins the
+# SQLite schema-creation behaviour (init_db builds the table, verified via
+# sqlite_master) that 0e-5 still depends on. It runs with NO dual-write env
+# — a DB_PATH swap + raw sqlite3 read against an isolated temp file.
+# ---------------------------------------------------------------------------
+
+
+class InitDbSqliteSchemaTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp_dir = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        import gc as _gc
+        _gc.collect()
+        try:
+            self._tmp_dir.cleanup()
+        except Exception:
+            pass
 
     def test_init_db_creates_artifact_evidence_candidates_table(self):
         fresh_db = str(Path(self._tmp_dir.name) / "fresh_init.db")
@@ -549,39 +575,32 @@ def _run_cli_subprocess(*args, timeout=CLI_TIMEOUT_SECONDS, env=None):
 
 class CliSmokeTests(unittest.TestCase):
     def setUp(self):
+        # M12.0e-3a: the CLI is PG-only. Point a private sqlite://
+        # substitute at a per-test temp file (USE_POSTGRES_WRITE ON) and
+        # reset the cached engine. The CLI subprocess inherits both env
+        # vars via _run_cli_subprocess's env={**os.environ, ...} merge,
+        # so parent (seeding) and child (CLI) share the same substitute
+        # file. Schema auto-creates via ensure_schema on first
+        # get_engine() — no manual CREATE TABLE needed.
         self._tmp_dir = tempfile.TemporaryDirectory()
-        self._db_path = str(Path(self._tmp_dir.name) / "cli_smoke.db")
-        # Seed the minimal schema the CLI reads from. We DON'T rely on
-        # init_db() here because that would create the full
-        # analysis_results / jobs / review surface — overkill for smoke.
-        connection = sqlite3.connect(self._db_path)
-        try:
-            connection.execute(
-                "CREATE TABLE IF NOT EXISTS analysis_results ("
-                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-                "query TEXT, title TEXT, original_url TEXT, "
-                "claim_text TEXT, claims TEXT, normalized_claims TEXT, "
-                "created_at TEXT)"
-            )
-            connection.execute(
-                "CREATE TABLE IF NOT EXISTS artifact_text_extractions ("
-                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-                "artifact_id INTEGER NOT NULL, source_id TEXT NOT NULL, "
-                "url TEXT NOT NULL, extraction_timestamp TEXT NOT NULL, "
-                "extraction_duration_ms INTEGER, "
-                "success INTEGER NOT NULL DEFAULT 0, error TEXT, "
-                "title TEXT, main_text TEXT, sections TEXT, "
-                "word_count INTEGER, language_hint TEXT, "
-                "truth_claim INTEGER NOT NULL DEFAULT 0, "
-                "official_source_candidate INTEGER NOT NULL DEFAULT 0, "
-                "created_at TEXT NOT NULL)"
-            )
-            connection.commit()
-        finally:
-            connection.close()
+        self._pg_db = str(Path(self._tmp_dir.name) / "cli_smoke_pg.db")
+        self._analysis_seq = 0
+        self._env_snapshot = {
+            k: os.environ.get(k)
+            for k in ("USE_POSTGRES_WRITE", "DATABASE_URL")
+        }
+        os.environ["USE_POSTGRES_WRITE"] = "true"
+        os.environ["DATABASE_URL"] = f"sqlite:///{self._pg_db}"
+        postgres_storage.reset_engine_for_tests()
 
     def tearDown(self):
         import gc as _gc
+        for key, value in self._env_snapshot.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        postgres_storage.reset_engine_for_tests()
         _gc.collect()
         try:
             self._tmp_dir.cleanup()
@@ -591,45 +610,42 @@ class CliSmokeTests(unittest.TestCase):
     def _seed_extraction(
         self, *, extraction_id, source_id, main_text=KOREAN_BODY_TEXT,
     ):
-        connection = sqlite3.connect(self._db_path)
-        try:
-            connection.execute(
-                "INSERT INTO artifact_text_extractions ("
-                "id, artifact_id, source_id, url, extraction_timestamp, "
-                "extraction_duration_ms, success, error, title, "
-                "main_text, sections, word_count, language_hint, "
-                "truth_claim, official_source_candidate, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    extraction_id, 100 + extraction_id, source_id,
-                    "https://example.go.kr/notice",
-                    "2026-05-22T00:00:00+00:00", 10, 1, None,
-                    "공고", main_text, "[]",
-                    len(main_text.split()), "ko", 0, 1,
-                    "2026-05-22T00:00:00+00:00",
-                ),
-            )
-            connection.commit()
-        finally:
-            connection.close()
+        # Seed the INPUT extraction via the public PG-primary writer
+        # (dual-write ON → PG substitute). PG's SERIAL assigns the
+        # extraction id; the smokes filter by analysis_id/source_id.
+        database.save_extraction_result({
+            "artifact_id": 100 + extraction_id,
+            "source_id": source_id,
+            "url": "https://example.go.kr/notice",
+            "extraction_timestamp": "2026-05-22T00:00:00+00:00",
+            "extraction_duration_ms": 10,
+            "success": True,
+            "error": None,
+            "title": "공고",
+            "main_text": main_text,
+            "sections": "[]",
+            "word_count": len(main_text.split()),
+            "language_hint": "ko",
+            "official_source_candidate": True,
+        })
 
-    def _seed_analysis(self, *, analysis_id, claim_text=KOREAN_CLAIM):
-        connection = sqlite3.connect(self._db_path)
-        try:
-            connection.execute(
-                "INSERT INTO analysis_results (id, query, title, "
-                "original_url, claim_text, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (
-                    analysis_id, "청년 정책", "테스트 분석",
-                    "https://news.example/article-1",
-                    claim_text,
-                    "2026-05-22T00:00:00+00:00",
-                ),
-            )
-            connection.commit()
-        finally:
-            connection.close()
+    def _seed_analysis(self, *, claim_text=KOREAN_CLAIM):
+        # Seed the INPUT analysis row via the public PG-primary writer and
+        # RETURN the PG-SERIAL id (save_analysis_result returns
+        # {"id": <pg id>}). A unique original_url per seed dodges the
+        # duplicate-by-url guard in save_analysis_result.
+        self._analysis_seq += 1
+        original_url = f"https://news.example/analysis-{self._analysis_seq}"
+        result = database.save_analysis_result(
+            {"claim_text": claim_text, "original_url": original_url},
+            query="청년 정책",
+        )
+        analysis_id = result.get("id")
+        self.assertIsNotNone(
+            analysis_id,
+            f"save_analysis_result did not persist a row (result={result})",
+        )
+        return analysis_id
 
     def test_help_exits_0(self):
         rc, stdout, _ = _run_cli_subprocess("--help")
@@ -638,9 +654,7 @@ class CliSmokeTests(unittest.TestCase):
         self.assertIn("Exit codes", stdout)
 
     def test_list_extractions_empty(self):
-        rc, stdout, _ = _run_cli_subprocess(
-            "--list-extractions", "--db-path", self._db_path,
-        )
+        rc, stdout, _ = _run_cli_subprocess("--list-extractions")
         self.assertEqual(rc, 0)
         self.assertIn("artifact_text_extractions", stdout)
         self.assertIn("Total: 0", stdout)
@@ -653,53 +667,42 @@ class CliSmokeTests(unittest.TestCase):
         self.assertIn("do not feed into the live analysis pipeline", stdout)
 
     def test_list_candidates_empty(self):
-        rc, stdout, _ = _run_cli_subprocess(
-            "--list-candidates", "--db-path", self._db_path,
-        )
+        rc, stdout, _ = _run_cli_subprocess("--list-candidates")
         self.assertEqual(rc, 0)
         self.assertIn("artifact_evidence_candidates", stdout)
         self.assertIn("Total: 0", stdout)
 
     def test_link_dry_run_does_not_write(self):
         self._seed_extraction(extraction_id=1, source_id="src_a")
-        self._seed_analysis(analysis_id=42)
+        analysis_id = self._seed_analysis()
         rc, stdout, _ = _run_cli_subprocess(
-            "--analysis-id", "42",
-            "--db-path", self._db_path,
+            "--analysis-id", str(analysis_id),
             "--dry-run",
         )
         self.assertEqual(rc, 0, msg=stdout)
         self.assertIn("Evidence Candidate", stdout)
         self.assertIn("dry_run: True", stdout)
-        # Confirm no rows written to artifact_evidence_candidates.
-        connection = sqlite3.connect(self._db_path)
-        try:
-            existed = connection.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' "
-                "AND name='artifact_evidence_candidates'"
-            ).fetchone()
-            if existed:
-                count = connection.execute(
-                    "SELECT COUNT(*) FROM artifact_evidence_candidates"
-                ).fetchone()[0]
-                self.assertEqual(
-                    count, 0, "dry-run must not insert rows",
-                )
-        finally:
-            connection.close()
+        # No rows written to artifact_evidence_candidates — read via the
+        # public PG API.
+        self.assertEqual(
+            len(database.get_evidence_candidates(
+                analysis_id=str(analysis_id),
+            )),
+            0,
+            "dry-run must not insert rows",
+        )
 
     def test_link_save_writes_candidate(self):
         self._seed_extraction(extraction_id=1, source_id="src_a")
-        self._seed_analysis(analysis_id=42)
+        analysis_id = self._seed_analysis()
         rc, stdout, _ = _run_cli_subprocess(
-            "--analysis-id", "42",
-            "--db-path", self._db_path,
+            "--analysis-id", str(analysis_id),
             "--save",
         )
         self.assertEqual(rc, 0, msg=stdout)
         self.assertIn("saved_row_id", stdout)
         rows = database.get_evidence_candidates(
-            analysis_id="42", db_path=self._db_path,
+            analysis_id=str(analysis_id),
         )
         self.assertGreater(len(rows), 0)
         self.assertIs(rows[0]["truth_claim"], False)
@@ -709,7 +712,6 @@ class CliSmokeTests(unittest.TestCase):
         self._seed_extraction(extraction_id=1, source_id="src_a")
         rc, stdout, _ = _run_cli_subprocess(
             "--analysis-id", "999",
-            "--db-path", self._db_path,
             "--dry-run",
         )
         self.assertEqual(rc, 1)
@@ -721,26 +723,22 @@ class CliSmokeTests(unittest.TestCase):
             extraction_id=1, source_id="src_a",
             main_text="완전히 다른 주제. 음악, 영화, 날씨 리뷰만 있는 페이지.",
         )
-        self._seed_analysis(analysis_id=42, claim_text=KOREAN_CLAIM)
+        analysis_id = self._seed_analysis(claim_text=KOREAN_CLAIM)
         rc, stdout, _ = _run_cli_subprocess(
-            "--analysis-id", "42",
-            "--db-path", self._db_path,
+            "--analysis-id", str(analysis_id),
             "--dry-run",
         )
         self.assertEqual(rc, 1)
         self.assertIn("no (extraction, claim) pair met min_score", stdout)
 
     def test_missing_analysis_id_is_usage_error(self):
-        rc, _stdout, stderr = _run_cli_subprocess(
-            "--db-path", self._db_path,
-        )
+        rc, _stdout, stderr = _run_cli_subprocess()
         self.assertEqual(rc, 2)
         self.assertIn("--analysis-id", stderr)
 
     def test_save_and_dry_run_mutually_exclusive(self):
         rc, _stdout, stderr = _run_cli_subprocess(
             "--analysis-id", "1",
-            "--db-path", self._db_path,
             "--dry-run", "--save",
         )
         self.assertEqual(rc, 2)

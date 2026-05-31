@@ -121,13 +121,6 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--db-path", default=None,
-        help=(
-            "Path to the SQLite DB. Defaults to the module's DB_PATH "
-            "(policy_ai.db in the repo root)."
-        ),
-    )
-    parser.add_argument(
         "--limit", type=int, default=DEFAULT_LIMIT,
         help=(
             f"Max number of extractions to process (default: "
@@ -167,28 +160,6 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     return parser
-
-
-# ---------------------------------------------------------------------------
-# DB context helpers
-# ---------------------------------------------------------------------------
-
-
-def _with_db_path(db_path: Optional[str]):
-    """When ``db_path`` is provided, temporarily swap ``database.DB_PATH``
-    so the existing read helpers point at the right file. Returns the
-    original value to be restored from a finally block."""
-    if db_path is None:
-        return None
-    original = database.DB_PATH
-    database.DB_PATH = Path(db_path)
-    return original
-
-
-def _restore_db_path(original):
-    if original is None:
-        return
-    database.DB_PATH = original
 
 
 # ---------------------------------------------------------------------------
@@ -266,31 +237,25 @@ def _summarize_candidate_row(row: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _run_list_extractions(
-    *, source_id: Optional[str], limit: int, db_path: Optional[str],
-    as_json: bool,
+    *, source_id: Optional[str], limit: int, as_json: bool,
 ) -> int:
-    original = _with_db_path(db_path)
     try:
-        try:
-            rows = database.get_extraction_results(
-                source_id=source_id,
-                db_path=db_path,
-                limit=max(1, min(int(limit or 1), 500)),
-            )
-        except Exception as error:
-            print(
-                f"[link] failed to load artifact_text_extractions: {error}",
-                file=sys.stderr,
-            )
-            return 1
-    finally:
-        _restore_db_path(original)
+        rows = database.get_extraction_results(
+            source_id=source_id,
+            limit=max(1, min(int(limit or 1), 500)),
+        )
+    except Exception as error:
+        print(
+            f"[link] failed to load artifact_text_extractions: {error}",
+            file=sys.stderr,
+        )
+        return 1
 
     summaries = [_summarize_extraction_row(r) for r in rows]
     payload = {
         "cli_version": CLI_VERSION,
         "mode": "list_extractions",
-        "db_path": str(db_path) if db_path is not None else str(database.DB_PATH),
+        "store": "postgres",
         "processed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "filter": {"source_id": source_id},
         "extractions": summaries,
@@ -341,13 +306,11 @@ def _run_list_extractions(
 
 
 def _run_list_candidates(
-    *, analysis_id: Optional[str], limit: int, db_path: Optional[str],
-    as_json: bool,
+    *, analysis_id: Optional[str], limit: int, as_json: bool,
 ) -> int:
     try:
         rows = database.get_evidence_candidates(
             analysis_id=analysis_id,
-            db_path=db_path,
             limit=max(1, min(int(limit or 1), 500)),
         )
     except Exception as error:
@@ -361,7 +324,7 @@ def _run_list_candidates(
     payload = {
         "cli_version": CLI_VERSION,
         "mode": "list_candidates",
-        "db_path": str(db_path) if db_path is not None else str(database.DB_PATH),
+        "store": "postgres",
         "processed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "filter": {"analysis_id": analysis_id},
         "candidates": summaries,
@@ -457,79 +420,68 @@ def _candidate_payload(
 
 def _run_link_mode(
     *, analysis_id: str, source_id: Optional[str], min_score: float,
-    limit: int, db_path: Optional[str], dry_run: bool, save: bool,
+    limit: int, dry_run: bool, save: bool,
     as_json: bool,
 ) -> int:
-    original = _with_db_path(db_path)
     try:
-        try:
-            analysis_row = database.get_result_by_id(int(analysis_id))
-        except (TypeError, ValueError):
-            analysis_row = None
-        except Exception as error:
-            print(
-                f"[link] failed to load analysis_results row: {error}",
-                file=sys.stderr,
-            )
-            return 1
+        analysis_row = database.get_result_by_id(int(analysis_id))
+    except (TypeError, ValueError):
+        analysis_row = None
+    except Exception as error:
+        print(
+            f"[link] failed to load analysis_results row: {error}",
+            file=sys.stderr,
+        )
+        return 1
 
-        if not analysis_row:
-            payload = {
-                "cli_version": CLI_VERSION,
-                "mode": "link",
-                "db_path": (
-                    str(db_path) if db_path is not None
-                    else str(database.DB_PATH)
-                ),
-                "processed_at": datetime.now(timezone.utc).isoformat(
-                    timespec="seconds",
-                ),
-                "filter": {
-                    "analysis_id": analysis_id,
-                    "source_id": source_id,
-                    "min_score": min_score,
-                },
-                "candidates": [],
-                "summary": {
-                    "total_candidates": 0, "total_extractions": 0,
-                    "matched_extractions": 0, "saved": 0,
-                },
-                "safety_notes": _safety_notes_dict(),
-                "warning": (
-                    f"no analysis_results row with id={analysis_id!r}"
-                ),
-            }
-            if as_json:
-                print(json.dumps(payload, ensure_ascii=False, indent=2))
-            else:
-                print("=== Evidence Candidate ===")
-                print(f"(no analysis_results row with id={analysis_id!r})")
-                _print_safety_footer()
-            return 1
+    if not analysis_row:
+        payload = {
+            "cli_version": CLI_VERSION,
+            "mode": "link",
+            "store": "postgres",
+            "processed_at": datetime.now(timezone.utc).isoformat(
+                timespec="seconds",
+            ),
+            "filter": {
+                "analysis_id": analysis_id,
+                "source_id": source_id,
+                "min_score": min_score,
+            },
+            "candidates": [],
+            "summary": {
+                "total_candidates": 0, "total_extractions": 0,
+                "matched_extractions": 0, "saved": 0,
+            },
+            "safety_notes": _safety_notes_dict(),
+            "warning": (
+                f"no analysis_results row with id={analysis_id!r}"
+            ),
+        }
+        if as_json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print("=== Evidence Candidate ===")
+            print(f"(no analysis_results row with id={analysis_id!r})")
+            _print_safety_footer()
+        return 1
 
-        try:
-            extractions = database.get_extraction_results(
-                source_id=source_id,
-                db_path=db_path,
-                limit=max(1, min(int(limit or 1), 500)),
-            )
-        except Exception as error:
-            print(
-                f"[link] failed to load artifact_text_extractions: {error}",
-                file=sys.stderr,
-            )
-            return 1
-    finally:
-        _restore_db_path(original)
+    try:
+        extractions = database.get_extraction_results(
+            source_id=source_id,
+            limit=max(1, min(int(limit or 1), 500)),
+        )
+    except Exception as error:
+        print(
+            f"[link] failed to load artifact_text_extractions: {error}",
+            file=sys.stderr,
+        )
+        return 1
 
     if not extractions:
         payload = {
             "cli_version": CLI_VERSION,
             "mode": "link",
-            "db_path": (
-                str(db_path) if db_path is not None
-                else str(database.DB_PATH)
-            ),
+            "store": "postgres",
             "processed_at": datetime.now(timezone.utc).isoformat(
                 timespec="seconds",
             ),
@@ -574,7 +526,7 @@ def _run_link_mode(
             try:
                 candidate_dict = linker.candidate_to_dict(candidate)
                 saved_row_id = database.save_evidence_candidate(
-                    candidate_dict, db_path=db_path,
+                    candidate_dict,
                 )
                 saved_count += 1
             except Exception as error:
@@ -589,9 +541,7 @@ def _run_link_mode(
     combined = {
         "cli_version": CLI_VERSION,
         "mode": "link",
-        "db_path": (
-            str(db_path) if db_path is not None else str(database.DB_PATH)
-        ),
+        "store": "postgres",
         "processed_at": datetime.now(timezone.utc).isoformat(
             timespec="seconds",
         ),
@@ -671,7 +621,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         return _run_list_extractions(
             source_id=args.source_id,
             limit=args.limit,
-            db_path=args.db_path,
             as_json=bool(args.json),
         )
 
@@ -679,7 +628,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         return _run_list_candidates(
             analysis_id=args.analysis_id,
             limit=args.limit,
-            db_path=args.db_path,
             as_json=bool(args.json),
         )
 
@@ -703,7 +651,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         source_id=args.source_id,
         min_score=float(args.min_score),
         limit=args.limit,
-        db_path=args.db_path,
         dry_run=bool(args.dry_run),
         save=bool(args.save),
         as_json=bool(args.json),
