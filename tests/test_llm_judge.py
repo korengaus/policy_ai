@@ -567,27 +567,17 @@ class SerializationSafetyTests(unittest.TestCase):
 
 
 def _seed_sqlite(db_path: Path, num_rows: int = 3):
-    """Create a synthetic analysis_results row set for CLI tests."""
+    """M12.0e-4b: raw-seed analysis_results rows into the PG-substitute
+    file. The CALLER must have already pointed DATABASE_URL at
+    ``db_path`` and triggered ``ensure_schema`` (via get_engine) so the
+    full analysis_results mirror table exists; we only INSERT here (no
+    CREATE TABLE). Inserts carry no explicit id, so SQLite AUTOINCREMENT
+    assigns 1, 2, 3 … on the fresh substitute — preserving the
+    ``--analysis-id 1`` (draft_verified) / ``2`` (draft_needs_context)
+    targeting the CLI tests rely on. The CLI then reads these rows back
+    through the PG-primary read helpers."""
     conn = sqlite3.connect(db_path)
     try:
-        conn.execute(
-            """
-            CREATE TABLE analysis_results (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                query TEXT, title TEXT, original_url TEXT,
-                topic TEXT,
-                verdict_label TEXT, verdict_confidence INTEGER,
-                policy_confidence_score INTEGER,
-                verification_strength TEXT,
-                claim_text TEXT,
-                evidence_summary TEXT,
-                contradiction_summary TEXT,
-                bias_framing_summary TEXT,
-                source_candidates TEXT,
-                created_at TEXT
-            )
-            """
-        )
         for index in range(num_rows):
             conn.execute(
                 "INSERT INTO analysis_results "
@@ -621,6 +611,42 @@ def _load_cli_module():
 
 
 class CliTests(unittest.TestCase):
+    def setUp(self):
+        # M12.0e-4b: the CLI now reads analysis_results via the PG-primary
+        # read helpers. Point the dual-write substitute at a per-test temp
+        # sqlite file (USE_POSTGRES_WRITE=true + DATABASE_URL=sqlite:///<tmp>)
+        # and reset+build the engine so ensure_schema creates the full
+        # analysis_results mirror table before any raw seed/INSERT. The CLI
+        # (run in-process) reads back through that same substitute.
+        import postgres_storage
+        self._postgres_storage = postgres_storage
+        self._tmp_dir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self._pg_db = Path(self._tmp_dir.name) / "pg.db"
+        self._env_snapshot = {
+            key: os.environ.get(key)
+            for key in ("USE_POSTGRES_WRITE", "DATABASE_URL")
+        }
+        os.environ["USE_POSTGRES_WRITE"] = "true"
+        os.environ["DATABASE_URL"] = f"sqlite:///{self._pg_db}"
+        postgres_storage.reset_engine_for_tests()
+        # Trigger ensure_schema so the full mirror schema exists before
+        # _seed_sqlite raw-INSERTs into the substitute file.
+        postgres_storage.get_engine()
+
+    def tearDown(self):
+        import gc as _gc
+        for key, value in self._env_snapshot.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        self._postgres_storage.reset_engine_for_tests()
+        _gc.collect()
+        try:
+            self._tmp_dir.cleanup()
+        except Exception:
+            pass
+
     def _run_cli(self, argv):
         module = _load_cli_module()
         stdout_capture = io.StringIO()
@@ -666,128 +692,113 @@ class CliTests(unittest.TestCase):
         self.assertFalse(data["safety"]["truth_claim"])
 
     def test_simulate_confirm_against_seeded_row(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-            db_path = Path(tmp) / "src.db"
-            _seed_sqlite(db_path, num_rows=1)
-            rc, out, _ = self._run_cli([
-                "--simulate-confirm",
-                "--analysis-id", "1",
-                "--db-path", str(db_path),
-            ])
-            self.assertEqual(rc, 0)
-            self.assertIn("Judge action:       confirm", out)
+        _seed_sqlite(self._pg_db, num_rows=1)
+        rc, out, _ = self._run_cli([
+            "--simulate-confirm",
+            "--analysis-id", "1",
+        ])
+        self.assertEqual(rc, 0)
+        self.assertIn("Judge action:       confirm", out)
 
     def test_simulate_downgrade_against_seeded_row(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-            db_path = Path(tmp) / "src.db"
-            _seed_sqlite(db_path, num_rows=1)
-            rc, out, _ = self._run_cli([
-                "--simulate-downgrade",
-                "--analysis-id", "1",
-                "--db-path", str(db_path),
-            ])
-            self.assertEqual(rc, 0)
-            self.assertIn("Judge action:       downgrade", out)
-            self.assertIn("draft_needs_context", out)
+        _seed_sqlite(self._pg_db, num_rows=1)
+        rc, out, _ = self._run_cli([
+            "--simulate-downgrade",
+            "--analysis-id", "1",
+        ])
+        self.assertEqual(rc, 0)
+        self.assertIn("Judge action:       downgrade", out)
+        self.assertIn("draft_needs_context", out)
 
     def test_simulate_upgrade_attempt_is_refused(self):
         """End-to-end pin: the CLI exposes that the validator refuses
         an upgrade attempt -- operator sees ``confirm`` and the
         ``refused upgrade`` reason."""
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-            db_path = Path(tmp) / "src.db"
-            _seed_sqlite(db_path, num_rows=2)
-            # Row 2 has verdict_label='draft_needs_context'; the fake
-            # upgrade-attempt provider tries to push it to 'draft_verified'.
-            rc, out, _ = self._run_cli([
-                "--simulate-upgrade-attempt",
-                "--analysis-id", "2",
-                "--db-path", str(db_path),
-            ])
-            self.assertEqual(rc, 0)
-            self.assertIn("Judge action:       confirm", out)
-            self.assertIn("refused upgrade", out)
+        _seed_sqlite(self._pg_db, num_rows=2)
+        # Row 2 has verdict_label='draft_needs_context'; the fake
+        # upgrade-attempt provider tries to push it to 'draft_verified'.
+        rc, out, _ = self._run_cli([
+            "--simulate-upgrade-attempt",
+            "--analysis-id", "2",
+        ])
+        self.assertEqual(rc, 0)
+        self.assertIn("Judge action:       confirm", out)
+        self.assertIn("refused upgrade", out)
 
     def test_simulate_malformed_returns_confirm(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-            db_path = Path(tmp) / "src.db"
-            _seed_sqlite(db_path, num_rows=1)
-            rc, out, _ = self._run_cli([
-                "--simulate-malformed",
-                "--analysis-id", "1",
-                "--db-path", str(db_path),
-            ])
-            self.assertEqual(rc, 0)
-            self.assertIn("Judge action:       confirm", out)
-            self.assertIn("Fell back:          True", out)
+        _seed_sqlite(self._pg_db, num_rows=1)
+        rc, out, _ = self._run_cli([
+            "--simulate-malformed",
+            "--analysis-id", "1",
+        ])
+        self.assertEqual(rc, 0)
+        self.assertIn("Judge action:       confirm", out)
+        self.assertIn("Fell back:          True", out)
 
     def test_simulate_flag_returns_flag_for_review(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-            db_path = Path(tmp) / "src.db"
-            _seed_sqlite(db_path, num_rows=1)
-            rc, out, _ = self._run_cli([
-                "--simulate-flag",
-                "--analysis-id", "1",
-                "--db-path", str(db_path),
-            ])
-            self.assertEqual(rc, 0)
-            self.assertIn("Judge action:       flag_for_review", out)
+        _seed_sqlite(self._pg_db, num_rows=1)
+        rc, out, _ = self._run_cli([
+            "--simulate-flag",
+            "--analysis-id", "1",
+        ])
+        self.assertEqual(rc, 0)
+        self.assertIn("Judge action:       flag_for_review", out)
 
     def test_from_sqlite_with_limit(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-            db_path = Path(tmp) / "src.db"
-            _seed_sqlite(db_path, num_rows=5)
-            rc, out, _ = self._run_cli([
-                "--from-sqlite",
-                "--limit", "5",
-                "--db-path", str(db_path),
-                "--simulate-confirm",
-            ])
-            self.assertEqual(rc, 0)
-            # Each row prints its own block; count the header lines.
-            header_count = out.count("=== LLM Judge Dry-Run ===")
-            self.assertEqual(header_count, 5)
+        _seed_sqlite(self._pg_db, num_rows=5)
+        rc, out, _ = self._run_cli([
+            "--from-sqlite",
+            "--limit", "5",
+            "--simulate-confirm",
+        ])
+        self.assertEqual(rc, 0)
+        # Each row prints its own block; count the header lines.
+        header_count = out.count("=== LLM Judge Dry-Run ===")
+        self.assertEqual(header_count, 5)
 
     def test_json_output_is_parseable(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-            db_path = Path(tmp) / "src.db"
-            _seed_sqlite(db_path, num_rows=2)
-            rc, out, _ = self._run_cli([
-                "--from-sqlite",
-                "--limit", "2",
-                "--db-path", str(db_path),
-                "--simulate-confirm",
-                "--json",
-            ])
-            self.assertEqual(rc, 0)
-            data = json.loads(out)
-            self.assertEqual(len(data["rows"]), 2)
-            self.assertFalse(data["safety"]["real_llm_calls_made"])
+        _seed_sqlite(self._pg_db, num_rows=2)
+        rc, out, _ = self._run_cli([
+            "--from-sqlite",
+            "--limit", "2",
+            "--simulate-confirm",
+            "--json",
+        ])
+        self.assertEqual(rc, 0)
+        data = json.loads(out)
+        self.assertEqual(len(data["rows"]), 2)
+        self.assertFalse(data["safety"]["real_llm_calls_made"])
 
     def test_missing_analysis_id_returns_one(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-            db_path = Path(tmp) / "src.db"
-            _seed_sqlite(db_path, num_rows=1)
-            rc, _, err = self._run_cli([
-                "--analysis-id", "9999",
-                "--db-path", str(db_path),
-            ])
-            self.assertEqual(rc, 1)
-            self.assertIn("9999", err)
+        _seed_sqlite(self._pg_db, num_rows=1)
+        rc, _, err = self._run_cli([
+            "--analysis-id", "9999",
+        ])
+        self.assertEqual(rc, 1)
+        self.assertIn("9999", err)
 
     def test_missing_db_returns_one(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-            db_path = Path(tmp) / "does_not_exist.db"
-            # Create a stub empty DB without the table to provoke an
-            # OperationalError in the reader (the SQLAlchemy default
-            # connect to a missing file would silently create one).
-            sqlite3.connect(db_path).close()
+        # M12.0e-4b: PG-only — no --db-path. Induce a DB read error by
+        # pointing DATABASE_URL at an UNPARSEABLE value (fast-fail at
+        # create_engine, no network) so get_result_by_id raises and the
+        # CLI surfaces the documented exit-1 path. Restore the valid
+        # substitute env + reset the engine in a finally so the rest of
+        # the test class is unaffected.
+        prior_url = os.environ.get("DATABASE_URL")
+        try:
+            os.environ["DATABASE_URL"] = "not-a-valid-database-url"
+            self._postgres_storage.reset_engine_for_tests()
             rc, _, err = self._run_cli([
                 "--analysis-id", "1",
-                "--db-path", str(db_path),
             ])
             self.assertEqual(rc, 1)
             self.assertIn("error", err.lower())
+        finally:
+            if prior_url is None:
+                os.environ.pop("DATABASE_URL", None)
+            else:
+                os.environ["DATABASE_URL"] = prior_url
+            self._postgres_storage.reset_engine_for_tests()
 
 
 # ---------------------------------------------------------------------------

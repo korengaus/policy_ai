@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sqlite3
 import sys
 from pathlib import Path
 
@@ -45,6 +44,7 @@ except Exception:
     pass
 
 
+import database  # noqa: E402 — import after sys.path manipulation
 import llm_judge  # noqa: E402 — import after sys.path manipulation
 
 
@@ -132,12 +132,6 @@ def _simulated_provider(flag: str):
 # ---------------------------------------------------------------------------
 
 
-def _open_db(db_path: str) -> sqlite3.Connection:
-    connection = sqlite3.connect(db_path)
-    connection.row_factory = sqlite3.Row
-    return connection
-
-
 def _row_to_judge_input(row) -> llm_judge.JudgeInput:
     """Translate one ``analysis_results`` row to a :class:`JudgeInput`.
 
@@ -196,29 +190,25 @@ def _row_to_judge_input(row) -> llm_judge.JudgeInput:
     )
 
 
-def _load_one_row(db_path: str, analysis_id: int):
+def _load_one_row(analysis_id: int):
+    """M12.0e-4b: read one analysis_results row via the PG-primary read
+    helper (Postgres when dual-write is enabled; SQLite otherwise).
+    Returns a dict (or None). Any engine/read error is converted to a
+    RuntimeError to preserve the CLI's documented exit-1 contract."""
     try:
-        with _open_db(db_path) as conn:
-            row = conn.execute(
-                "SELECT * FROM analysis_results WHERE id = ?",
-                (int(analysis_id),),
-            ).fetchone()
-    except sqlite3.OperationalError as exc:
-        raise RuntimeError(f"SQLite read failed: {exc}") from exc
-    return row
+        return database.get_result_by_id(int(analysis_id))
+    except Exception as exc:  # noqa: BLE001 — surface as exit-1 DB error
+        raise RuntimeError(f"DB read failed: {exc}") from exc
 
 
-def _load_rows(db_path: str, limit: int):
+def _load_rows(limit: int):
+    """M12.0e-4b: read the newest analysis_results rows (id DESC) via the
+    PG-primary read helper. Returns a list of dicts. Any engine/read
+    error becomes a RuntimeError (exit-1 contract preserved)."""
     try:
-        with _open_db(db_path) as conn:
-            rows = conn.execute(
-                "SELECT * FROM analysis_results "
-                "ORDER BY id DESC LIMIT ?",
-                (int(limit),),
-            ).fetchall()
-    except sqlite3.OperationalError as exc:
-        raise RuntimeError(f"SQLite read failed: {exc}") from exc
-    return rows
+        return database.get_recent_results(limit=int(limit)) or []
+    except Exception as exc:  # noqa: BLE001 — surface as exit-1 DB error
+        raise RuntimeError(f"DB read failed: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -346,10 +336,6 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--limit", type=int, default=10,
         help="Max rows when --from-sqlite is set. Default: 10. Cap: 100.",
-    )
-    parser.add_argument(
-        "--db-path", default="policy_ai.db",
-        help="SQLite path (default: %(default)s).",
     )
     sim = parser.add_mutually_exclusive_group()
     sim.add_argument(
@@ -479,7 +465,7 @@ def main(argv=None) -> int:
     rows_payload = []
     try:
         if args.analysis_id is not None:
-            row = _load_one_row(args.db_path, args.analysis_id)
+            row = _load_one_row(args.analysis_id)
             if row is None:
                 msg = (
                     f"No analysis_results row with id={args.analysis_id}"
@@ -491,7 +477,7 @@ def main(argv=None) -> int:
                 return 1
             rows = [row]
         else:
-            rows = _load_rows(args.db_path, limit)
+            rows = _load_rows(limit)
     except RuntimeError as exc:
         msg = str(exc)
         if args.json:
@@ -505,8 +491,7 @@ def main(argv=None) -> int:
             print(json.dumps({"rows": [], "note": "no data"}, indent=2))
         else:
             print(
-                "(no analysis_results rows found in "
-                f"{args.db_path}; nothing to dry-run)"
+                "(no analysis_results rows found; nothing to dry-run)"
             )
         return 0
 
