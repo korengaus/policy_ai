@@ -1319,17 +1319,15 @@ class DatabaseReadFallbackIntegrationTests(unittest.TestCase):
                             "verdict_confidence": 70,
                         },
                     }
+                    # M12.0e-5a: SQLite write fallback removed. With
+                    # dual-write OFF the durable save fails loud (no
+                    # phantom save, no SQLite persistence/read-back).
                     status = database.save_analysis_result(
                         sanitize_data(sample), query="fallback-disabled",
                     )
-                    self.assertTrue(status["saved"])
-
-                    row = database.get_result_by_id(status["id"])
-                    self.assertIsNotNone(row)
-                    self.assertEqual(row["title"], "from sqlite")
-                    self.assertEqual(
-                        row["original_url"], "https://example.com/sqlite-1",
-                    )
+                    self.assertFalse(status["saved"])
+                    self.assertEqual(status["error"], "pg_write_failed")
+                    self.assertIsNone(status["id"])
 
     def test_get_result_by_id_returns_none_when_pg_empty(self):
         """M12.0d-1: PG is enabled and reachable but has no matching row.

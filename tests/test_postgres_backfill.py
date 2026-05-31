@@ -250,21 +250,29 @@ class BackfillIntegrationTests(unittest.TestCase):
             database.init_verdict_label_attributions_table()
 
             # 3 analysis_results rows.
-            for index in range(3):
-                sample = {
-                    "title": f"row-{index}",
-                    "original_url": f"https://example.com/r{index}",
-                    "topic": "test",
-                    "claim_text": "주장",
-                    "verdict_label": "draft_likely_true",
-                    "verdict_confidence": 70,
-                    "verification_card": {
-                        "claim_text": "주장",
-                        "verdict_label": "draft_likely_true",
-                        "verdict_confidence": 70,
-                    },
-                }
-                database.save_analysis_result(sample, query=f"q-{index}")
+            # M12.0e-5a: save_analysis_result is PG-only (the SQLite write
+            # fallback was removed), so seed the SQLite source the backfill
+            # tool reads via raw SQL — same pattern as the review_tasks /
+            # review_decisions seed below. Columns mirror what the old
+            # save_analysis_result stored for this sample (the rest NULL).
+            with database.get_connection() as connection:
+                for index in range(3):
+                    connection.execute(
+                        """
+                        INSERT INTO analysis_results (
+                            query, title, original_url, topic,
+                            claim_text, verdict_label, verdict_confidence,
+                            created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            f"q-{index}", f"row-{index}",
+                            f"https://example.com/r{index}", "test",
+                            "주장", "draft_likely_true", 70,
+                            "2026-05-23T00:00:00",
+                        ),
+                    )
+                connection.commit()
 
             # 2 review_tasks rows with distinct idempotency keys.
             # M12.0d Stage 3c-2: database.create_review_task no longer
@@ -307,12 +315,25 @@ class BackfillIntegrationTests(unittest.TestCase):
                 connection.commit()
 
             # 1 source_fetch_artifact row.
-            database.save_fetch_artifact({
-                "source_id": "kr_law_open_data_candidate",
-                "url": "https://www.law.go.kr/test",
-                "fetch_timestamp": "2026-05-23T00:00:00",
-                "success": True,
-            })
+            # M12.0e-5a: save_fetch_artifact is PG-only; seed the SQLite
+            # source via raw SQL (same precedent). truth_claim /
+            # official_source_candidate forced to 0 as the old save did.
+            with database.get_connection() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO source_fetch_artifacts (
+                        source_id, url, fetch_timestamp, success,
+                        truth_claim, official_source_candidate, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "kr_law_open_data_candidate",
+                        "https://www.law.go.kr/test",
+                        "2026-05-23T00:00:00", 1, 0, 0,
+                        "2026-05-23T00:00:00",
+                    ),
+                )
+                connection.commit()
 
         # Restore the env values the test set up before seeding so
         # the caller can rely on them when invoking backfill.

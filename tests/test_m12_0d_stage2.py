@@ -303,6 +303,10 @@ class GetCachedEmbeddingWrapperTests(unittest.TestCase):
                     import database
 
                     database.init_db()
+                    # M12.0e-5a: SQLite write fallback removed. The embedding
+                    # cache is best-effort; with dual-write OFF the save
+                    # persists nothing (no-op) and a subsequent read is a
+                    # clean miss rather than a durable hit.
                     database.save_cached_embedding(
                         text_hash="h-sqlite-disabled",
                         provider="openai",
@@ -313,7 +317,7 @@ class GetCachedEmbeddingWrapperTests(unittest.TestCase):
                     result = database.get_cached_embedding(
                         "h-sqlite-disabled", "openai", "m",
                     )
-                    self.assertEqual(result, [3.0, 4.0, 5.0])
+                    self.assertIsNone(result)
 
     def test_raises_when_pg_read_fails(self):
         with _EnvScope():

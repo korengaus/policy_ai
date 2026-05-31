@@ -523,83 +523,27 @@ def save_analysis_result(result: dict, query: str):
     # the SERIAL is past any explicitly-written id, so the RETURNING id
     # never collides. save_analysis_result takes no db_path arg, so the
     # gate is purely the dual-write flag (matches the 3c-2 model).
-    from postgres_storage import is_postgres_dual_write_enabled
-
-    if is_postgres_dual_write_enabled():
-        pg_id = _mirror_write_returning_safe("analysis_results", row_dict)
-        if pg_id is None:
-            # With the SQLite INSERT gone on this path, a None id means
-            # the row was persisted nowhere. Surface an explicit failure
-            # (the 3c-1 data-loss class) rather than reporting a phantom
-            # save with a fabricated id.
-            log.error(
-                "save_analysis_result PG write returned no id",
-                extra={
-                    "function": "save_analysis_result",
-                    "original_url": original_url,
-                },
-            )
-            return {
-                "saved": False,
-                "duplicate": False,
-                "id": None,
-                "error": "pg_write_failed",
-            }
-        return {"saved": True, "duplicate": False, "id": pg_id}
-
-    # Dual-write disabled (local dev / tests / backfill seeding with
-    # USE_POSTGRES_WRITE unset) — SQLite is the sole store, unchanged
-    # from the pre-3c-3 behaviour. SQLite's AUTOINCREMENT assigns the id.
-    with get_connection() as connection:
-        cursor = connection.execute(
-            """
-            INSERT INTO analysis_results (
-                query,
-                title,
-                original_url,
-                topic,
-                policy_alert_level,
-                market_signal,
-                policy_confidence_score,
-                verification_strength,
-                risk_level,
-                action_priority,
-                impact_level,
-                impact_direction,
-                market_sensitivity,
-                consumer_sensitivity,
-                business_sensitivity,
-                claim_text,
-                verdict_label,
-                verdict_confidence,
-                evidence_sources,
-                source_reliability_score,
-                source_reliability_reason,
-                evidence_summary,
-                missing_context,
-                last_checked_at,
-                review_status,
-                claims,
-                normalized_claims,
-                source_candidates,
-                source_queries,
-                source_reliability_summary,
-                evidence_snippets,
-                claim_evidence_map,
-                evidence_extraction_summary,
-                contradiction_checks,
-                contradiction_summary,
-                bias_framing_analysis,
-                bias_framing_summary,
-                debug_summary,
-                created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            values,
+    # M12.0e-5a: Postgres is the sole durable store; the SQLite write
+    # fallback was removed (point of no return). The PG write is now
+    # unconditional. A None id means the row was persisted nowhere
+    # (PG write failure, or dual-write disabled) — surface an explicit
+    # failure (the 3c-1 data-loss class) rather than a phantom save.
+    pg_id = _mirror_write_returning_safe("analysis_results", row_dict)
+    if pg_id is None:
+        log.error(
+            "save_analysis_result PG write returned no id",
+            extra={
+                "function": "save_analysis_result",
+                "original_url": original_url,
+            },
         )
-        connection.commit()
-
-    return {"saved": True, "duplicate": False, "id": cursor.lastrowid}
+        return {
+            "saved": False,
+            "duplicate": False,
+            "id": None,
+            "error": "pg_write_failed",
+        }
+    return {"saved": True, "duplicate": False, "id": pg_id}
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -803,42 +747,11 @@ def save_cached_embedding(
     preview = (text_preview or "")[:200]
     created_at = datetime.now(timezone.utc).isoformat()
 
-    # M12.0e-1: PG-primary. When dual-write is enabled the Postgres mirror
-    # below is the durable copy and get_cached_embedding never consults
-    # SQLite, so the SQLite INSERT is redundant — skip it. When dual-write
-    # is disabled (local dev / tests) the SQLite write remains the sole
-    # durable path and runs unchanged.
-    from postgres_storage import is_postgres_dual_write_enabled
-
-    if not is_postgres_dual_write_enabled():
-        try:
-            with get_connection() as connection:
-                connection.execute(
-                    """
-                    INSERT OR REPLACE INTO embedding_cache (
-                        text_hash, provider, model, dimensions,
-                        vector_json, text_preview, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        text_hash,
-                        provider,
-                        model or "",
-                        len(vector),
-                        vector_json,
-                        preview,
-                        created_at,
-                    ),
-                )
-                connection.commit()
-        except sqlite3.Error as error:
-            _embedding_logger.warning("embedding_cache write failed: %s", error)
-            return False
-
-    # M12.0a — mirror to Postgres. INSERT OR REPLACE on the SQLite side
-    # maps to ON CONFLICT (text_hash, provider, model) DO UPDATE on the
-    # Postgres side via the UNIQUE constraint declared in
-    # postgres_storage.py.
+    # M12.0e-5a: PG-primary, SQLite write fallback removed. The embedding
+    # cache is best-effort; under dual-write the Postgres mirror below is
+    # the durable copy and get_cached_embedding never consults SQLite. The
+    # upsert maps INSERT OR REPLACE → ON CONFLICT (text_hash, provider,
+    # model) DO UPDATE via the UNIQUE constraint in postgres_storage.py.
     _mirror_upsert_safe(
         "embedding_cache",
         {
@@ -1390,44 +1303,24 @@ def save_fetch_artifact(fetch_result: dict) -> int:
     # ``-> int`` contract: on PG write failure it returns the sentinel
     # ``-1`` (an impossible real row id) rather than a phantom positive id
     # — the 3c-1 data-loss class, surfaced explicitly via log.error.
-    from postgres_storage import is_postgres_dual_write_enabled
-
-    if is_postgres_dual_write_enabled():
-        pg_id = _mirror_write_returning_safe(
-            "source_fetch_artifacts", mirror_payload,
+    # M12.0e-5a: Postgres is the sole durable store; the SQLite write
+    # fallback was removed. The PG write is now unconditional and returns
+    # the sentinel -1 on failure (the 3c-1 data-loss class, surfaced via
+    # log.error) rather than a phantom positive id.
+    pg_id = _mirror_write_returning_safe(
+        "source_fetch_artifacts", mirror_payload,
+    )
+    if pg_id is None:
+        log.error(
+            "save_fetch_artifact PG write returned no id",
+            extra={
+                "function": "save_fetch_artifact",
+                "source_id": row_values[0],
+                "url": row_values[1],
+            },
         )
-        if pg_id is None:
-            log.error(
-                "save_fetch_artifact PG write returned no id",
-                extra={
-                    "function": "save_fetch_artifact",
-                    "source_id": row_values[0],
-                    "url": row_values[1],
-                },
-            )
-            return -1
-        return pg_id
-
-    # Dual-write disabled (local dev / tests / backfill seeding with
-    # USE_POSTGRES_WRITE unset) — SQLite is the sole store, unchanged
-    # from the pre-3c-3 behaviour. SQLite's AUTOINCREMENT assigns the id.
-    with get_connection() as connection:
-        _ensure_source_fetch_artifacts_table(connection)
-        cursor = connection.execute(
-            """
-            INSERT INTO source_fetch_artifacts (
-                source_id, url, fetch_timestamp,
-                status_code, content_type, success, error,
-                text_content, raw_html, fetch_duration_ms,
-                truth_claim, official_source_candidate,
-                created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            row_values,
-        )
-        connection.commit()
-        row_id = int(cursor.lastrowid)
-    return row_id
+        return -1
+    return pg_id
 
 
 def get_fetch_artifacts(source_id: str = None, limit: int = 50) -> list:
@@ -1636,45 +1529,24 @@ def save_extraction_result(result_dict: dict, db_path: str = None) -> int:
     # via mirror_write_returning); the function keeps its ``-> int``
     # contract, returning the sentinel ``-1`` on PG write failure (the
     # 3c-1 data-loss class, surfaced via log.error).
-    from postgres_storage import is_postgres_dual_write_enabled
-
-    if is_postgres_dual_write_enabled() and db_path is None:
-        pg_id = _mirror_write_returning_safe(
-            "artifact_text_extractions", mirror_payload,
+    # M12.0e-5a: Postgres is the sole durable store; the SQLite write
+    # fallback (and the explicit-db_path SQLite branch) was removed. The
+    # PG write is now unconditional and returns the sentinel -1 on failure
+    # (the 3c-1 data-loss class, surfaced via log.error).
+    pg_id = _mirror_write_returning_safe(
+        "artifact_text_extractions", mirror_payload,
+    )
+    if pg_id is None:
+        log.error(
+            "save_extraction_result PG write returned no id",
+            extra={
+                "function": "save_extraction_result",
+                "artifact_id": row_values[0],
+                "source_id": row_values[1],
+            },
         )
-        if pg_id is None:
-            log.error(
-                "save_extraction_result PG write returned no id",
-                extra={
-                    "function": "save_extraction_result",
-                    "artifact_id": row_values[0],
-                    "source_id": row_values[1],
-                },
-            )
-            return -1
-        return pg_id
-
-    # Dual-write disabled OR explicit db_path — SQLite is the write target
-    # (unchanged behaviour). SQLite's AUTOINCREMENT assigns the id.
-    connection = _open_connection(db_path)
-    try:
-        _ensure_artifact_text_extractions_table(connection)
-        cursor = connection.execute(
-            """
-            INSERT INTO artifact_text_extractions (
-                artifact_id, source_id, url, extraction_timestamp,
-                extraction_duration_ms, success, error,
-                title, main_text, sections, word_count, language_hint,
-                truth_claim, official_source_candidate, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            row_values,
-        )
-        connection.commit()
-        row_id = int(cursor.lastrowid)
-    finally:
-        connection.close()
-    return row_id
+        return -1
+    return pg_id
 
 
 def get_extraction_results(source_id: str = None, artifact_id: int = None,
@@ -1927,46 +1799,24 @@ def save_evidence_candidate(candidate_dict: dict, db_path: str = None) -> int:
     # via mirror_write_returning); the function keeps its ``-> int``
     # contract, returning the sentinel ``-1`` on PG write failure (the
     # 3c-1 data-loss class, surfaced via log.error).
-    from postgres_storage import is_postgres_dual_write_enabled
-
-    if is_postgres_dual_write_enabled() and db_path is None:
-        pg_id = _mirror_write_returning_safe(
-            "artifact_evidence_candidates", mirror_payload,
+    # M12.0e-5a: Postgres is the sole durable store; the SQLite write
+    # fallback (and the explicit-db_path SQLite branch) was removed. The
+    # PG write is now unconditional and returns the sentinel -1 on failure
+    # (the 3c-1 data-loss class, surfaced via log.error).
+    pg_id = _mirror_write_returning_safe(
+        "artifact_evidence_candidates", mirror_payload,
+    )
+    if pg_id is None:
+        log.error(
+            "save_evidence_candidate PG write returned no id",
+            extra={
+                "function": "save_evidence_candidate",
+                "analysis_id": row_values[3],
+                "extraction_id": row_values[0],
+            },
         )
-        if pg_id is None:
-            log.error(
-                "save_evidence_candidate PG write returned no id",
-                extra={
-                    "function": "save_evidence_candidate",
-                    "analysis_id": row_values[3],
-                    "extraction_id": row_values[0],
-                },
-            )
-            return -1
-        return pg_id
-
-    # Dual-write disabled OR explicit db_path — SQLite is the write target
-    # (unchanged behaviour). SQLite's AUTOINCREMENT assigns the id.
-    connection = _open_connection(db_path)
-    try:
-        _ensure_artifact_evidence_candidates_table(connection)
-        cursor = connection.execute(
-            """
-            INSERT INTO artifact_evidence_candidates (
-                extraction_id, source_id, url, analysis_id,
-                claim_text, match_score, matched_tokens,
-                supporting_passage, candidate_timestamp,
-                truth_claim, official_source_candidate,
-                operator_review_required, notes, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            row_values,
-        )
-        connection.commit()
-        row_id = int(cursor.lastrowid)
-    finally:
-        connection.close()
-    return row_id
+        return -1
+    return pg_id
 
 
 def get_evidence_candidates(
@@ -2251,50 +2101,24 @@ def save_producer_comparison(comparison_dict: dict, db_path: str = None) -> int:
     # (mirror_upsert_returning); the function keeps its ``-> int`` contract,
     # returning the sentinel ``-1`` on PG write failure (the 3c-1 data-loss
     # class, surfaced via log.error).
-    from postgres_storage import is_postgres_dual_write_enabled
-
-    if is_postgres_dual_write_enabled() and db_path is None:
-        pg_id = _mirror_upsert_returning_safe(
-            "verdict_producer_comparisons", mirror_payload, ["input_hash"],
+    # M12.0e-5a: Postgres is the sole durable store; the SQLite write
+    # fallback (and the explicit-db_path SQLite branch) was removed. The
+    # PG upsert is now unconditional and returns the sentinel -1 on
+    # failure (the 3c-1 data-loss class, surfaced via log.error).
+    pg_id = _mirror_upsert_returning_safe(
+        "verdict_producer_comparisons", mirror_payload, ["input_hash"],
+    )
+    if pg_id is None:
+        log.error(
+            "save_producer_comparison PG write returned no id",
+            extra={
+                "function": "save_producer_comparison",
+                "analysis_id": row_values[0],
+                "input_hash": row_values[2],
+            },
         )
-        if pg_id is None:
-            log.error(
-                "save_producer_comparison PG write returned no id",
-                extra={
-                    "function": "save_producer_comparison",
-                    "analysis_id": row_values[0],
-                    "input_hash": row_values[2],
-                },
-            )
-            return -1
-        return pg_id
-
-    # Dual-write disabled OR explicit db_path — SQLite is the write target
-    # (unchanged behaviour). SQLite's AUTOINCREMENT assigns the id.
-    connection = _open_connection(db_path)
-    try:
-        _ensure_verdict_producer_comparisons_table(connection)
-        cursor = connection.execute(
-            """
-            INSERT OR REPLACE INTO verdict_producer_comparisons (
-                analysis_id, source, input_hash,
-                producer1_label, producer1_score, producer1_extra,
-                producer2_label, producer2_alert_level,
-                producer2_score, producer2_extra,
-                producer3_label, producer3_extra,
-                all_three_agree, p1_p2_agree, p1_p3_agree, p2_p3_agree,
-                disagreement_pattern, most_conservative_label,
-                comparison_timestamp, notes,
-                truth_claim, operator_review_required, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            row_values,
-        )
-        connection.commit()
-        row_id = int(cursor.lastrowid)
-    finally:
-        connection.close()
-    return row_id
+        return -1
+    return pg_id
 
 
 def get_producer_comparisons(
@@ -2561,51 +2385,23 @@ def save_verdict_label_attribution(
     # (mirror_upsert_returning); the function keeps its ``-> int`` contract,
     # returning the sentinel ``-1`` on PG write failure (the 3c-1 data-loss
     # class, surfaced via log.error).
-    from postgres_storage import is_postgres_dual_write_enabled
-
-    if is_postgres_dual_write_enabled() and db_path is None:
-        pg_id = _mirror_upsert_returning_safe(
-            "verdict_label_attributions", mirror_payload, ["analysis_id"],
+    # M12.0e-5a: Postgres is the sole durable store; the SQLite write
+    # fallback (and the explicit-db_path SQLite branch) was removed. The
+    # PG upsert is now unconditional and returns the sentinel -1 on
+    # failure (the 3c-1 data-loss class, surfaced via log.error).
+    pg_id = _mirror_upsert_returning_safe(
+        "verdict_label_attributions", mirror_payload, ["analysis_id"],
+    )
+    if pg_id is None:
+        log.error(
+            "save_verdict_label_attribution PG write returned no id",
+            extra={
+                "function": "save_verdict_label_attribution",
+                "analysis_id": row_values[0],
+            },
         )
-        if pg_id is None:
-            log.error(
-                "save_verdict_label_attribution PG write returned no id",
-                extra={
-                    "function": "save_verdict_label_attribution",
-                    "analysis_id": row_values[0],
-                },
-            )
-            return -1
-        return pg_id
-
-    # Dual-write disabled OR explicit db_path — SQLite is the write target
-    # (unchanged behaviour). SQLite's AUTOINCREMENT assigns the id.
-    connection = _open_connection(db_path)
-    try:
-        _ensure_verdict_label_attributions_table(connection)
-        cursor = connection.execute(
-            """
-            INSERT OR REPLACE INTO verdict_label_attributions (
-                analysis_id, stored_verdict_label,
-                stored_verdict_confidence, stored_policy_alert_level,
-                stored_policy_confidence_score,
-                stored_verification_strength,
-                stored_claim_text, stored_evidence_summary,
-                reconstructed_inputs,
-                attributed_branch_id, attribution_confidence,
-                attribution_reason,
-                is_weak_evidence_verified, weak_evidence_signals,
-                diagnostic_timestamp, notes,
-                truth_claim, operator_review_required, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            row_values,
-        )
-        connection.commit()
-        row_id = int(cursor.lastrowid)
-    finally:
-        connection.close()
-    return row_id
+        return -1
+    return pg_id
 
 
 def get_verdict_label_attributions(

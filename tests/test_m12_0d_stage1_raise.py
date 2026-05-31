@@ -452,11 +452,12 @@ class ImportFailurePropagatesTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Part E — Disabled dual-write keeps SQLite path silent.
+# Part E — Disabled dual-write now fails loud (M12.0e-5a).
 #
-# Sanity check that the SQLite fallback still runs when
-# USE_POSTGRES_WRITE is unset / "false". This is the load-bearing
-# invariant for local dev and CI without a Postgres substrate.
+# The SQLite write fallback was removed at the point of no return. With
+# USE_POSTGRES_WRITE unset, a durable save_* no longer silently persists
+# via SQLite — it returns the fail-loud shape (no phantom save). This
+# pins the new contract.
 # ---------------------------------------------------------------------------
 
 
@@ -485,16 +486,15 @@ class DisabledDualWriteKeepsSQLitePathTests(unittest.TestCase):
                             "verdict_confidence": 70,
                         },
                     }
+                    # M12.0e-5a: SQLite write fallback removed. Dual-write
+                    # OFF → durable save fails loud (no phantom save, no
+                    # SQLite persistence/read-back).
                     status = database.save_analysis_result(
                         sanitize_data(sample), query="disabled-path",
                     )
-                    self.assertTrue(status["saved"])
-
-                    row = database.get_result_by_id(status["id"])
-                    self.assertIsNotNone(row)
-                    self.assertEqual(
-                        row["title"], "from sqlite (dual-write disabled)",
-                    )
+                    self.assertFalse(status["saved"])
+                    self.assertEqual(status["error"], "pg_write_failed")
+                    self.assertIsNone(status["id"])
 
 
 if __name__ == "__main__":
