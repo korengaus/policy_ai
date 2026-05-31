@@ -147,13 +147,6 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--db-path", default=None,
-        help=(
-            "Path to the SQLite DB. Defaults to the module's DB_PATH "
-            "(policy_ai.db in the repo root)."
-        ),
-    )
-    parser.add_argument(
         "--dry-run", action="store_true",
         help="Compute and print comparisons but do not save to the DB.",
     )
@@ -170,25 +163,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Print results as JSON only (no human header/footer).",
     )
     return parser
-
-
-# ---------------------------------------------------------------------------
-# DB context helpers
-# ---------------------------------------------------------------------------
-
-
-def _with_db_path(db_path: Optional[str]):
-    if db_path is None:
-        return None
-    original = database.DB_PATH
-    database.DB_PATH = Path(db_path)
-    return original
-
-
-def _restore_db_path(original):
-    if original is None:
-        return
-    database.DB_PATH = original
 
 
 def _safety_notes_dict() -> Dict[str, str]:
@@ -212,20 +186,16 @@ def _print_safety_footer() -> None:
 
 
 def _load_from_sqlite(
-    *, db_path: Optional[str], limit: int, analysis_id: Optional[str],
+    *, limit: int, analysis_id: Optional[str],
 ) -> List[Dict[str, Any]]:
-    original = _with_db_path(db_path)
-    try:
-        if analysis_id is not None:
-            try:
-                row = database.get_result_by_id(int(analysis_id))
-            except (TypeError, ValueError):
-                row = None
-            return [row] if row else []
-        rows = database.get_recent_results(limit=limit)
-        return rows or []
-    finally:
-        _restore_db_path(original)
+    if analysis_id is not None:
+        try:
+            row = database.get_result_by_id(int(analysis_id))
+        except (TypeError, ValueError):
+            row = None
+        return [row] if row else []
+    rows = database.get_recent_results(limit=limit)
+    return rows or []
 
 
 def _flatten_reports_dir(reports_dir: Path) -> List[Dict[str, Any]]:
@@ -426,17 +396,14 @@ def _print_summary_human(summary: Dict[str, Any]) -> None:
 
 def _run_compare(
     *, rows: List[Dict[str, Any]], source_label: str,
-    dry_run: bool, save: bool, as_json: bool, db_path: Optional[str],
+    dry_run: bool, save: bool, as_json: bool,
 ) -> int:
     if not rows:
         payload = {
             "cli_version": CLI_VERSION,
             "mode": "compare",
             "source": source_label,
-            "db_path": (
-                str(db_path) if db_path is not None
-                else str(database.DB_PATH)
-            ),
+            "store": "postgres",
             "processed_at": datetime.now(timezone.utc).isoformat(
                 timespec="seconds",
             ),
@@ -486,7 +453,7 @@ def _run_compare(
             try:
                 comparison_dict = comparator.comparison_to_dict(comparison)
                 saved_row_id = database.save_producer_comparison(
-                    comparison_dict, db_path=db_path,
+                    comparison_dict,
                 )
                 saved_count += 1
             except Exception as error:
@@ -503,9 +470,7 @@ def _run_compare(
         "cli_version": CLI_VERSION,
         "mode": "compare",
         "source": source_label,
-        "db_path": (
-            str(db_path) if db_path is not None else str(database.DB_PATH)
-        ),
+        "store": "postgres",
         "processed_at": datetime.now(timezone.utc).isoformat(
             timespec="seconds",
         ),
@@ -542,12 +507,10 @@ def _run_compare(
 
 
 def _run_summary(
-    *, db_path: Optional[str], limit: int, as_json: bool,
+    *, limit: int, as_json: bool,
 ) -> int:
     try:
-        rows = database.get_producer_comparisons(
-            db_path=db_path, limit=limit,
-        )
+        rows = database.get_producer_comparisons(limit=limit)
     except Exception as error:
         print(
             f"[compare-verdicts] failed to load comparisons: {error}",
@@ -558,9 +521,7 @@ def _run_summary(
     payload = {
         "cli_version": CLI_VERSION,
         "mode": "summary",
-        "db_path": (
-            str(db_path) if db_path is not None else str(database.DB_PATH)
-        ),
+        "store": "postgres",
         "processed_at": datetime.now(timezone.utc).isoformat(
             timespec="seconds",
         ),
@@ -581,11 +542,11 @@ def _run_summary(
 
 
 def _run_list_disagreements(
-    *, db_path: Optional[str], limit: int, as_json: bool,
+    *, limit: int, as_json: bool,
 ) -> int:
     try:
         rows = database.get_producer_comparisons(
-            only_disagreements=True, db_path=db_path, limit=limit,
+            only_disagreements=True, limit=limit,
         )
     except Exception as error:
         print(
@@ -596,9 +557,7 @@ def _run_list_disagreements(
     payload = {
         "cli_version": CLI_VERSION,
         "mode": "list_disagreements",
-        "db_path": (
-            str(db_path) if db_path is not None else str(database.DB_PATH)
-        ),
+        "store": "postgres",
         "processed_at": datetime.now(timezone.utc).isoformat(
             timespec="seconds",
         ),
@@ -670,37 +629,35 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.summary:
         return _run_summary(
-            db_path=args.db_path,
             limit=args.limit,
             as_json=bool(args.json),
         )
 
     if args.list_disagreements:
         return _run_list_disagreements(
-            db_path=args.db_path,
             limit=args.limit,
             as_json=bool(args.json),
         )
 
     if args.analysis_id:
         rows = _load_from_sqlite(
-            db_path=args.db_path, limit=args.limit,
+            limit=args.limit,
             analysis_id=args.analysis_id,
         )
         return _run_compare(
             rows=rows, source_label="sqlite",
             dry_run=bool(args.dry_run), save=bool(args.save),
-            as_json=bool(args.json), db_path=args.db_path,
+            as_json=bool(args.json),
         )
 
     if args.from_sqlite:
         rows = _load_from_sqlite(
-            db_path=args.db_path, limit=args.limit, analysis_id=None,
+            limit=args.limit, analysis_id=None,
         )
         return _run_compare(
             rows=rows, source_label="sqlite",
             dry_run=bool(args.dry_run), save=bool(args.save),
-            as_json=bool(args.json), db_path=args.db_path,
+            as_json=bool(args.json),
         )
 
     if args.from_reports:
@@ -710,7 +667,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return _run_compare(
             rows=rows, source_label="reports_json",
             dry_run=bool(args.dry_run), save=bool(args.save),
-            as_json=bool(args.json), db_path=args.db_path,
+            as_json=bool(args.json),
         )
 
     # Should be unreachable thanks to _validate_args.

@@ -58,6 +58,7 @@ if str(ROOT) not in sys.path:
 import database  # noqa: E402
 import policy_decision  # noqa: E402
 import policy_scoring  # noqa: E402
+import postgres_storage  # noqa: E402
 import verdict_producer_comparison as comparator  # noqa: E402
 import verification_card  # noqa: E402
 
@@ -472,11 +473,30 @@ class InputHashTests(unittest.TestCase):
 
 class DatabaseRoundTripTests(unittest.TestCase):
     def setUp(self):
+        # M12.0e-3a: round-trip via the PG-primary path. Point a private
+        # sqlite:// substitute at a per-test temp file (USE_POSTGRES_WRITE
+        # ON) and reset the cached engine so each test binds to its own
+        # fresh DB. Env vars are snapshot/restored so the rest of the
+        # process (and validate.py's dual-write-disabled determinism) is
+        # untouched. Pattern copied from the #1/#2-migrated tests.
         self._tmp_dir = tempfile.TemporaryDirectory()
-        self._db_path = str(Path(self._tmp_dir.name) / "comparator_test.db")
+        self._pg_db = str(Path(self._tmp_dir.name) / "pg.db")
+        self._env_snapshot = {
+            k: os.environ.get(k)
+            for k in ("USE_POSTGRES_WRITE", "DATABASE_URL")
+        }
+        os.environ["USE_POSTGRES_WRITE"] = "true"
+        os.environ["DATABASE_URL"] = f"sqlite:///{self._pg_db}"
+        postgres_storage.reset_engine_for_tests()
 
     def tearDown(self):
         import gc as _gc
+        for key, value in self._env_snapshot.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        postgres_storage.reset_engine_for_tests()
         _gc.collect()
         try:
             self._tmp_dir.cleanup()
@@ -489,13 +509,13 @@ class DatabaseRoundTripTests(unittest.TestCase):
         if lie:
             d["truth_claim"] = True
             d["operator_review_required"] = False
-        return database.save_producer_comparison(d, db_path=self._db_path)
+        return database.save_producer_comparison(d)
 
     def test_basic_round_trip(self):
         row_id = self._save_for(row=_row_high_confidence())
         self.assertIsInstance(row_id, int)
         self.assertGreater(row_id, 0)
-        rows = database.get_producer_comparisons(db_path=self._db_path)
+        rows = database.get_producer_comparisons()
         self.assertEqual(len(rows), 1)
         r = rows[0]
         self.assertEqual(r["analysis_id"], "101")
@@ -505,36 +525,32 @@ class DatabaseRoundTripTests(unittest.TestCase):
 
     def test_save_forces_truth_claim_zero_even_when_caller_lies(self):
         self._save_for(row=_row_high_confidence(), lie=True)
-        rows = database.get_producer_comparisons(db_path=self._db_path)
+        rows = database.get_producer_comparisons()
         self.assertEqual(len(rows), 1)
         self.assertIs(rows[0]["truth_claim"], False)
 
     def test_save_forces_operator_review_required_one_even_when_lied(self):
         self._save_for(row=_row_high_confidence(), lie=True)
-        rows = database.get_producer_comparisons(db_path=self._db_path)
+        rows = database.get_producer_comparisons()
         self.assertEqual(len(rows), 1)
         self.assertIs(rows[0]["operator_review_required"], True)
 
     def test_insert_or_replace_on_input_hash(self):
         self._save_for(row=_row_high_confidence())
-        # Same input → same input_hash → INSERT OR REPLACE.
+        # Same input → same input_hash → upsert (PG: ON CONFLICT DO UPDATE).
         self._save_for(row=_row_high_confidence())
-        rows = database.get_producer_comparisons(db_path=self._db_path)
+        rows = database.get_producer_comparisons()
         self.assertEqual(len(rows), 1, "duplicate hash must overwrite")
         # A different input produces a new row, not a replacement.
         self._save_for(row=_row_low_confidence())
-        rows = database.get_producer_comparisons(db_path=self._db_path)
+        rows = database.get_producer_comparisons()
         self.assertEqual(len(rows), 2)
 
     def test_get_filters_by_analysis_id(self):
         self._save_for(row=_row_high_confidence())
         self._save_for(row=_row_low_confidence())
-        rows_101 = database.get_producer_comparisons(
-            analysis_id="101", db_path=self._db_path,
-        )
-        rows_102 = database.get_producer_comparisons(
-            analysis_id="102", db_path=self._db_path,
-        )
+        rows_101 = database.get_producer_comparisons(analysis_id="101")
+        rows_102 = database.get_producer_comparisons(analysis_id="102")
         self.assertEqual(len(rows_101), 1)
         self.assertEqual(rows_101[0]["analysis_id"], "101")
         self.assertEqual(len(rows_102), 1)
@@ -554,10 +570,10 @@ class DatabaseRoundTripTests(unittest.TestCase):
         )
         for c in (agree, disagree):
             d = comparator.comparison_to_dict(c)
-            database.save_producer_comparison(d, db_path=self._db_path)
-        all_rows = database.get_producer_comparisons(db_path=self._db_path)
+            database.save_producer_comparison(d)
+        all_rows = database.get_producer_comparisons()
         only_disagree = database.get_producer_comparisons(
-            only_disagreements=True, db_path=self._db_path,
+            only_disagreements=True,
         )
         self.assertEqual(len(all_rows), 2)
         self.assertEqual(len(only_disagree), 1)
@@ -573,9 +589,30 @@ class DatabaseRoundTripTests(unittest.TestCase):
         ):
             with self.subTest(bad=bad):
                 with self.assertRaises(ValueError):
-                    database.save_producer_comparison(
-                        bad, db_path=self._db_path,
-                    )
+                    database.save_producer_comparison(bad)
+
+
+# ---------------------------------------------------------------------------
+# O. init_db() creates the verdict_producer_comparisons table — SQLite-specific.
+#
+# Deliberately NOT migrated to the PG-substitute path: this pins the
+# SQLite schema-creation behaviour (init_db builds the table, verified via
+# sqlite_master) that 0e-5 still depends on. It runs with NO dual-write env
+# — a DB_PATH swap + raw sqlite3 read against an isolated temp file.
+# ---------------------------------------------------------------------------
+
+
+class InitDbSqliteSchemaTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp_dir = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        import gc as _gc
+        _gc.collect()
+        try:
+            self._tmp_dir.cleanup()
+        except Exception:
+            pass
 
     def test_init_db_creates_verdict_producer_comparisons_table(self):
         fresh_db = str(Path(self._tmp_dir.name) / "fresh_init.db")
@@ -618,11 +655,30 @@ def _run_cli_subprocess(*args, timeout=CLI_TIMEOUT_SECONDS, env=None):
 
 class CliSmokeTests(unittest.TestCase):
     def setUp(self):
+        # M12.0e-3a: the CLI is PG-only. Point a private sqlite://
+        # substitute at a per-test temp file (USE_POSTGRES_WRITE ON) and
+        # reset the cached engine. The CLI subprocess inherits both env
+        # vars via _run_cli_subprocess's env={**os.environ, ...} merge.
+        # These smokes seed nothing — they exercise --help / empty-DB
+        # reads / usage errors only.
         self._tmp_dir = tempfile.TemporaryDirectory()
-        self._db_path = str(Path(self._tmp_dir.name) / "cli_smoke.db")
+        self._pg_db = str(Path(self._tmp_dir.name) / "cli_smoke_pg.db")
+        self._env_snapshot = {
+            k: os.environ.get(k)
+            for k in ("USE_POSTGRES_WRITE", "DATABASE_URL")
+        }
+        os.environ["USE_POSTGRES_WRITE"] = "true"
+        os.environ["DATABASE_URL"] = f"sqlite:///{self._pg_db}"
+        postgres_storage.reset_engine_for_tests()
 
     def tearDown(self):
         import gc as _gc
+        for key, value in self._env_snapshot.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        postgres_storage.reset_engine_for_tests()
         _gc.collect()
         try:
             self._tmp_dir.cleanup()
@@ -636,33 +692,26 @@ class CliSmokeTests(unittest.TestCase):
         self.assertIn("Exit codes", stdout)
 
     def test_summary_empty_db(self):
-        rc, stdout, _ = _run_cli_subprocess(
-            "--summary", "--db-path", self._db_path,
-        )
+        rc, stdout, _ = _run_cli_subprocess("--summary")
         self.assertEqual(rc, 0)
         self.assertIn("Disagreement Summary", stdout)
         self.assertIn("Total comparisons:           0", stdout)
         self.assertIn("truth_claim=False", stdout)
 
     def test_list_disagreements_empty(self):
-        rc, stdout, _ = _run_cli_subprocess(
-            "--list-disagreements", "--db-path", self._db_path,
-        )
+        rc, stdout, _ = _run_cli_subprocess("--list-disagreements")
         self.assertEqual(rc, 0)
         self.assertIn("Disagreements", stdout)
         self.assertIn("Total: 0", stdout)
 
     def test_no_mode_is_usage_error(self):
-        rc, _stdout, stderr = _run_cli_subprocess(
-            "--db-path", self._db_path,
-        )
+        rc, _stdout, stderr = _run_cli_subprocess()
         self.assertEqual(rc, 2)
         self.assertIn("required", stderr)
 
     def test_save_and_dry_run_mutually_exclusive(self):
         rc, _stdout, stderr = _run_cli_subprocess(
             "--from-sqlite", "--save", "--dry-run",
-            "--db-path", self._db_path,
         )
         self.assertEqual(rc, 2)
         self.assertIn("mutually exclusive", stderr)
@@ -670,7 +719,6 @@ class CliSmokeTests(unittest.TestCase):
     def test_two_modes_simultaneously_is_usage_error(self):
         rc, _stdout, stderr = _run_cli_subprocess(
             "--summary", "--from-sqlite",
-            "--db-path", self._db_path,
         )
         self.assertEqual(rc, 2)
         self.assertIn("only one", stderr)
