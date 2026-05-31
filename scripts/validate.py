@@ -358,6 +358,11 @@ def _commands() -> List[List[str]]:
         # M12.0a — Postgres dual-write foundation.
         [python, "scripts/check_postgres_health.py", "--help"],
         [python, "tests/test_postgres_storage.py"],
+        # M12.0e-2 — PG-schema-creation invariant pin (TEST ONLY).
+        # Locks that get_engine() alone creates the mirror schema,
+        # independently of database.init_db(), before a later sub-stage
+        # removes init_db.
+        [python, "tests/test_m12_0e_pg_schema_startup_invariant.py"],
         # M12.0b — Postgres backfill CLI + tests.
         [python, "scripts/run_postgres_backfill.py", "--help"],
         [python, "scripts/run_postgres_backfill.py", "--status"],
