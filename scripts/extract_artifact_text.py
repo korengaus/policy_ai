@@ -103,13 +103,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Process a single specific artifact by id.",
     )
     parser.add_argument(
-        "--db-path", default=None,
-        help=(
-            "Path to the SQLite DB. Defaults to the module's DB_PATH "
-            "(policy_ai.db in the repo root)."
-        ),
-    )
-    parser.add_argument(
         "--limit", type=int, default=DEFAULT_LIMIT,
         help=(
             f"Max number of artifacts to process (default: "
@@ -145,26 +138,6 @@ def _build_parser() -> argparse.ArgumentParser:
 # ---------------------------------------------------------------------------
 # DB access
 # ---------------------------------------------------------------------------
-
-
-def _with_db_path(db_path: Optional[str]):
-    """Context-manager-ish helper: when ``db_path`` is provided, swap
-    ``database.DB_PATH`` for the duration of a block so the existing
-    ``get_fetch_artifacts`` (which uses the module-level path) reads
-    the right file. Returns a ``(set, restore)`` tuple — the caller
-    must call ``restore`` from a ``finally``.
-    """
-    if db_path is None:
-        return None
-    original = database.DB_PATH
-    database.DB_PATH = Path(db_path)
-    return original
-
-
-def _restore_db_path(original):
-    if original is None:
-        return
-    database.DB_PATH = original
 
 
 def _load_artifacts(
@@ -230,29 +203,24 @@ def _print_safety_footer() -> None:
 
 
 def _run_list_mode(
-    *, source_id: Optional[str], limit: int, db_path: Optional[str],
-    as_json: bool,
+    *, source_id: Optional[str], limit: int, as_json: bool,
 ) -> int:
-    original = _with_db_path(db_path)
     try:
-        try:
-            rows = _load_artifacts_for_list(
-                source_id=source_id, limit=limit,
-            )
-        except Exception as error:
-            print(
-                f"[extract] failed to load source_fetch_artifacts: {error}",
-                file=sys.stderr,
-            )
-            return 1
-    finally:
-        _restore_db_path(original)
+        rows = _load_artifacts_for_list(
+            source_id=source_id, limit=limit,
+        )
+    except Exception as error:
+        print(
+            f"[extract] failed to load source_fetch_artifacts: {error}",
+            file=sys.stderr,
+        )
+        return 1
 
     summaries = [_summarize_artifact_row(r) for r in rows]
     payload = {
         "cli_version": CLI_VERSION,
         "mode": "list_artifacts",
-        "db_path": str(db_path) if db_path is not None else str(database.DB_PATH),
+        "store": "postgres",
         "processed_at": datetime.now(timezone.utc).isoformat(
             timespec="seconds",
         ),
@@ -376,91 +344,80 @@ def _print_extraction_human(payload: Dict[str, Any]) -> None:
 
 def _run_extract_mode(
     *, source_id: Optional[str], artifact_id: Optional[int],
-    db_path: Optional[str], limit: int, dry_run: bool, save: bool,
+    limit: int, dry_run: bool, save: bool,
     as_json: bool,
 ) -> int:
-    original = _with_db_path(db_path)
     try:
-        try:
-            rows = _load_artifacts(
-                source_id=source_id, artifact_id=artifact_id, limit=limit,
-            )
-        except Exception as error:
-            print(
-                f"[extract] failed to load source_fetch_artifacts: {error}",
-                file=sys.stderr,
-            )
-            return 1
+        rows = _load_artifacts(
+            source_id=source_id, artifact_id=artifact_id, limit=limit,
+        )
+    except Exception as error:
+        print(
+            f"[extract] failed to load source_fetch_artifacts: {error}",
+            file=sys.stderr,
+        )
+        return 1
 
-        if not rows:
-            payload = {
-                "cli_version": CLI_VERSION,
-                "mode": "extract",
-                "db_path": (
-                    str(db_path) if db_path is not None
-                    else str(database.DB_PATH)
-                ),
-                "processed_at": datetime.now(timezone.utc).isoformat(
-                    timespec="seconds",
-                ),
-                "filter": {
-                    "source_id": source_id,
-                    "artifact_id": artifact_id,
-                },
-                "results": [],
-                "summary": {
-                    "total": 0, "succeeded": 0, "failed": 0, "saved": 0,
-                },
-                "safety_notes": _safety_notes_dict(),
-                "warning": "no source_fetch_artifacts rows matched the filter",
-            }
-            if as_json:
-                print(json.dumps(payload, ensure_ascii=False, indent=2))
-            else:
-                print("=== Extraction Result ===")
-                print("(no source_fetch_artifacts rows matched the filter)")
-                _print_safety_footer()
-            return 1
+    if not rows:
+        payload = {
+            "cli_version": CLI_VERSION,
+            "mode": "extract",
+            "store": "postgres",
+            "processed_at": datetime.now(timezone.utc).isoformat(
+                timespec="seconds",
+            ),
+            "filter": {
+                "source_id": source_id,
+                "artifact_id": artifact_id,
+            },
+            "results": [],
+            "summary": {
+                "total": 0, "succeeded": 0, "failed": 0, "saved": 0,
+            },
+            "safety_notes": _safety_notes_dict(),
+            "warning": "no source_fetch_artifacts rows matched the filter",
+        }
+        if as_json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print("=== Extraction Result ===")
+            print("(no source_fetch_artifacts rows matched the filter)")
+            _print_safety_footer()
+        return 1
 
-        per_artifact: List[Dict[str, Any]] = []
-        saved_count = 0
-        succeeded = 0
-        failed = 0
-        for row in rows:
-            result = artifact_extractor.extract_text_from_artifact(row)
-            result_dict = artifact_extractor.extraction_result_to_dict(result)
-            saved_row_id: Optional[int] = None
-            save_error: Optional[str] = None
-            if save and not dry_run and result.success:
-                try:
-                    saved_row_id = database.save_extraction_result(
-                        result_dict, db_path=db_path,
-                    )
-                    saved_count += 1
-                except Exception as error:
-                    save_error = (
-                        f"{type(error).__name__}: {error}"
-                    )
-            payload = _shape_extraction_payload(
-                result_dict=result_dict,
-                saved_row_id=saved_row_id,
-                dry_run=dry_run or not save,
-                save_error=save_error,
-            )
-            per_artifact.append(payload)
-            if result.success:
-                succeeded += 1
-            else:
-                failed += 1
-    finally:
-        _restore_db_path(original)
+    per_artifact: List[Dict[str, Any]] = []
+    saved_count = 0
+    succeeded = 0
+    failed = 0
+    for row in rows:
+        result = artifact_extractor.extract_text_from_artifact(row)
+        result_dict = artifact_extractor.extraction_result_to_dict(result)
+        saved_row_id: Optional[int] = None
+        save_error: Optional[str] = None
+        if save and not dry_run and result.success:
+            try:
+                saved_row_id = database.save_extraction_result(result_dict)
+                saved_count += 1
+            except Exception as error:
+                save_error = (
+                    f"{type(error).__name__}: {error}"
+                )
+        payload = _shape_extraction_payload(
+            result_dict=result_dict,
+            saved_row_id=saved_row_id,
+            dry_run=dry_run or not save,
+            save_error=save_error,
+        )
+        per_artifact.append(payload)
+        if result.success:
+            succeeded += 1
+        else:
+            failed += 1
 
     combined = {
         "cli_version": CLI_VERSION,
         "mode": "extract",
-        "db_path": (
-            str(db_path) if db_path is not None else str(database.DB_PATH)
-        ),
+        "store": "postgres",
         "processed_at": datetime.now(timezone.utc).isoformat(
             timespec="seconds",
         ),
@@ -516,7 +473,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         return _run_list_mode(
             source_id=args.source_id,
             limit=args.limit,
-            db_path=args.db_path,
             as_json=bool(args.json),
         )
 
@@ -538,7 +494,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     return _run_extract_mode(
         source_id=args.source_id,
         artifact_id=args.artifact_id,
-        db_path=args.db_path,
         limit=args.limit,
         dry_run=bool(args.dry_run),
         save=bool(args.save),

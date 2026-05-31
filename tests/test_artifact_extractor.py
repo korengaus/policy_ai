@@ -47,6 +47,7 @@ if str(ROOT) not in sys.path:
 
 import artifact_extractor  # noqa: E402
 import database  # noqa: E402
+import postgres_storage  # noqa: E402
 import scripts.extract_artifact_text as extract_cli  # noqa: E402
 
 
@@ -355,21 +356,36 @@ class WordCountTests(unittest.TestCase):
 
 class DatabaseRoundTripTests(unittest.TestCase):
     def setUp(self):
+        # M12.0e-3a: round-trip via the PG-primary path. Point a private
+        # sqlite:// substitute at a per-test temp file (USE_POSTGRES_WRITE
+        # ON), and reset the cached engine so each test binds to its own
+        # fresh DB. Env vars are snapshot/restored so the rest of the
+        # process (and validate.py's dual-write-disabled determinism) is
+        # untouched. Pattern copied from tests/test_m12_0d_stage2.py and
+        # tests/test_m12_0e_pg_schema_startup_invariant.py.
         self._tmp_dir = tempfile.TemporaryDirectory()
-        self._db_path = str(Path(self._tmp_dir.name) / "extractor_test.db")
+        self._pg_db = str(Path(self._tmp_dir.name) / "pg.db")
+        self._env_snapshot = {
+            k: os.environ.get(k)
+            for k in ("USE_POSTGRES_WRITE", "DATABASE_URL")
+        }
+        os.environ["USE_POSTGRES_WRITE"] = "true"
+        os.environ["DATABASE_URL"] = f"sqlite:///{self._pg_db}"
+        postgres_storage.reset_engine_for_tests()
 
     def tearDown(self):
         import gc as _gc
+        for key, value in self._env_snapshot.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        postgres_storage.reset_engine_for_tests()
         _gc.collect()
         try:
             self._tmp_dir.cleanup()
         except Exception:
             pass
-
-    def _ensure_db(self):
-        database.init_artifact_text_extractions_table()  # noqa — uses module DB_PATH
-        # The helper above uses module DB_PATH; we want our temp path.
-        # Use save_extraction_result with db_path explicitly instead.
 
     def _round_trip_one(
         self, *, source_id, artifact_id, html=KOREAN_HTML,
@@ -381,7 +397,7 @@ class DatabaseRoundTripTests(unittest.TestCase):
         )
         result = artifact_extractor.extract_text_from_artifact(row)
         d = artifact_extractor.extraction_result_to_dict(result)
-        return database.save_extraction_result(d, db_path=self._db_path)
+        return database.save_extraction_result(d)
 
     def test_save_then_get_round_trip(self):
         row_id = self._round_trip_one(
@@ -390,7 +406,7 @@ class DatabaseRoundTripTests(unittest.TestCase):
         self.assertIsInstance(row_id, int)
         self.assertGreater(row_id, 0)
         results = database.get_extraction_results(
-            source_id="sample_source", db_path=self._db_path,
+            source_id="sample_source",
         )
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["source_id"], "sample_source")
@@ -409,9 +425,9 @@ class DatabaseRoundTripTests(unittest.TestCase):
         d = artifact_extractor.extraction_result_to_dict(result)
         # Re-mutate the dict to simulate a misbehaving caller.
         d["truth_claim"] = True
-        database.save_extraction_result(d, db_path=self._db_path)
+        database.save_extraction_result(d)
         results = database.get_extraction_results(
-            source_id="liar_source", db_path=self._db_path,
+            source_id="liar_source",
         )
         self.assertEqual(len(results), 1)
         self.assertIs(results[0]["truth_claim"], False)
@@ -421,13 +437,9 @@ class DatabaseRoundTripTests(unittest.TestCase):
         self._round_trip_one(source_id="src_b", artifact_id=2)
         self._round_trip_one(source_id="src_a", artifact_id=3,
                              html=ENGLISH_HTML)
-        a_rows = database.get_extraction_results(
-            source_id="src_a", db_path=self._db_path,
-        )
-        b_rows = database.get_extraction_results(
-            source_id="src_b", db_path=self._db_path,
-        )
-        all_rows = database.get_extraction_results(db_path=self._db_path)
+        a_rows = database.get_extraction_results(source_id="src_a")
+        b_rows = database.get_extraction_results(source_id="src_b")
+        all_rows = database.get_extraction_results()
         self.assertEqual(len(a_rows), 2)
         self.assertEqual(len(b_rows), 1)
         self.assertEqual(len(all_rows), 3)
@@ -435,9 +447,7 @@ class DatabaseRoundTripTests(unittest.TestCase):
     def test_get_filters_by_artifact_id(self):
         self._round_trip_one(source_id="src_a", artifact_id=1)
         self._round_trip_one(source_id="src_b", artifact_id=2)
-        rows = database.get_extraction_results(
-            artifact_id=2, db_path=self._db_path,
-        )
+        rows = database.get_extraction_results(artifact_id=2)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["artifact_id"], 2)
         self.assertEqual(rows[0]["source_id"], "src_b")
@@ -446,7 +456,7 @@ class DatabaseRoundTripTests(unittest.TestCase):
         self._round_trip_one(source_id="src_a", artifact_id=1)
         self._round_trip_one(source_id="src_b", artifact_id=1)
         rows = database.get_extraction_results(
-            source_id="src_a", artifact_id=1, db_path=self._db_path,
+            source_id="src_a", artifact_id=1,
         )
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["source_id"], "src_a")
@@ -461,9 +471,30 @@ class DatabaseRoundTripTests(unittest.TestCase):
         ):
             with self.subTest(bad=bad):
                 with self.assertRaises(ValueError):
-                    database.save_extraction_result(
-                        bad, db_path=self._db_path,
-                    )
+                    database.save_extraction_result(bad)
+
+
+# ---------------------------------------------------------------------------
+# P. init_db() creates the artifact_text_extractions table — SQLite-specific.
+#
+# Deliberately NOT migrated to the PG-substitute path: this pins the
+# SQLite schema-creation behaviour (init_db builds the table, verified via
+# sqlite_master) that 0e-5 still depends on. It runs with NO dual-write env
+# — a DB_PATH swap + raw sqlite3 read against an isolated temp file.
+# ---------------------------------------------------------------------------
+
+
+class InitDbSqliteSchemaTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp_dir = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        import gc as _gc
+        _gc.collect()
+        try:
+            self._tmp_dir.cleanup()
+        except Exception:
+            pass
 
     def test_init_db_creates_artifact_text_extractions_table(self):
         # Point database.DB_PATH at a fresh temp file, then call init_db().
@@ -506,30 +537,31 @@ def _run_cli_subprocess(*args, timeout=CLI_TIMEOUT_SECONDS, env=None):
 
 class CliSmokeTests(unittest.TestCase):
     def setUp(self):
+        # M12.0e-3a: the CLI is PG-only. Point a private sqlite://
+        # substitute at a per-test temp file (USE_POSTGRES_WRITE ON) and
+        # reset the cached engine. The CLI subprocess inherits both env
+        # vars via _run_cli_subprocess's env={**os.environ, ...} merge,
+        # so parent (seeding) and child (CLI) share the same substitute
+        # file. Schema auto-creates via ensure_schema on first
+        # get_engine() — no manual CREATE TABLE needed.
         self._tmp_dir = tempfile.TemporaryDirectory()
-        self._db_path = str(Path(self._tmp_dir.name) / "cli_smoke.db")
-        # Create an empty artifact_text_extractions table so the CLI
-        # doesn't error on a missing schema.
-        connection = sqlite3.connect(self._db_path)
-        try:
-            connection.execute(
-                "CREATE TABLE IF NOT EXISTS source_fetch_artifacts ("
-                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-                "source_id TEXT NOT NULL, url TEXT NOT NULL, "
-                "fetch_timestamp TEXT NOT NULL, status_code INTEGER, "
-                "content_type TEXT, success INTEGER NOT NULL DEFAULT 0, "
-                "error TEXT, text_content TEXT, raw_html TEXT, "
-                "fetch_duration_ms INTEGER, "
-                "truth_claim INTEGER NOT NULL DEFAULT 0, "
-                "official_source_candidate INTEGER NOT NULL DEFAULT 0, "
-                "created_at TEXT NOT NULL)"
-            )
-            connection.commit()
-        finally:
-            connection.close()
+        self._pg_db = str(Path(self._tmp_dir.name) / "cli_smoke_pg.db")
+        self._env_snapshot = {
+            k: os.environ.get(k)
+            for k in ("USE_POSTGRES_WRITE", "DATABASE_URL")
+        }
+        os.environ["USE_POSTGRES_WRITE"] = "true"
+        os.environ["DATABASE_URL"] = f"sqlite:///{self._pg_db}"
+        postgres_storage.reset_engine_for_tests()
 
     def tearDown(self):
         import gc as _gc
+        for key, value in self._env_snapshot.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        postgres_storage.reset_engine_for_tests()
         _gc.collect()
         try:
             self._tmp_dir.cleanup()
@@ -537,27 +569,24 @@ class CliSmokeTests(unittest.TestCase):
             pass
 
     def _seed_artifact(self, *, artifact_id, source_id, raw_html):
-        connection = sqlite3.connect(self._db_path)
-        try:
-            connection.execute(
-                "INSERT INTO source_fetch_artifacts ("
-                "id, source_id, url, fetch_timestamp, status_code, "
-                "content_type, success, error, text_content, raw_html, "
-                "fetch_duration_ms, truth_claim, "
-                "official_source_candidate, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    artifact_id, source_id,
-                    "https://example.go.kr/test",
-                    "2026-05-22T00:00:00+00:00", 200,
-                    "text/html; charset=utf-8", 1, None, None, raw_html,
-                    250, 0, 1,
-                    "2026-05-22T00:00:00+00:00",
-                ),
-            )
-            connection.commit()
-        finally:
-            connection.close()
+        # Seed the INPUT row via the public PG-primary writer (dual-write
+        # ON → lands in the PG substitute). PG's SERIAL assigns the id, so
+        # ``artifact_id`` is not pinned — the smokes filter by source_id.
+        # Mirrors tests/test_postgres_storage.py's save_fetch_artifact
+        # PG-only precedent.
+        database.save_fetch_artifact({
+            "source_id": source_id,
+            "url": "https://example.go.kr/test",
+            "fetch_timestamp": "2026-05-22T00:00:00+00:00",
+            "status_code": 200,
+            "content_type": "text/html; charset=utf-8",
+            "success": True,
+            "error": None,
+            "text_content": None,
+            "raw_html": raw_html,
+            "fetch_duration_ms": 250,
+            "official_source_candidate": True,
+        })
 
     def test_help_exits_0(self):
         rc, stdout, _ = _run_cli_subprocess("--help")
@@ -566,9 +595,7 @@ class CliSmokeTests(unittest.TestCase):
         self.assertIn("Exit codes", stdout)
 
     def test_list_artifacts_empty_db(self):
-        rc, stdout, _ = _run_cli_subprocess(
-            "--list-artifacts", "--db-path", self._db_path,
-        )
+        rc, stdout, _ = _run_cli_subprocess("--list-artifacts")
         self.assertEqual(rc, 0)
         self.assertIn("source_fetch_artifacts", stdout)
         self.assertIn("Total: 0", stdout)
@@ -579,7 +606,7 @@ class CliSmokeTests(unittest.TestCase):
             artifact_id=1, source_id="src_a", raw_html=KOREAN_HTML,
         )
         rc, stdout, _ = _run_cli_subprocess(
-            "--list-artifacts", "--db-path", self._db_path, "--json",
+            "--list-artifacts", "--json",
         )
         self.assertEqual(rc, 0)
         payload = json.loads(stdout)
@@ -592,73 +619,48 @@ class CliSmokeTests(unittest.TestCase):
         self._seed_artifact(
             artifact_id=1, source_id="src_a", raw_html=KOREAN_HTML,
         )
-        # Snapshot file modification time.
-        before_mtime = os.path.getmtime(self._db_path)
         rc, stdout, _ = _run_cli_subprocess(
-            "--source-id", "src_a", "--db-path", self._db_path,
-            "--dry-run",
+            "--source-id", "src_a", "--dry-run",
         )
         self.assertEqual(rc, 0, msg=stdout)
         self.assertIn("Extraction Result", stdout)
         self.assertIn("dry_run: True", stdout)
-        # No extractions in the temp DB.
-        connection = sqlite3.connect(self._db_path)
-        try:
-            row = connection.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' "
-                "AND name='artifact_text_extractions'"
-            ).fetchone()
-        finally:
-            connection.close()
-        # Even if the CLI auto-created the empty table for read, no rows.
-        if row is not None:
-            connection = sqlite3.connect(self._db_path)
-            try:
-                count = connection.execute(
-                    "SELECT COUNT(*) FROM artifact_text_extractions"
-                ).fetchone()[0]
-            finally:
-                connection.close()
-            self.assertEqual(count, 0, "dry-run must not insert rows")
-        # mtime may change because reads can update metadata but no
-        # INSERT happened — explicit row-count assertion above covers it.
-        _ = before_mtime
+        # No extractions persisted — read back via the public PG API.
+        self.assertEqual(
+            len(database.get_extraction_results(source_id="src_a")),
+            0,
+            "dry-run must not insert rows",
+        )
 
     def test_save_writes_extraction_row(self):
         self._seed_artifact(
             artifact_id=1, source_id="src_a", raw_html=KOREAN_HTML,
         )
         rc, stdout, _ = _run_cli_subprocess(
-            "--source-id", "src_a", "--db-path", self._db_path, "--save",
+            "--source-id", "src_a", "--save",
         )
         self.assertEqual(rc, 0, msg=stdout)
         self.assertIn("saved_row_id", stdout)
-        rows = database.get_extraction_results(
-            source_id="src_a", db_path=self._db_path,
-        )
+        rows = database.get_extraction_results(source_id="src_a")
         self.assertEqual(len(rows), 1)
         self.assertTrue(rows[0]["success"])
         self.assertIs(rows[0]["truth_claim"], False)
 
     def test_no_filter_is_usage_error(self):
-        rc, _stdout, stderr = _run_cli_subprocess(
-            "--db-path", self._db_path,
-        )
+        rc, _stdout, stderr = _run_cli_subprocess()
         self.assertEqual(rc, 2)
         self.assertIn("--source-id", stderr)
 
     def test_save_and_dry_run_mutually_exclusive(self):
         rc, _stdout, stderr = _run_cli_subprocess(
-            "--source-id", "src_a", "--db-path", self._db_path,
-            "--dry-run", "--save",
+            "--source-id", "src_a", "--dry-run", "--save",
         )
         self.assertEqual(rc, 2)
         self.assertIn("mutually exclusive", stderr)
 
     def test_empty_artifact_set_exits_1(self):
         rc, stdout, _ = _run_cli_subprocess(
-            "--source-id", "src_none", "--db-path", self._db_path,
-            "--dry-run",
+            "--source-id", "src_none", "--dry-run",
         )
         self.assertEqual(rc, 1)
         self.assertIn("no source_fetch_artifacts rows", stdout)
