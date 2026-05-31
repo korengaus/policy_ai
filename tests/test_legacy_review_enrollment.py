@@ -282,20 +282,34 @@ class FindLegacyWeakVerifiedTests(unittest.TestCase):
         _seed_attribution_row(
             self._db, attribution_id=2, analysis_id="200", weak=False,
         )
-        rows = enrollment.find_legacy_weak_verified_rows(db_path=self._db)
+        rows = enrollment.find_legacy_weak_verified_rows()
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["analysis_id"], "100")
 
     def test_returns_empty_when_no_flagged(self):
-        rows = enrollment.find_legacy_weak_verified_rows(db_path=self._db)
+        rows = enrollment.find_legacy_weak_verified_rows()
         self.assertEqual(rows, [])
 
     def test_db_error_returns_empty_list_without_raising(self):
-        # Pointing at a path inside a nonexistent parent directory makes
-        # sqlite3 fail to open — the helper must swallow and return [].
-        bad = str(Path(self._tmp_dir.name) / "nope" / "missing.db")
-        result = enrollment.find_legacy_weak_verified_rows(db_path=bad)
-        self.assertEqual(result, [])
+        # M12.0e-3b: PG-only — no db_path. Point DATABASE_URL at an
+        # UNPARSEABLE value so engine creation fails immediately at
+        # create_engine (no network connect — fast) and raises
+        # PostgresReadError; find_legacy_weak_verified_rows must swallow
+        # it and return []. Restore the prior env + reset the engine in a
+        # finally so this test cannot poison the others in the file.
+        import postgres_storage
+        prior_url = os.environ.get("DATABASE_URL")
+        try:
+            os.environ["DATABASE_URL"] = "not-a-valid-database-url"
+            postgres_storage.reset_engine_for_tests()
+            result = enrollment.find_legacy_weak_verified_rows()
+            self.assertEqual(result, [])
+        finally:
+            if prior_url is None:
+                os.environ.pop("DATABASE_URL", None)
+            else:
+                os.environ["DATABASE_URL"] = prior_url
+            postgres_storage.reset_engine_for_tests()
 
 
 class IsAlreadyEnrolledTests(unittest.TestCase):
@@ -317,37 +331,33 @@ class IsAlreadyEnrolledTests(unittest.TestCase):
 
     def test_false_when_no_task(self):
         self.assertFalse(
-            enrollment.is_already_enrolled("100", db_path=self._db)
+            enrollment.is_already_enrolled("100")
         )
 
     def test_true_after_enrollment(self):
-        candidate = enrollment.find_legacy_weak_verified_rows(
-            db_path=self._db,
-        )[0]
+        candidate = enrollment.find_legacy_weak_verified_rows()[0]
         enrollment.enroll_legacy_row(
-            candidate, db_path=self._db, dry_run=False,
+            candidate, dry_run=False,
         )
         self.assertTrue(
-            enrollment.is_already_enrolled("100", db_path=self._db)
+            enrollment.is_already_enrolled("100")
         )
 
     def test_false_when_same_analysis_id_different_reason(self):
-        candidate = enrollment.find_legacy_weak_verified_rows(
-            db_path=self._db,
-        )[0]
+        candidate = enrollment.find_legacy_weak_verified_rows()[0]
         enrollment.enroll_legacy_row(
-            candidate, db_path=self._db, dry_run=False,
+            candidate, dry_run=False,
         )
         # Different reason → different idempotency key → False.
         self.assertFalse(
             enrollment.is_already_enrolled(
-                "100", reason="some_other_reason", db_path=self._db,
+                "100", reason="some_other_reason",
             )
         )
 
     def test_empty_analysis_id_returns_false(self):
         self.assertFalse(
-            enrollment.is_already_enrolled("", db_path=self._db)
+            enrollment.is_already_enrolled("")
         )
 
 
@@ -375,13 +385,13 @@ class EnrollLegacyRowTests(unittest.TestCase):
             pass
 
     def _candidate(self) -> dict:
-        rows = enrollment.find_legacy_weak_verified_rows(db_path=self._db)
+        rows = enrollment.find_legacy_weak_verified_rows()
         self.assertEqual(len(rows), 1)
         return rows[0]
 
     def test_dry_run_does_not_write(self):
         record = enrollment.enroll_legacy_row(
-            self._candidate(), db_path=self._db, dry_run=True,
+            self._candidate(), dry_run=True,
         )
         self.assertEqual(_count_review_tasks(self._db), 0)
         self.assertFalse(record.already_enrolled)
@@ -392,7 +402,7 @@ class EnrollLegacyRowTests(unittest.TestCase):
 
     def test_actual_write_creates_one_review_task(self):
         record = enrollment.enroll_legacy_row(
-            self._candidate(), db_path=self._db, dry_run=False,
+            self._candidate(), dry_run=False,
         )
         self.assertTrue(record.wrote_to_db)
         self.assertFalse(record.already_enrolled)
@@ -401,10 +411,10 @@ class EnrollLegacyRowTests(unittest.TestCase):
 
     def test_idempotency_second_call_does_not_duplicate(self):
         first = enrollment.enroll_legacy_row(
-            self._candidate(), db_path=self._db, dry_run=False,
+            self._candidate(), dry_run=False,
         )
         second = enrollment.enroll_legacy_row(
-            self._candidate(), db_path=self._db, dry_run=False,
+            self._candidate(), dry_run=False,
         )
         self.assertTrue(first.wrote_to_db)
         self.assertFalse(second.wrote_to_db)
@@ -416,7 +426,7 @@ class EnrollLegacyRowTests(unittest.TestCase):
     def test_analysis_results_row_unchanged_after_enroll(self):
         before = _fetch_analysis_row(self._db, analysis_id=100)
         enrollment.enroll_legacy_row(
-            self._candidate(), db_path=self._db, dry_run=False,
+            self._candidate(), dry_run=False,
         )
         after = _fetch_analysis_row(self._db, analysis_id=100)
         # Every column must be byte-identical before/after enrollment.
@@ -427,7 +437,7 @@ class EnrollLegacyRowTests(unittest.TestCase):
 
     def test_review_task_status_is_pending_review(self):
         record = enrollment.enroll_legacy_row(
-            self._candidate(), db_path=self._db, dry_run=False,
+            self._candidate(), dry_run=False,
         )
         key = enrollment.make_enrollment_idempotency_key("100")
         task = _fetch_review_task(self._db, idempotency_key=key)
@@ -461,7 +471,7 @@ class EnrollLegacyRowTests(unittest.TestCase):
         for dry in (True, False):
             with self.subTest(dry_run=dry):
                 r = enrollment.enroll_legacy_row(
-                    self._candidate(), db_path=self._db, dry_run=dry,
+                    self._candidate(), dry_run=dry,
                 )
                 self.assertIs(r.truth_claim, False)
                 d = enrollment.enrollment_to_dict(r)
@@ -469,7 +479,7 @@ class EnrollLegacyRowTests(unittest.TestCase):
                 self.assertIs(d["operator_review_required"], True)
 
     def test_non_dict_input_returns_error_record(self):
-        r = enrollment.enroll_legacy_row(None, db_path=self._db)  # type: ignore[arg-type]
+        r = enrollment.enroll_legacy_row(None)  # type: ignore[arg-type]
         self.assertIsNotNone(r.error)
         self.assertIs(r.truth_claim, False)
         # No write happened.
@@ -478,7 +488,6 @@ class EnrollLegacyRowTests(unittest.TestCase):
     def test_missing_analysis_id_returns_error_record(self):
         r = enrollment.enroll_legacy_row(
             {"stored_verdict_label": "draft_verified"},
-            db_path=self._db,
         )
         self.assertIsNotNone(r.error)
         self.assertIn("analysis_id", r.error)
@@ -516,11 +525,9 @@ class MalformedSignalsTests(unittest.TestCase):
             pass
 
     def test_malformed_signals_does_not_crash(self):
-        candidate = enrollment.find_legacy_weak_verified_rows(
-            db_path=self._db,
-        )[0]
+        candidate = enrollment.find_legacy_weak_verified_rows()[0]
         record = enrollment.enroll_legacy_row(
-            candidate, db_path=self._db, dry_run=True,
+            candidate, dry_run=True,
         )
         # Signals collapsed to empty list — no crash.
         self.assertEqual(record.weak_evidence_signals, [])
@@ -614,7 +621,7 @@ class CliSmokeTests(unittest.TestCase):
     def test_list_exits_0_no_writes(self):
         before = _count_review_tasks(self._db)
         rc, stdout, _ = _run_cli_subprocess(
-            "--list", "--db-path", self._db,
+            "--list",
         )
         self.assertEqual(rc, 0)
         self.assertIn("Legacy Weak-Verified Candidates", stdout)
@@ -628,7 +635,7 @@ class CliSmokeTests(unittest.TestCase):
     def test_dry_run_exits_0_no_writes(self):
         before = _count_review_tasks(self._db)
         rc, stdout, _ = _run_cli_subprocess(
-            "--dry-run", "--db-path", self._db,
+            "--dry-run",
         )
         self.assertEqual(rc, 0)
         self.assertIn("Total candidates: 3", stdout)
@@ -637,7 +644,7 @@ class CliSmokeTests(unittest.TestCase):
 
     def test_check_status_reports_each_row(self):
         rc, stdout, _ = _run_cli_subprocess(
-            "--check-status", "--db-path", self._db,
+            "--check-status",
         )
         self.assertEqual(rc, 0)
         self.assertIn("Total candidates: 3", stdout)
@@ -649,7 +656,7 @@ class CliSmokeTests(unittest.TestCase):
     def test_summary_exits_0_no_writes(self):
         before = _count_review_tasks(self._db)
         rc, stdout, _ = _run_cli_subprocess(
-            "--summary", "--db-path", self._db,
+            "--summary",
         )
         self.assertEqual(rc, 0)
         self.assertIn("Enrollment Summary", stdout)
@@ -661,7 +668,7 @@ class CliSmokeTests(unittest.TestCase):
         # writing.
         before = _count_review_tasks(self._db)
         rc, _stdout, stderr = _run_cli_subprocess(
-            "--enroll", "--db-path", self._db,
+            "--enroll",
         )
         self.assertEqual(rc, 1)
         self.assertIn("--yes", stderr)
@@ -669,7 +676,7 @@ class CliSmokeTests(unittest.TestCase):
 
     def test_enroll_yes_writes_review_tasks(self):
         rc, stdout, _ = _run_cli_subprocess(
-            "--enroll", "--yes", "--db-path", self._db,
+            "--enroll", "--yes",
         )
         self.assertEqual(rc, 0, msg=stdout)
         self.assertIn("enrolled=3", stdout)
@@ -691,10 +698,10 @@ class CliSmokeTests(unittest.TestCase):
 
     def test_enroll_yes_is_idempotent(self):
         rc1, _, _ = _run_cli_subprocess(
-            "--enroll", "--yes", "--db-path", self._db,
+            "--enroll", "--yes",
         )
         rc2, stdout2, _ = _run_cli_subprocess(
-            "--enroll", "--yes", "--db-path", self._db,
+            "--enroll", "--yes",
         )
         self.assertEqual(rc1, 0)
         self.assertEqual(rc2, 0)
@@ -704,20 +711,20 @@ class CliSmokeTests(unittest.TestCase):
         self.assertEqual(_count_review_tasks(self._db), 3)
 
     def test_no_mode_is_usage_error(self):
-        rc, _, stderr = _run_cli_subprocess("--db-path", self._db)
+        rc, _, stderr = _run_cli_subprocess()
         self.assertEqual(rc, 2)
         self.assertIn("required", stderr)
 
     def test_two_modes_simultaneously_is_usage_error(self):
         rc, _, stderr = _run_cli_subprocess(
-            "--list", "--dry-run", "--db-path", self._db,
+            "--list", "--dry-run",
         )
         self.assertEqual(rc, 2)
         self.assertIn("only one", stderr)
 
     def test_yes_without_enroll_is_usage_error(self):
         rc, _, stderr = _run_cli_subprocess(
-            "--list", "--yes", "--db-path", self._db,
+            "--list", "--yes",
         )
         self.assertEqual(rc, 2)
         self.assertIn("--yes", stderr)
@@ -727,14 +734,14 @@ class CliSmokeTests(unittest.TestCase):
         empty_db = str(Path(self._tmp_dir.name) / "empty.db")
         _init_temp_db(empty_db)
         rc, _stdout, stderr = _run_cli_subprocess(
-            "--enroll", "--yes", "--db-path", empty_db,
+            "--enroll", "--yes",
         )
         self.assertEqual(rc, 1)
         self.assertIn("no legacy weak-verified candidates", stderr)
 
     def test_list_json_carries_no_truth_claim_true(self):
         rc, stdout, _ = _run_cli_subprocess(
-            "--list", "--db-path", self._db, "--json",
+            "--list", "--json",
         )
         self.assertEqual(rc, 0)
         payload = json.loads(stdout)
@@ -774,7 +781,7 @@ class InteractiveConfirmationTests(unittest.TestCase):
             enroll_cli, "_read_confirmation", return_value="YES",
         ):
             rc, _stdout, _ = _run_cli_inproc([
-                "--enroll", "--db-path", self._db,
+                "--enroll",
             ])
         self.assertEqual(rc, 0)
         self.assertEqual(_count_review_tasks(self._db), 1)
@@ -785,7 +792,7 @@ class InteractiveConfirmationTests(unittest.TestCase):
             enroll_cli, "_read_confirmation", return_value="NO",
         ):
             rc, _stdout, stderr = _run_cli_inproc([
-                "--enroll", "--db-path", self._db,
+                "--enroll",
             ])
         self.assertEqual(rc, 1)
         self.assertIn("confirmation aborted", stderr)
@@ -797,7 +804,7 @@ class InteractiveConfirmationTests(unittest.TestCase):
             enroll_cli, "_read_confirmation", return_value="",
         ):
             rc, _stdout, _ = _run_cli_inproc([
-                "--enroll", "--db-path", self._db,
+                "--enroll",
             ])
         self.assertEqual(rc, 1)
         self.assertEqual(_count_review_tasks(self._db), before)

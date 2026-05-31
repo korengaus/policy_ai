@@ -123,7 +123,7 @@ class AuditEmptyAndNoMatchTests(unittest.TestCase):
             _init_temp_db(db_path)
             output_dir = Path(tmp) / "audit-out"
             rc, out, _ = _run_main_inproc(
-                ["--db-path", db_path, "--output-dir", str(output_dir)]
+                ["--output-dir", str(output_dir)]
             )
             self.assertEqual(rc, 0)
             payload = _load_audit_payload(_read_latest_audit(output_dir))
@@ -143,7 +143,7 @@ class AuditEmptyAndNoMatchTests(unittest.TestCase):
             )
             output_dir = Path(tmp) / "audit-out"
             rc, _, _ = _run_main_inproc(
-                ["--db-path", db_path, "--output-dir", str(output_dir)]
+                ["--output-dir", str(output_dir)]
             )
             self.assertEqual(rc, 0)
             payload = _load_audit_payload(_read_latest_audit(output_dir))
@@ -166,7 +166,7 @@ class AuditOneMatchTests(unittest.TestCase):
             )
             output_dir = Path(tmp) / "audit-out"
             rc, _, _ = _run_main_inproc(
-                ["--db-path", db_path, "--output-dir", str(output_dir)]
+                ["--output-dir", str(output_dir)]
             )
             self.assertEqual(rc, 0)
             payload = _load_audit_payload(_read_latest_audit(output_dir))
@@ -195,7 +195,7 @@ class AuditMultipleMatchesTests(unittest.TestCase):
             _seed_n_attributions(db_path, 5)
             output_dir = Path(tmp) / "audit-out"
             rc, _, _ = _run_main_inproc(
-                ["--db-path", db_path, "--output-dir", str(output_dir)]
+                ["--output-dir", str(output_dir)]
             )
             self.assertEqual(rc, 0)
             payload = _load_audit_payload(_read_latest_audit(output_dir))
@@ -224,7 +224,6 @@ class AuditLimitTests(unittest.TestCase):
             _seed_n_attributions(db_path, 5)
             output_dir = Path(tmp) / "audit-out"
             rc, _, _ = _run_main_inproc([
-                "--db-path", db_path,
                 "--output-dir", str(output_dir),
                 "--limit", "2",
             ])
@@ -244,7 +243,7 @@ class AuditFileShapeTests(unittest.TestCase):
             _init_temp_db(db_path)
             output_dir = Path(tmp) / "audit-out"
             _run_main_inproc(
-                ["--db-path", db_path, "--output-dir", str(output_dir)]
+                ["--output-dir", str(output_dir)]
             )
             path = _read_latest_audit(output_dir)
             # Parses without error.
@@ -257,7 +256,7 @@ class AuditFileShapeTests(unittest.TestCase):
             _init_temp_db(db_path)
             output_dir = Path(tmp) / "audit-out"
             _run_main_inproc(
-                ["--db-path", db_path, "--output-dir", str(output_dir)]
+                ["--output-dir", str(output_dir)]
             )
             payload = _load_audit_payload(_read_latest_audit(output_dir))
             self.assertEqual(payload["schema_version"], "m11.3.audit.v1")
@@ -268,7 +267,7 @@ class AuditFileShapeTests(unittest.TestCase):
             _init_temp_db(db_path)
             output_dir = Path(tmp) / "audit-out"
             _run_main_inproc(
-                ["--db-path", db_path, "--output-dir", str(output_dir)]
+                ["--output-dir", str(output_dir)]
             )
             path = _read_latest_audit(output_dir)
             self.assertEqual(path.parent.resolve(), output_dir.resolve())
@@ -279,7 +278,7 @@ class AuditFileShapeTests(unittest.TestCase):
             _init_temp_db(db_path)
             output_dir = Path(tmp) / "audit-out"
             _run_main_inproc(
-                ["--db-path", db_path, "--output-dir", str(output_dir)]
+                ["--output-dir", str(output_dir)]
             )
             payload = _load_audit_payload(_read_latest_audit(output_dir))
             from datetime import datetime
@@ -301,7 +300,7 @@ class AuditIdempotencyTests(unittest.TestCase):
             _seed_n_attributions(db_path, 4)
             output_dir = Path(tmp) / "audit-out"
             _run_main_inproc(
-                ["--db-path", db_path, "--output-dir", str(output_dir)]
+                ["--output-dir", str(output_dir)]
             )
             first_path = _read_latest_audit(output_dir)
             first_payload = _load_audit_payload(first_path)
@@ -311,7 +310,7 @@ class AuditIdempotencyTests(unittest.TestCase):
             # either overwrite or produce a sibling. We just need both
             # files' candidate sets to match.
             _run_main_inproc(
-                ["--db-path", db_path, "--output-dir", str(output_dir)]
+                ["--output-dir", str(output_dir)]
             )
             second_path = _read_latest_audit(output_dir)
             second_payload = _load_audit_payload(second_path)
@@ -339,7 +338,6 @@ class AuditAtomicWriteTests(unittest.TestCase):
 
             with patch("scripts.audit_legacy_enrollment.os.replace", _boom):
                 rc, _out, err = _run_main_inproc([
-                    "--db-path", db_path,
                     "--output-dir", str(output_dir),
                 ])
             self.assertEqual(rc, 1)
@@ -366,7 +364,7 @@ class AuditExitCodeTests(unittest.TestCase):
             _init_temp_db(db_path)
             output_dir = Path(tmp) / "audit-out"
             rc, _, _ = _run_main_inproc(
-                ["--db-path", db_path, "--output-dir", str(output_dir)]
+                ["--output-dir", str(output_dir)]
             )
             self.assertEqual(rc, 0)
 
@@ -382,7 +380,7 @@ class AuditExitCodeTests(unittest.TestCase):
             # Use a sub-path under the blocker so mkdir must traverse it.
             target = blocker / "audit-out"
             rc, _, err = _run_main_inproc(
-                ["--db-path", db_path, "--output-dir", str(target)]
+                ["--output-dir", str(target)]
             )
             self.assertEqual(rc, 1)
             self.assertIn("[audit]", err)
@@ -416,7 +414,7 @@ class AuditLogEventTests(unittest.TestCase):
             _seed_n_attributions(db_path, 2)
             output_dir = Path(tmp) / "audit-out"
             _run_main_inproc(
-                ["--db-path", db_path, "--output-dir", str(output_dir)]
+                ["--output-dir", str(output_dir)]
             )
 
         events = [
@@ -457,7 +455,7 @@ class AuditKoreanRoundTripTests(unittest.TestCase):
             )
             output_dir = Path(tmp) / "audit-out"
             _run_main_inproc(
-                ["--db-path", db_path, "--output-dir", str(output_dir)]
+                ["--output-dir", str(output_dir)]
             )
             path = _read_latest_audit(output_dir)
             raw = path.read_text(encoding="utf-8")
@@ -482,7 +480,7 @@ class AuditReadOnlyContractTests(unittest.TestCase):
             _seed_n_attributions(db_path, 3)
             output_dir = Path(tmp) / "audit-out"
             _run_main_inproc(
-                ["--db-path", db_path, "--output-dir", str(output_dir)]
+                ["--output-dir", str(output_dir)]
             )
             self.assertEqual(_count_review_tasks(db_path), 0)
 

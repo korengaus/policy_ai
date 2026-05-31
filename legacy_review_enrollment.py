@@ -47,10 +47,9 @@ Public surface (stable, pinned by tests)
     enrollment_to_dict(record) -> dict
     make_enrollment_idempotency_key(analysis_id, reason) -> str
     make_enrollment_task_id(analysis_id, reason) -> str
-    find_legacy_weak_verified_rows(db_path=None) -> list[dict]
-    is_already_enrolled(analysis_id, reason=ENROLLMENT_REASON,
-                        db_path=None) -> bool
-    enroll_legacy_row(attribution_row, db_path=None,
+    find_legacy_weak_verified_rows() -> list[dict]
+    is_already_enrolled(analysis_id, reason=ENROLLMENT_REASON) -> bool
+    enroll_legacy_row(attribution_row,
                       dry_run=True) -> LegacyEnrollmentRecord
     compute_enrollment_summary(records) -> dict
 """
@@ -63,7 +62,6 @@ import logging
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from structured_logging import get_logger
@@ -202,43 +200,19 @@ def make_enrollment_task_id(
 
 
 # ---------------------------------------------------------------------------
-# DB context helpers
-# ---------------------------------------------------------------------------
-
-
-def _with_db_path(db_path: Optional[str]):
-    """Temporarily swap ``database.DB_PATH`` so the existing review
-    helpers (which use the module-level path) read/write the right
-    file. Returns the original value to be restored by the caller."""
-    if db_path is None:
-        return None
-    original = database.DB_PATH
-    database.DB_PATH = Path(db_path)
-    return original
-
-
-def _restore_db_path(original):
-    if original is None:
-        return
-    database.DB_PATH = original
-
-
-# ---------------------------------------------------------------------------
 # Discovery + idempotency check
 # ---------------------------------------------------------------------------
 
 
-def find_legacy_weak_verified_rows(db_path: Optional[str] = None) -> List[Dict[str, Any]]:
+def find_legacy_weak_verified_rows() -> List[Dict[str, Any]]:
     """Return ``verdict_label_attributions`` rows where
     ``is_weak_evidence_verified=1``, newest first.
 
-    Wraps ``database.get_verdict_label_attributions(only_weak_evidence_verified=True)``
-    so callers don't have to manage ``db_path`` themselves. Returns
-    ``[]`` on any DB error (logged at WARNING)."""
+    Wraps ``database.get_verdict_label_attributions(only_weak_evidence_verified=True)``.
+    Returns ``[]`` on any DB error (logged at WARNING)."""
     try:
         return database.get_verdict_label_attributions(
             only_weak_evidence_verified=True,
-            db_path=db_path,
             # Use the DB-side maximum so we never truncate the queue.
             limit=500,
         )
@@ -253,14 +227,12 @@ def find_legacy_weak_verified_rows(db_path: Optional[str] = None) -> List[Dict[s
 def is_already_enrolled(
     analysis_id: str,
     reason: str = ENROLLMENT_REASON,
-    db_path: Optional[str] = None,
 ) -> bool:
     """True iff a review_task already exists with the idempotency key
     for ``(analysis_id, reason)``. Never raises."""
     if not analysis_id:
         return False
     key = make_enrollment_idempotency_key(analysis_id, reason)
-    original = _with_db_path(db_path)
     try:
         existing = database.get_review_task_by_idempotency_key(key)
     except Exception as error:
@@ -270,8 +242,6 @@ def is_already_enrolled(
             analysis_id, reason, error,
         )
         existing = None
-    finally:
-        _restore_db_path(original)
     return existing is not None
 
 
@@ -384,7 +354,6 @@ def _empty_record(analysis_id: str, attribution_row: Dict[str, Any]) -> LegacyEn
 
 def enroll_legacy_row(
     attribution_row: Dict[str, Any],
-    db_path: Optional[str] = None,
     dry_run: bool = True,
 ) -> LegacyEnrollmentRecord:
     """Enroll one ``verdict_label_attributions`` row into the review
@@ -425,7 +394,7 @@ def enroll_legacy_row(
     # --- Idempotency check ---
     try:
         already = is_already_enrolled(
-            analysis_id, ENROLLMENT_REASON, db_path=db_path,
+            analysis_id, ENROLLMENT_REASON,
         )
     except Exception as error:
         record.error = (
@@ -438,7 +407,6 @@ def enroll_legacy_row(
         existing_task_id = make_enrollment_task_id(
             analysis_id, ENROLLMENT_REASON,
         )
-        original = _with_db_path(db_path)
         try:
             existing = database.get_review_task_by_idempotency_key(
                 make_enrollment_idempotency_key(
@@ -447,8 +415,6 @@ def enroll_legacy_row(
             )
         except Exception:
             existing = None
-        finally:
-            _restore_db_path(original)
         if isinstance(existing, dict) and existing.get("task_id"):
             existing_task_id = existing["task_id"]
         record.review_task_id = existing_task_id
@@ -485,38 +451,34 @@ def enroll_legacy_row(
         analysis_id, ENROLLMENT_REASON,
     )
 
-    original = _with_db_path(db_path)
     try:
-        try:
-            _task, was_existing = database.create_review_task(
-                task_id=task_id,
-                result_id=analysis_id,
-                job_id=None,
-                item_index=0,
-                status=ENROLLMENT_STATUS,
-                query="",
-                claim_text=attribution_row.get("stored_claim_text") or "",
-                title="",
-                url="",
-                final_decision=attribution_row.get(
-                    "stored_policy_alert_level"
-                ) or "",
-                policy_confidence=str(
-                    attribution_row.get("stored_policy_confidence_score") or ""
-                ),
-                human_review_required=True,
-                snapshot=snapshot,
-                idempotency_key=idempotency_key,
-                created_at=now,
-                updated_at=now,
-            )
-        except Exception as error:
-            record.error = (
-                f"create_review_task failed: {type(error).__name__}: {error}"
-            )
-            return record
-    finally:
-        _restore_db_path(original)
+        _task, was_existing = database.create_review_task(
+            task_id=task_id,
+            result_id=analysis_id,
+            job_id=None,
+            item_index=0,
+            status=ENROLLMENT_STATUS,
+            query="",
+            claim_text=attribution_row.get("stored_claim_text") or "",
+            title="",
+            url="",
+            final_decision=attribution_row.get(
+                "stored_policy_alert_level"
+            ) or "",
+            policy_confidence=str(
+                attribution_row.get("stored_policy_confidence_score") or ""
+            ),
+            human_review_required=True,
+            snapshot=snapshot,
+            idempotency_key=idempotency_key,
+            created_at=now,
+            updated_at=now,
+        )
+    except Exception as error:
+        record.error = (
+            f"create_review_task failed: {type(error).__name__}: {error}"
+        )
+        return record
 
     record.review_task_id = task_id
     if was_existing:

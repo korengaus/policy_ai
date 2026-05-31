@@ -62,7 +62,6 @@ except Exception:
     pass
 
 
-import database  # noqa: E402
 import legacy_review_enrollment as enrollment  # noqa: E402
 from structured_logging import get_logger  # noqa: E402
 
@@ -148,7 +147,6 @@ def _iso_now() -> str:
 
 def build_audit_payload(
     *,
-    db_path: Optional[str],
     limit: Optional[int],
 ) -> Dict[str, Any]:
     """Pure function: pull candidates from the M11.1 identifier and
@@ -156,10 +154,9 @@ def build_audit_payload(
     to disk. Always returns a dict; never raises."""
     audit_id = uuid.uuid4().hex
     generated_at = _iso_now()
-    effective_db = str(db_path) if db_path else str(database.DB_PATH)
     try:
         rows: List[Dict[str, Any]] = (
-            enrollment.find_legacy_weak_verified_rows(db_path=db_path)
+            enrollment.find_legacy_weak_verified_rows()
             or []
         )
     except Exception as error:  # noqa: BLE001 — defensive; identifier is best-effort
@@ -184,7 +181,7 @@ def build_audit_payload(
     return {
         "audit_id": audit_id,
         "generated_at": generated_at,
-        "reports_dir": effective_db,   # repurposed: DB path stand-in
+        "reports_dir": "postgres",   # PG-primary store (M12.0e-3b)
         "total_reports_scanned": total_scanned,
         "candidates_found": len(candidates),
         "candidates": candidates,
@@ -263,14 +260,6 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--db-path", default=None,
-        help=(
-            "Path to the SQLite DB. Defaults to database.DB_PATH "
-            "(policy_ai.db in the repo root). Mirrors the M11.1 CLI's "
-            "--db-path flag."
-        ),
-    )
-    parser.add_argument(
         "--output-dir", default=str(DEFAULT_OUTPUT_DIR),
         help="Directory to write the audit JSON into (default: ./reports).",
     )
@@ -300,7 +289,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
 
     payload = build_audit_payload(
-        db_path=args.db_path,
         limit=args.limit,
     )
     output_path = output_dir / _output_filename(payload["generated_at"])

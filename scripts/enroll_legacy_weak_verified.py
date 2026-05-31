@@ -61,7 +61,6 @@ try:
 except Exception:
     pass
 
-import database  # noqa: E402
 import legacy_review_enrollment as enrollment  # noqa: E402
 
 
@@ -150,13 +149,6 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--db-path", default=None,
-        help=(
-            "Path to the SQLite DB. Defaults to the module's DB_PATH "
-            "(policy_ai.db in the repo root)."
-        ),
-    )
-    parser.add_argument(
         "--json", action="store_true",
         help="Print results as JSON only (no human header/footer).",
     )
@@ -213,15 +205,13 @@ def _coerce_signals_for_display(value: Any) -> List[str]:
 
 
 def _run_list_mode(
-    *, db_path: Optional[str], as_json: bool,
+    *, as_json: bool,
 ) -> int:
-    candidates = enrollment.find_legacy_weak_verified_rows(db_path=db_path)
+    candidates = enrollment.find_legacy_weak_verified_rows()
     payload = {
         "cli_version": CLI_VERSION,
         "mode": "list",
-        "db_path": (
-            str(db_path) if db_path is not None else str(database.DB_PATH)
-        ),
+        "store": "postgres",
         "processed_at": datetime.now(timezone.utc).isoformat(
             timespec="seconds",
         ),
@@ -279,11 +269,11 @@ def _run_list_mode(
 
 
 def _run_dry_run_mode(
-    *, db_path: Optional[str], as_json: bool,
+    *, as_json: bool,
 ) -> int:
-    candidates = enrollment.find_legacy_weak_verified_rows(db_path=db_path)
+    candidates = enrollment.find_legacy_weak_verified_rows()
     records = [
-        enrollment.enroll_legacy_row(c, db_path=db_path, dry_run=True)
+        enrollment.enroll_legacy_row(c, dry_run=True)
         for c in candidates
     ]
     summary = enrollment.compute_enrollment_summary(records)
@@ -295,9 +285,7 @@ def _run_dry_run_mode(
     payload = {
         "cli_version": CLI_VERSION,
         "mode": "dry_run",
-        "db_path": (
-            str(db_path) if db_path is not None else str(database.DB_PATH)
-        ),
+        "store": "postgres",
         "processed_at": datetime.now(timezone.utc).isoformat(
             timespec="seconds",
         ),
@@ -348,16 +336,14 @@ def _run_dry_run_mode(
 
 
 def _run_check_status_mode(
-    *, db_path: Optional[str], as_json: bool,
+    *, as_json: bool,
 ) -> int:
-    candidates = enrollment.find_legacy_weak_verified_rows(db_path=db_path)
+    candidates = enrollment.find_legacy_weak_verified_rows()
     rows = []
     enrolled_count = 0
     for c in candidates:
         analysis_id = str(c.get("analysis_id") or "")
-        is_enrolled = enrollment.is_already_enrolled(
-            analysis_id, db_path=db_path,
-        )
+        is_enrolled = enrollment.is_already_enrolled(analysis_id)
         if is_enrolled:
             enrolled_count += 1
         rows.append({
@@ -374,9 +360,7 @@ def _run_check_status_mode(
     payload = {
         "cli_version": CLI_VERSION,
         "mode": "check_status",
-        "db_path": (
-            str(db_path) if db_path is not None else str(database.DB_PATH)
-        ),
+        "store": "postgres",
         "processed_at": datetime.now(timezone.utc).isoformat(
             timespec="seconds",
         ),
@@ -414,20 +398,18 @@ def _run_check_status_mode(
 
 
 def _run_summary_mode(
-    *, db_path: Optional[str], as_json: bool,
+    *, as_json: bool,
 ) -> int:
-    candidates = enrollment.find_legacy_weak_verified_rows(db_path=db_path)
+    candidates = enrollment.find_legacy_weak_verified_rows()
     records = [
-        enrollment.enroll_legacy_row(c, db_path=db_path, dry_run=True)
+        enrollment.enroll_legacy_row(c, dry_run=True)
         for c in candidates
     ]
     summary = enrollment.compute_enrollment_summary(records)
     payload = {
         "cli_version": CLI_VERSION,
         "mode": "summary",
-        "db_path": (
-            str(db_path) if db_path is not None else str(database.DB_PATH)
-        ),
+        "store": "postgres",
         "processed_at": datetime.now(timezone.utc).isoformat(
             timespec="seconds",
         ),
@@ -475,9 +457,9 @@ def _read_confirmation(prompt: str) -> str:
 
 
 def _run_enroll_mode(
-    *, db_path: Optional[str], as_json: bool, auto_yes: bool,
+    *, as_json: bool, auto_yes: bool,
 ) -> int:
-    candidates = enrollment.find_legacy_weak_verified_rows(db_path=db_path)
+    candidates = enrollment.find_legacy_weak_verified_rows()
     if not candidates:
         msg = (
             "[enroll] no legacy weak-verified candidates found "
@@ -490,7 +472,7 @@ def _run_enroll_mode(
     # Pre-flight dry-run pass so the operator (and the JSON consumer)
     # can see exactly what would change.
     preflight_records = [
-        enrollment.enroll_legacy_row(c, db_path=db_path, dry_run=True)
+        enrollment.enroll_legacy_row(c, dry_run=True)
         for c in candidates
     ]
     new_count = sum(
@@ -533,16 +515,14 @@ def _run_enroll_mode(
 
     # --- Actual write pass ---
     records = [
-        enrollment.enroll_legacy_row(c, db_path=db_path, dry_run=False)
+        enrollment.enroll_legacy_row(c, dry_run=False)
         for c in candidates
     ]
     summary = enrollment.compute_enrollment_summary(records)
     payload = {
         "cli_version": CLI_VERSION,
         "mode": "enroll",
-        "db_path": (
-            str(db_path) if db_path is not None else str(database.DB_PATH)
-        ),
+        "store": "postgres",
         "processed_at": datetime.now(timezone.utc).isoformat(
             timespec="seconds",
         ),
@@ -619,24 +599,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
 
     if args.list_mode:
-        return _run_list_mode(
-            db_path=args.db_path, as_json=bool(args.json),
-        )
+        return _run_list_mode(as_json=bool(args.json))
     if args.dry_run:
-        return _run_dry_run_mode(
-            db_path=args.db_path, as_json=bool(args.json),
-        )
+        return _run_dry_run_mode(as_json=bool(args.json))
     if args.check_status:
-        return _run_check_status_mode(
-            db_path=args.db_path, as_json=bool(args.json),
-        )
+        return _run_check_status_mode(as_json=bool(args.json))
     if args.summary:
-        return _run_summary_mode(
-            db_path=args.db_path, as_json=bool(args.json),
-        )
+        return _run_summary_mode(as_json=bool(args.json))
     if args.enroll:
         return _run_enroll_mode(
-            db_path=args.db_path, as_json=bool(args.json),
+            as_json=bool(args.json),
             auto_yes=bool(args.yes),
         )
     return 2  # unreachable thanks to _validate_args
