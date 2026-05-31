@@ -141,13 +141,6 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--db-path", default=None,
-        help=(
-            "Path to the SQLite DB. Defaults to the module's DB_PATH "
-            "(policy_ai.db in the repo root)."
-        ),
-    )
-    parser.add_argument(
         "--dry-run", action="store_true",
         help="Compute and print attributions but do not save to the DB.",
     )
@@ -164,25 +157,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Print results as JSON only (no human header/footer).",
     )
     return parser
-
-
-# ---------------------------------------------------------------------------
-# DB context helpers
-# ---------------------------------------------------------------------------
-
-
-def _with_db_path(db_path: Optional[str]):
-    if db_path is None:
-        return None
-    original = database.DB_PATH
-    database.DB_PATH = Path(db_path)
-    return original
-
-
-def _restore_db_path(original):
-    if original is None:
-        return
-    database.DB_PATH = original
 
 
 def _safety_notes_dict() -> Dict[str, str]:
@@ -401,21 +375,16 @@ def _print_summary_human(summary: Dict[str, Any]) -> None:
 
 
 def _load_rows(
-    *, db_path: Optional[str], limit: int,
-    analysis_id: Optional[str],
+    *, limit: int, analysis_id: Optional[str],
 ) -> List[Dict[str, Any]]:
-    original = _with_db_path(db_path)
-    try:
-        if analysis_id is not None:
-            try:
-                row = database.get_result_by_id(int(analysis_id))
-            except (TypeError, ValueError):
-                row = None
-            return [row] if row else []
-        rows = database.get_recent_results(limit=limit)
-        return rows or []
-    finally:
-        _restore_db_path(original)
+    if analysis_id is not None:
+        try:
+            row = database.get_result_by_id(int(analysis_id))
+        except (TypeError, ValueError):
+            row = None
+        return [row] if row else []
+    rows = database.get_recent_results(limit=limit)
+    return rows or []
 
 
 # ---------------------------------------------------------------------------
@@ -425,16 +394,13 @@ def _load_rows(
 
 def _run_attribute_mode(
     *, rows: List[Dict[str, Any]], dry_run: bool, save: bool,
-    as_json: bool, db_path: Optional[str],
+    as_json: bool,
 ) -> int:
     if not rows:
         payload = {
             "cli_version": CLI_VERSION,
             "mode": "attribute",
-            "db_path": (
-                str(db_path) if db_path is not None
-                else str(database.DB_PATH)
-            ),
+            "store": "postgres",
             "processed_at": datetime.now(timezone.utc).isoformat(
                 timespec="seconds",
             ),
@@ -460,9 +426,7 @@ def _run_attribute_mode(
         if save and not dry_run:
             try:
                 d = diagnostic.attribution_to_dict(attribution)
-                saved_row_id = database.save_verdict_label_attribution(
-                    d, db_path=db_path,
-                )
+                saved_row_id = database.save_verdict_label_attribution(d)
                 saved_count += 1
             except Exception as error:
                 save_error = f"{type(error).__name__}: {error}"
@@ -477,9 +441,7 @@ def _run_attribute_mode(
     combined = {
         "cli_version": CLI_VERSION,
         "mode": "attribute",
-        "db_path": (
-            str(db_path) if db_path is not None else str(database.DB_PATH)
-        ),
+        "store": "postgres",
         "processed_at": datetime.now(timezone.utc).isoformat(
             timespec="seconds",
         ),
@@ -519,12 +481,10 @@ def _run_attribute_mode(
 
 
 def _run_summary_mode(
-    *, db_path: Optional[str], limit: int, as_json: bool,
+    *, limit: int, as_json: bool,
 ) -> int:
     try:
-        rows = database.get_verdict_label_attributions(
-            db_path=db_path, limit=limit,
-        )
+        rows = database.get_verdict_label_attributions(limit=limit)
     except Exception as error:
         print(
             f"[diagnose-verdict-labels] failed to load attributions: "
@@ -536,9 +496,7 @@ def _run_summary_mode(
     payload = {
         "cli_version": CLI_VERSION,
         "mode": "summary",
-        "db_path": (
-            str(db_path) if db_path is not None else str(database.DB_PATH)
-        ),
+        "store": "postgres",
         "processed_at": datetime.now(timezone.utc).isoformat(
             timespec="seconds",
         ),
@@ -554,12 +512,12 @@ def _run_summary_mode(
 
 
 def _run_list_weak_verified_mode(
-    *, db_path: Optional[str], limit: int, as_json: bool,
+    *, limit: int, as_json: bool,
 ) -> int:
     try:
         rows = database.get_verdict_label_attributions(
             only_weak_evidence_verified=True,
-            db_path=db_path, limit=limit,
+            limit=limit,
         )
     except Exception as error:
         print(
@@ -571,9 +529,7 @@ def _run_list_weak_verified_mode(
     payload = {
         "cli_version": CLI_VERSION,
         "mode": "list_weak_verified",
-        "db_path": (
-            str(db_path) if db_path is not None else str(database.DB_PATH)
-        ),
+        "store": "postgres",
         "processed_at": datetime.now(timezone.utc).isoformat(
             timespec="seconds",
         ),
@@ -677,33 +633,33 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.summary:
         return _run_summary_mode(
-            db_path=args.db_path, limit=args.limit,
+            limit=args.limit,
             as_json=bool(args.json),
         )
 
     if args.list_weak_verified:
         return _run_list_weak_verified_mode(
-            db_path=args.db_path, limit=args.limit,
+            limit=args.limit,
             as_json=bool(args.json),
         )
 
     if args.analysis_id:
         rows = _load_rows(
-            db_path=args.db_path, limit=args.limit,
+            limit=args.limit,
             analysis_id=args.analysis_id,
         )
         return _run_attribute_mode(
             rows=rows, dry_run=bool(args.dry_run), save=bool(args.save),
-            as_json=bool(args.json), db_path=args.db_path,
+            as_json=bool(args.json),
         )
 
     if args.from_sqlite:
         rows = _load_rows(
-            db_path=args.db_path, limit=args.limit, analysis_id=None,
+            limit=args.limit, analysis_id=None,
         )
         return _run_attribute_mode(
             rows=rows, dry_run=bool(args.dry_run), save=bool(args.save),
-            as_json=bool(args.json), db_path=args.db_path,
+            as_json=bool(args.json),
         )
 
     return 2  # unreachable thanks to _validate_args

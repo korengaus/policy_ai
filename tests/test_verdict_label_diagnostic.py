@@ -54,6 +54,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import database  # noqa: E402
+import postgres_storage  # noqa: E402
 import verdict_label_diagnostic as diagnostic  # noqa: E402
 import verification_card  # noqa: E402
 
@@ -400,11 +401,30 @@ class AttributionInvariantsTests(unittest.TestCase):
 
 class DatabaseRoundTripTests(unittest.TestCase):
     def setUp(self):
+        # M12.0e-3a: round-trip via the PG-primary path. Point a private
+        # sqlite:// substitute at a per-test temp file (USE_POSTGRES_WRITE
+        # ON) and reset the cached engine so each test binds to its own
+        # fresh DB. Env vars are snapshot/restored so the rest of the
+        # process (and validate.py's dual-write-disabled determinism) is
+        # untouched. Pattern copied from the #1/#2/#3-migrated tests.
         self._tmp_dir = tempfile.TemporaryDirectory()
-        self._db_path = str(Path(self._tmp_dir.name) / "diag_test.db")
+        self._pg_db = str(Path(self._tmp_dir.name) / "pg.db")
+        self._env_snapshot = {
+            k: os.environ.get(k)
+            for k in ("USE_POSTGRES_WRITE", "DATABASE_URL")
+        }
+        os.environ["USE_POSTGRES_WRITE"] = "true"
+        os.environ["DATABASE_URL"] = f"sqlite:///{self._pg_db}"
+        postgres_storage.reset_engine_for_tests()
 
     def tearDown(self):
         import gc as _gc
+        for key, value in self._env_snapshot.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        postgres_storage.reset_engine_for_tests()
         _gc.collect()
         try:
             self._tmp_dir.cleanup()
@@ -417,17 +437,13 @@ class DatabaseRoundTripTests(unittest.TestCase):
         if lie:
             d["truth_claim"] = True
             d["operator_review_required"] = False
-        return database.save_verdict_label_attribution(
-            d, db_path=self._db_path,
-        )
+        return database.save_verdict_label_attribution(d)
 
     def test_basic_round_trip(self):
         row_id = self._save(row=_row_id_105_pattern())
         self.assertIsInstance(row_id, int)
         self.assertGreater(row_id, 0)
-        rows = database.get_verdict_label_attributions(
-            db_path=self._db_path,
-        )
+        rows = database.get_verdict_label_attributions()
         self.assertEqual(len(rows), 1)
         r = rows[0]
         self.assertEqual(r["analysis_id"], "105")
@@ -441,42 +457,34 @@ class DatabaseRoundTripTests(unittest.TestCase):
 
     def test_save_forces_truth_claim_zero_even_when_caller_lies(self):
         self._save(row=_row_id_105_pattern(), lie=True)
-        rows = database.get_verdict_label_attributions(
-            db_path=self._db_path,
-        )
+        rows = database.get_verdict_label_attributions()
         self.assertEqual(len(rows), 1)
         self.assertIs(rows[0]["truth_claim"], False)
 
     def test_save_forces_operator_review_required_one_even_when_lied(self):
         self._save(row=_row_id_105_pattern(), lie=True)
-        rows = database.get_verdict_label_attributions(
-            db_path=self._db_path,
-        )
+        rows = database.get_verdict_label_attributions()
         self.assertEqual(len(rows), 1)
         self.assertIs(rows[0]["operator_review_required"], True)
 
     def test_insert_or_replace_on_analysis_id(self):
         self._save(row=_row_id_105_pattern())
-        # Same analysis_id again → REPLACE.
+        # Same analysis_id again → upsert (PG: ON CONFLICT DO UPDATE).
         self._save(row=_row_id_105_pattern())
-        rows = database.get_verdict_label_attributions(
-            db_path=self._db_path,
-        )
+        rows = database.get_verdict_label_attributions()
         self.assertEqual(
             len(rows), 1, "duplicate analysis_id must overwrite",
         )
         # A different analysis_id produces a new row, not a replacement.
         self._save(row=_row_strong_official_pattern())
-        rows = database.get_verdict_label_attributions(
-            db_path=self._db_path,
-        )
+        rows = database.get_verdict_label_attributions()
         self.assertEqual(len(rows), 2)
 
     def test_get_filters_by_analysis_id(self):
         self._save(row=_row_id_105_pattern())
         self._save(row=_row_strong_official_pattern())
         only_105 = database.get_verdict_label_attributions(
-            analysis_id="105", db_path=self._db_path,
+            analysis_id="105",
         )
         self.assertEqual(len(only_105), 1)
         self.assertEqual(only_105[0]["analysis_id"], "105")
@@ -486,7 +494,7 @@ class DatabaseRoundTripTests(unittest.TestCase):
         self._save(row=_row_strong_official_pattern())   # not weak
         self._save(row=_row_conflict_pattern())          # not verified
         weak = database.get_verdict_label_attributions(
-            only_weak_evidence_verified=True, db_path=self._db_path,
+            only_weak_evidence_verified=True,
         )
         self.assertEqual(len(weak), 1)
         self.assertEqual(weak[0]["analysis_id"], "105")
@@ -499,9 +507,30 @@ class DatabaseRoundTripTests(unittest.TestCase):
         ):
             with self.subTest(bad=bad):
                 with self.assertRaises(ValueError):
-                    database.save_verdict_label_attribution(
-                        bad, db_path=self._db_path,
-                    )
+                    database.save_verdict_label_attribution(bad)
+
+
+# ---------------------------------------------------------------------------
+# init_db() creates the verdict_label_attributions table — SQLite-specific.
+#
+# Deliberately NOT migrated to the PG-substitute path: this pins the
+# SQLite schema-creation behaviour (init_db builds the table, verified via
+# sqlite_master) that 0e-5 still depends on. It runs with NO dual-write env
+# — a DB_PATH swap + raw sqlite3 read against an isolated temp file.
+# ---------------------------------------------------------------------------
+
+
+class InitDbSqliteSchemaTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp_dir = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        import gc as _gc
+        _gc.collect()
+        try:
+            self._tmp_dir.cleanup()
+        except Exception:
+            pass
 
     def test_init_db_creates_verdict_label_attributions_table(self):
         fresh_db = str(Path(self._tmp_dir.name) / "fresh_init.db")
@@ -706,11 +735,30 @@ def _run_cli_subprocess(*args, timeout=CLI_TIMEOUT_SECONDS, env=None):
 
 class CliSmokeTests(unittest.TestCase):
     def setUp(self):
+        # M12.0e-3a: the CLI is PG-only. Point a private sqlite://
+        # substitute at a per-test temp file (USE_POSTGRES_WRITE ON) and
+        # reset the cached engine. The CLI subprocess inherits both env
+        # vars via _run_cli_subprocess's env={**os.environ, ...} merge.
+        # These smokes seed nothing — they exercise --help / --branch-table
+        # (DB-free) / empty-DB reads / usage errors only.
         self._tmp_dir = tempfile.TemporaryDirectory()
-        self._db_path = str(Path(self._tmp_dir.name) / "cli_smoke.db")
+        self._pg_db = str(Path(self._tmp_dir.name) / "cli_smoke_pg.db")
+        self._env_snapshot = {
+            k: os.environ.get(k)
+            for k in ("USE_POSTGRES_WRITE", "DATABASE_URL")
+        }
+        os.environ["USE_POSTGRES_WRITE"] = "true"
+        os.environ["DATABASE_URL"] = f"sqlite:///{self._pg_db}"
+        postgres_storage.reset_engine_for_tests()
 
     def tearDown(self):
         import gc as _gc
+        for key, value in self._env_snapshot.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        postgres_storage.reset_engine_for_tests()
         _gc.collect()
         try:
             self._tmp_dir.cleanup()
@@ -744,25 +792,19 @@ class CliSmokeTests(unittest.TestCase):
         )
 
     def test_summary_empty_db(self):
-        rc, stdout, _ = _run_cli_subprocess(
-            "--summary", "--db-path", self._db_path,
-        )
+        rc, stdout, _ = _run_cli_subprocess("--summary")
         self.assertEqual(rc, 0)
         self.assertIn("Diagnostic Summary", stdout)
         self.assertIn("Total rows attributed:       0", stdout)
         self.assertIn("truth_claim=False", stdout)
 
     def test_list_weak_verified_empty(self):
-        rc, stdout, _ = _run_cli_subprocess(
-            "--list-weak-verified", "--db-path", self._db_path,
-        )
+        rc, stdout, _ = _run_cli_subprocess("--list-weak-verified")
         self.assertEqual(rc, 0)
         self.assertIn("Total: 0", stdout)
 
     def test_no_mode_is_usage_error(self):
-        rc, _stdout, stderr = _run_cli_subprocess(
-            "--db-path", self._db_path,
-        )
+        rc, _stdout, stderr = _run_cli_subprocess()
         self.assertEqual(rc, 2)
         self.assertIn("required", stderr)
 
@@ -776,7 +818,6 @@ class CliSmokeTests(unittest.TestCase):
     def test_save_and_dry_run_mutually_exclusive(self):
         rc, _stdout, stderr = _run_cli_subprocess(
             "--from-sqlite", "--save", "--dry-run",
-            "--db-path", self._db_path,
         )
         self.assertEqual(rc, 2)
         self.assertIn("mutually exclusive", stderr)
