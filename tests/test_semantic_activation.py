@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import database
+import postgres_storage
 import semantic_embeddings
 import semantic_evidence_agent
 
@@ -49,18 +49,32 @@ def _env(**overrides: str):
 
 @contextmanager
 def _temporary_sqlite_db():
+    """M12.0e-4: isolate DB access via the Postgres dual-write substitute
+    (``USE_POSTGRES_WRITE=true`` + ``DATABASE_URL=sqlite:///<tmp>``) so any
+    embedding-cache write goes through the PG-primary path into an
+    isolated sqlite file, never the real ``policy_ai.db``. Env vars are
+    snapshot/restored; the cached engine is reset on enter and exit."""
     import gc
 
     fd, raw_path = tempfile.mkstemp(suffix=".db", prefix="m5_5_test_")
     os.close(fd)
     new_path = Path(raw_path)
-    original = database.DB_PATH
-    database.DB_PATH = new_path
+    snapshot = {
+        key: os.environ.get(key)
+        for key in ("USE_POSTGRES_WRITE", "DATABASE_URL")
+    }
+    os.environ["USE_POSTGRES_WRITE"] = "true"
+    os.environ["DATABASE_URL"] = f"sqlite:///{new_path}"
+    postgres_storage.reset_engine_for_tests()
     try:
-        database.init_db()
         yield new_path
     finally:
-        database.DB_PATH = original
+        for key, value in snapshot.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        postgres_storage.reset_engine_for_tests()
         gc.collect()
         try:
             new_path.unlink()

@@ -25,6 +25,7 @@ if str(ROOT) not in sys.path:
 
 import config
 import database
+import postgres_storage
 import semantic_chunker
 import semantic_embeddings
 import semantic_evidence_agent
@@ -52,7 +53,13 @@ def _env(**overrides: str):
 
 @contextmanager
 def _temporary_sqlite_db():
-    """Point ``database.DB_PATH`` at a fresh sqlite file and init it.
+    """M12.0e-4: point the Postgres dual-write substitute at a fresh
+    temp sqlite file (``USE_POSTGRES_WRITE=true`` +
+    ``DATABASE_URL=sqlite:///<tmp>``) and reset the cached engine, so
+    embedding-cache reads/writes go through the PG-primary path. The
+    substitute is an isolated sqlite file pointed at by ``DATABASE_URL``,
+    so the real ``policy_ai.db`` is never touched. Env vars are
+    snapshot/restored so the rest of the process is unaffected.
 
     Cleanup is best-effort: on Windows, sqlite3 connections sometimes hold a
     file handle open until garbage collection, which makes ``unlink`` raise
@@ -63,13 +70,22 @@ def _temporary_sqlite_db():
     fd, raw_path = tempfile.mkstemp(suffix=".db", prefix="semantic_test_")
     os.close(fd)
     new_path = Path(raw_path)
-    original = database.DB_PATH
-    database.DB_PATH = new_path
+    snapshot = {
+        key: os.environ.get(key)
+        for key in ("USE_POSTGRES_WRITE", "DATABASE_URL")
+    }
+    os.environ["USE_POSTGRES_WRITE"] = "true"
+    os.environ["DATABASE_URL"] = f"sqlite:///{new_path}"
+    postgres_storage.reset_engine_for_tests()
     try:
-        database.init_db()
         yield new_path
     finally:
-        database.DB_PATH = original
+        for key, value in snapshot.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        postgres_storage.reset_engine_for_tests()
         # Encourage any lingering sqlite3.Connection objects to be finalized
         # before we attempt to delete the file (helps on Windows).
         gc.collect()

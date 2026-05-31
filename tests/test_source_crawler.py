@@ -500,20 +500,37 @@ class NetworkFetchFlagTests(unittest.TestCase):
 
 class DatabaseRoundTripTests(unittest.TestCase):
     def setUp(self):
+        # M12.0e-4: round-trip via the PG-primary path. Point the
+        # dual-write substitute at a per-test temp sqlite file
+        # (USE_POSTGRES_WRITE=true + DATABASE_URL=sqlite:///<tmp>) and
+        # reset the cached engine; ensure_schema (inside get_engine)
+        # creates the mirror tables on first use, so no init_db /
+        # DB_PATH swap is needed and the real policy_ai.db is untouched.
         import database
+        import postgres_storage
         self._database = database
-        self._original_path = database.DB_PATH
+        self._postgres_storage = postgres_storage
         self._tmp_dir = tempfile.TemporaryDirectory()
-        database.DB_PATH = Path(self._tmp_dir.name) / "crawler_test.db"
-        database.init_db()
-        database.init_source_fetch_artifacts_table()
+        self._pg_db = Path(self._tmp_dir.name) / "pg.db"
+        self._env_snapshot = {
+            key: os.environ.get(key)
+            for key in ("USE_POSTGRES_WRITE", "DATABASE_URL")
+        }
+        os.environ["USE_POSTGRES_WRITE"] = "true"
+        os.environ["DATABASE_URL"] = f"sqlite:///{self._pg_db}"
+        postgres_storage.reset_engine_for_tests()
 
     def tearDown(self):
         # Drop the connection reference so the temp file unlinks
         # cleanly on Windows.
         import gc as _gc
+        for key, value in self._env_snapshot.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        self._postgres_storage.reset_engine_for_tests()
         _gc.collect()
-        self._database.DB_PATH = self._original_path
         try:
             self._tmp_dir.cleanup()
         except Exception:
