@@ -818,6 +818,31 @@ def validate_judge_response_json(
 DEFAULT_JUDGE_MODEL = "claude-sonnet-4-5"
 
 
+def _coerce_summary_text(value, limit: int) -> str:
+    """Render a Judge summary field to a truncated display string.
+
+    The live pipeline passes dict summaries (from
+    ``summarize_contradiction_checks`` / ``summarize_bias_framing``)
+    while the dry-run CLI passes JSON strings read from the DB. Both
+    must render without raising — slicing a dict (``some_dict[:400]``)
+    raises ``KeyError: slice(None, 400, None)`` because ``dict`` treats
+    the slice object as a key.
+
+    Falsy (``None`` / ``{}`` / ``""``) → the safe placeholder, exactly
+    preserving the prior ``(x or "정보 없음")`` semantics. For a truthy
+    ``str`` the result is byte-identical to the previous
+    ``value[:limit]``.
+    """
+    if not value:
+        return "정보 없음"
+    if not isinstance(value, str):
+        try:
+            value = json.dumps(value, ensure_ascii=False, sort_keys=True)
+        except (TypeError, ValueError):
+            value = str(value)
+    return value[:limit]
+
+
 def build_judge_request(
     judge_input: JudgeInput, model: str = DEFAULT_JUDGE_MODEL,
 ) -> LLMRequest:
@@ -828,15 +853,19 @@ def build_judge_request(
     intentionally short-context — its job is to react to the summary
     fields produced by the deterministic pipeline, not to re-read the
     article.
+
+    Summary fields are coerced via :func:`_coerce_summary_text` so a
+    dict-shaped summary from the live pipeline renders as JSON instead
+    of raising ``KeyError`` on the truncation slice.
     """
-    claim_text = (judge_input.claim_text or "정보 없음")[:1000]
-    evidence_summary = (judge_input.evidence_summary or "정보 없음")[:800]
-    contradiction_summary = (
-        judge_input.contradiction_summary or "정보 없음"
-    )[:400]
-    bias_framing_summary = (
-        judge_input.bias_framing_summary or "정보 없음"
-    )[:400]
+    claim_text = _coerce_summary_text(judge_input.claim_text, 1000)
+    evidence_summary = _coerce_summary_text(judge_input.evidence_summary, 800)
+    contradiction_summary = _coerce_summary_text(
+        judge_input.contradiction_summary, 400,
+    )
+    bias_framing_summary = _coerce_summary_text(
+        judge_input.bias_framing_summary, 400,
+    )
     score_value = (
         judge_input.policy_confidence_score
         if judge_input.policy_confidence_score is not None

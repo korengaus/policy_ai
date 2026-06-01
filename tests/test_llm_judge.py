@@ -520,6 +520,60 @@ class BuildJudgeRequestTests(unittest.TestCase):
                       "draft_likely_true", "draft_verified"):
             self.assertIn(label, req.system_prompt)
 
+    def test_build_judge_request_tolerates_dict_summaries(self):
+        """M16-judge-fix: the live pipeline passes dict summaries (from
+        summarize_contradiction_checks / summarize_bias_framing), not
+        strings. Pre-fix, ``dict[:400]`` raised
+        ``KeyError: slice(None, 400, None)`` and the judge silently
+        failed on every analysis. The builder must render the dict as
+        JSON instead of raising."""
+        contradiction_summary = {
+            "possible_contradiction_count": 0,
+            "confirmed_contradiction_count": 1,
+            "contradiction_verdict_source": "official_source",
+        }
+        bias_framing_summary = {
+            "high_framing_count": 2,
+            "framing_risk": "high",
+        }
+        try:
+            req = llm_judge.build_judge_request(
+                llm_judge.JudgeInput(
+                    current_label="draft_verified",
+                    contradiction_summary=contradiction_summary,
+                    bias_framing_summary=bias_framing_summary,
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.fail(
+                f"build_judge_request raised on dict summaries: {exc!r}"
+            )
+        # The serialized dict content appears in the rendered prompt —
+        # the judge now actually receives the deterministic summaries.
+        self.assertIn("confirmed_contradiction_count", req.user_prompt)
+        self.assertIn("high_framing_count", req.user_prompt)
+
+    def test_coerce_summary_text_preserves_str_byte_identical(self):
+        """For a truthy str the helper must be byte-identical to the
+        previous ``value[:limit]`` slice."""
+        self.assertEqual(
+            llm_judge._coerce_summary_text("근거" * 1000, 800),
+            ("근거" * 1000)[:800],
+        )
+        self.assertEqual(
+            llm_judge._coerce_summary_text("plain text", 400),
+            "plain text",
+        )
+
+    def test_coerce_summary_text_falsy_preserved_as_placeholder(self):
+        """Falsy values ({} / None / "") collapse to the safe
+        placeholder, exactly preserving the prior ``or`` semantics."""
+        for falsy in ({}, None, "", [], 0):
+            self.assertEqual(
+                llm_judge._coerce_summary_text(falsy, 400),
+                "정보 없음",
+            )
+
 
 # ---------------------------------------------------------------------------
 # judge_verdict_to_dict safety pins
