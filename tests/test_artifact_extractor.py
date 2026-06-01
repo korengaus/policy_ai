@@ -475,47 +475,12 @@ class DatabaseRoundTripTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# P. init_db() creates the artifact_text_extractions table — SQLite-specific.
-#
-# Deliberately NOT migrated to the PG-substitute path: this pins the
-# SQLite schema-creation behaviour (init_db builds the table, verified via
-# sqlite_master) that 0e-5 still depends on. It runs with NO dual-write env
-# — a DB_PATH swap + raw sqlite3 read against an isolated temp file.
+# M12.0e-6b-1: InitDbSqliteSchemaTests removed. It pinned init_db()'s SQLite
+# schema-creation (artifact_text_extractions, verified via sqlite_master) —
+# that machinery is intentionally retired in 0e-6b-3, so the coverage is
+# dropped here rather than left coupled to soon-to-be-removed symbols. PG
+# schema is owned by postgres_storage.ensure_schema.
 # ---------------------------------------------------------------------------
-
-
-class InitDbSqliteSchemaTests(unittest.TestCase):
-    def setUp(self):
-        self._tmp_dir = tempfile.TemporaryDirectory()
-
-    def tearDown(self):
-        import gc as _gc
-        _gc.collect()
-        try:
-            self._tmp_dir.cleanup()
-        except Exception:
-            pass
-
-    def test_init_db_creates_artifact_text_extractions_table(self):
-        # Point database.DB_PATH at a fresh temp file, then call init_db().
-        fresh_db = str(Path(self._tmp_dir.name) / "fresh_init.db")
-        original = database.DB_PATH
-        database.DB_PATH = Path(fresh_db)
-        try:
-            database.init_db()
-            connection = sqlite3.connect(fresh_db)
-            try:
-                row = connection.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table' "
-                    "AND name='artifact_text_extractions'"
-                ).fetchone()
-            finally:
-                connection.close()
-        finally:
-            database.DB_PATH = original
-        self.assertIsNotNone(
-            row, "init_db() must create artifact_text_extractions table",
-        )
 
 
 # ---------------------------------------------------------------------------

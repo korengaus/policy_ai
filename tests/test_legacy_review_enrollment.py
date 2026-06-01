@@ -76,30 +76,28 @@ CLI_TIMEOUT_SECONDS = 10.0
 
 
 def _init_temp_db(path: str) -> None:
-    """Create the full schema in a temp DB by swapping DB_PATH and
-    calling init_db (the same pattern existing tests use).
+    """Create the full schema in a temp SQLite-as-PG-substitute file.
 
-    M12.0d Stage 3c-2: review_tasks / review_decisions writes are
-    PG-only. We also point ``DATABASE_URL`` at the same temp file so
-    SQLAlchemy writes land in it (visible to direct sqlite3 reads
-    like ``_count_review_tasks``). ``database.DB_PATH`` is restored on
-    return; the env vars remain set so subsequent enrollment calls in
-    the test see them — the next ``_init_temp_db`` call will overwrite
+    M12.0e-6b-1: replaced the ``database.DB_PATH`` swap + ``init_db()``
+    scaffold with the PG-substitute pattern. Pointing ``DATABASE_URL``
+    at ``path`` and building the engine triggers
+    ``postgres_storage.ensure_schema`` (``_metadata.create_all``), which
+    creates every mirror table (analysis_results,
+    verdict_label_attributions, review_tasks, …) in the SAME file the
+    ``_seed_*`` / ``_count_*`` helpers read and write directly via
+    sqlite3. The create_all column set matches the raw-INSERT columns
+    this fixture uses (verified against postgres_storage's table
+    definitions). The env vars remain set so the enrollment calls under
+    test see the substitute; the next ``_init_temp_db`` call overwrites
     ``DATABASE_URL`` for the next test's fresh DB.
     """
-    original = database.DB_PATH
-    database.DB_PATH = Path(path)
     os.environ["USE_POSTGRES_WRITE"] = "true"
     os.environ["DATABASE_URL"] = f"sqlite:///{path}"
-    try:
-        import postgres_storage
-        postgres_storage.reset_engine_for_tests()
-    except Exception:
-        pass
-    try:
-        database.init_db()
-    finally:
-        database.DB_PATH = original
+    import postgres_storage
+    postgres_storage.reset_engine_for_tests()
+    # Build the engine → ensure_schema (create_all) materialises every
+    # mirror table in the substitute file before any seed/read fires.
+    postgres_storage.get_engine()
 
 
 def _seed_analysis_row(

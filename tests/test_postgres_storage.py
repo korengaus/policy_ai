@@ -491,16 +491,15 @@ class SqliteSubstituteIntegrationTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Schema parity: every SQLite table from database.py must appear in
-# postgres_storage._metadata with the same column NAMES.
+# PG metadata completeness: every mirror table must be defined in
+# postgres_storage._metadata.
+#
+# M12.0e-6b-1: the SQLite-vs-PG column-name parity test
+# (test_postgres_columns_match_sqlite_columns) + its _sqlite_table_columns
+# helper were removed — they built the SQLite schema via init_db /
+# init_*_table to compare against PG, coupling to machinery retired in
+# 0e-6b-3. The PG-side completeness check below is preserved.
 # ---------------------------------------------------------------------------
-
-
-def _sqlite_table_columns(connection, table_name: str) -> set:
-    rows = connection.execute(
-        f"PRAGMA table_info({table_name})"
-    ).fetchall()
-    return {row[1] for row in rows}  # row[1] is the column name
 
 
 class SchemaParityTests(unittest.TestCase):
@@ -526,48 +525,6 @@ class SchemaParityTests(unittest.TestCase):
             missing, set(),
             msg=f"Postgres mirror missing tables: {missing}",
         )
-
-    def test_postgres_columns_match_sqlite_columns(self):
-        """For every mirrored table, the Postgres column NAMES must
-        match the SQLite column NAMES exactly. Types differ (SQLite is
-        permissive; Postgres uses Text/Integer/Float) — we only enforce
-        the column-name contract because that's what the dual-write
-        path relies on for ``_filter_row``."""
-        import database
-        import postgres_storage
-
-        # Build a fresh SQLite DB in a temp location so we don't touch
-        # the real policy_ai.db.
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-            tmp_db = Path(tmp_dir) / "schema_parity.db"
-            with patch("database.DB_PATH", tmp_db):
-                database.init_db()
-                # Some tables need their own initializer.
-                database.init_source_fetch_artifacts_table()
-                database.init_artifact_text_extractions_table()
-                database.init_artifact_evidence_candidates_table()
-                database.init_verdict_producer_comparisons_table()
-                database.init_verdict_label_attributions_table()
-
-                connection = sqlite3.connect(tmp_db)
-                try:
-                    for table_name in self.EXPECTED_TABLES:
-                        sqlite_cols = _sqlite_table_columns(
-                            connection, table_name,
-                        )
-                        pg_table = postgres_storage._metadata.tables[
-                            table_name
-                        ]
-                        pg_cols = {c.name for c in pg_table.columns}
-                        self.assertSetEqual(
-                            sqlite_cols, pg_cols,
-                            msg=(
-                                f"Column mismatch for {table_name}: "
-                                f"sqlite={sqlite_cols}, pg={pg_cols}"
-                            ),
-                        )
-                finally:
-                    connection.close()
 
 
 # ---------------------------------------------------------------------------

@@ -77,16 +77,16 @@ class _TempDBScope:
     a fresh SQLite file as the dual-write substitute
     (``USE_POSTGRES_WRITE=true`` + ``DATABASE_URL=sqlite:///<tmp>``),
     matching the pattern used in ``tests/test_postgres_storage.py``.
-    The local SQLite file is still initialised via
-    ``database.init_db()`` for legacy read paths that fall back to
-    SQLite when PG is disabled; 3c-2 no longer writes to it for
-    ``jobs`` / ``review_tasks`` / ``review_decisions``.
+
+    M12.0e-6b-1: the local SQLite ``database.DB_PATH`` + ``init_db()``
+    scaffold was removed — jobs/review reads are PG-only, so the
+    substitute schema (created by ``ensure_schema`` inside
+    ``get_engine``) is the only DB this fixture needs.
     """
 
     def __enter__(self):
         self._tmp_ctx = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         tmp_dir = self._tmp_ctx.__enter__()
-        self._db_path = Path(tmp_dir) / "jobs_test.db"
         self._pg_db_path = Path(tmp_dir) / "pg_substitute.db"
         self._pg_snapshot = {
             key: os.environ.get(key) for key in ("DATABASE_URL", "USE_POSTGRES_WRITE")
@@ -97,11 +97,8 @@ class _TempDBScope:
         import postgres_storage
         postgres_storage.reset_engine_for_tests()
 
-        # Make sure modules see a clean DB_PATH before any connection is opened.
         import database
         importlib.reload(database)
-        database.DB_PATH = self._db_path
-        database.init_db()
 
         import job_manager
         importlib.reload(job_manager)
