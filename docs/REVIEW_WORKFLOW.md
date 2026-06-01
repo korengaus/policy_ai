@@ -42,7 +42,7 @@ existing public-facing report are intentionally untouched.
 | Offline operational smoke | ✓ `scripts/smoke_review_workflow.py --self-contained` + `--profile review-local` runner (M8.3, fully offline, dummy in-process token) |
 | Publication | **not implemented**; transitions into `published` / `corrected` are refused |
 | Verdict mutation | **disabled by contract**, pinned by `tests/test_review_api.py::VerdictIsolationTests` |
-| Postgres dual-write | **deferred** — SQLite remains source of truth |
+| Storage | **Postgres** — the single source of truth (SQLite retired in M12.0e) |
 
 ## C. Safety gate
 
@@ -670,7 +670,8 @@ working.
 M9.0 strengthens the internal audit trail every reviewer decision
 leaves behind. Strictly additive: existing API fields are preserved,
 existing tests still pass, no verdict logic / publication / auth
-changes, no Postgres migration. SQLite remains the source of truth.
+changes. (Historical note: SQLite was the store at M9.0; it was retired
+in M12.0e and Postgres is now the single source of truth.)
 
 ### What was stored before M9.0
 

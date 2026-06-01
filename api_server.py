@@ -62,18 +62,26 @@ def _log_ai_config_startup() -> None:
 
 
 def _log_postgres_startup() -> None:
+    # M12.0e-7: SQLite is fully retired (0e-6b-3); Postgres is the single
+    # source of truth. These startup lines were updated to drop the stale
+    # "dual-write" / "SQLite remains source of truth" framing. The
+    # is_dual_write_enabled / is_postgres_enabled gate names are
+    # unchanged (db.postgres API), only the log text.
     if is_dual_write_enabled():
         logger.info(
-            "Postgres dual-write enabled (DATABASE_URL set, USE_POSTGRES_WRITE=true); "
-            "SQLite remains source of truth."
+            "Postgres enabled (DATABASE_URL set, USE_POSTGRES_WRITE=true); "
+            "Postgres is the source of truth."
         )
     elif is_postgres_enabled():
         logger.info(
-            "Postgres reachable (DATABASE_URL set) but dual-write disabled "
-            "(USE_POSTGRES_WRITE not true); SQLite-only writes."
+            "Postgres reachable (DATABASE_URL set) but writes disabled "
+            "(USE_POSTGRES_WRITE not true); durable persistence unavailable."
         )
     else:
-        logger.info("Postgres disabled (DATABASE_URL not set); SQLite-only writes.")
+        logger.info(
+            "Postgres not configured (DATABASE_URL not set); "
+            "durable persistence unavailable."
+        )
 
 
 @asynccontextmanager
