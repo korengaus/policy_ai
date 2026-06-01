@@ -455,6 +455,16 @@ def _extend_source_catalog_keywords() -> None:
 _extend_source_catalog_keywords()
 
 
+# M19-source-reliability-2 Option A: institutions that are kept even when a
+# query produces zero relevance hits. Every other catalog institution must
+# now have at least one matched_reason (keyword / topic / topic-family hit)
+# to be generated, so irrelevant central authorities (e.g. FSC/FSS/police/
+# assembly on a 고유가 query) are no longer injected unconditionally. Korea
+# Policy Briefing (korea.kr) is the single cross-government fallback so
+# candidate generation never returns an empty official set.
+ALWAYS_INCLUDE_SOURCE_NAMES = {"Korea Policy Briefing"}
+
+
 def _normalize_text(*values: str | None) -> str:
     return " ".join(value for value in values if value).strip()
 
@@ -846,11 +856,7 @@ def generate_official_source_candidates(
 
     for source in OFFICIAL_SOURCE_CATALOG:
         match_score, matched_reasons = _score_source(source, source_text, topic_for_query)
-        if not matched_reasons and source["source_type"] not in {
-            "financial_regulator",
-            "central_government",
-            "legislature",
-        }:
+        if not matched_reasons and source["source_name"] not in ALWAYS_INCLUDE_SOURCE_NAMES:
             continue
 
         search_query = _build_search_query(
