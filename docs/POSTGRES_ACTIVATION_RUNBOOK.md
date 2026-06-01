@@ -4,6 +4,11 @@ This runbook walks an operator through enabling the M12.0a dual-write
 infrastructure against a real, provisioned Postgres instance. It is the
 M12.1 deliverable.
 
+> **NOTE (M12.0e-6b-2).** `postgres_backfill.py` /
+> `scripts/run_postgres_backfill.py` are RETIRED — the migration is
+> complete and SQLite is no longer written. The `run_postgres_backfill`
+> steps below are historical; skip them.
+
 The runbook assumes:
 
 - M12.0a (`postgres_storage.py`) and M12.0b (`postgres_backfill.py`)

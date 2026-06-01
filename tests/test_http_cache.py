@@ -741,7 +741,7 @@ class PipelineIsolationPin(unittest.TestCase):
         "policy_confidence.py",
         "database.py",
         "postgres_storage.py",
-        "postgres_backfill.py",
+        # M12.0e-6b-2: postgres_backfill.py retired (migration complete).
         "llm_judge.py",
     )
 

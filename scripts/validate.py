@@ -60,9 +60,9 @@ def _commands() -> List[List[str]]:
          "korean_constants.py",
          # M12.0a — Postgres dual-write foundation.
          "postgres_storage.py", "scripts/check_postgres_health.py",
-         # M12.0b — Postgres backfill.
-         "postgres_backfill.py", "scripts/run_postgres_backfill.py",
          # M12.1 — Postgres parity check.
+         # M12.0e-6b-2: postgres_backfill.py + run_postgres_backfill.py
+         # retired (migration complete; SQLite unwritten).
          "scripts/check_parity.py",
          # M13.1a — LLM Judge infrastructure (dry-run only).
          "llm_judge.py", "scripts/dry_run_llm_judge.py",
@@ -363,10 +363,10 @@ def _commands() -> List[List[str]]:
         # independently of database.init_db(), before a later sub-stage
         # removes init_db.
         [python, "tests/test_m12_0e_pg_schema_startup_invariant.py"],
-        # M12.0b — Postgres backfill CLI + tests.
-        [python, "scripts/run_postgres_backfill.py", "--help"],
-        [python, "scripts/run_postgres_backfill.py", "--status"],
-        [python, "tests/test_postgres_backfill.py"],
+        # M12.0e-6b-2: postgres_backfill retired — its CLI + tests
+        # (run_postgres_backfill --help/--status, test_postgres_backfill)
+        # removed. The migration is complete; SQLite is an unwritten
+        # source, so the row-mover has nothing to do.
         # M12.1 — Postgres parity check CLI + tests. Default-env runs
         # report "dual-write disabled" cleanly (no-op pass) — the tests
         # exercise the parity logic, drift detection, exit-code policy,

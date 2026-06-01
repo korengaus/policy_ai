@@ -162,6 +162,12 @@ validation suite to pass.
 
 ## M12.0b — Backfill Script (this PR)
 
+> **RETIRED (M12.0e-6b-2).** `postgres_backfill.py` and
+> `scripts/run_postgres_backfill.py` were removed. The SQLite→Postgres
+> migration is complete and production-verified; since M12.0e-5a SQLite
+> is no longer written, so the row-mover has nothing to do. The section
+> below is retained for historical context only.
+
 M12.0b adds `postgres_backfill.py` and `scripts/run_postgres_backfill.py`
 to copy existing SQLite rows into the M12.0a mirror tables. The
 backfill is:

@@ -2,10 +2,10 @@
 
 Run with: python tests/test_check_parity.py
 
-No real Postgres is required. The check_parity module reads counts from
-``postgres_backfill.collect_status`` (which we patch) and identity
-tuples from helper functions we exercise either directly or via patch.
-The CLI's exit-code policy is also pinned end-to-end.
+No real Postgres is required. The neutralized check_parity module reads
+its health block from ``postgres_storage.health_check`` (which we patch)
+and the CLI's exit-code policy is pinned end-to-end. (M12.0e-6b-2:
+repointed off the retired ``postgres_backfill.collect_status``.)
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 
 # ---------------------------------------------------------------------------
-# Env-var scope helper — same shape as test_postgres_backfill.py.
+# Env-var scope helper — snapshot/restore the dual-write env vars.
 # ---------------------------------------------------------------------------
 
 
@@ -72,22 +72,22 @@ def _make_status(
     sqlite_counts=None,
     postgres_counts=None,
 ) -> dict:
-    """Synthesize a ``postgres_backfill.collect_status`` payload."""
-    if sqlite_counts is None:
-        sqlite_counts = {name: 0 for name in _EXPECTED_TABLES}
-    if postgres_counts is None:
-        postgres_counts = {name: 0 for name in _EXPECTED_TABLES}
+    """Synthesize a ``postgres_storage.health_check`` payload (the health
+    dict).
+
+    M12.0e-6b-2: check_parity now reads ``postgres_storage.health_check()``
+    directly (the retired ``postgres_backfill.collect_status`` wrapped the
+    same health dict). This returns just that health dict — not the old
+    ``{health, sqlite_counts, postgres_counts}`` wrapper. The count kwargs
+    are accepted-but-ignored for call-site back-compat (check_parity's
+    neutralized no-op never reads counts)."""
     return {
-        "health": {
-            "dual_write_enabled": enabled,
-            "database_url_present": enabled,
-            "engine_available": enabled and can_connect,
-            "can_connect": enabled and can_connect,
-            "tables_defined": sorted(_EXPECTED_TABLES),
-            "error": None if can_connect else "connection refused",
-        },
-        "sqlite_counts": dict(sqlite_counts),
-        "postgres_counts": dict(postgres_counts),
+        "dual_write_enabled": enabled,
+        "database_url_present": enabled,
+        "engine_available": enabled and can_connect,
+        "can_connect": enabled and can_connect,
+        "tables_defined": sorted(_EXPECTED_TABLES),
+        "error": None if can_connect else "connection refused",
     }
 
 
@@ -98,18 +98,13 @@ def _make_status(
 
 class ModuleInvariantsTests(unittest.TestCase):
     def test_identity_columns_cover_every_mirror_table(self):
-        """The IDENTITY_COLUMNS map must enumerate the same 10 tables
-        that postgres_backfill.get_backfill_specs exposes — otherwise
-        a future table addition would silently skip the --sample mode."""
-        import postgres_backfill
+        """The IDENTITY_COLUMNS map must enumerate the 10 mirror tables.
+
+        M12.0e-6b-2: dropped the ``postgres_backfill.get_backfill_specs``
+        cross-check (postgres_backfill retired); the ``_EXPECTED_TABLES``
+        invariant below preserves the same coverage guarantee."""
         from scripts import check_parity
 
-        spec_names = {
-            s.table_name for s in postgres_backfill.get_backfill_specs()
-        }
-        self.assertSetEqual(
-            set(check_parity._IDENTITY_COLUMNS.keys()), spec_names
-        )
         self.assertSetEqual(
             set(check_parity._IDENTITY_COLUMNS.keys()), _EXPECTED_TABLES
         )
@@ -308,7 +303,7 @@ class SummarizeParityTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# collect_parity_report — patched at the postgres_backfill boundary
+# collect_parity_report — patched at the postgres_storage.health_check boundary
 # ---------------------------------------------------------------------------
 
 
@@ -318,14 +313,14 @@ class CollectParityReportTests(unittest.TestCase):
         empty (zeros on the Postgres side would otherwise surface as
         bogus drift), summary reports zero tables checked, no drift."""
         from scripts import check_parity
-        import postgres_backfill
+        import postgres_storage
 
         # Realistic disabled-state shape: SQLite counts are real, the
         # Postgres counts are zero because no engine could be built.
         sqlite_counts = {n: 5 for n in _EXPECTED_TABLES}
         postgres_counts = {n: 0 for n in _EXPECTED_TABLES}
         with patch.object(
-            postgres_backfill, "collect_status",
+            postgres_storage, "health_check",
             return_value=_make_status(
                 enabled=False, can_connect=False,
                 sqlite_counts=sqlite_counts,
@@ -344,10 +339,10 @@ class CollectParityReportTests(unittest.TestCase):
         echoed in the report, but per_table is always empty (no
         comparison) regardless of the patched counts."""
         from scripts import check_parity
-        import postgres_backfill
+        import postgres_storage
 
         with patch.object(
-            postgres_backfill, "collect_status",
+            postgres_storage, "health_check",
             return_value=_make_status(
                 sqlite_counts={n: 5 for n in _EXPECTED_TABLES},
                 postgres_counts={n: 5 for n in _EXPECTED_TABLES},
@@ -368,14 +363,14 @@ class CollectParityReportTests(unittest.TestCase):
         per_table stays empty and any_drift is False. SQLite is no
         longer written, so count drift is meaningless."""
         from scripts import check_parity
-        import postgres_backfill
+        import postgres_storage
 
         sqlite_counts = {n: 5 for n in _EXPECTED_TABLES}
         postgres_counts = dict(sqlite_counts)
         postgres_counts["analysis_results"] = 3  # would-be drift
 
         with patch.object(
-            postgres_backfill, "collect_status",
+            postgres_storage, "health_check",
             return_value=_make_status(
                 sqlite_counts=sqlite_counts,
                 postgres_counts=postgres_counts,
@@ -420,13 +415,13 @@ class MainExitPolicyTests(unittest.TestCase):
 
     def test_returns_0_when_dual_write_disabled(self):
         from scripts import check_parity
-        import postgres_backfill
+        import postgres_storage
 
         with _EnvScope():
             os.environ.pop("USE_POSTGRES_WRITE", None)
             os.environ.pop("DATABASE_URL", None)
             with patch.object(
-                postgres_backfill, "collect_status",
+                postgres_storage, "health_check",
                 return_value=_make_status(enabled=False, can_connect=False),
             ):
                 code, stdout, stderr = self._run_main([])
@@ -435,13 +430,13 @@ class MainExitPolicyTests(unittest.TestCase):
         self.assertIn("sole source of truth", stdout)
 
     def test_returns_0_when_parity_holds(self):
-        import postgres_backfill
+        import postgres_storage
 
         with _EnvScope():
             os.environ["USE_POSTGRES_WRITE"] = "true"
             os.environ["DATABASE_URL"] = "postgresql+psycopg://x/y"
             with patch.object(
-                postgres_backfill, "collect_status",
+                postgres_storage, "health_check",
                 return_value=_make_status(
                     sqlite_counts={n: 7 for n in _EXPECTED_TABLES},
                     postgres_counts={n: 7 for n in _EXPECTED_TABLES},
@@ -457,13 +452,13 @@ class MainExitPolicyTests(unittest.TestCase):
         unreachable Postgres is irrelevant to the parity exit code.
         Replaces the pre-5b strict/non-strict + drift exit-1 tests,
         which exercised comparison paths that no longer run."""
-        import postgres_backfill
+        import postgres_storage
 
         with _EnvScope():
             os.environ["USE_POSTGRES_WRITE"] = "true"
             os.environ["DATABASE_URL"] = "postgresql+psycopg://x/y"
             with patch.object(
-                postgres_backfill, "collect_status",
+                postgres_storage, "health_check",
                 return_value=_make_status(
                     enabled=True, can_connect=False,
                 ),
@@ -475,13 +470,13 @@ class MainExitPolicyTests(unittest.TestCase):
     def test_strict_flag_is_accepted_but_still_exits_0(self):
         """M12.0e-5b: --strict is retained for CLI back-compat but has
         no effect — the neutralized no-op always exits 0."""
-        import postgres_backfill
+        import postgres_storage
 
         with _EnvScope():
             os.environ["USE_POSTGRES_WRITE"] = "true"
             os.environ["DATABASE_URL"] = "postgresql+psycopg://x/y"
             with patch.object(
-                postgres_backfill, "collect_status",
+                postgres_storage, "health_check",
                 return_value=_make_status(
                     enabled=True, can_connect=False,
                 ),
@@ -490,13 +485,13 @@ class MainExitPolicyTests(unittest.TestCase):
         self.assertEqual(code, 0)
 
     def test_json_output_is_valid_json_with_expected_keys(self):
-        import postgres_backfill
+        import postgres_storage
 
         with _EnvScope():
             os.environ["USE_POSTGRES_WRITE"] = "true"
             os.environ["DATABASE_URL"] = "postgresql+psycopg://x/y"
             with patch.object(
-                postgres_backfill, "collect_status",
+                postgres_storage, "health_check",
                 return_value=_make_status(
                     sqlite_counts={n: 1 for n in _EXPECTED_TABLES},
                     postgres_counts={n: 1 for n in _EXPECTED_TABLES},
@@ -527,12 +522,11 @@ class ReadOnlyContractTests(unittest.TestCase):
         """No mirror_write / mirror_upsert / ensure_schema call may
         happen during a parity check. We patch the writer surface and
         assert it stays untouched."""
-        import postgres_backfill
         import postgres_storage
         from scripts import check_parity
 
         with patch.object(
-            postgres_backfill, "collect_status",
+            postgres_storage, "health_check",
             return_value=_make_status(),
         ), patch.object(
             postgres_storage, "mirror_write",

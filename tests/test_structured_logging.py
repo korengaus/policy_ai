@@ -454,7 +454,7 @@ _ADOPTED_MODULES = (
     "llm_judge.py",
     "http_cache.py",
     "postgres_storage.py",
-    "postgres_backfill.py",
+    # M12.0e-6b-2: postgres_backfill.py retired (migration complete).
     "legacy_review_enrollment.py",
     "verdict_label_diagnostic.py",
     "verdict_producer_comparison.py",

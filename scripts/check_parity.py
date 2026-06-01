@@ -299,21 +299,22 @@ def collect_parity_report(
     NEUTRALIZED in M12.0e-5b. SQLite is no longer a write target
     (M12.0e-5a), so SQLite-vs-Postgres parity is vacuous. This function
     now short-circuits to a no-op report: ``per_table`` is empty and
-    ``summary.any_drift`` is always False. The ``health`` block is still
-    sourced from :func:`postgres_backfill.collect_status` so operators
-    keep visibility into current Postgres connectivity. The per-table
-    count/identity comparison is NOT performed — the engine is never
-    touched here.
+    ``summary.any_drift`` is always False. The ``health`` block is
+    sourced directly from :func:`postgres_storage.health_check` so
+    operators keep visibility into current Postgres connectivity.
+    (M12.0e-6b-2: repointed off the retired ``postgres_backfill`` — its
+    ``collect_status`` health block was just ``health_check`` anyway.)
+    The per-table count/identity comparison is NOT performed — the
+    engine is never touched here.
 
     The report dict keys are preserved exactly (``health`` / ``summary``
     / ``per_table`` / ``sampled`` / ``sample_limit`` / ``only_table``) so
     existing consumers (run_operational_checks parsers, test_check_parity)
     continue to read the same shape. Never raises.
     """
-    import postgres_backfill
+    import postgres_storage
 
-    status = postgres_backfill.collect_status()
-    health = status["health"]
+    health = postgres_storage.health_check()
 
     # M12.0e-5b: no comparison. per_table stays empty; summarize_parity
     # over an empty map yields tables_checked=0, any_drift=False.
