@@ -128,36 +128,9 @@ class ModuleInvariantsTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# _format_identity
+# M12.0e-6b-3: FormatIdentityTests removed with the _format_identity /
+# sampling helpers (get_connection retired).
 # ---------------------------------------------------------------------------
-
-
-class FormatIdentityTests(unittest.TestCase):
-    def test_format_identity_single_value(self):
-        from scripts import check_parity
-
-        self.assertEqual(
-            check_parity._format_identity((42,), ["id"]), "42"
-        )
-
-    def test_format_identity_composite_key(self):
-        from scripts import check_parity
-
-        self.assertEqual(
-            check_parity._format_identity(
-                ("hash1", "openai", "text-embed"),
-                ["text_hash", "provider", "model"],
-            ),
-            "hash1|openai|text-embed",
-        )
-
-    def test_format_identity_none_becomes_empty_string(self):
-        from scripts import check_parity
-
-        self.assertEqual(
-            check_parity._format_identity((None, "openai"), ["a", "b"]),
-            "|openai",
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -201,68 +174,10 @@ class ComputeParityTests(unittest.TestCase):
         )
         self.assertEqual(behind["delta"], -10)
 
-    def test_sample_downgrades_in_parity_when_sets_diverge(self):
-        """Same counts but different identities still counts as drift
-        when --sample mode is active."""
-        from scripts import check_parity
-
-        with patch.object(
-            check_parity, "_sample_sqlite_identities",
-            return_value=[(1,), (2,), (3,)],
-        ), patch.object(
-            check_parity, "_sample_postgres_identities",
-            return_value=[(1,), (2,), (99,)],
-        ):
-            record = check_parity.compute_parity_for_table(
-                "analysis_results", 3, 3,
-                engine=object(), sample=True, sample_limit=100,
-            )
-        self.assertFalse(record["in_parity"])
-        self.assertEqual(record["sqlite_only_count"], 1)
-        self.assertEqual(record["postgres_only_count"], 1)
-        self.assertIn("3", record["sqlite_only_preview"])
-        self.assertIn("99", record["postgres_only_preview"])
-
-    def test_sample_preview_capped(self):
-        """Drift previews never exceed _MAX_PREVIEW_PER_SIDE entries per
-        side, regardless of how large the set difference is."""
-        from scripts import check_parity
-
-        sqlite_ids = [(i,) for i in range(200)]
-        postgres_ids = []  # massive sqlite_only drift
-
-        with patch.object(
-            check_parity, "_sample_sqlite_identities",
-            return_value=sqlite_ids,
-        ), patch.object(
-            check_parity, "_sample_postgres_identities",
-            return_value=postgres_ids,
-        ):
-            record = check_parity.compute_parity_for_table(
-                "analysis_results", 200, 0,
-                engine=object(), sample=True, sample_limit=500,
-            )
-        self.assertEqual(record["sqlite_only_count"], 200)
-        self.assertLessEqual(
-            len(record["sqlite_only_preview"]),
-            check_parity._MAX_PREVIEW_PER_SIDE,
-        )
-
-    def test_sample_false_skips_set_probe(self):
-        """When sample=False, the function must not touch the identity
-        helpers at all — keeps the default mode O(2 counts)."""
-        from scripts import check_parity
-
-        with patch.object(
-            check_parity, "_sample_sqlite_identities",
-        ) as sqlite_mock, patch.object(
-            check_parity, "_sample_postgres_identities",
-        ) as pg_mock:
-            check_parity.compute_parity_for_table(
-                "analysis_results", 5, 5, sample=False,
-            )
-        sqlite_mock.assert_not_called()
-        pg_mock.assert_not_called()
+    # M12.0e-6b-3: the 3 --sample tests (test_sample_downgrades_in_parity_
+    # when_sets_diverge / test_sample_preview_capped / test_sample_false_
+    # skips_set_probe) were removed with the SQLite sampling helpers
+    # (get_connection retired). compute_parity_for_table is count-only.
 
 
 # ---------------------------------------------------------------------------

@@ -19,8 +19,6 @@ from database import (
     get_result_by_id,
     get_result_id_by_url,
     get_review_task,
-    init_db,
-    init_review_tables,
     list_review_decisions,
     list_review_tasks,
     record_review_decision,
@@ -80,8 +78,9 @@ def _log_postgres_startup() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()
-    logger.info("SQLite database initialized")
+    # M12.0e-6b-3: SQLite machinery retired. The Postgres mirror schema
+    # is created lazily by postgres_storage.ensure_schema on the first
+    # engine build (inside get_engine), so no startup DB init is needed.
     _log_ai_config_startup()
     _log_postgres_startup()
     yield
@@ -1214,7 +1213,6 @@ def review_list_tasks(
     Status filter is normalized via ``review_workflow.normalize_review_status``;
     an unknown status returns 400 rather than silently returning all rows.
     """
-    init_review_tables()
     status_filter: Optional[str] = None
     if status:
         try:
@@ -1239,7 +1237,6 @@ def review_task_detail(
     _: None = Depends(_require_review_token),
 ) -> dict:
     """Return a task plus all decisions recorded against it."""
-    init_review_tables()
     task = get_review_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="review task not found")
@@ -1269,7 +1266,6 @@ def review_create_task_from_result(
     ``human_review_required=true``. Same logical (result_id, job_id,
     item_index, claim_text) tuple returns the same task on repeat calls.
     """
-    init_review_tables()
     payload = _load_payload_for_review(
         result_id=body.result_id,
         job_id=body.job_id,
@@ -1348,7 +1344,6 @@ def review_record_decision(
     analysis_results, and never changes the verdict / confidence /
     verification_card the pipeline produced.
     """
-    init_review_tables()
     task = get_review_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="review task not found")
@@ -1420,7 +1415,6 @@ def review_list_decisions(
     task_id: str,
     _: None = Depends(_require_review_token),
 ) -> dict:
-    init_review_tables()
     task = get_review_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="review task not found")
@@ -1455,7 +1449,6 @@ def review_audit_packet(
         * 403 when ``X-Review-Token`` is missing / wrong.
         * 404 when the task does not exist.
     """
-    init_review_tables()
     task = get_review_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="review task not found")

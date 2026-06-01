@@ -1,5 +1,4 @@
 import json
-import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -100,163 +99,6 @@ def _mirror_upsert_returning_safe(
         return mirror_upsert_returning(table_name, row_dict, conflict_columns)
     except Exception:  # noqa: BLE001 — Postgres failures must not surface
         return None
-
-
-DB_PATH = Path("policy_ai.db")
-
-
-def get_connection():
-    connection = sqlite3.connect(DB_PATH)
-    connection.row_factory = sqlite3.Row
-    return connection
-
-
-def init_db():
-    with get_connection() as connection:
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS analysis_results (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                query TEXT,
-                title TEXT,
-                original_url TEXT,
-                topic TEXT,
-                policy_alert_level TEXT,
-                market_signal TEXT,
-                policy_confidence_score INTEGER,
-                verification_strength TEXT,
-                risk_level TEXT,
-                action_priority TEXT,
-                impact_level TEXT,
-                impact_direction TEXT,
-                market_sensitivity INTEGER,
-                consumer_sensitivity INTEGER,
-                business_sensitivity INTEGER,
-                created_at TEXT
-            )
-            """
-        )
-        _ensure_columns(connection)
-        _ensure_jobs_table(connection)
-        _ensure_embedding_cache_table(connection)
-        _ensure_review_tables(connection)
-        _ensure_source_fetch_artifacts_table(connection)
-        _ensure_artifact_text_extractions_table(connection)
-        _ensure_artifact_evidence_candidates_table(connection)
-        _ensure_verdict_producer_comparisons_table(connection)
-        _ensure_verdict_label_attributions_table(connection)
-        connection.commit()
-
-
-def _ensure_embedding_cache_table(connection):
-    """Phase 2 M5: idempotent embedding cache. Safe to call repeatedly.
-
-    The cache is best-effort — a corrupted row or schema mismatch should never
-    block a pipeline run. Callers go through ``get_cached_embedding`` /
-    ``save_cached_embedding`` which swallow errors and log a warning.
-    """
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS embedding_cache (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            text_hash TEXT NOT NULL,
-            provider TEXT NOT NULL,
-            model TEXT,
-            dimensions INTEGER,
-            vector_json TEXT NOT NULL,
-            text_preview TEXT,
-            created_at TEXT
-        )
-        """
-    )
-    connection.execute(
-        """
-        CREATE UNIQUE INDEX IF NOT EXISTS ix_embedding_cache_lookup
-        ON embedding_cache(text_hash, provider, model)
-        """
-    )
-
-
-def _ensure_jobs_table(connection):
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS jobs (
-            id TEXT PRIMARY KEY,
-            status TEXT NOT NULL,
-            query TEXT,
-            max_news INTEGER,
-            progress_percent INTEGER DEFAULT 0,
-            current_stage TEXT,
-            result_id INTEGER,
-            error_message TEXT,
-            created_at TEXT,
-            started_at TEXT,
-            completed_at TEXT,
-            pipeline_version TEXT
-        )
-        """
-    )
-    existing = {
-        row["name"]
-        for row in connection.execute("PRAGMA table_info(jobs)").fetchall()
-    }
-    desired = {
-        "query": "TEXT",
-        "max_news": "INTEGER",
-        "progress_percent": "INTEGER DEFAULT 0",
-        "current_stage": "TEXT",
-        "result_id": "INTEGER",
-        "error_message": "TEXT",
-        "created_at": "TEXT",
-        "started_at": "TEXT",
-        "completed_at": "TEXT",
-        "pipeline_version": "TEXT",
-    }
-    for column, column_type in desired.items():
-        if column not in existing:
-            connection.execute(
-                f"ALTER TABLE jobs ADD COLUMN {column} {column_type}"
-            )
-    connection.execute("CREATE INDEX IF NOT EXISTS ix_jobs_status ON jobs(status)")
-    connection.execute("CREATE INDEX IF NOT EXISTS ix_jobs_created_at ON jobs(created_at)")
-
-
-def _ensure_columns(connection):
-    existing_columns = {
-        row["name"]
-        for row in connection.execute("PRAGMA table_info(analysis_results)").fetchall()
-    }
-    desired_columns = {
-        "claim_text": "TEXT",
-        "verdict_label": "TEXT",
-        "verdict_confidence": "INTEGER",
-        "evidence_sources": "TEXT",
-        "source_reliability_score": "INTEGER",
-        "source_reliability_reason": "TEXT",
-        "evidence_summary": "TEXT",
-        "missing_context": "TEXT",
-        "last_checked_at": "TEXT",
-        "review_status": "TEXT",
-        "claims": "TEXT",
-        "normalized_claims": "TEXT",
-        "source_candidates": "TEXT",
-        "source_queries": "TEXT",
-        "source_reliability_summary": "TEXT",
-        "evidence_snippets": "TEXT",
-        "claim_evidence_map": "TEXT",
-        "evidence_extraction_summary": "TEXT",
-        "contradiction_checks": "TEXT",
-        "contradiction_summary": "TEXT",
-        "bias_framing_analysis": "TEXT",
-        "bias_framing_summary": "TEXT",
-        "debug_summary": "TEXT",
-    }
-
-    for column, column_type in desired_columns.items():
-        if column not in existing_columns:
-            connection.execute(
-                f"ALTER TABLE analysis_results ADD COLUMN {column} {column_type}"
-            )
 
 
 def _serialize_market_signal(value) -> str:
@@ -501,8 +343,7 @@ def save_analysis_result(result: dict, query: str):
     # of the system uses (jobs.result_id, frontend localStorage,
     # GET /history/{id}). The 3c-1 sequence-alignment hotfix guarantees
     # the SERIAL is past any explicitly-written id, so the RETURNING id
-    # never collides. save_analysis_result takes no db_path arg, so the
-    # gate is purely the dual-write flag (matches the 3c-2 model).
+    # never collides.
     # M12.0e-5a: Postgres is the sole durable store; the SQLite write
     # fallback was removed (point of no return). The PG write is now
     # unconditional. A None id means the row was persisted nowhere
@@ -524,10 +365,6 @@ def save_analysis_result(result: dict, query: str):
             "error": "pg_write_failed",
         }
     return {"saved": True, "duplicate": False, "id": pg_id}
-
-
-def _row_to_dict(row: sqlite3.Row) -> dict:
-    return dict(row)
 
 
 def get_recent_results(limit: int = 20):
@@ -722,77 +559,6 @@ def save_cached_embedding(
 # (analysis_results) are NEVER mutated by anything in this section; the
 # review layer is strictly additive.
 # ---------------------------------------------------------------------------
-
-
-def _ensure_review_tables(connection):
-    """Idempotent. Safe to call repeatedly."""
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS review_tasks (
-            task_id TEXT PRIMARY KEY,
-            result_id TEXT,
-            job_id TEXT,
-            item_index INTEGER DEFAULT 0,
-            status TEXT NOT NULL,
-            query TEXT,
-            claim_text TEXT,
-            title TEXT,
-            url TEXT,
-            final_decision TEXT,
-            policy_confidence TEXT,
-            human_review_required INTEGER DEFAULT 1,
-            snapshot_json TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            idempotency_key TEXT UNIQUE
-        )
-        """
-    )
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS review_decisions (
-            decision_id TEXT PRIMARY KEY,
-            task_id TEXT NOT NULL,
-            decision TEXT NOT NULL,
-            reviewer_id TEXT,
-            comment TEXT,
-            public_note TEXT,
-            previous_status TEXT,
-            new_status TEXT,
-            created_at TEXT NOT NULL,
-            metadata_json TEXT,
-            decision_source TEXT
-        )
-        """
-    )
-    # Phase 2 M9.0 — additive migration for installs that created
-    # review_decisions before the decision_source column existed. SQLite
-    # has no IF NOT EXISTS for ADD COLUMN, so we catch the OperationalError.
-    try:
-        connection.execute(
-            "ALTER TABLE review_decisions ADD COLUMN decision_source TEXT"
-        )
-    except sqlite3.OperationalError:
-        # Column already present — older table that included it, or a
-        # concurrent migration win. Either case is fine.
-        pass
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS idx_review_tasks_status ON review_tasks(status)"
-    )
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS idx_review_tasks_result ON review_tasks(result_id, job_id, item_index)"
-    )
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS idx_review_decisions_task ON review_decisions(task_id, created_at)"
-    )
-
-
-def init_review_tables():
-    """Public idempotent initializer. Independent of init_db() so tests
-    and the API server can call it without touching analysis_results."""
-    with get_connection() as connection:
-        _ensure_review_tables(connection)
-        connection.commit()
 
 
 def _row_to_review_task(row) -> dict:
@@ -1134,42 +900,6 @@ def list_review_decisions(task_id: str) -> list:
 # ---------------------------------------------------------------------------
 
 
-def _ensure_source_fetch_artifacts_table(connection):
-    """Idempotent. Safe to call repeatedly."""
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS source_fetch_artifacts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            source_id TEXT NOT NULL,
-            url TEXT NOT NULL,
-            fetch_timestamp TEXT NOT NULL,
-            status_code INTEGER,
-            content_type TEXT,
-            success INTEGER NOT NULL DEFAULT 0,
-            error TEXT,
-            text_content TEXT,
-            raw_html TEXT,
-            fetch_duration_ms INTEGER,
-            truth_claim INTEGER NOT NULL DEFAULT 0,
-            official_source_candidate INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL
-        )
-        """
-    )
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS idx_source_fetch_artifacts_source "
-        "ON source_fetch_artifacts(source_id, fetch_timestamp)"
-    )
-
-
-def init_source_fetch_artifacts_table():
-    """Public idempotent initializer. Independent of init_db() so tests
-    and the operator CLI can call it without touching analysis_results."""
-    with get_connection() as connection:
-        _ensure_source_fetch_artifacts_table(connection)
-        connection.commit()
-
-
 def _row_to_fetch_artifact(row) -> dict:
     """SQLite row → fetch-artifact dict. Maps the integer success /
     truth_claim / official_source_candidate columns back to booleans
@@ -1243,8 +973,7 @@ def save_fetch_artifact(fetch_result: dict) -> int:
     # is enabled. PG's SERIAL sequence assigns the id (captured via
     # mirror_write_returning); the returned id is the value the operator
     # CLI (scripts/fetch_registry_source.py) prints as ``saved_row_id``.
-    # save_fetch_artifact takes no db_path arg, so the gate is purely the
-    # dual-write flag (matches the 3c-2 model). The function keeps its
+    # The function keeps its
     # ``-> int`` contract: on PG write failure it returns the sentinel
     # ``-1`` (an impossible real row id) rather than a phantom positive id
     # — the 3c-1 data-loss class, surfaced explicitly via log.error.
@@ -1276,10 +1005,8 @@ def get_fetch_artifacts(source_id: str = None, limit: int = 50) -> list:
         capped_limit = max(1, min(int(limit or 50), 500))
     except (TypeError, ValueError):
         capped_limit = 50
-    # M12.0c-4 / M12.0d-1: no db_path arg on this function — always
-    # default DB. PG primary; [] is PG truth, None means engine-not-built.
-    # SQLite block unreachable when dual-write enabled. PG-read errors
-    # now raise.
+    # M12.0c-4 / M12.0d-1: PG primary; [] is PG truth, None means
+    # engine-not-built. PG-read errors now raise.
     try:
         from postgres_storage import (
             is_postgres_dual_write_enabled,
@@ -1329,44 +1056,6 @@ def get_fetch_artifacts(source_id: str = None, limit: int = 50) -> list:
 # ---------------------------------------------------------------------------
 
 
-def _ensure_artifact_text_extractions_table(connection):
-    """Idempotent. Safe to call repeatedly."""
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS artifact_text_extractions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            artifact_id INTEGER NOT NULL,
-            source_id TEXT NOT NULL,
-            url TEXT NOT NULL,
-            extraction_timestamp TEXT NOT NULL,
-            extraction_duration_ms INTEGER,
-            success INTEGER NOT NULL DEFAULT 0,
-            error TEXT,
-            title TEXT,
-            main_text TEXT,
-            sections TEXT,
-            word_count INTEGER,
-            language_hint TEXT,
-            truth_claim INTEGER NOT NULL DEFAULT 0,
-            official_source_candidate INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL
-        )
-        """
-    )
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS idx_artifact_text_extractions_artifact "
-        "ON artifact_text_extractions(artifact_id)"
-    )
-
-
-def init_artifact_text_extractions_table():
-    """Public idempotent initializer. Independent of init_db() so tests
-    and the operator CLI can call it without touching analysis_results."""
-    with get_connection() as connection:
-        _ensure_artifact_text_extractions_table(connection)
-        connection.commit()
-
-
 def _row_to_extraction_result(row) -> dict:
     """SQLite row → extraction-result dict. Maps the integer success /
     truth_claim / official_source_candidate columns back to booleans
@@ -1385,7 +1074,7 @@ def _row_to_extraction_result(row) -> dict:
     return out
 
 
-def save_extraction_result(result_dict: dict, db_path: str = None) -> int:
+def save_extraction_result(result_dict: dict) -> int:
     """Persist one extraction artifact and return the inserted row id.
 
     ``result_dict`` matches the shape returned by
@@ -1393,11 +1082,6 @@ def save_extraction_result(result_dict: dict, db_path: str = None) -> int:
     default safely. ``truth_claim`` is always stored as 0 regardless
     of the input (defensive against future regressions in the
     extractor that might try to set it true).
-
-    When ``db_path`` is provided the write goes to that SQLite file
-    directly (used by the CLI's ``--db-path`` flag and by tests that
-    want isolated DBs without monkey-patching the module-level
-    ``DB_PATH``).
     """
     if not isinstance(result_dict, dict):
         raise ValueError("result_dict must be a dict")
@@ -1448,17 +1132,10 @@ def save_extraction_result(result_dict: dict, db_path: str = None) -> int:
         "created_at": row_values[14],
     }
 
-    # M12.0d Stage 3c-3: Postgres is the sole write target when dual-write
-    # is enabled AND no explicit db_path was supplied. An explicit db_path
-    # opts into an isolated SQLite file (CLI --db-path / tests) and MUST
-    # keep the SQLite write. PG's SERIAL sequence assigns the id (captured
-    # via mirror_write_returning); the function keeps its ``-> int``
-    # contract, returning the sentinel ``-1`` on PG write failure (the
-    # 3c-1 data-loss class, surfaced via log.error).
-    # M12.0e-5a: Postgres is the sole durable store; the SQLite write
-    # fallback (and the explicit-db_path SQLite branch) was removed. The
-    # PG write is now unconditional and returns the sentinel -1 on failure
-    # (the 3c-1 data-loss class, surfaced via log.error).
+    # M12.0e-5a: Postgres is the sole durable store. PG's SERIAL sequence
+    # assigns the id (captured via mirror_write_returning); the function
+    # keeps its ``-> int`` contract, returning the sentinel ``-1`` on PG
+    # write failure (the 3c-1 data-loss class, surfaced via log.error).
     pg_id = _mirror_write_returning_safe(
         "artifact_text_extractions", mirror_payload,
     )
@@ -1485,9 +1162,9 @@ def get_extraction_results(source_id: str = None, artifact_id: int = None,
     except (TypeError, ValueError):
         capped_limit = 50
     # M12.0c-4 / M12.0d-1: PG primary. PG-read errors raise.
-    # M12.0e-6a: the explicit-db_path SQLite read path and the dual-
-    # write-OFF SQLite fallback were removed; PG is the sole durable
-    # store since 0e-5a. OFF → [].
+    # M12.0e-6a: the SQLite read path and the dual-write-OFF SQLite
+    # fallback were removed; PG is the sole durable store since 0e-5a.
+    # OFF → [].
     try:
         from postgres_storage import (
             is_postgres_dual_write_enabled,
@@ -1539,50 +1216,6 @@ def get_extraction_results(source_id: str = None, artifact_id: int = None,
 # ---------------------------------------------------------------------------
 
 
-def _ensure_artifact_evidence_candidates_table(connection):
-    """Idempotent. Safe to call repeatedly."""
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS artifact_evidence_candidates (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            extraction_id INTEGER NOT NULL,
-            source_id TEXT NOT NULL,
-            url TEXT NOT NULL,
-            analysis_id TEXT NOT NULL,
-            claim_text TEXT NOT NULL,
-            match_score REAL NOT NULL DEFAULT 0.0,
-            matched_tokens TEXT,
-            supporting_passage TEXT,
-            candidate_timestamp TEXT NOT NULL,
-            truth_claim INTEGER NOT NULL DEFAULT 0,
-            official_source_candidate INTEGER NOT NULL DEFAULT 0,
-            operator_review_required INTEGER NOT NULL DEFAULT 1,
-            notes TEXT,
-            created_at TEXT NOT NULL
-        )
-        """
-    )
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS idx_artifact_evidence_candidates_analysis "
-        "ON artifact_evidence_candidates(analysis_id)"
-    )
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS idx_artifact_evidence_candidates_extraction "
-        "ON artifact_evidence_candidates(extraction_id)"
-    )
-
-
-def init_artifact_evidence_candidates_table(db_path: str = None):
-    """Public idempotent initializer. Independent of init_db() so tests
-    and the operator CLI can call it without touching analysis_results."""
-    connection = _open_connection(db_path)
-    try:
-        _ensure_artifact_evidence_candidates_table(connection)
-        connection.commit()
-    finally:
-        connection.close()
-
-
 def _row_to_evidence_candidate(row) -> dict:
     """SQLite row → evidence-candidate dict. Maps the integer
     truth_claim / official_source_candidate / operator_review_required
@@ -1612,7 +1245,7 @@ def _row_to_evidence_candidate(row) -> dict:
     return out
 
 
-def save_evidence_candidate(candidate_dict: dict, db_path: str = None) -> int:
+def save_evidence_candidate(candidate_dict: dict) -> int:
     """Persist one evidence candidate and return the inserted row id.
 
     ``candidate_dict`` matches the shape returned by
@@ -1687,17 +1320,10 @@ def save_evidence_candidate(candidate_dict: dict, db_path: str = None) -> int:
         "created_at": row_values[13],
     }
 
-    # M12.0d Stage 3c-3: Postgres is the sole write target when dual-write
-    # is enabled AND no explicit db_path was supplied. An explicit db_path
-    # opts into an isolated SQLite file (CLI --db-path / tests) and MUST
-    # keep the SQLite write. PG's SERIAL sequence assigns the id (captured
-    # via mirror_write_returning); the function keeps its ``-> int``
-    # contract, returning the sentinel ``-1`` on PG write failure (the
-    # 3c-1 data-loss class, surfaced via log.error).
-    # M12.0e-5a: Postgres is the sole durable store; the SQLite write
-    # fallback (and the explicit-db_path SQLite branch) was removed. The
-    # PG write is now unconditional and returns the sentinel -1 on failure
-    # (the 3c-1 data-loss class, surfaced via log.error).
+    # M12.0e-5a: Postgres is the sole durable store. PG's SERIAL sequence
+    # assigns the id (captured via mirror_write_returning); the function
+    # keeps its ``-> int`` contract, returning the sentinel ``-1`` on PG
+    # write failure (the 3c-1 data-loss class, surfaced via log.error).
     pg_id = _mirror_write_returning_safe(
         "artifact_evidence_candidates", mirror_payload,
     )
@@ -1728,9 +1354,9 @@ def get_evidence_candidates(
     except (TypeError, ValueError):
         capped_limit = 50
     # M12.0c-4 / M12.0d-1: PG primary. PG-read errors raise.
-    # M12.0e-6a: the explicit-db_path SQLite read path and the dual-
-    # write-OFF SQLite fallback were removed; PG is the sole durable
-    # store since 0e-5a. OFF → [].
+    # M12.0e-6a: the SQLite read path and the dual-write-OFF SQLite
+    # fallback were removed; PG is the sole durable store since 0e-5a.
+    # OFF → [].
     try:
         from postgres_storage import (
             is_postgres_dual_write_enabled,
@@ -1785,63 +1411,6 @@ def get_evidence_candidates(
 # ---------------------------------------------------------------------------
 
 
-def _ensure_verdict_producer_comparisons_table(connection):
-    """Idempotent. Safe to call repeatedly."""
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS verdict_producer_comparisons (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            analysis_id TEXT NOT NULL,
-            source TEXT NOT NULL,
-            input_hash TEXT NOT NULL,
-            producer1_label TEXT,
-            producer1_score REAL,
-            producer1_extra TEXT,
-            producer2_label TEXT,
-            producer2_alert_level TEXT,
-            producer2_score REAL,
-            producer2_extra TEXT,
-            producer3_label TEXT,
-            producer3_extra TEXT,
-            all_three_agree INTEGER NOT NULL DEFAULT 0,
-            p1_p2_agree INTEGER NOT NULL DEFAULT 0,
-            p1_p3_agree INTEGER NOT NULL DEFAULT 0,
-            p2_p3_agree INTEGER NOT NULL DEFAULT 0,
-            disagreement_pattern TEXT,
-            most_conservative_label TEXT,
-            comparison_timestamp TEXT NOT NULL,
-            notes TEXT,
-            truth_claim INTEGER NOT NULL DEFAULT 0,
-            operator_review_required INTEGER NOT NULL DEFAULT 1,
-            created_at TEXT NOT NULL
-        )
-        """
-    )
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS idx_verdict_comparisons_analysis "
-        "ON verdict_producer_comparisons(analysis_id)"
-    )
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS idx_verdict_comparisons_pattern "
-        "ON verdict_producer_comparisons(disagreement_pattern)"
-    )
-    connection.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_verdict_comparisons_input_hash "
-        "ON verdict_producer_comparisons(input_hash)"
-    )
-
-
-def init_verdict_producer_comparisons_table(db_path: str = None):
-    """Public idempotent initializer. Independent of init_db() so tests
-    and the operator CLI can call it without touching analysis_results."""
-    connection = _open_connection(db_path)
-    try:
-        _ensure_verdict_producer_comparisons_table(connection)
-        connection.commit()
-    finally:
-        connection.close()
-
-
 def _row_to_producer_comparison(row) -> dict:
     """SQLite row → comparison dict. Maps the integer flag columns
     back to booleans and leaves the JSON-encoded ``producerN_extra``
@@ -1869,7 +1438,7 @@ def _row_to_producer_comparison(row) -> dict:
     return out
 
 
-def save_producer_comparison(comparison_dict: dict, db_path: str = None) -> int:
+def save_producer_comparison(comparison_dict: dict) -> int:
     """Persist (or replace, on input_hash collision) one comparison
     row and return the resulting row id.
 
@@ -1959,17 +1528,10 @@ def save_producer_comparison(comparison_dict: dict, db_path: str = None) -> int:
         "created_at": row_values[22],
     }
 
-    # M12.0d Stage 3c-3: Postgres is the sole write target when dual-write
-    # is enabled AND no explicit db_path was supplied. An explicit db_path
-    # opts into an isolated SQLite file (CLI --db-path / tests) and MUST
-    # keep the SQLite write. PG assigns the id via ON CONFLICT ... RETURNING
-    # (mirror_upsert_returning); the function keeps its ``-> int`` contract,
-    # returning the sentinel ``-1`` on PG write failure (the 3c-1 data-loss
-    # class, surfaced via log.error).
-    # M12.0e-5a: Postgres is the sole durable store; the SQLite write
-    # fallback (and the explicit-db_path SQLite branch) was removed. The
-    # PG upsert is now unconditional and returns the sentinel -1 on
-    # failure (the 3c-1 data-loss class, surfaced via log.error).
+    # M12.0e-5a: Postgres is the sole durable store. PG assigns the id via
+    # ON CONFLICT ... RETURNING (mirror_upsert_returning); the function
+    # keeps its ``-> int`` contract, returning the sentinel ``-1`` on PG
+    # write failure (the 3c-1 data-loss class, surfaced via log.error).
     pg_id = _mirror_upsert_returning_safe(
         "verdict_producer_comparisons", mirror_payload, ["input_hash"],
     )
@@ -2001,9 +1563,9 @@ def get_producer_comparisons(
     except (TypeError, ValueError):
         capped_limit = 50
     # M12.0c-4 / M12.0d-1: PG primary. PG-read errors raise.
-    # M12.0e-6a: the explicit-db_path SQLite read path and the dual-
-    # write-OFF SQLite fallback were removed; PG is the sole durable
-    # store since 0e-5a. OFF → [].
+    # M12.0e-6a: the SQLite read path and the dual-write-OFF SQLite
+    # fallback were removed; PG is the sole durable store since 0e-5a.
+    # OFF → [].
     try:
         from postgres_storage import (
             is_postgres_dual_write_enabled,
@@ -2058,64 +1620,6 @@ def get_producer_comparisons(
 # ---------------------------------------------------------------------------
 
 
-def _ensure_verdict_label_attributions_table(connection):
-    """Idempotent. Safe to call repeatedly."""
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS verdict_label_attributions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            analysis_id TEXT NOT NULL,
-            stored_verdict_label TEXT,
-            stored_verdict_confidence INTEGER,
-            stored_policy_alert_level TEXT,
-            stored_policy_confidence_score INTEGER,
-            stored_verification_strength TEXT,
-            stored_claim_text TEXT,
-            stored_evidence_summary TEXT,
-            reconstructed_inputs TEXT,
-            attributed_branch_id TEXT,
-            attribution_confidence TEXT,
-            attribution_reason TEXT,
-            is_weak_evidence_verified INTEGER NOT NULL DEFAULT 0,
-            weak_evidence_signals TEXT,
-            diagnostic_timestamp TEXT NOT NULL,
-            notes TEXT,
-            truth_claim INTEGER NOT NULL DEFAULT 0,
-            operator_review_required INTEGER NOT NULL DEFAULT 1,
-            created_at TEXT NOT NULL
-        )
-        """
-    )
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS idx_verdict_label_attr_analysis "
-        "ON verdict_label_attributions(analysis_id)"
-    )
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS idx_verdict_label_attr_branch "
-        "ON verdict_label_attributions(attributed_branch_id)"
-    )
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS idx_verdict_label_attr_weak "
-        "ON verdict_label_attributions(is_weak_evidence_verified)"
-    )
-    connection.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS "
-        "idx_verdict_label_attr_analysis_unique "
-        "ON verdict_label_attributions(analysis_id)"
-    )
-
-
-def init_verdict_label_attributions_table(db_path: str = None):
-    """Public idempotent initializer. Independent of init_db() so tests
-    and the operator CLI can call it without touching analysis_results."""
-    connection = _open_connection(db_path)
-    try:
-        _ensure_verdict_label_attributions_table(connection)
-        connection.commit()
-    finally:
-        connection.close()
-
-
 def _row_to_verdict_label_attribution(row) -> dict:
     """SQLite row → attribution dict. Surfaces booleans as Python
     bools and leaves the JSON-encoded ``reconstructed_inputs`` /
@@ -2136,9 +1640,7 @@ def _row_to_verdict_label_attribution(row) -> dict:
     return out
 
 
-def save_verdict_label_attribution(
-    attribution_dict: dict, db_path: str = None,
-) -> int:
+def save_verdict_label_attribution(attribution_dict: dict) -> int:
     """Persist (or replace, on analysis_id collision) one attribution
     row and return the resulting row id.
 
@@ -2218,17 +1720,10 @@ def save_verdict_label_attribution(
         "created_at": row_values[18],
     }
 
-    # M12.0d Stage 3c-3: Postgres is the sole write target when dual-write
-    # is enabled AND no explicit db_path was supplied. An explicit db_path
-    # opts into an isolated SQLite file (CLI --db-path / tests) and MUST
-    # keep the SQLite write. PG assigns the id via ON CONFLICT ... RETURNING
-    # (mirror_upsert_returning); the function keeps its ``-> int`` contract,
-    # returning the sentinel ``-1`` on PG write failure (the 3c-1 data-loss
-    # class, surfaced via log.error).
-    # M12.0e-5a: Postgres is the sole durable store; the SQLite write
-    # fallback (and the explicit-db_path SQLite branch) was removed. The
-    # PG upsert is now unconditional and returns the sentinel -1 on
-    # failure (the 3c-1 data-loss class, surfaced via log.error).
+    # M12.0e-5a: Postgres is the sole durable store. PG assigns the id via
+    # ON CONFLICT ... RETURNING (mirror_upsert_returning); the function
+    # keeps its ``-> int`` contract, returning the sentinel ``-1`` on PG
+    # write failure (the 3c-1 data-loss class, surfaced via log.error).
     pg_id = _mirror_upsert_returning_safe(
         "verdict_label_attributions", mirror_payload, ["analysis_id"],
     )
@@ -2259,9 +1754,9 @@ def get_verdict_label_attributions(
     except (TypeError, ValueError):
         capped_limit = 100
     # M12.0c-4 / M12.0d-1: PG primary. PG-read errors raise.
-    # M12.0e-6a: the explicit-db_path SQLite read path and the dual-
-    # write-OFF SQLite fallback were removed; PG is the sole durable
-    # store since 0e-5a. OFF → [].
+    # M12.0e-6a: the SQLite read path and the dual-write-OFF SQLite
+    # fallback were removed; PG is the sole durable store since 0e-5a.
+    # OFF → [].
     try:
         from postgres_storage import (
             is_postgres_dual_write_enabled,
@@ -2305,19 +1800,6 @@ def get_verdict_label_attributions(
             ]
         return []
     return []
-
-
-def _open_connection(db_path):
-    """Internal helper: open a sqlite3 connection at ``db_path`` (or
-    the module-level ``DB_PATH`` when ``db_path`` is None). Returns a
-    plain ``sqlite3.Connection`` with the standard row_factory; the
-    caller is responsible for closing it."""
-    if db_path is None:
-        connection = sqlite3.connect(DB_PATH)
-    else:
-        connection = sqlite3.connect(str(db_path))
-    connection.row_factory = sqlite3.Row
-    return connection
 
 
 def embedding_cache_stats() -> dict:

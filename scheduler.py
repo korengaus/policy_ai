@@ -1,7 +1,7 @@
 import argparse
 import time
 
-from database import init_db, save_analysis_result
+from database import save_analysis_result
 from main import analyze_pipeline
 from structured_logging import get_logger
 
@@ -31,7 +31,9 @@ def _iter_api_results(report: dict):
 
 
 def run_once():
-    init_db()
+    # M12.0e-6b-3: SQLite init removed; the scheduler writes via the PG
+    # mirror (save_analysis_result), and ensure_schema creates the PG
+    # schema lazily on first engine use.
     # M14.0-print-b (2026-05-26): print → log.info conversion. All
     # status lines preserved verbatim with structured extras for
     # JSON-log queryability.

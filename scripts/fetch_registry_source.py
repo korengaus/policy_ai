@@ -337,7 +337,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     saved_row_id: Optional[int] = None
     try:
         import database
-        database.init_source_fetch_artifacts_table()
+        # M12.0e-6b-3: SQLite init removed; save_fetch_artifact mirrors to
+        # PG and ensure_schema creates the table lazily on first engine use.
         saved_row_id = database.save_fetch_artifact(fetch_dict)
     except Exception as save_error:
         # Persistence failure does not invalidate the fetch result,

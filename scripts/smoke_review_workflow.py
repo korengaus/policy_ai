@@ -135,27 +135,21 @@ def _disabled_review_env():
 
 @contextmanager
 def _temp_sqlite_database():
-    """Point ``database.DB_PATH`` at a fresh temp file and reload api_server.
+    """Provision a SQLite-as-PG substitute and reload api_server.
 
-    The api_server module reload is required because the FastAPI app may
-    already have been imported by a prior test in the same process — reloading
-    ensures any startup side-effects (init_db on lifespan) hit the temp DB.
-    The original DB_PATH is restored on exit; the reloaded api_server module
-    is left in place intentionally so subsequent operations within the same
-    process see a consistent FastAPI app.
-
-    M12.0d Stage 3c-2: review_tasks / review_decisions writes are
-    PG-only. The smoke now also provisions a fresh SQLite-as-PG substitute
+    The api_server reload ensures the FastAPI app picks up the
+    substitute env. review_tasks / review_decisions writes are PG-only;
+    the smoke points ``DATABASE_URL`` at a fresh SQLite-as-PG substitute
     (``USE_POSTGRES_WRITE=true`` + ``DATABASE_URL=sqlite:///<tmp>``) so
-    the production write path lands in the substitute and PG-primary
-    reads resolve correctly. The contract that the smoke needs no real
-    Postgres server is preserved — the substitute is a local SQLite file.
+    the production write path lands in it and PG-primary reads resolve.
+    No real Postgres server is needed — the substitute is a local SQLite
+    file. (M12.0e-6b-3: the SQLite ``DB_PATH`` swap + ``init_db`` were
+    removed with the retired SQLite machinery.)
     """
     import database
     tmp_dir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
     db_path = Path(tmp_dir.name) / "review_smoke.db"
     pg_db_path = Path(tmp_dir.name) / "review_smoke_pg.db"
-    previous = database.DB_PATH
     env_snapshot = {
         key: os.environ.get(key)
         for key in ("USE_POSTGRES_WRITE", "DATABASE_URL")
@@ -164,18 +158,15 @@ def _temp_sqlite_database():
     os.environ["DATABASE_URL"] = f"sqlite:///{pg_db_path}"
     import postgres_storage
     postgres_storage.reset_engine_for_tests()
-    database.DB_PATH = db_path
     try:
-        database.init_db()
+        # M12.0e-6b-3: SQLite init / DB_PATH swap removed (machinery
+        # retired). The PG-substitute engine below creates the mirror
+        # schema via ensure_schema before any write fires.
         import api_server  # noqa: F401
         importlib.reload(api_server)
-        # Build the PG-substitute engine so ensure_schema (via the
-        # 3c-1 hotfix inside get_engine) creates the mirror tables
-        # before any write fires.
         postgres_storage.get_engine()
         yield database, api_server, db_path
     finally:
-        database.DB_PATH = previous
         postgres_storage.reset_engine_for_tests()
         for key, value in env_snapshot.items():
             if value is None:

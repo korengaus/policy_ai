@@ -162,42 +162,12 @@ class SchemaBoundToEngineBuildTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Invariant 2 — PG schema creation is independent of database.init_db().
-#
-# init_db() is pure SQLite and is never on the PG-schema-creation path.
-# Patch it with a mock, build the engine, confirm the mirror tables are
-# queryable, and assert init_db was never invoked. This is the precise
-# pin that protects a later sub-stage's removal of init_db: removing it
-# must not affect PG schema creation.
+# M12.0e-6b-3: Invariant 2 (SchemaIndependentOfInitDbTests) removed. It
+# patched database.init_db to assert it is not on the PG-schema path —
+# but init_db is now retired (the patch target is gone), and Invariant 1
+# (SchemaBoundToEngineBuildTests) already proves get_engine() alone
+# creates every mirror table without init_db, fully subsuming it.
 # ---------------------------------------------------------------------------
-
-
-class SchemaIndependentOfInitDbTests(unittest.TestCase):
-    def test_get_engine_does_not_call_init_db(self):
-        with _EnvScope():
-            with tempfile.TemporaryDirectory(
-                ignore_cleanup_errors=True,
-            ) as tmp_dir:
-                pg_db = Path(tmp_dir) / "no_init_db_pg.db"
-                _enable_pg(f"sqlite:///{pg_db}")
-                import database
-                import postgres_storage
-
-                postgres_storage.reset_engine_for_tests()
-
-                with patch.object(database, "init_db") as init_db_mock:
-                    engine = postgres_storage.get_engine()
-                    self.assertIsNotNone(engine)
-
-                    # Mirror tables are usable even though init_db was
-                    # never called.
-                    with engine.connect() as conn:
-                        count = conn.execute(
-                            sa.text("SELECT COUNT(*) FROM embedding_cache")
-                        ).scalar()
-                    self.assertEqual(count, 0)
-
-                init_db_mock.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

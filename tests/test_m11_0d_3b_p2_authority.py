@@ -295,22 +295,51 @@ class OperatorReviewRequiredInvariantPin(unittest.TestCase):
     """Pin the M11.0d-1 Section E Constraint #11."""
 
     def test_database_schemas_force_default_1(self):
-        """Every CREATE TABLE in database.py that has an
-        operator_review_required column must declare it
-        NOT NULL DEFAULT 1."""
-        source = (_PROJECT_ROOT / "database.py").read_text(encoding="utf-8")
-        # Find every line containing the column declaration.
-        pattern = re.compile(
-            r"operator_review_required\s+INTEGER\s+NOT\s+NULL\s+DEFAULT\s+1",
+        """Every mirror table in postgres_storage.py that holds the
+        ``operator_review_required`` / ``truth_claim`` safety columns
+        must declare them ``nullable=False`` with the forced
+        ``server_default`` (1 / 0 respectively), so the DB enforces the
+        M11.0d-1 Constraint #11 invariant regardless of caller input.
+
+        M12.0e-6b-3: re-anchored from the retired SQLite DDL in
+        database.py to the authoritative Postgres schema in
+        postgres_storage.py. Same constraint, authoritative location —
+        both halves (operator_review_required=1, truth_claim=0) are
+        pinned so the SQLite-DDL pin's full coverage is preserved. The
+        app-layer enforcement (candidate_to_dict) is pinned separately
+        by ``test_artifact_evidence_linker_forces_true_in_candidate_to_dict``.
+        """
+        source = (
+            _PROJECT_ROOT / "postgres_storage.py"
+        ).read_text(encoding="utf-8")
+
+        orr = re.compile(
+            r'"operator_review_required",\s+sa\.Integer,\s+'
+            r'nullable=False,\s+server_default=sa\.text\("1"\)',
             re.IGNORECASE,
         )
-        matches = pattern.findall(source)
         self.assertGreaterEqual(
-            len(matches), 3,
-            "Expected at least 3 database tables with "
-            "`operator_review_required INTEGER NOT NULL DEFAULT 1`; "
-            f"found {len(matches)}. M11.0d-1 Constraint #11 requires "
-            "the DB to enforce True regardless of caller input.",
+            len(orr.findall(source)), 3,
+            "Expected >=3 Postgres mirror tables declaring "
+            "operator_review_required nullable=False "
+            "server_default=sa.text('1'); found "
+            f"{len(orr.findall(source))}. Constraint #11 requires the DB "
+            "to enforce operator_review_required=True regardless of "
+            "caller input.",
+        )
+
+        tc = re.compile(
+            r'"truth_claim",\s+sa\.Integer,\s+'
+            r'nullable=False,\s+server_default=sa\.text\("0"\)',
+            re.IGNORECASE,
+        )
+        self.assertGreaterEqual(
+            len(tc.findall(source)), 3,
+            "Expected >=3 Postgres mirror tables declaring truth_claim "
+            "nullable=False server_default=sa.text('0'); found "
+            f"{len(tc.findall(source))}. The partner invariant requires "
+            "the DB to enforce truth_claim=False regardless of caller "
+            "input.",
         )
 
     def test_artifact_evidence_linker_forces_true_in_candidate_to_dict(self):

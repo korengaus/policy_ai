@@ -266,13 +266,8 @@ def _write_json_out(case_results: list[dict], provider, path: Path) -> None:
 def run_probe(args: argparse.Namespace) -> int:
     started = time.perf_counter()
 
-    # Ensure the embedding_cache table exists so cache reads/writes don't
-    # spam "no such table" warnings on a fresh checkout. init_db() is
-    # idempotent and only touches the project's local SQLite file.
-    try:
-        database.init_db()
-    except Exception as init_error:
-        print(f"[probe] warning: database.init_db() failed: {init_error}", file=sys.stderr)
+    # M12.0e-6b-3: SQLite init removed. The embedding cache is PG-backed;
+    # postgres_storage.ensure_schema creates it lazily on first engine use.
 
     provider = _resolve_provider(args)
 

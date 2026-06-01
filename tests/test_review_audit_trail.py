@@ -75,19 +75,19 @@ def _env(**values):
 
 @contextmanager
 def _temp_db():
-    """Point ``database.DB_PATH`` at a fresh temp file and reload api_server.
+    """Provision a SQLite-as-PG substitute and reload api_server.
 
-    M12.0d Stage 3c-2: review_tasks / review_decisions writes are PG-only.
-    The fixture also provisions a SQLite-as-PG substitute so the
-    production write path lands in the substitute and the PG-primary
-    reads resolve correctly.
+    review_tasks / review_decisions writes are PG-only; the fixture
+    points ``DATABASE_URL`` at a temp SQLite-as-PG substitute so the
+    production write path lands in it and PG-primary reads resolve.
+    (M12.0e-6b-3: the SQLite ``DB_PATH`` swap + ``init_db`` were removed
+    with the retired SQLite machinery.)
     """
     import database
     tmp_dir = tempfile.TemporaryDirectory()
     try:
         db_path = Path(tmp_dir.name) / "audit_test.db"
         pg_db_path = Path(tmp_dir.name) / "audit_test_pg.db"
-        previous = database.DB_PATH
         env_snapshot = {
             key: os.environ.get(key)
             for key in ("USE_POSTGRES_WRITE", "DATABASE_URL")
@@ -96,17 +96,15 @@ def _temp_db():
         os.environ["DATABASE_URL"] = f"sqlite:///{pg_db_path}"
         import postgres_storage
         postgres_storage.reset_engine_for_tests()
-        database.DB_PATH = db_path
         try:
-            database.init_db()
+            # M12.0e-6b-3: SQLite init / DB_PATH swap removed (machinery
+            # retired). The lifespan no longer calls init_db; the
+            # PG-substitute engine below owns the review schema.
             import api_server
             importlib.reload(api_server)
-            # Build PG-substitute engine so ensure_schema creates the
-            # mirror tables before any write fires.
             postgres_storage.get_engine()
             yield database, api_server, db_path
         finally:
-            database.DB_PATH = previous
             postgres_storage.reset_engine_for_tests()
             for key, value in env_snapshot.items():
                 if value is None:
@@ -879,25 +877,10 @@ class AuditPacketHelperUnitTests(unittest.TestCase):
         self.assertFalse(packet["safety_contract"]["human_review_required"])
 
 
-class SchemaMigrationTests(unittest.TestCase):
-    def test_decision_source_column_is_idempotent(self):
-        import database
-        with _temp_db() as (db, _api, _path):
-            # Calling _ensure_review_tables a second time must not fail
-            # even though decision_source already exists.
-            with db.get_connection() as conn:
-                db._ensure_review_tables(conn)
-                db._ensure_review_tables(conn)
-                cursor = conn.execute("PRAGMA table_info(review_decisions)")
-                cols = {row[1] for row in cursor.fetchall()}
-            self.assertIn("decision_source", cols)
-            # Existing columns still present.
-            for required in (
-                "decision_id", "task_id", "decision", "reviewer_id",
-                "comment", "public_note", "previous_status", "new_status",
-                "created_at", "metadata_json",
-            ):
-                self.assertIn(required, cols)
+# M12.0e-6b-3: SchemaMigrationTests removed. It pinned SQLite review-
+# schema migration (decision_source column idempotency via
+# _ensure_review_tables + get_connection) — that machinery is retired.
+# The PG review schema is owned by postgres_storage.ensure_schema.
 
 
 if __name__ == "__main__":

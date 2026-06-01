@@ -1,10 +1,10 @@
 """Phase 2 M9.3: local launcher for the reviewer UI demo.
 
-A tiny wrapper that monkey-patches ``database.DB_PATH`` to the demo
-SQLite file *before* importing ``api_server``, then starts uvicorn in
-the foreground. The project's DB path is a module-level constant (no
-env-var indirection), so this launcher is the safe way to point the
-FastAPI app at a non-default DB without editing tracked source.
+A tiny wrapper that points ``DATABASE_URL`` at the demo SQLite-as-PG
+substitute *before* importing ``api_server``, then starts uvicorn in
+the foreground. (M12.0e-6b-3: the SQLite ``DB_PATH`` monkey-patch was
+removed with the retired SQLite machinery — reviews are PG-only and the
+demo data lives in the substitute file referenced by ``DATABASE_URL``.)
 
 Hard contract:
     * Refuses any ``--db-path`` outside ``reports/`` (defensive — the
@@ -120,18 +120,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         return 1
 
-    # Override the module-level DB constant BEFORE any code imports
-    # ``api_server`` (api_server itself imports database). Doing this
-    # via env var would require touching database.py; instead we keep
-    # database.py unchanged and patch its DB_PATH for the launcher's
-    # lifetime only.
-    import database
-    database.DB_PATH = db_path
-
-    # M12.0d Stage 3c-2: review_tasks / review_decisions are PG-only.
-    # Point the dual-write substrate at the same demo SQLite file so
-    # the seeded rows (written by prepare_review_ui_local_demo via
-    # SQLAlchemy) are visible to PG-primary reads.
+    # M12.0e-6b-3: SQLite machinery retired — the DB_PATH swap is gone.
+    # review_tasks / review_decisions are PG-only; point the dual-write
+    # substrate at the demo SQLite file so the seeded rows (written by
+    # prepare_review_ui_local_demo via SQLAlchemy) are visible to the
+    # PG-primary reads.
     import os as _os
     _os.environ.setdefault("USE_POSTGRES_WRITE", "true")
     _os.environ.setdefault("DATABASE_URL", f"sqlite:///{db_path}")

@@ -179,15 +179,15 @@ def _path_is_under_reports(p: Path) -> bool:
 
 def _powershell_commands(db_path: Path, token: str) -> List[str]:
     """The exact PowerShell snippet the operator pastes to start a
-    local demo server. The launcher script handles the project's
-    module-level ``database.DB_PATH`` override since the codebase has
-    no env-var indirection for the DB path."""
+    local demo server. The launcher points ``DATABASE_URL`` at the demo
+    SQLite-as-PG substitute (M12.0e-6b-3 retired the SQLite ``DB_PATH``
+    override; reviews are PG-only)."""
     serve_script = ROOT / "scripts" / "serve_review_ui_local_demo.py"
     return [
         f'$env:REVIEW_API_ENABLED = "true"',
         f'$env:REVIEW_API_TOKEN = "{token}"',
-        # The launcher monkey-patches database.DB_PATH before importing
-        # api_server. Operators do NOT have to touch policy_ai.db.
+        # The launcher points DATABASE_URL at the demo substitute before
+        # importing api_server. Operators do NOT have to touch policy_ai.db.
         f'python "{serve_script}" --db-path "{db_path}"',
     ]
 
@@ -231,19 +231,17 @@ def _runbook_lines(db_path: Path, token: str, *, url: str) -> List[str]:
 
 @contextmanager
 def _override_database_path(target: Path):
-    """Switch ``database.DB_PATH`` to ``target`` for the duration of the
-    block; reload ``api_server`` so any cached imports see the new path;
-    restore the previous value on exit.
+    """Point ``DATABASE_URL`` at ``target`` (the demo SQLite-as-PG
+    substitute) for the duration of the block; reload ``api_server`` so
+    cached imports see the new env; restore env on exit.
 
-    M12.0d Stage 3c-2: review_tasks / review_decisions writes are
-    PG-only. The block also points ``DATABASE_URL`` at the same demo
-    SQLite file so SQLAlchemy writes from create_review_task /
-    record_review_decision / update_review_task_status land in the
-    demo file (readable by both SQLite-direct legacy fallback reads
-    and SQLAlchemy PG-primary reads). Env values are restored on exit.
+    review_tasks / review_decisions writes are PG-only, so SQLAlchemy
+    writes from create_review_task / record_review_decision /
+    update_review_task_status land in ``target`` and PG-primary reads
+    resolve from it. (M12.0e-6b-3: the SQLite ``DB_PATH`` swap was
+    removed with the retired SQLite machinery.)
     """
     import database
-    previous = database.DB_PATH
     env_snapshot = {
         key: os.environ.get(key)
         for key in ("USE_POSTGRES_WRITE", "DATABASE_URL")
@@ -255,7 +253,8 @@ def _override_database_path(target: Path):
         postgres_storage.reset_engine_for_tests()
     except Exception:
         postgres_storage = None  # type: ignore
-    database.DB_PATH = target
+    # M12.0e-6b-3: SQLite init / DB_PATH swap removed (machinery retired);
+    # the demo writes/reads go through the PG substitute at ``target``.
     try:
         try:
             import api_server  # noqa: F401
@@ -272,7 +271,6 @@ def _override_database_path(target: Path):
                 pass
         yield database
     finally:
-        database.DB_PATH = previous
         if postgres_storage is not None:
             try:
                 postgres_storage.reset_engine_for_tests()
@@ -288,17 +286,16 @@ def _override_database_path(target: Path):
 def _seed_demo_db(db_path: Path) -> List[str]:
     """Initialize review tables on ``db_path`` and insert the demo rows.
 
-    Uses only the existing public helpers (``init_db``,
-    ``init_review_tables``, ``create_review_task``,
+    Uses only the existing public helpers (``create_review_task``,
     ``record_review_decision``) so the seeded rows match every
-    invariant the rest of the codebase (and tests) rely on.
+    invariant the rest of the codebase (and tests) rely on. The PG
+    mirror schema is created by ensure_schema (M12.0e-6b-3 retired the
+    SQLite init helpers).
     """
     import review_workflow
 
     seeded: List[str] = []
     with _override_database_path(db_path) as database:
-        database.init_db()
-        database.init_review_tables()
         for case in _demo_payloads():
             snapshot = review_workflow.extract_review_snapshot_from_result(
                 case["payload"], item_index=case["item_index"],

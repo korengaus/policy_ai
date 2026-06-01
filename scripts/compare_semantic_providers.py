@@ -606,13 +606,8 @@ def _write_markdown(payload: dict, path: Path) -> None:
 def run_comparison(args: argparse.Namespace) -> int:
     started = time.perf_counter()
 
-    # Idempotent — used so the embedding cache table is available for the
-    # OpenAI provider's writes; deterministic + disabled also benefit from
-    # the read path being a no-op rather than a missing-table warning.
-    try:
-        database.init_db()
-    except Exception as init_error:
-        print(f"[compare] warning: database.init_db() failed: {init_error}", file=sys.stderr)
+    # M12.0e-6b-3: SQLite init removed. The embedding cache is PG-backed;
+    # postgres_storage.ensure_schema creates it lazily on first engine use.
 
     providers = _parse_providers(args.providers)
 

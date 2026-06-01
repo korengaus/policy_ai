@@ -404,12 +404,8 @@ def _resolve_provider(args: argparse.Namespace):
 def run_evaluation(args: argparse.Namespace) -> int:
     started = time.perf_counter()
 
-    # Ensure the embedding_cache table exists so cache writes don't spam
-    # "no such table" warnings on a fresh checkout.
-    try:
-        database.init_db()
-    except Exception as init_error:
-        print(f"[evaluate] warning: database.init_db() failed: {init_error}", file=sys.stderr)
+    # M12.0e-6b-3: SQLite init removed. The embedding cache is PG-backed;
+    # postgres_storage.ensure_schema creates it lazily on first engine use.
 
     provider = _resolve_provider(args)
     cases = _load_cases(args.case_file, args.max_cases)

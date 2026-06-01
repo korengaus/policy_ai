@@ -11,8 +11,10 @@ Verifies:
     * verdict-side modules don't import review modules,
     * no OpenAI key, no network, no live server required.
 
-CI safety: every test creates its own ``tempfile`` SQLite DB and points
-``database.DB_PATH`` at it before instantiating the FastAPI TestClient.
+CI safety: every test runs against a per-test SQLite-as-Postgres
+substitute (``USE_POSTGRES_WRITE=true`` + ``DATABASE_URL=sqlite:///<tmp>``)
+before instantiating the FastAPI TestClient. (M12.0e-6b-3: the SQLite
+``DB_PATH`` swap was removed with the retired SQLite machinery.)
 """
 
 from __future__ import annotations
@@ -95,7 +97,6 @@ class _ReviewAPIBase(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp_ctx = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self._tmp_dir = Path(self._tmp_ctx.__enter__())
-        self._db_path = self._tmp_dir / "review.db"
         self._pg_db_path = self._tmp_dir / "pg_substitute.db"
 
         self._env_snapshot = {
@@ -111,14 +112,11 @@ class _ReviewAPIBase(unittest.TestCase):
 
         import database
         self._database = database
-        self._previous_db_path = database.DB_PATH
-        database.DB_PATH = self._db_path
-        database.init_db()  # creates analysis_results + review tables
 
-        # Importing api_server triggers FastAPI app construction; do it
-        # AFTER swapping DB_PATH so any startup side-effects (init_db
-        # on FastAPI lifespan) hit the temp DB. Reload to make sure the
-        # module picks up the new DB_PATH if it's already imported.
+        # M12.0e-6b-3: SQLite machinery retired. The FastAPI lifespan no
+        # longer calls init_db, so no DB_PATH swap is needed — the
+        # PG-substitute engine below (ensure_schema inside get_engine)
+        # owns the review schema.
         import api_server
         importlib.reload(api_server)
         self._api_server = api_server
@@ -129,7 +127,6 @@ class _ReviewAPIBase(unittest.TestCase):
         postgres_storage.get_engine()
 
     def tearDown(self) -> None:
-        self._database.DB_PATH = self._previous_db_path
         self._postgres_storage.reset_engine_for_tests()
         for key, value in self._env_snapshot.items():
             if value is None:

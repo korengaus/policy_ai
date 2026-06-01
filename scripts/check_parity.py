@@ -11,11 +11,11 @@ The script writes NOTHING to either database under any circumstance.
 
 Historical behavior (pre-M12.0e-5b): three signals were reported per
 mirror table — ``sqlite_count``, ``postgres_count``, and ``in_parity``
-(``sqlite_count == postgres_count``) — with an optional ``--sample``
-mode that diffed per-row identity sets. The pure helpers that computed
-those records (:func:`compute_parity_for_table`, :func:`summarize_parity`,
-:func:`_format_identity`) are retained for reference and test coverage
-but are no longer reached by :func:`collect_parity_report`.
+(``sqlite_count == postgres_count``). M12.0e-6b-3 removed the
+``--sample`` identity-set helpers (they used ``database.get_connection``,
+now retired). The pure count helpers (:func:`compute_parity_for_table`,
+:func:`summarize_parity`) are retained for the count-math unit tests but
+are no longer reached by :func:`collect_parity_report`.
 
 Usage:
     python scripts/check_parity.py
@@ -155,137 +155,28 @@ def _build_parser() -> argparse.ArgumentParser:
 # ---------------------------------------------------------------------------
 
 
-def _format_identity(row: Any, columns: List[str]) -> str:
-    """Render an identity tuple as a stable string for preview output.
-    Single-column ids print as ``"42"``; composite keys print as
-    ``"abc|openai|text-embedding-3-small"``."""
-    if isinstance(row, tuple):
-        values = row
-    elif isinstance(row, (list,)):
-        values = tuple(row)
-    else:
-        values = (row,)
-    return "|".join("" if v is None else str(v) for v in values)
-
-
-def _sample_sqlite_identities(
-    table_name: str, columns: List[str], limit: int,
-) -> List[tuple]:
-    """Read identity tuples from SQLite. Returns [] on any error."""
-    import database  # local import keeps --help cheap
-    import sqlite3
-
-    if not columns:
-        return []
-    select_cols = ", ".join(columns)
-    sql = f"SELECT {select_cols} FROM {table_name}"
-    if limit is not None and limit > 0:
-        sql += f" LIMIT {int(limit)}"
-    try:
-        with database.get_connection() as connection:
-            rows = connection.execute(sql).fetchall()
-        return [tuple(row[c] for c in columns) for row in rows]
-    except sqlite3.OperationalError:
-        return []
-    except Exception:  # noqa: BLE001
-        return []
-
-
-def _sample_postgres_identities(
-    engine: Any, table_name: str, columns: List[str], limit: int,
-) -> List[tuple]:
-    """Read identity tuples from the Postgres mirror. Returns [] on any
-    error including engine-missing / table-missing."""
-    if engine is None or not columns:
-        return []
-    try:
-        import sqlalchemy as sa
-        import postgres_storage
-        from sqlalchemy.exc import SQLAlchemyError
-    except Exception:  # noqa: BLE001
-        return []
-
-    table = postgres_storage._metadata.tables.get(table_name)
-    if table is None:
-        return []
-    try:
-        cols = [table.c[c] for c in columns]
-    except KeyError:
-        return []
-    try:
-        stmt = sa.select(*cols)
-        if limit is not None and limit > 0:
-            stmt = stmt.limit(int(limit))
-        with engine.connect() as conn:
-            rows = conn.execute(stmt).all()
-        return [tuple(row) for row in rows]
-    except SQLAlchemyError:
-        return []
-    except Exception:  # noqa: BLE001
-        return []
-
-
 def compute_parity_for_table(
     table_name: str,
     sqlite_count: int,
     postgres_count: int,
-    *,
-    engine: Any = None,
-    sample: bool = False,
-    sample_limit: int = 500,
 ) -> dict:
-    """Build the parity record for one table.
+    """Build the parity record for one table (count comparison only).
 
-    Pure-ish: counts are passed in by the caller. When ``sample`` is
-    True and the table has a known identity column set, the function
-    fetches identity tuples from both sides (read-only) and computes
-    the set difference. The preview list per side is capped at
-    :data:`_MAX_PREVIEW_PER_SIDE` entries.
-    """
+    M12.0e-6b-3: the ``--sample`` identity-set comparison was removed
+    with the SQLite sampling helpers (``_sample_sqlite_identities`` used
+    ``database.get_connection``, now retired). Parity is count-based.
+    The neutralized :func:`collect_parity_report` does not call this —
+    it is kept for the count-math unit tests."""
     columns = _IDENTITY_COLUMNS.get(table_name, [])
-    record: Dict[str, Any] = {
+    return {
         "table": table_name,
         "sqlite_count": int(sqlite_count),
         "postgres_count": int(postgres_count),
         "delta": int(sqlite_count) - int(postgres_count),
         "in_parity": int(sqlite_count) == int(postgres_count),
         "identity_columns": columns,
+        "sampled": False,
     }
-
-    if not sample or not columns:
-        record["sampled"] = False
-        return record
-
-    sqlite_keys = set(
-        _sample_sqlite_identities(table_name, columns, sample_limit)
-    )
-    postgres_keys = set(
-        _sample_postgres_identities(engine, table_name, columns, sample_limit)
-    )
-    sqlite_only = sqlite_keys - postgres_keys
-    postgres_only = postgres_keys - sqlite_keys
-    record["sampled"] = True
-    record["sample_limit"] = int(sample_limit)
-    record["sqlite_keys_sampled"] = len(sqlite_keys)
-    record["postgres_keys_sampled"] = len(postgres_keys)
-    record["sqlite_only_count"] = len(sqlite_only)
-    record["postgres_only_count"] = len(postgres_only)
-    record["sqlite_only_preview"] = sorted(
-        _format_identity(k, columns) for k in list(sqlite_only)[
-            :_MAX_PREVIEW_PER_SIDE
-        ]
-    )
-    record["postgres_only_preview"] = sorted(
-        _format_identity(k, columns) for k in list(postgres_only)[
-            :_MAX_PREVIEW_PER_SIDE
-        ]
-    )
-    # in_parity is downgraded to False if the sampled identity sets
-    # disagree, even when counts happen to match (catches the
-    # same-count-different-rows drift case).
-    if sqlite_only or postgres_only:
-        record["in_parity"] = False
-    return record
 
 
 def collect_parity_report(
