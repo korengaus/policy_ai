@@ -411,7 +411,6 @@ class ImportFailurePropagatesTests(unittest.TestCase):
     def test_get_result_by_id_raises_when_postgres_storage_import_fails(self):
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 _enable_pg(f"sqlite:///{Path(tmp_dir) / 'pg.db'}")
                 # Remove cached module so the next ``from
                 # postgres_storage import ...`` triggers a fresh import.
@@ -439,9 +438,8 @@ class ImportFailurePropagatesTests(unittest.TestCase):
                 finder = _RaisingFinder()
                 sys.meta_path.insert(0, finder)
                 try:
-                    with patch("database.DB_PATH", sqlite_db):
-                        with self.assertRaises(ImportError):
-                            database.get_result_by_id(1)
+                    with self.assertRaises(ImportError):
+                        database.get_result_by_id(1)
                 finally:
                     sys.meta_path.remove(finder)
                     sys.modules.pop("postgres_storage", None)
@@ -467,34 +465,30 @@ class DisabledDualWriteKeepsSQLitePathTests(unittest.TestCase):
 
         with _EnvScope():
             _set_env(USE_POSTGRES_WRITE=None, DATABASE_URL=None)
-            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite.db"
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
+            import database
 
-                    database.init_db()
-                    sample = {
-                        "title": "from sqlite (dual-write disabled)",
-                        "original_url": "https://example.com/disabled",
-                        "topic": "정책",
-                        "claim_text": "주장",
-                        "verdict_label": "draft_likely_true",
-                        "verdict_confidence": 70,
-                        "verification_card": {
-                            "claim_text": "주장",
-                            "verdict_label": "draft_likely_true",
-                            "verdict_confidence": 70,
-                        },
-                    }
-                    # M12.0e-5a: SQLite write fallback removed. Dual-write
-                    # OFF → durable save fails loud (no phantom save, no
-                    # SQLite persistence/read-back).
-                    status = database.save_analysis_result(
-                        sanitize_data(sample), query="disabled-path",
-                    )
-                    self.assertFalse(status["saved"])
-                    self.assertEqual(status["error"], "pg_write_failed")
-                    self.assertIsNone(status["id"])
+            sample = {
+                "title": "from sqlite (dual-write disabled)",
+                "original_url": "https://example.com/disabled",
+                "topic": "정책",
+                "claim_text": "주장",
+                "verdict_label": "draft_likely_true",
+                "verdict_confidence": 70,
+                "verification_card": {
+                    "claim_text": "주장",
+                    "verdict_label": "draft_likely_true",
+                    "verdict_confidence": 70,
+                },
+            }
+            # M12.0e-5a: SQLite write fallback removed. Dual-write OFF →
+            # durable save fails loud (no phantom save, no SQLite
+            # persistence/read-back).
+            status = database.save_analysis_result(
+                sanitize_data(sample), query="disabled-path",
+            )
+            self.assertFalse(status["saved"])
+            self.assertEqual(status["error"], "pg_write_failed")
+            self.assertIsNone(status["id"])
 
 
 if __name__ == "__main__":

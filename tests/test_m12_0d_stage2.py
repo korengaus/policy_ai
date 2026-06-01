@@ -228,127 +228,99 @@ class GetCachedEmbeddingWrapperTests(unittest.TestCase):
     def test_uses_pg_when_enabled(self):
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg.db"
                 _enable_pg(f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_db()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    _seed_embedding_in_pg(
-                        text_hash="h-from-pg",
-                        provider="openai",
-                        model="m",
-                        vector=[0.5, 0.6, 0.7],
-                    )
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                _seed_embedding_in_pg(
+                    text_hash="h-from-pg",
+                    provider="openai",
+                    model="m",
+                    vector=[0.5, 0.6, 0.7],
+                )
 
-                    result = database.get_cached_embedding(
-                        "h-from-pg", "openai", "m",
-                    )
-                    self.assertEqual(result, [0.5, 0.6, 0.7])
-                    postgres_storage.reset_engine_for_tests()
+                result = database.get_cached_embedding(
+                    "h-from-pg", "openai", "m",
+                )
+                self.assertEqual(result, [0.5, 0.6, 0.7])
+                postgres_storage.reset_engine_for_tests()
 
     def test_pg_miss_does_not_fall_through_to_sqlite(self):
         """Stage 2 contract: a PG cache miss returns None — caller
-        recomputes the embedding. We must NOT silently substitute the
-        SQLite row (which would be stale across Render restarts).
+        recomputes the embedding (no SQLite fallthrough).
 
-        M12.0e-1 note: under PG-primary, save_cached_embedding skips the
-        SQLite INSERT entirely when dual-write is ON, so the "seed SQLite
-        only" step below is now effectively a no-op (mirror is also
-        patched off). The assertion still holds because PG stays empty —
-        get_cached_embedding returns None either way."""
+        M12.0e-6b-1: the mirror-suppressed SQLite-only seed (already a
+        no-op under PG-primary) was dropped; the "PG miss → None" half is
+        preserved."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg.db"
                 _enable_pg(f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_db()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
 
-                    # Seed SQLite only, suppressing mirror so PG stays empty.
-                    with patch.object(
-                        postgres_storage, "mirror_upsert",
-                        lambda *a, **kw: False,
-                    ):
-                        database.save_cached_embedding(
-                            text_hash="h-sqlite-only",
-                            provider="openai",
-                            model="m",
-                            vector=[1.0, 2.0],
-                        )
-
-                    # PG empty → returns None even though SQLite has it.
-                    self.assertIsNone(
-                        database.get_cached_embedding(
-                            "h-sqlite-only", "openai", "m",
-                        ),
-                    )
-                    postgres_storage.reset_engine_for_tests()
+                # PG empty → returns None (cache miss).
+                self.assertIsNone(
+                    database.get_cached_embedding(
+                        "h-sqlite-only", "openai", "m",
+                    ),
+                )
+                postgres_storage.reset_engine_for_tests()
 
     def test_uses_sqlite_when_disabled(self):
         with _EnvScope():
             _set_env(USE_POSTGRES_WRITE=None, DATABASE_URL=None)
-            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite.db"
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
+            import database
 
-                    database.init_db()
-                    # M12.0e-5a: SQLite write fallback removed. The embedding
-                    # cache is best-effort; with dual-write OFF the save
-                    # persists nothing (no-op) and a subsequent read is a
-                    # clean miss rather than a durable hit.
-                    database.save_cached_embedding(
-                        text_hash="h-sqlite-disabled",
-                        provider="openai",
-                        model="m",
-                        vector=[3.0, 4.0, 5.0],
-                    )
+            # M12.0e-5a: SQLite write fallback removed. The embedding
+            # cache is best-effort; with dual-write OFF the save persists
+            # nothing (no-op) and a subsequent read is a clean miss
+            # rather than a durable hit.
+            database.save_cached_embedding(
+                text_hash="h-sqlite-disabled",
+                provider="openai",
+                model="m",
+                vector=[3.0, 4.0, 5.0],
+            )
 
-                    result = database.get_cached_embedding(
-                        "h-sqlite-disabled", "openai", "m",
-                    )
-                    self.assertIsNone(result)
+            result = database.get_cached_embedding(
+                "h-sqlite-disabled", "openai", "m",
+            )
+            self.assertIsNone(result)
 
     def test_raises_when_pg_read_fails(self):
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg.db"
                 _enable_pg(f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_db()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
 
-                    def _boom(*a, **kw):
-                        raise postgres_storage.PostgresReadError(
-                            "simulated",
-                        )
+                def _boom(*a, **kw):
+                    raise postgres_storage.PostgresReadError(
+                        "simulated",
+                    )
 
-                    with patch.object(
-                        postgres_storage, "read_cached_embedding",
-                        side_effect=_boom,
+                with patch.object(
+                    postgres_storage, "read_cached_embedding",
+                    side_effect=_boom,
+                ):
+                    with self.assertRaises(
+                        postgres_storage.PostgresReadError,
                     ):
-                        with self.assertRaises(
-                            postgres_storage.PostgresReadError,
-                        ):
-                            database.get_cached_embedding(
-                                "any", "openai", "m",
-                            )
-                    postgres_storage.reset_engine_for_tests()
+                        database.get_cached_embedding(
+                            "any", "openai", "m",
+                        )
+                postgres_storage.reset_engine_for_tests()
 
 
 # ---------------------------------------------------------------------------
@@ -382,80 +354,74 @@ class UpdateReviewTaskStatusMirrorTests(unittest.TestCase):
         SQLite-re-read then mirror_upsert."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg.db"
                 _enable_pg(f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_review_tables()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
 
-                    self._seed_task(
-                        database, "task-status-mirror",
-                        "idem-status-mirror",
-                        status="open",
-                    )
+                self._seed_task(
+                    database, "task-status-mirror",
+                    "idem-status-mirror",
+                    status="open",
+                )
 
-                    # Sanity: pre-update PG status is "open".
-                    pre = postgres_storage.read_review_task_by_task_id(
-                        "task-status-mirror",
-                    )
-                    self.assertIsNotNone(pre)
-                    self.assertEqual(pre["status"], "open")
+                # Sanity: pre-update PG status is "open".
+                pre = postgres_storage.read_review_task_by_task_id(
+                    "task-status-mirror",
+                )
+                self.assertIsNotNone(pre)
+                self.assertEqual(pre["status"], "open")
 
-                    # Direct PG UPDATE via pg_update_review_task_status.
-                    database.update_review_task_status(
-                        "task-status-mirror",
-                        new_status="approved",
-                        updated_at="2026-05-28T01:00:00",
-                    )
+                # Direct PG UPDATE via pg_update_review_task_status.
+                database.update_review_task_status(
+                    "task-status-mirror",
+                    new_status="approved",
+                    updated_at="2026-05-28T01:00:00",
+                )
 
-                    # PG row reflects the new status — directly, not via
-                    # an SQLite re-read + mirror_upsert round-trip.
-                    post = postgres_storage.read_review_task_by_task_id(
-                        "task-status-mirror",
-                    )
-                    self.assertIsNotNone(post)
-                    self.assertEqual(post["status"], "approved")
-                    self.assertEqual(
-                        post["updated_at"], "2026-05-28T01:00:00",
-                    )
-                    postgres_storage.reset_engine_for_tests()
+                # PG row reflects the new status — directly, not via
+                # an SQLite re-read + mirror_upsert round-trip.
+                post = postgres_storage.read_review_task_by_task_id(
+                    "task-status-mirror",
+                )
+                self.assertIsNotNone(post)
+                self.assertEqual(post["status"], "approved")
+                self.assertEqual(
+                    post["updated_at"], "2026-05-28T01:00:00",
+                )
+                postgres_storage.reset_engine_for_tests()
 
     def test_get_review_task_pg_primary_sees_updated_status(self):
         """M12.0d Stage 3c-2: end-to-end — after the direct PG UPDATE,
         the PG-primary get_review_task returns the new status."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg.db"
                 _enable_pg(f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_review_tables()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
 
-                    self._seed_task(
-                        database, "task-end-to-end",
-                        "idem-end-to-end",
-                        status="open",
-                    )
-                    database.update_review_task_status(
-                        "task-end-to-end",
-                        new_status="dismissed",
-                        updated_at="2026-05-28T02:00:00",
-                    )
+                self._seed_task(
+                    database, "task-end-to-end",
+                    "idem-end-to-end",
+                    status="open",
+                )
+                database.update_review_task_status(
+                    "task-end-to-end",
+                    new_status="dismissed",
+                    updated_at="2026-05-28T02:00:00",
+                )
 
-                    fetched = database.get_review_task("task-end-to-end")
-                    self.assertIsNotNone(fetched)
-                    self.assertEqual(fetched["status"], "dismissed")
-                    postgres_storage.reset_engine_for_tests()
+                fetched = database.get_review_task("task-end-to-end")
+                self.assertIsNotNone(fetched)
+                self.assertEqual(fetched["status"], "dismissed")
+                postgres_storage.reset_engine_for_tests()
 
 
 # ---------------------------------------------------------------------------

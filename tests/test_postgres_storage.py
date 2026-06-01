@@ -551,46 +551,43 @@ class DatabaseDualWriteIsolationTests(unittest.TestCase):
 
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "iso_pg_local.db"
                 pg_db = Path(tmp_dir) / "iso_pg_substitute.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_db()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    sample = {
-                        "title": "pg-only write",
-                        "original_url": "https://example.com/pg-only-1",
-                        "topic": "정책",
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                sample = {
+                    "title": "pg-only write",
+                    "original_url": "https://example.com/pg-only-1",
+                    "topic": "정책",
+                    "claim_text": "주장",
+                    "verdict_label": "draft_likely_true",
+                    "verdict_confidence": 70,
+                    "verification_card": {
                         "claim_text": "주장",
                         "verdict_label": "draft_likely_true",
                         "verdict_confidence": 70,
-                        "verification_card": {
-                            "claim_text": "주장",
-                            "verdict_label": "draft_likely_true",
-                            "verdict_confidence": 70,
-                        },
-                    }
-                    status = database.save_analysis_result(
-                        sanitize_data(sample), query="pg-only-test",
-                    )
-                    self.assertTrue(status["saved"])
-                    self.assertFalse(status["duplicate"])
-                    self.assertIsInstance(status["id"], int)
+                    },
+                }
+                status = database.save_analysis_result(
+                    sanitize_data(sample), query="pg-only-test",
+                )
+                self.assertTrue(status["saved"])
+                self.assertFalse(status["duplicate"])
+                self.assertIsInstance(status["id"], int)
 
-                    # The id is PG-assigned; the row must be readable from
-                    # the PG substitute (get_recent_results is PG-primary).
-                    rows = database.get_recent_results(limit=5)
-                    self.assertEqual(len(rows), 1)
-                    self.assertEqual(
-                        rows[0]["original_url"], sample["original_url"],
-                    )
-                    self.assertEqual(rows[0]["id"], status["id"])
-                    postgres_storage.reset_engine_for_tests()
+                # The id is PG-assigned; the row must be readable from
+                # the PG substitute (get_recent_results is PG-primary).
+                rows = database.get_recent_results(limit=5)
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(
+                    rows[0]["original_url"], sample["original_url"],
+                )
+                self.assertEqual(rows[0]["id"], status["id"])
+                postgres_storage.reset_engine_for_tests()
 
     def test_save_analysis_result_pg_write_failure_reports_not_saved(self):
         """M12.0d Stage 3c-3 (Q1 decision): when the PG write returns no
@@ -602,48 +599,45 @@ class DatabaseDualWriteIsolationTests(unittest.TestCase):
 
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "iso_fail_local.db"
                 pg_db = Path(tmp_dir) / "iso_fail_substitute.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_db()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    sample = {
-                        "title": "pg write fails",
-                        "original_url": "https://example.com/pg-fail-1",
-                        "topic": "정책",
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                sample = {
+                    "title": "pg write fails",
+                    "original_url": "https://example.com/pg-fail-1",
+                    "topic": "정책",
+                    "claim_text": "주장",
+                    "verdict_label": "draft_likely_true",
+                    "verdict_confidence": 70,
+                    "verification_card": {
                         "claim_text": "주장",
                         "verdict_label": "draft_likely_true",
                         "verdict_confidence": 70,
-                        "verification_card": {
-                            "claim_text": "주장",
-                            "verdict_label": "draft_likely_true",
-                            "verdict_confidence": 70,
-                        },
-                    }
-                    # mirror_write_returning → None simulates a PG insert
-                    # that assigned no id (driver/SQL failure swallowed by
-                    # _mirror_write_returning_safe).
-                    with patch.object(
-                        postgres_storage, "mirror_write_returning",
-                        lambda *a, **kw: None,
-                    ):
-                        status = database.save_analysis_result(
-                            sanitize_data(sample), query="pg-fail-test",
-                        )
-                    self.assertFalse(status["saved"])
-                    self.assertIsNone(status["id"])
-                    self.assertEqual(status.get("error"), "pg_write_failed")
+                    },
+                }
+                # mirror_write_returning → None simulates a PG insert
+                # that assigned no id (driver/SQL failure swallowed by
+                # _mirror_write_returning_safe).
+                with patch.object(
+                    postgres_storage, "mirror_write_returning",
+                    lambda *a, **kw: None,
+                ):
+                    status = database.save_analysis_result(
+                        sanitize_data(sample), query="pg-fail-test",
+                    )
+                self.assertFalse(status["saved"])
+                self.assertIsNone(status["id"])
+                self.assertEqual(status.get("error"), "pg_write_failed")
 
-                    # Nothing persisted to PG, and the SQLite write path is
-                    # NOT taken under dual-write — so PG stays empty.
-                    self.assertEqual(database.get_recent_results(limit=5), [])
-                    postgres_storage.reset_engine_for_tests()
+                # Nothing persisted to PG, and the SQLite write path is
+                # NOT taken under dual-write — so PG stays empty.
+                self.assertEqual(database.get_recent_results(limit=5), [])
+                postgres_storage.reset_engine_for_tests()
 
     def test_save_fetch_artifact_pg_only_returns_pg_assigned_id(self):
         """M12.0d Stage 3c-3: with dual-write enabled, save_fetch_artifact
@@ -652,33 +646,30 @@ class DatabaseDualWriteIsolationTests(unittest.TestCase):
         ``..._isolated_from_mirror_write_failure`` test."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "iso_fetch_local.db"
                 pg_db = Path(tmp_dir) / "iso_fetch_substitute.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_source_fetch_artifacts_table()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    fetch_result = {
-                        "source_id": "kr_law_open_data_candidate",
-                        "url": "https://www.law.go.kr/x",
-                        "fetch_timestamp": "2026-05-23T00:00:00",
-                        "success": True,
-                    }
-                    row_id = database.save_fetch_artifact(fetch_result)
-                    self.assertIsInstance(row_id, int)
-                    self.assertGreater(row_id, 0)
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                fetch_result = {
+                    "source_id": "kr_law_open_data_candidate",
+                    "url": "https://www.law.go.kr/x",
+                    "fetch_timestamp": "2026-05-23T00:00:00",
+                    "success": True,
+                }
+                row_id = database.save_fetch_artifact(fetch_result)
+                self.assertIsInstance(row_id, int)
+                self.assertGreater(row_id, 0)
 
-                    artifacts = database.get_fetch_artifacts(
-                        source_id="kr_law_open_data_candidate",
-                    )
-                    self.assertEqual(len(artifacts), 1)
-                    self.assertEqual(artifacts[0]["id"], row_id)
-                    postgres_storage.reset_engine_for_tests()
+                artifacts = database.get_fetch_artifacts(
+                    source_id="kr_law_open_data_candidate",
+                )
+                self.assertEqual(len(artifacts), 1)
+                self.assertEqual(artifacts[0]["id"], row_id)
+                postgres_storage.reset_engine_for_tests()
 
     def test_save_fetch_artifact_pg_write_failure_returns_sentinel(self):
         """M12.0d Stage 3c-3 (Q1 decision, int-return variant): when the
@@ -688,33 +679,30 @@ class DatabaseDualWriteIsolationTests(unittest.TestCase):
         while preserving the ``-> int`` contract."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "iso_fetch_fail_local.db"
                 pg_db = Path(tmp_dir) / "iso_fetch_fail_substitute.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_source_fetch_artifacts_table()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    fetch_result = {
-                        "source_id": "kr_law_open_data_candidate",
-                        "url": "https://www.law.go.kr/x",
-                        "fetch_timestamp": "2026-05-23T00:00:00",
-                        "success": True,
-                    }
-                    with patch.object(
-                        postgres_storage, "mirror_write_returning",
-                        lambda *a, **kw: None,
-                    ):
-                        row_id = database.save_fetch_artifact(fetch_result)
-                    self.assertEqual(row_id, -1)
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                fetch_result = {
+                    "source_id": "kr_law_open_data_candidate",
+                    "url": "https://www.law.go.kr/x",
+                    "fetch_timestamp": "2026-05-23T00:00:00",
+                    "success": True,
+                }
+                with patch.object(
+                    postgres_storage, "mirror_write_returning",
+                    lambda *a, **kw: None,
+                ):
+                    row_id = database.save_fetch_artifact(fetch_result)
+                self.assertEqual(row_id, -1)
 
-                    # Nothing persisted to PG; SQLite write path NOT taken.
-                    self.assertEqual(database.get_fetch_artifacts(), [])
-                    postgres_storage.reset_engine_for_tests()
+                # Nothing persisted to PG; SQLite write path NOT taken.
+                self.assertEqual(database.get_fetch_artifacts(), [])
+                postgres_storage.reset_engine_for_tests()
 
     def test_save_producer_comparison_pg_only_returns_pg_assigned_id(self):
         """M12.0d Stage 3c-3: with dual-write enabled and no db_path,
@@ -722,31 +710,29 @@ class DatabaseDualWriteIsolationTests(unittest.TestCase):
         PG-assigned id."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "iso_pc_local.db"
                 pg_db = Path(tmp_dir) / "iso_pc_substitute.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    row_id = database.save_producer_comparison({
-                        "analysis_id": "ana-pc",
-                        "source": "s",
-                        "input_hash": "h-pc",
-                        "comparison_timestamp": "2026-05-27T00:00:00",
-                    })
-                    self.assertIsInstance(row_id, int)
-                    self.assertGreater(row_id, 0)
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                row_id = database.save_producer_comparison({
+                    "analysis_id": "ana-pc",
+                    "source": "s",
+                    "input_hash": "h-pc",
+                    "comparison_timestamp": "2026-05-27T00:00:00",
+                })
+                self.assertIsInstance(row_id, int)
+                self.assertGreater(row_id, 0)
 
-                    rows = database.get_producer_comparisons(
-                        analysis_id="ana-pc",
-                    )
-                    self.assertEqual(len(rows), 1)
-                    self.assertEqual(rows[0]["id"], row_id)
-                    postgres_storage.reset_engine_for_tests()
+                rows = database.get_producer_comparisons(
+                    analysis_id="ana-pc",
+                )
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]["id"], row_id)
+                postgres_storage.reset_engine_for_tests()
 
     def test_save_producer_comparison_pg_write_failure_returns_sentinel(self):
         """M12.0d Stage 3c-3 (Q1 decision, int-return variant): on PG write
@@ -754,29 +740,27 @@ class DatabaseDualWriteIsolationTests(unittest.TestCase):
         a phantom positive id, with the SQLite write path NOT taken."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "iso_pc_fail_local.db"
                 pg_db = Path(tmp_dir) / "iso_pc_fail_substitute.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    with patch.object(
-                        postgres_storage, "mirror_upsert_returning",
-                        lambda *a, **kw: None,
-                    ):
-                        row_id = database.save_producer_comparison({
-                            "analysis_id": "ana-pc-fail",
-                            "source": "s",
-                            "input_hash": "h-pc-fail",
-                            "comparison_timestamp": "2026-05-27T00:00:00",
-                        })
-                    self.assertEqual(row_id, -1)
-                    self.assertEqual(database.get_producer_comparisons(), [])
-                    postgres_storage.reset_engine_for_tests()
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                with patch.object(
+                    postgres_storage, "mirror_upsert_returning",
+                    lambda *a, **kw: None,
+                ):
+                    row_id = database.save_producer_comparison({
+                        "analysis_id": "ana-pc-fail",
+                        "source": "s",
+                        "input_hash": "h-pc-fail",
+                        "comparison_timestamp": "2026-05-27T00:00:00",
+                    })
+                self.assertEqual(row_id, -1)
+                self.assertEqual(database.get_producer_comparisons(), [])
+                postgres_storage.reset_engine_for_tests()
 
     def test_save_verdict_label_attribution_pg_only_returns_pg_assigned_id(self):
         """M12.0d Stage 3c-3: with dual-write enabled and no db_path,
@@ -784,29 +768,27 @@ class DatabaseDualWriteIsolationTests(unittest.TestCase):
         the PG-assigned id."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "iso_vla_local.db"
                 pg_db = Path(tmp_dir) / "iso_vla_substitute.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    row_id = database.save_verdict_label_attribution({
-                        "analysis_id": "ana-vla",
-                        "diagnostic_timestamp": "2026-05-27T00:00:00",
-                    })
-                    self.assertIsInstance(row_id, int)
-                    self.assertGreater(row_id, 0)
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                row_id = database.save_verdict_label_attribution({
+                    "analysis_id": "ana-vla",
+                    "diagnostic_timestamp": "2026-05-27T00:00:00",
+                })
+                self.assertIsInstance(row_id, int)
+                self.assertGreater(row_id, 0)
 
-                    rows = database.get_verdict_label_attributions(
-                        analysis_id="ana-vla",
-                    )
-                    self.assertEqual(len(rows), 1)
-                    self.assertEqual(rows[0]["id"], row_id)
-                    postgres_storage.reset_engine_for_tests()
+                rows = database.get_verdict_label_attributions(
+                    analysis_id="ana-vla",
+                )
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]["id"], row_id)
+                postgres_storage.reset_engine_for_tests()
 
     def test_save_verdict_label_attribution_pg_write_failure_returns_sentinel(self):
         """M12.0d Stage 3c-3 (Q1 decision, int-return variant): on PG write
@@ -815,29 +797,27 @@ class DatabaseDualWriteIsolationTests(unittest.TestCase):
         taken."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "iso_vla_fail_local.db"
                 pg_db = Path(tmp_dir) / "iso_vla_fail_substitute.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    with patch.object(
-                        postgres_storage, "mirror_upsert_returning",
-                        lambda *a, **kw: None,
-                    ):
-                        row_id = database.save_verdict_label_attribution({
-                            "analysis_id": "ana-vla-fail",
-                            "diagnostic_timestamp": "2026-05-27T00:00:00",
-                        })
-                    self.assertEqual(row_id, -1)
-                    self.assertEqual(
-                        database.get_verdict_label_attributions(), [],
-                    )
-                    postgres_storage.reset_engine_for_tests()
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                with patch.object(
+                    postgres_storage, "mirror_upsert_returning",
+                    lambda *a, **kw: None,
+                ):
+                    row_id = database.save_verdict_label_attribution({
+                        "analysis_id": "ana-vla-fail",
+                        "diagnostic_timestamp": "2026-05-27T00:00:00",
+                    })
+                self.assertEqual(row_id, -1)
+                self.assertEqual(
+                    database.get_verdict_label_attributions(), [],
+                )
+                postgres_storage.reset_engine_for_tests()
 
     def test_save_extraction_result_pg_only_returns_pg_assigned_id(self):
         """M12.0d Stage 3c-3: with dual-write enabled and no db_path,
@@ -845,32 +825,30 @@ class DatabaseDualWriteIsolationTests(unittest.TestCase):
         PG-assigned id."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "iso_ext_local.db"
                 pg_db = Path(tmp_dir) / "iso_ext_substitute.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    row_id = database.save_extraction_result({
-                        "artifact_id": 1,
-                        "source_id": "ext-src",
-                        "url": "https://ext/x",
-                        "extraction_timestamp": "2026-05-27T00:00:00",
-                        "success": True,
-                    })
-                    self.assertIsInstance(row_id, int)
-                    self.assertGreater(row_id, 0)
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                row_id = database.save_extraction_result({
+                    "artifact_id": 1,
+                    "source_id": "ext-src",
+                    "url": "https://ext/x",
+                    "extraction_timestamp": "2026-05-27T00:00:00",
+                    "success": True,
+                })
+                self.assertIsInstance(row_id, int)
+                self.assertGreater(row_id, 0)
 
-                    rows = database.get_extraction_results(
-                        source_id="ext-src",
-                    )
-                    self.assertEqual(len(rows), 1)
-                    self.assertEqual(rows[0]["id"], row_id)
-                    postgres_storage.reset_engine_for_tests()
+                rows = database.get_extraction_results(
+                    source_id="ext-src",
+                )
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]["id"], row_id)
+                postgres_storage.reset_engine_for_tests()
 
     def test_save_extraction_result_pg_write_failure_returns_sentinel(self):
         """M12.0d Stage 3c-3 (Q1 decision, int-return variant): on PG write
@@ -878,30 +856,28 @@ class DatabaseDualWriteIsolationTests(unittest.TestCase):
         phantom positive id, with the SQLite write path NOT taken."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "iso_ext_fail_local.db"
                 pg_db = Path(tmp_dir) / "iso_ext_fail_substitute.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    with patch.object(
-                        postgres_storage, "mirror_write_returning",
-                        lambda *a, **kw: None,
-                    ):
-                        row_id = database.save_extraction_result({
-                            "artifact_id": 1,
-                            "source_id": "ext-src-fail",
-                            "url": "https://ext/fail",
-                            "extraction_timestamp": "2026-05-27T00:00:00",
-                            "success": True,
-                        })
-                    self.assertEqual(row_id, -1)
-                    self.assertEqual(database.get_extraction_results(), [])
-                    postgres_storage.reset_engine_for_tests()
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                with patch.object(
+                    postgres_storage, "mirror_write_returning",
+                    lambda *a, **kw: None,
+                ):
+                    row_id = database.save_extraction_result({
+                        "artifact_id": 1,
+                        "source_id": "ext-src-fail",
+                        "url": "https://ext/fail",
+                        "extraction_timestamp": "2026-05-27T00:00:00",
+                        "success": True,
+                    })
+                self.assertEqual(row_id, -1)
+                self.assertEqual(database.get_extraction_results(), [])
+                postgres_storage.reset_engine_for_tests()
 
     def test_save_evidence_candidate_pg_only_returns_pg_assigned_id(self):
         """M12.0d Stage 3c-3: with dual-write enabled and no db_path,
@@ -909,33 +885,31 @@ class DatabaseDualWriteIsolationTests(unittest.TestCase):
         PG-assigned id."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "iso_ec_local.db"
                 pg_db = Path(tmp_dir) / "iso_ec_substitute.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    row_id = database.save_evidence_candidate({
-                        "extraction_id": 1,
-                        "source_id": "ec-src",
-                        "url": "https://ec/x",
-                        "analysis_id": "ana-ec",
-                        "claim_text": "claim",
-                        "candidate_timestamp": "2026-05-27T00:00:00",
-                    })
-                    self.assertIsInstance(row_id, int)
-                    self.assertGreater(row_id, 0)
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                row_id = database.save_evidence_candidate({
+                    "extraction_id": 1,
+                    "source_id": "ec-src",
+                    "url": "https://ec/x",
+                    "analysis_id": "ana-ec",
+                    "claim_text": "claim",
+                    "candidate_timestamp": "2026-05-27T00:00:00",
+                })
+                self.assertIsInstance(row_id, int)
+                self.assertGreater(row_id, 0)
 
-                    rows = database.get_evidence_candidates(
-                        analysis_id="ana-ec",
-                    )
-                    self.assertEqual(len(rows), 1)
-                    self.assertEqual(rows[0]["id"], row_id)
-                    postgres_storage.reset_engine_for_tests()
+                rows = database.get_evidence_candidates(
+                    analysis_id="ana-ec",
+                )
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]["id"], row_id)
+                postgres_storage.reset_engine_for_tests()
 
     def test_save_evidence_candidate_pg_write_failure_returns_sentinel(self):
         """M12.0d Stage 3c-3 (Q1 decision, int-return variant): on PG write
@@ -943,31 +917,29 @@ class DatabaseDualWriteIsolationTests(unittest.TestCase):
         phantom positive id, with the SQLite write path NOT taken."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "iso_ec_fail_local.db"
                 pg_db = Path(tmp_dir) / "iso_ec_fail_substitute.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    with patch.object(
-                        postgres_storage, "mirror_write_returning",
-                        lambda *a, **kw: None,
-                    ):
-                        row_id = database.save_evidence_candidate({
-                            "extraction_id": 1,
-                            "source_id": "ec-src-fail",
-                            "url": "https://ec/fail",
-                            "analysis_id": "ana-ec-fail",
-                            "claim_text": "claim",
-                            "candidate_timestamp": "2026-05-27T00:00:00",
-                        })
-                    self.assertEqual(row_id, -1)
-                    self.assertEqual(database.get_evidence_candidates(), [])
-                    postgres_storage.reset_engine_for_tests()
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                with patch.object(
+                    postgres_storage, "mirror_write_returning",
+                    lambda *a, **kw: None,
+                ):
+                    row_id = database.save_evidence_candidate({
+                        "extraction_id": 1,
+                        "source_id": "ec-src-fail",
+                        "url": "https://ec/fail",
+                        "analysis_id": "ana-ec-fail",
+                        "claim_text": "claim",
+                        "candidate_timestamp": "2026-05-27T00:00:00",
+                    })
+                self.assertEqual(row_id, -1)
+                self.assertEqual(database.get_evidence_candidates(), [])
+                postgres_storage.reset_engine_for_tests()
 
     # M12.0d Stage 3c-2/3c-3: review_decisions (3c-2) plus the six
     # integer-PK tables of 3c-3 — analysis_results, source_fetch_artifacts,
@@ -1222,159 +1194,110 @@ class DatabaseReadFallbackIntegrationTests(unittest.TestCase):
     def test_get_result_by_id_prefers_postgres_when_enabled(self):
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg_substitute.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_db()  # SQLite schema only; no rows.
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    postgres_storage.mirror_write(
-                        "analysis_results",
-                        {
-                            "id": 7,
-                            "query": "prefer pg",
-                            "title": "from postgres",
-                            "original_url": "https://example.com/pg-7",
-                            "created_at": "2026-05-27T00:00:00+00:00",
-                        },
-                    )
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                postgres_storage.mirror_write(
+                    "analysis_results",
+                    {
+                        "id": 7,
+                        "query": "prefer pg",
+                        "title": "from postgres",
+                        "original_url": "https://example.com/pg-7",
+                        "created_at": "2026-05-27T00:00:00+00:00",
+                    },
+                )
 
-                    row = database.get_result_by_id(7)
-                    self.assertIsNotNone(row)
-                    self.assertEqual(row["title"], "from postgres")
-                    self.assertEqual(
-                        row["original_url"], "https://example.com/pg-7",
-                    )
-                    postgres_storage.reset_engine_for_tests()
+                row = database.get_result_by_id(7)
+                self.assertIsNotNone(row)
+                self.assertEqual(row["title"], "from postgres")
+                self.assertEqual(
+                    row["original_url"], "https://example.com/pg-7",
+                )
+                postgres_storage.reset_engine_for_tests()
 
     def test_get_result_by_id_falls_back_to_sqlite_when_disabled(self):
         from text_utils import sanitize_data
 
         with _EnvScope():
             _set_env(USE_POSTGRES_WRITE=None, DATABASE_URL=None)
-            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_only.db"
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
+            import database
 
-                    database.init_db()
-                    sample = {
-                        "title": "from sqlite",
-                        "original_url": "https://example.com/sqlite-1",
-                        "topic": "정책",
-                        "claim_text": "주장",
-                        "verdict_label": "draft_likely_true",
-                        "verdict_confidence": 70,
-                        "verification_card": {
-                            "claim_text": "주장",
-                            "verdict_label": "draft_likely_true",
-                            "verdict_confidence": 70,
-                        },
-                    }
-                    # M12.0e-5a: SQLite write fallback removed. With
-                    # dual-write OFF the durable save fails loud (no
-                    # phantom save, no SQLite persistence/read-back).
-                    status = database.save_analysis_result(
-                        sanitize_data(sample), query="fallback-disabled",
-                    )
-                    self.assertFalse(status["saved"])
-                    self.assertEqual(status["error"], "pg_write_failed")
-                    self.assertIsNone(status["id"])
+            sample = {
+                "title": "from sqlite",
+                "original_url": "https://example.com/sqlite-1",
+                "topic": "정책",
+                "claim_text": "주장",
+                "verdict_label": "draft_likely_true",
+                "verdict_confidence": 70,
+                "verification_card": {
+                    "claim_text": "주장",
+                    "verdict_label": "draft_likely_true",
+                    "verdict_confidence": 70,
+                },
+            }
+            # M12.0e-5a: SQLite write fallback removed. With dual-write
+            # OFF the durable save fails loud (no phantom save, no SQLite
+            # persistence/read-back).
+            status = database.save_analysis_result(
+                sanitize_data(sample), query="fallback-disabled",
+            )
+            self.assertFalse(status["saved"])
+            self.assertEqual(status["error"], "pg_write_failed")
+            self.assertIsNone(status["id"])
 
     def test_get_result_by_id_returns_none_when_pg_empty(self):
-        """M12.0d-1: PG is enabled and reachable but has no matching row.
-        Stage 1 contract: function returns None (PG is authoritative for
-        'not found'); the SQLite fallback is unreachable when dual-write
-        is enabled, even if SQLite has the row."""
-        from text_utils import sanitize_data
+        """M12.0d-1: PG is enabled and reachable but has no matching row →
+        get_result_by_id returns None (PG authoritative for 'not found').
 
+        M12.0e-6b-1: the stale-SQLite seed (which pinned 'PG-empty wins
+        over a stale SQLite row') was dropped — SQLite is no longer a
+        readable store. The wrapper-level 'PG empty → None' half is
+        preserved here (no SQLite seeding)."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg_substitute.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_db()
-                    # Set up PG substitute schema but insert nothing —
-                    # so read_analysis_result_by_id will return None.
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    # M12.0d Stage 3c-3: seed a STALE row directly into
-                    # SQLite via raw SQL. Under dual-write,
-                    # save_analysis_result no longer writes SQLite, so we
-                    # bypass it to reproduce the "stale SQLite, empty PG"
-                    # scenario this test pins (PG-empty must win).
-                    with database.get_connection() as conn:
-                        conn.execute(
-                            "INSERT INTO analysis_results "
-                            "(id, query, title, original_url, created_at) "
-                            "VALUES (?, ?, ?, ?, ?)",
-                            (
-                                42, "fallback-miss", "from sqlite only",
-                                "https://example.com/sqlite-only",
-                                "2026-05-27T00:00:00+00:00",
-                            ),
-                        )
-                        conn.commit()
+                # PG substitute schema present but empty → None.
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
 
-                    # Stage 1: PG empty + dual-write enabled → None, even
-                    # though SQLite holds id=42.
-                    row = database.get_result_by_id(42)
-                    self.assertIsNone(row)
-                    postgres_storage.reset_engine_for_tests()
+                row = database.get_result_by_id(42)
+                self.assertIsNone(row)
+                postgres_storage.reset_engine_for_tests()
 
-    def test_get_recent_results_prefers_postgres_empty_over_sqlite_rows(self):
+    def test_get_recent_results_returns_empty_when_pg_empty(self):
         """Load-bearing invariant: when Postgres returns ``[]`` (PG
-        authoritative zero), the caller MUST trust it and NOT fall
-        back to SQLite, even if SQLite holds rows. Without this,
-        operators migrating to Postgres would see stale SQLite data
-        leaking through."""
-        from text_utils import sanitize_data
+        authoritative zero), get_recent_results returns ``[]``.
 
+        M12.0e-6b-1: the stale-SQLite seed (which pinned 'PG-empty []
+        wins over stale SQLite rows') was dropped — SQLite is no longer a
+        readable store. The wrapper-level 'PG empty → []' half is
+        preserved here (no SQLite seeding)."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg_substitute.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_db()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    # M12.0d Stage 3c-3: seed the stale SQLite row via raw
-                    # SQL (save_analysis_result no longer writes SQLite
-                    # under dual-write). PG stays empty; the stale row must
-                    # NOT leak through.
-                    with database.get_connection() as conn:
-                        conn.execute(
-                            "INSERT INTO analysis_results "
-                            "(id, query, title, original_url, created_at) "
-                            "VALUES (?, ?, ?, ?, ?)",
-                            (
-                                7, "empty-pg", "stale sqlite row",
-                                "https://example.com/stale",
-                                "2026-05-27T00:00:00+00:00",
-                            ),
-                        )
-                        conn.commit()
+                # PG substitute schema present but empty → [].
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
 
-                    rows = database.get_recent_results(limit=5)
-                    # PG has 0 rows → [] returned authoritatively.
-                    # SQLite has 1 stale row but must be IGNORED.
-                    self.assertEqual(rows, [])
-                    postgres_storage.reset_engine_for_tests()
+                rows = database.get_recent_results(limit=5)
+                self.assertEqual(rows, [])
+                postgres_storage.reset_engine_for_tests()
 
 
 # ---------------------------------------------------------------------------
@@ -1688,13 +1611,13 @@ class ReadReviewDecisionsForTaskTests(unittest.TestCase):
 class DatabaseReviewFallbackIntegrationTests(unittest.TestCase):
     """Integration tests for the database.py side of M12.0c-2.
 
-    Each case sets up two SQLite files: one is the local SQLite source
-    of truth (``database.DB_PATH``) and one is the Postgres substitute
-    behind ``DATABASE_URL``. We assert that the database.py read
-    functions prefer the Postgres row when enabled, fall back to
-    SQLite when Postgres is disabled or returns None for a single-row
-    lookup, and trust an authoritative empty list from Postgres over
-    any stale SQLite rows for list-shaped lookups.
+    Each case uses a Postgres substitute behind ``DATABASE_URL``
+    (``sqlite:///<tmp>``). We assert that the database.py read functions
+    return the Postgres row when present and return None/[] when
+    Postgres is empty (PG authoritative). M12.0e-6b-1: the prior
+    SQLite-seed + "PG wins over stale SQLite" assertions were dropped —
+    SQLite is no longer a readable store — leaving the still-valid
+    "PG empty → None/[]" half.
     """
 
     # --- get_review_task ---------------------------------------------
@@ -1702,374 +1625,241 @@ class DatabaseReviewFallbackIntegrationTests(unittest.TestCase):
     def test_get_review_task_prefers_postgres_when_enabled(self):
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg_substitute.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_review_tables()  # SQLite-only schema.
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    _seed_review_task_in_pg(
-                        task_id="task-pg", idempotency_key="idem-pg",
-                        claim_text="from postgres",
-                    )
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                _seed_review_task_in_pg(
+                    task_id="task-pg", idempotency_key="idem-pg",
+                    claim_text="from postgres",
+                )
 
-                    task = database.get_review_task("task-pg")
-                    self.assertIsNotNone(task)
-                    self.assertEqual(task["claim_text"], "from postgres")
-                    # _row_to_review_task transformation applied.
-                    self.assertIn("snapshot", task)
-                    self.assertNotIn("snapshot_json", task)
-                    self.assertIsInstance(
-                        task["human_review_required"], bool,
-                    )
-                    postgres_storage.reset_engine_for_tests()
+                task = database.get_review_task("task-pg")
+                self.assertIsNotNone(task)
+                self.assertEqual(task["claim_text"], "from postgres")
+                # _row_to_review_task transformation applied.
+                self.assertIn("snapshot", task)
+                self.assertNotIn("snapshot_json", task)
+                self.assertIsInstance(
+                    task["human_review_required"], bool,
+                )
+                postgres_storage.reset_engine_for_tests()
 
     def test_get_review_task_returns_none_when_pg_empty(self):
-        """M12.0d-1: PG enabled + empty → None. SQLite fallback is
-        unreachable when dual-write is enabled."""
+        """M12.0d-1: PG enabled + empty → None.
+
+        M12.0e-6b-1: dropped the mirror-suppressed SQLite-only seed
+        (the "stale SQLite must not leak" half); the wrapper-level
+        "PG empty → None" assertion is preserved."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg_substitute.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_review_tables()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    # Seed SQLite only; suppress the PG mirror so PG
-                    # stays empty and read_review_task_by_task_id
-                    # returns None for the lookup. Pre-M12.0d-1 this
-                    # leaked the SQLite row through; Stage 1 hides it.
-                    with patch.object(
-                        postgres_storage, "mirror_upsert",
-                        lambda *a, **kw: False,
-                    ):
-                        database.create_review_task(
-                            task_id="task-sqlite",
-                            result_id="r1", job_id="j1", item_index=0,
-                            status="open", query="q",
-                            claim_text="sqlite-only", title="t", url="u",
-                            final_decision="WATCH",
-                            policy_confidence="60",
-                            human_review_required=True,
-                            snapshot={"k": "v"},
-                            idempotency_key="idem-sqlite",
-                            created_at="2026-05-27T00:00:00",
-                            updated_at="2026-05-27T00:00:00",
-                        )
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
 
-                    task = database.get_review_task("task-sqlite")
-                    self.assertIsNone(task)
-                    postgres_storage.reset_engine_for_tests()
+                task = database.get_review_task("task-sqlite")
+                self.assertIsNone(task)
+                postgres_storage.reset_engine_for_tests()
 
     # --- get_review_task_by_idempotency_key --------------------------
 
     def test_get_review_task_by_idempotency_key_prefers_postgres(self):
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg_substitute.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_review_tables()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    _seed_review_task_in_pg(
-                        task_id="t-pg-idem",
-                        idempotency_key="idem-from-pg",
-                        claim_text="pg idem hit",
-                    )
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                _seed_review_task_in_pg(
+                    task_id="t-pg-idem",
+                    idempotency_key="idem-from-pg",
+                    claim_text="pg idem hit",
+                )
 
-                    task = database.get_review_task_by_idempotency_key(
-                        "idem-from-pg",
-                    )
-                    self.assertIsNotNone(task)
-                    self.assertEqual(task["task_id"], "t-pg-idem")
-                    self.assertEqual(task["claim_text"], "pg idem hit")
-                    postgres_storage.reset_engine_for_tests()
+                task = database.get_review_task_by_idempotency_key(
+                    "idem-from-pg",
+                )
+                self.assertIsNotNone(task)
+                self.assertEqual(task["task_id"], "t-pg-idem")
+                self.assertEqual(task["claim_text"], "pg idem hit")
+                postgres_storage.reset_engine_for_tests()
 
     def test_get_review_task_by_idempotency_key_returns_none_when_pg_empty(self):
-        """M12.0d-1: PG enabled + empty → None."""
+        """M12.0d-1: PG enabled + empty → None. M12.0e-6b-1: SQLite-only
+        seed dropped; the "PG empty → None" half is preserved."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg_substitute.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_review_tables()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    with patch.object(
-                        postgres_storage, "mirror_upsert",
-                        lambda *a, **kw: False,
-                    ):
-                        database.create_review_task(
-                            task_id="t-only-sqlite",
-                            result_id="r1", job_id="j1", item_index=0,
-                            status="open", query="q",
-                            claim_text="sqlite idem", title="t", url="u",
-                            final_decision="WATCH",
-                            policy_confidence="60",
-                            human_review_required=True,
-                            snapshot={"k": "v"},
-                            idempotency_key="idem-sqlite-only",
-                            created_at="2026-05-27T00:00:00",
-                            updated_at="2026-05-27T00:00:00",
-                        )
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
 
-                    task = database.get_review_task_by_idempotency_key(
-                        "idem-sqlite-only",
-                    )
-                    self.assertIsNone(task)
-                    postgres_storage.reset_engine_for_tests()
+                task = database.get_review_task_by_idempotency_key(
+                    "idem-sqlite-only",
+                )
+                self.assertIsNone(task)
+                postgres_storage.reset_engine_for_tests()
 
     # --- list_review_tasks -------------------------------------------
 
     def test_list_review_tasks_prefers_postgres_when_enabled(self):
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg_substitute.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_review_tables()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    _seed_review_task_in_pg(
-                        task_id="t-pg-a", idempotency_key="i-a",
-                        created_at="2026-05-27T00:00:01",
-                    )
-                    _seed_review_task_in_pg(
-                        task_id="t-pg-b", idempotency_key="i-b",
-                        created_at="2026-05-27T00:00:02",
-                    )
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                _seed_review_task_in_pg(
+                    task_id="t-pg-a", idempotency_key="i-a",
+                    created_at="2026-05-27T00:00:01",
+                )
+                _seed_review_task_in_pg(
+                    task_id="t-pg-b", idempotency_key="i-b",
+                    created_at="2026-05-27T00:00:02",
+                )
 
-                    rows = database.list_review_tasks(limit=10)
-                    self.assertEqual(len(rows), 2)
-                    # Newest first.
-                    self.assertEqual(rows[0]["task_id"], "t-pg-b")
-                    self.assertEqual(rows[1]["task_id"], "t-pg-a")
-                    postgres_storage.reset_engine_for_tests()
+                rows = database.list_review_tasks(limit=10)
+                self.assertEqual(len(rows), 2)
+                # Newest first.
+                self.assertEqual(rows[0]["task_id"], "t-pg-b")
+                self.assertEqual(rows[1]["task_id"], "t-pg-a")
+                postgres_storage.reset_engine_for_tests()
 
     def test_list_review_tasks_pg_empty_list_authoritative(self):
-        """Load-bearing invariant: PG ``[]`` overrides any SQLite rows."""
+        """PG ``[]`` is authoritative. M12.0e-6b-1: SQLite-only seed
+        dropped; the "PG empty → []" half is preserved."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg_substitute.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_review_tables()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    # Seed a SQLite row that must NOT leak through.
-                    with patch.object(
-                        postgres_storage, "mirror_upsert",
-                        lambda *a, **kw: False,
-                    ):
-                        database.create_review_task(
-                            task_id="stale-sqlite",
-                            result_id="r1", job_id="j1", item_index=0,
-                            status="open", query="q",
-                            claim_text="stale", title="t", url="u",
-                            final_decision="WATCH",
-                            policy_confidence="60",
-                            human_review_required=True,
-                            snapshot={"k": "v"},
-                            idempotency_key="idem-stale",
-                            created_at="2026-05-27T00:00:00",
-                            updated_at="2026-05-27T00:00:00",
-                        )
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
 
-                    rows = database.list_review_tasks(limit=10)
-                    # PG has 0 rows → [] authoritative; SQLite row hidden.
-                    self.assertEqual(rows, [])
-                    postgres_storage.reset_engine_for_tests()
+                rows = database.list_review_tasks(limit=10)
+                self.assertEqual(rows, [])
+                postgres_storage.reset_engine_for_tests()
 
     # --- get_review_decision -----------------------------------------
 
     def test_get_review_decision_prefers_postgres(self):
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg_substitute.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_review_tables()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    _seed_review_decision_in_pg(
-                        decision_id="d-pg", task_id="t-pg",
-                        decision="approve", metadata_json='{"src":"pg"}',
-                    )
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                _seed_review_decision_in_pg(
+                    decision_id="d-pg", task_id="t-pg",
+                    decision="approve", metadata_json='{"src":"pg"}',
+                )
 
-                    rec = database.get_review_decision("d-pg")
-                    self.assertIsNotNone(rec)
-                    self.assertEqual(rec["decision_id"], "d-pg")
-                    self.assertEqual(rec["decision"], "approve")
-                    # _row_to_review_decision transformation applied.
-                    self.assertIn("metadata", rec)
-                    self.assertNotIn("metadata_json", rec)
-                    self.assertEqual(rec["metadata"], {"src": "pg"})
-                    postgres_storage.reset_engine_for_tests()
+                rec = database.get_review_decision("d-pg")
+                self.assertIsNotNone(rec)
+                self.assertEqual(rec["decision_id"], "d-pg")
+                self.assertEqual(rec["decision"], "approve")
+                # _row_to_review_decision transformation applied.
+                self.assertIn("metadata", rec)
+                self.assertNotIn("metadata_json", rec)
+                self.assertEqual(rec["metadata"], {"src": "pg"})
+                postgres_storage.reset_engine_for_tests()
 
     def test_get_review_decision_returns_none_when_pg_empty(self):
-        """M12.0d-1: PG enabled + empty → None."""
+        """M12.0d-1: PG enabled + empty → None. M12.0e-6b-1: SQLite-only
+        seed dropped; the "PG empty → None" half is preserved."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg_substitute.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_review_tables()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    # Parent task so the FK-implicit relationship is sane.
-                    with patch.object(
-                        postgres_storage, "mirror_upsert",
-                        lambda *a, **kw: False,
-                    ):
-                        database.create_review_task(
-                            task_id="t-decis", result_id="r1", job_id="j1",
-                            item_index=0, status="open", query="q",
-                            claim_text="c", title="t", url="u",
-                            final_decision="WATCH",
-                            policy_confidence="60",
-                            human_review_required=True,
-                            snapshot={"k": "v"},
-                            idempotency_key="idem-decis",
-                            created_at="2026-05-27T00:00:00",
-                            updated_at="2026-05-27T00:00:00",
-                        )
-                    with patch.object(
-                        postgres_storage, "mirror_write",
-                        lambda *a, **kw: False,
-                    ):
-                        database.record_review_decision(
-                            decision_id="d-sqlite", task_id="t-decis",
-                            decision="approve",
-                            created_at="2026-05-27T00:00:01",
-                        )
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
 
-                    rec = database.get_review_decision("d-sqlite")
-                    self.assertIsNone(rec)
-                    postgres_storage.reset_engine_for_tests()
+                rec = database.get_review_decision("d-sqlite")
+                self.assertIsNone(rec)
+                postgres_storage.reset_engine_for_tests()
 
     # --- list_review_decisions ---------------------------------------
 
     def test_list_review_decisions_prefers_postgres_when_enabled(self):
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg_substitute.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_review_tables()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    _seed_review_decision_in_pg(
-                        decision_id="d-old", task_id="task-list",
-                        created_at="2026-05-27T00:00:01",
-                    )
-                    _seed_review_decision_in_pg(
-                        decision_id="d-new", task_id="task-list",
-                        created_at="2026-05-27T00:00:02",
-                    )
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                _seed_review_decision_in_pg(
+                    decision_id="d-old", task_id="task-list",
+                    created_at="2026-05-27T00:00:01",
+                )
+                _seed_review_decision_in_pg(
+                    decision_id="d-new", task_id="task-list",
+                    created_at="2026-05-27T00:00:02",
+                )
 
-                    rows = database.list_review_decisions("task-list")
-                    self.assertEqual(len(rows), 2)
-                    # Oldest first (asc).
-                    self.assertEqual(rows[0]["decision_id"], "d-old")
-                    self.assertEqual(rows[1]["decision_id"], "d-new")
-                    # metadata key from _row_to_review_decision.
-                    for r in rows:
-                        self.assertIn("metadata", r)
-                        self.assertNotIn("metadata_json", r)
-                    postgres_storage.reset_engine_for_tests()
+                rows = database.list_review_decisions("task-list")
+                self.assertEqual(len(rows), 2)
+                # Oldest first (asc).
+                self.assertEqual(rows[0]["decision_id"], "d-old")
+                self.assertEqual(rows[1]["decision_id"], "d-new")
+                # metadata key from _row_to_review_decision.
+                for r in rows:
+                    self.assertIn("metadata", r)
+                    self.assertNotIn("metadata_json", r)
+                postgres_storage.reset_engine_for_tests()
 
     def test_list_review_decisions_pg_empty_list_authoritative(self):
-        """PG empty → [] returned, SQLite decisions hidden."""
+        """PG empty → [] returned. M12.0e-6b-1: SQLite-only seed dropped;
+        the "PG empty → []" half is preserved."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg_substitute.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_review_tables()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    # Seed SQLite-only parent + decision.
-                    with patch.object(
-                        postgres_storage, "mirror_upsert",
-                        lambda *a, **kw: False,
-                    ):
-                        database.create_review_task(
-                            task_id="t-empty", result_id="r1", job_id="j1",
-                            item_index=0, status="open", query="q",
-                            claim_text="c", title="t", url="u",
-                            final_decision="WATCH",
-                            policy_confidence="60",
-                            human_review_required=True,
-                            snapshot={"k": "v"},
-                            idempotency_key="idem-empty",
-                            created_at="2026-05-27T00:00:00",
-                            updated_at="2026-05-27T00:00:00",
-                        )
-                    with patch.object(
-                        postgres_storage, "mirror_write",
-                        lambda *a, **kw: False,
-                    ):
-                        database.record_review_decision(
-                            decision_id="d-stale", task_id="t-empty",
-                            decision="approve",
-                            created_at="2026-05-27T00:00:01",
-                        )
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
 
-                    rows = database.list_review_decisions("t-empty")
-                    # PG has 0 rows for this task → [] authoritative.
-                    self.assertEqual(rows, [])
-                    postgres_storage.reset_engine_for_tests()
+                rows = database.list_review_decisions("t-empty")
+                self.assertEqual(rows, [])
+                postgres_storage.reset_engine_for_tests()
 
 
 # ---------------------------------------------------------------------------
@@ -2204,169 +1994,117 @@ class ReadAnalysisResultIdByUrlTests(unittest.TestCase):
 class DatabaseDuplicateDetectionFallbackTests(unittest.TestCase):
     """Integration tests for the database.py side of M12.0c-3.
 
-    Each case sets up two SQLite files: one is the local SQLite source
-    of truth (``database.DB_PATH``) and one is the Postgres substitute
-    behind ``DATABASE_URL``. Confirms that:
-
-      * ``result_exists_by_url`` prefers Postgres when enabled and that
-        PG ``False`` is authoritative over any stale SQLite row.
-      * ``get_result_id_by_url`` prefers Postgres when enabled and
-        falls back to SQLite when Postgres returns None.
+    Each case uses a Postgres substitute behind ``DATABASE_URL``.
+    Confirms that ``result_exists_by_url`` / ``get_result_id_by_url``
+    return the Postgres answer when present and the PG-empty answer
+    (False / None) when Postgres has no matching row. M12.0e-6b-1: the
+    prior stale-SQLite seed + "PG wins over stale SQLite" assertions
+    were dropped — SQLite is no longer a readable store.
     """
 
     def test_result_exists_by_url_prefers_postgres_when_enabled(self):
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg_substitute.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_db()  # SQLite schema only; no rows.
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    # Seed PG only; SQLite stays empty.
-                    postgres_storage.mirror_write(
-                        "analysis_results",
-                        {
-                            "id": 5,
-                            "query": "exists from pg",
-                            "title": "in pg",
-                            "original_url": "https://example.com/pg-exists",
-                            "created_at": "2026-05-27T00:00:00+00:00",
-                        },
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                # Seed PG only.
+                postgres_storage.mirror_write(
+                    "analysis_results",
+                    {
+                        "id": 5,
+                        "query": "exists from pg",
+                        "title": "in pg",
+                        "original_url": "https://example.com/pg-exists",
+                        "created_at": "2026-05-27T00:00:00+00:00",
+                    },
+                )
+
+                self.assertTrue(
+                    database.result_exists_by_url(
+                        "https://example.com/pg-exists",
                     )
+                )
+                postgres_storage.reset_engine_for_tests()
 
-                    self.assertTrue(
-                        database.result_exists_by_url(
-                            "https://example.com/pg-exists",
-                        )
-                    )
-                    postgres_storage.reset_engine_for_tests()
-
-    def test_result_exists_by_url_pg_false_authoritative_over_stale_sqlite(self):
-        """Load-bearing invariant: when PG says no row (False), the
-        wrapper trusts PG even if SQLite has a stale row. Without this,
-        duplicate detection would leak through and the caller would
-        skip a legitimate save."""
-        from text_utils import sanitize_data
-
+    def test_result_exists_by_url_returns_false_when_pg_empty(self):
+        """PG has no row for the URL → result_exists_by_url returns False
+        (PG authoritative). M12.0e-6b-1: the stale-SQLite seed was
+        dropped; the "PG empty → False" half is preserved."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg_substitute.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_db()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    # M12.0d Stage 3c-3: seed the stale SQLite row via raw
-                    # SQL (save_analysis_result no longer writes SQLite
-                    # under dual-write). PG stays empty for this URL.
-                    with database.get_connection() as conn:
-                        conn.execute(
-                            "INSERT INTO analysis_results "
-                            "(id, query, title, original_url, created_at) "
-                            "VALUES (?, ?, ?, ?, ?)",
-                            (
-                                1, "stale-test", "stale sqlite row",
-                                "https://example.com/stale-only",
-                                "2026-05-27T00:00:00+00:00",
-                            ),
-                        )
-                        conn.commit()
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
 
-                    # PG has 0 rows for this URL → False authoritative.
-                    # SQLite has 1 stale row but must be IGNORED.
-                    self.assertFalse(
-                        database.result_exists_by_url(
-                            "https://example.com/stale-only",
-                        )
+                self.assertFalse(
+                    database.result_exists_by_url(
+                        "https://example.com/stale-only",
                     )
-                    postgres_storage.reset_engine_for_tests()
+                )
+                postgres_storage.reset_engine_for_tests()
 
     def test_get_result_id_by_url_prefers_postgres_when_enabled(self):
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg_substitute.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_db()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    postgres_storage.mirror_write(
-                        "analysis_results",
-                        {
-                            "id": 99,
-                            "query": "id from pg",
-                            "title": "pg row",
-                            "original_url": "https://example.com/pg-id",
-                            "created_at": "2026-05-27T00:00:00+00:00",
-                        },
-                    )
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                postgres_storage.mirror_write(
+                    "analysis_results",
+                    {
+                        "id": 99,
+                        "query": "id from pg",
+                        "title": "pg row",
+                        "original_url": "https://example.com/pg-id",
+                        "created_at": "2026-05-27T00:00:00+00:00",
+                    },
+                )
 
-                    self.assertEqual(
-                        database.get_result_id_by_url(
-                            "https://example.com/pg-id",
-                        ),
-                        99,
-                    )
-                    postgres_storage.reset_engine_for_tests()
+                self.assertEqual(
+                    database.get_result_id_by_url(
+                        "https://example.com/pg-id",
+                    ),
+                    99,
+                )
+                postgres_storage.reset_engine_for_tests()
 
     def test_get_result_id_by_url_returns_none_when_pg_empty(self):
-        """M12.0d-1: PG enabled + empty → None. SQLite fallback is
-        unreachable when dual-write is enabled."""
-        from text_utils import sanitize_data
-
+        """M12.0d-1: PG enabled + empty → None. M12.0e-6b-1: the stale-
+        SQLite seed was dropped; the "PG empty → None" half is
+        preserved."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg_substitute.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_db()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    # M12.0d Stage 3c-3: seed SQLite only via raw SQL
-                    # (save_analysis_result no longer writes SQLite under
-                    # dual-write). PG stays empty for this URL.
-                    with database.get_connection() as conn:
-                        conn.execute(
-                            "INSERT INTO analysis_results "
-                            "(id, query, title, original_url, created_at) "
-                            "VALUES (?, ?, ?, ?, ?)",
-                            (
-                                3, "sqlite-id-test", "sqlite-only id source",
-                                "https://example.com/sqlite-id-only",
-                                "2026-05-27T00:00:00+00:00",
-                            ),
-                        )
-                        conn.commit()
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
 
-                    # PG returns None for this URL → function returns
-                    # None (SQLite row is ignored under Stage 1).
-                    self.assertIsNone(
-                        database.get_result_id_by_url(
-                            "https://example.com/sqlite-id-only",
-                        ),
-                    )
-                    postgres_storage.reset_engine_for_tests()
+                self.assertIsNone(
+                    database.get_result_id_by_url(
+                        "https://example.com/sqlite-id-only",
+                    ),
+                )
+                postgres_storage.reset_engine_for_tests()
 
 
 # ---------------------------------------------------------------------------
@@ -2780,347 +2518,233 @@ class DatabaseOperatorCliFallbackTests(unittest.TestCase):
     def test_get_fetch_artifacts_prefers_postgres_when_enabled(self):
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_source_fetch_artifacts_table()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    _seed_fetch_artifact_in_pg(
-                        source_id="pg-src", url="https://pg/x",
-                        fetch_timestamp="2026-05-27T00:00:01",
-                    )
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                _seed_fetch_artifact_in_pg(
+                    source_id="pg-src", url="https://pg/x",
+                    fetch_timestamp="2026-05-27T00:00:01",
+                )
 
-                    rows = database.get_fetch_artifacts()
-                    self.assertEqual(len(rows), 1)
-                    self.assertEqual(rows[0]["source_id"], "pg-src")
-                    # _row_to_fetch_artifact transformation applied.
-                    self.assertIsInstance(rows[0]["success"], bool)
-                    self.assertIsInstance(rows[0]["truth_claim"], bool)
-                    postgres_storage.reset_engine_for_tests()
+                rows = database.get_fetch_artifacts()
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]["source_id"], "pg-src")
+                # _row_to_fetch_artifact transformation applied.
+                self.assertIsInstance(rows[0]["success"], bool)
+                self.assertIsInstance(rows[0]["truth_claim"], bool)
+                postgres_storage.reset_engine_for_tests()
 
     def test_get_fetch_artifacts_pg_empty_list_authoritative(self):
+        """PG empty → []. M12.0e-6b-1: stale-SQLite seed dropped; the
+        "PG empty → []" half is preserved."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_source_fetch_artifacts_table()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    # M12.0d Stage 3c-3: seed a STALE row directly into
-                    # SQLite via raw SQL. Under dual-write, save_fetch_artifact
-                    # no longer writes SQLite (PG-only), so we bypass it to
-                    # reproduce the "stale SQLite, empty PG" scenario this
-                    # test pins (PG-empty [] must win).
-                    with database.get_connection() as conn:
-                        conn.execute(
-                            "INSERT INTO source_fetch_artifacts "
-                            "(source_id, url, fetch_timestamp, success, "
-                            "truth_claim, official_source_candidate, "
-                            "created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                            (
-                                "sqlite-only", "https://stale/x",
-                                "2026-05-27T00:00:00", 1, 0, 0,
-                                "2026-05-27T00:00:00+00:00",
-                            ),
-                        )
-                        conn.commit()
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
 
-                    rows = database.get_fetch_artifacts()
-                    self.assertEqual(rows, [])
-                    postgres_storage.reset_engine_for_tests()
+                rows = database.get_fetch_artifacts()
+                self.assertEqual(rows, [])
+                postgres_storage.reset_engine_for_tests()
 
     # --- get_extraction_results --------------------------------------
 
     def test_get_extraction_results_prefers_postgres_when_enabled(self):
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_artifact_text_extractions_table()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    _seed_extraction_result_in_pg(
-                        artifact_id=42, source_id="pg-src",
-                        url="https://pg/e",
-                        extraction_timestamp="2026-05-27T00:00:01",
-                    )
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                _seed_extraction_result_in_pg(
+                    artifact_id=42, source_id="pg-src",
+                    url="https://pg/e",
+                    extraction_timestamp="2026-05-27T00:00:01",
+                )
 
-                    rows = database.get_extraction_results()
-                    self.assertEqual(len(rows), 1)
-                    self.assertEqual(rows[0]["artifact_id"], 42)
-                    self.assertIsInstance(rows[0]["success"], bool)
-                    postgres_storage.reset_engine_for_tests()
+                rows = database.get_extraction_results()
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]["artifact_id"], 42)
+                self.assertIsInstance(rows[0]["success"], bool)
+                postgres_storage.reset_engine_for_tests()
 
     def test_get_extraction_results_pg_empty_list_authoritative(self):
+        """PG empty → []. M12.0e-6b-1: stale-SQLite seed dropped; the
+        "PG empty → []" half is preserved."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_artifact_text_extractions_table()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    # M12.0d Stage 3c-3: seed a STALE row directly into
-                    # SQLite via raw SQL. Under dual-write, save_extraction_
-                    # result no longer writes SQLite (PG-only), so we bypass
-                    # it to reproduce the "stale SQLite, empty PG" scenario
-                    # this test pins (PG-empty [] must win).
-                    with database.get_connection() as conn:
-                        conn.execute(
-                            "INSERT INTO artifact_text_extractions "
-                            "(artifact_id, source_id, url, "
-                            "extraction_timestamp, success, truth_claim, "
-                            "official_source_candidate, created_at) "
-                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                            (
-                                1, "stale", "https://stale/y",
-                                "2026-05-27T00:00:00", 1, 0, 0,
-                                "2026-05-27T00:00:00+00:00",
-                            ),
-                        )
-                        conn.commit()
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
 
-                    rows = database.get_extraction_results()
-                    self.assertEqual(rows, [])
-                    postgres_storage.reset_engine_for_tests()
+                rows = database.get_extraction_results()
+                self.assertEqual(rows, [])
+                postgres_storage.reset_engine_for_tests()
 
     # --- get_evidence_candidates -------------------------------------
 
     def test_get_evidence_candidates_prefers_postgres_when_enabled(self):
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_artifact_evidence_candidates_table()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    _seed_evidence_candidate_in_pg(
-                        extraction_id=5, source_id="pg-src",
-                        url="https://pg/c", analysis_id="ana-pg",
-                        claim_text="claim from pg",
-                        candidate_timestamp="2026-05-27T00:00:01",
-                    )
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                _seed_evidence_candidate_in_pg(
+                    extraction_id=5, source_id="pg-src",
+                    url="https://pg/c", analysis_id="ana-pg",
+                    claim_text="claim from pg",
+                    candidate_timestamp="2026-05-27T00:00:01",
+                )
 
-                    rows = database.get_evidence_candidates(
-                        analysis_id="ana-pg",
-                    )
-                    self.assertEqual(len(rows), 1)
-                    self.assertEqual(rows[0]["claim_text"], "claim from pg")
-                    # bool conversions applied.
-                    self.assertIsInstance(
-                        rows[0]["operator_review_required"], bool,
-                    )
-                    self.assertIsInstance(rows[0]["match_score"], float)
-                    postgres_storage.reset_engine_for_tests()
+                rows = database.get_evidence_candidates(
+                    analysis_id="ana-pg",
+                )
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]["claim_text"], "claim from pg")
+                # bool conversions applied.
+                self.assertIsInstance(
+                    rows[0]["operator_review_required"], bool,
+                )
+                self.assertIsInstance(rows[0]["match_score"], float)
+                postgres_storage.reset_engine_for_tests()
 
     def test_get_evidence_candidates_pg_empty_list_authoritative(self):
+        """PG empty → []. M12.0e-6b-1: stale-SQLite seed dropped; the
+        "PG empty → []" half is preserved."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_artifact_evidence_candidates_table()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    # M12.0d Stage 3c-3: seed a STALE row directly into
-                    # SQLite via raw SQL. Under dual-write, save_evidence_
-                    # candidate no longer writes SQLite (PG-only), so we
-                    # bypass it to reproduce the "stale SQLite, empty PG"
-                    # scenario this test pins (PG-empty [] must win).
-                    with database.get_connection() as conn:
-                        conn.execute(
-                            "INSERT INTO artifact_evidence_candidates "
-                            "(extraction_id, source_id, url, analysis_id, "
-                            "claim_text, candidate_timestamp, match_score, "
-                            "truth_claim, official_source_candidate, "
-                            "operator_review_required, created_at) "
-                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                            (
-                                1, "stale", "u", "ana-stale", "c",
-                                "2026-05-27T00:00:00", 0.0, 0, 0, 1,
-                                "2026-05-27T00:00:00+00:00",
-                            ),
-                        )
-                        conn.commit()
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
 
-                    rows = database.get_evidence_candidates()
-                    self.assertEqual(rows, [])
-                    postgres_storage.reset_engine_for_tests()
+                rows = database.get_evidence_candidates()
+                self.assertEqual(rows, [])
+                postgres_storage.reset_engine_for_tests()
 
     # --- get_producer_comparisons ------------------------------------
 
     def test_get_producer_comparisons_prefers_postgres_when_enabled(self):
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_verdict_producer_comparisons_table()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    _seed_producer_comparison_in_pg(
-                        analysis_id="ana-pc", source="pc-src",
-                        input_hash="h-pc-1",
-                        comparison_timestamp="2026-05-27T00:00:01",
-                    )
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                _seed_producer_comparison_in_pg(
+                    analysis_id="ana-pc", source="pc-src",
+                    input_hash="h-pc-1",
+                    comparison_timestamp="2026-05-27T00:00:01",
+                )
 
-                    rows = database.get_producer_comparisons(
-                        analysis_id="ana-pc",
-                    )
-                    self.assertEqual(len(rows), 1)
-                    self.assertEqual(rows[0]["source"], "pc-src")
-                    self.assertIsInstance(rows[0]["all_three_agree"], bool)
-                    postgres_storage.reset_engine_for_tests()
+                rows = database.get_producer_comparisons(
+                    analysis_id="ana-pc",
+                )
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]["source"], "pc-src")
+                self.assertIsInstance(rows[0]["all_three_agree"], bool)
+                postgres_storage.reset_engine_for_tests()
 
     def test_get_producer_comparisons_pg_empty_list_authoritative(self):
+        """PG empty → []. M12.0e-6b-1: stale-SQLite seed dropped; the
+        "PG empty → []" half is preserved."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_verdict_producer_comparisons_table()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    # M12.0d Stage 3c-3: seed a STALE row directly into
-                    # SQLite via raw SQL. Under dual-write, save_producer_
-                    # comparison no longer writes SQLite (PG-only), so we
-                    # bypass it to reproduce the "stale SQLite, empty PG"
-                    # scenario this test pins (PG-empty [] must win).
-                    with database.get_connection() as conn:
-                        conn.execute(
-                            "INSERT INTO verdict_producer_comparisons "
-                            "(analysis_id, source, input_hash, "
-                            "comparison_timestamp, truth_claim, "
-                            "operator_review_required, created_at) "
-                            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                            (
-                                "ana-stale", "s", "h-stale",
-                                "2026-05-27T00:00:00", 0, 1,
-                                "2026-05-27T00:00:00+00:00",
-                            ),
-                        )
-                        conn.commit()
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
 
-                    rows = database.get_producer_comparisons()
-                    self.assertEqual(rows, [])
-                    postgres_storage.reset_engine_for_tests()
+                rows = database.get_producer_comparisons()
+                self.assertEqual(rows, [])
+                postgres_storage.reset_engine_for_tests()
 
     # --- get_verdict_label_attributions ------------------------------
 
     def test_get_verdict_label_attributions_prefers_postgres_when_enabled(self):
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_verdict_label_attributions_table()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    _seed_verdict_label_attribution_in_pg(
-                        analysis_id="ana-vla",
-                        diagnostic_timestamp="2026-05-27T00:00:01",
-                        attributed_branch_id="branch_X",
-                        is_weak_evidence_verified=1,
-                    )
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                _seed_verdict_label_attribution_in_pg(
+                    analysis_id="ana-vla",
+                    diagnostic_timestamp="2026-05-27T00:00:01",
+                    attributed_branch_id="branch_X",
+                    is_weak_evidence_verified=1,
+                )
 
-                    rows = database.get_verdict_label_attributions(
-                        analysis_id="ana-vla",
-                    )
-                    self.assertEqual(len(rows), 1)
-                    self.assertEqual(
-                        rows[0]["attributed_branch_id"], "branch_X",
-                    )
-                    self.assertIsInstance(
-                        rows[0]["is_weak_evidence_verified"], bool,
-                    )
-                    self.assertTrue(rows[0]["is_weak_evidence_verified"])
-                    postgres_storage.reset_engine_for_tests()
+                rows = database.get_verdict_label_attributions(
+                    analysis_id="ana-vla",
+                )
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(
+                    rows[0]["attributed_branch_id"], "branch_X",
+                )
+                self.assertIsInstance(
+                    rows[0]["is_weak_evidence_verified"], bool,
+                )
+                self.assertTrue(rows[0]["is_weak_evidence_verified"])
+                postgres_storage.reset_engine_for_tests()
 
     def test_get_verdict_label_attributions_pg_empty_list_authoritative(self):
+        """PG empty → []. M12.0e-6b-1: stale-SQLite seed dropped; the
+        "PG empty → []" half is preserved."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import postgres_storage
+                import database
+                import postgres_storage
 
-                    database.init_verdict_label_attributions_table()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    # M12.0d Stage 3c-3: seed a STALE row directly into
-                    # SQLite via raw SQL. Under dual-write, save_verdict_
-                    # label_attribution no longer writes SQLite (PG-only),
-                    # so we bypass it to reproduce the "stale SQLite, empty
-                    # PG" scenario this test pins (PG-empty [] must win).
-                    with database.get_connection() as conn:
-                        conn.execute(
-                            "INSERT INTO verdict_label_attributions "
-                            "(analysis_id, diagnostic_timestamp, "
-                            "is_weak_evidence_verified, truth_claim, "
-                            "operator_review_required, created_at) "
-                            "VALUES (?, ?, ?, ?, ?, ?)",
-                            (
-                                "ana-stale-vla", "2026-05-27T00:00:00",
-                                0, 0, 1, "2026-05-27T00:00:00+00:00",
-                            ),
-                        )
-                        conn.commit()
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
 
-                    rows = database.get_verdict_label_attributions()
-                    self.assertEqual(rows, [])
-                    postgres_storage.reset_engine_for_tests()
+                rows = database.get_verdict_label_attributions()
+                self.assertEqual(rows, [])
+                postgres_storage.reset_engine_for_tests()
 
     # M12.0e-6a: the 2 db_path-skip tests
     # (test_get_extraction_results_with_db_path_skips_postgres,
@@ -3195,156 +2819,141 @@ class JobsMirrorWriteTests(unittest.TestCase):
     def test_create_job_mirrors_full_row_to_postgres(self):
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import job_manager
-                    import postgres_storage
+                import database
+                import job_manager
+                import postgres_storage
 
-                    database.init_db()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
 
-                    record = job_manager.create_job(
-                        query="hello", max_news=7,
-                    )
-                    job_id = record["id"]
+                record = job_manager.create_job(
+                    query="hello", max_news=7,
+                )
+                job_id = record["id"]
 
-                    pg_row = _pg_row_for_job(engine, job_id)
-                    self.assertIsNotNone(pg_row)
-                    self.assertEqual(pg_row["id"], job_id)
-                    self.assertEqual(pg_row["status"], "queued")
-                    self.assertEqual(pg_row["query"], "hello")
-                    self.assertEqual(pg_row["max_news"], 7)
-                    self.assertEqual(pg_row["progress_percent"], 0)
-                    self.assertEqual(pg_row["current_stage"], "queued")
-                    self.assertIsNone(pg_row["result_id"])
-                    self.assertIsNone(pg_row["error_message"])
-                    postgres_storage.reset_engine_for_tests()
+                pg_row = _pg_row_for_job(engine, job_id)
+                self.assertIsNotNone(pg_row)
+                self.assertEqual(pg_row["id"], job_id)
+                self.assertEqual(pg_row["status"], "queued")
+                self.assertEqual(pg_row["query"], "hello")
+                self.assertEqual(pg_row["max_news"], 7)
+                self.assertEqual(pg_row["progress_percent"], 0)
+                self.assertEqual(pg_row["current_stage"], "queued")
+                self.assertIsNone(pg_row["result_id"])
+                self.assertIsNone(pg_row["error_message"])
+                postgres_storage.reset_engine_for_tests()
 
     def test_start_job_updates_postgres_mirror(self):
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import job_manager
-                    import postgres_storage
+                import database
+                import job_manager
+                import postgres_storage
 
-                    database.init_db()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
 
-                    record = job_manager.create_job(
-                        query="q", max_news=1,
-                    )
-                    job_id = record["id"]
-                    job_manager.start_job(job_id)
+                record = job_manager.create_job(
+                    query="q", max_news=1,
+                )
+                job_id = record["id"]
+                job_manager.start_job(job_id)
 
-                    pg_row = _pg_row_for_job(engine, job_id)
-                    self.assertIsNotNone(pg_row)
-                    self.assertEqual(pg_row["status"], "running")
-                    self.assertEqual(pg_row["current_stage"], "running")
-                    self.assertEqual(pg_row["progress_percent"], 5)
-                    self.assertIsNotNone(pg_row["started_at"])
-                    postgres_storage.reset_engine_for_tests()
+                pg_row = _pg_row_for_job(engine, job_id)
+                self.assertIsNotNone(pg_row)
+                self.assertEqual(pg_row["status"], "running")
+                self.assertEqual(pg_row["current_stage"], "running")
+                self.assertEqual(pg_row["progress_percent"], 5)
+                self.assertIsNotNone(pg_row["started_at"])
+                postgres_storage.reset_engine_for_tests()
 
     def test_update_progress_mirrors_to_postgres(self):
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import job_manager
-                    import postgres_storage
+                import database
+                import job_manager
+                import postgres_storage
 
-                    database.init_db()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
 
-                    record = job_manager.create_job(query="q", max_news=1)
-                    job_id = record["id"]
-                    job_manager.start_job(job_id)
-                    job_manager.update_progress(
-                        job_id, "news_collecting", 35,
-                    )
+                record = job_manager.create_job(query="q", max_news=1)
+                job_id = record["id"]
+                job_manager.start_job(job_id)
+                job_manager.update_progress(
+                    job_id, "news_collecting", 35,
+                )
 
-                    pg_row = _pg_row_for_job(engine, job_id)
-                    self.assertEqual(
-                        pg_row["current_stage"], "news_collecting",
-                    )
-                    self.assertEqual(pg_row["progress_percent"], 35)
-                    # Status stays 'running' through progress updates.
-                    self.assertEqual(pg_row["status"], "running")
-                    postgres_storage.reset_engine_for_tests()
+                pg_row = _pg_row_for_job(engine, job_id)
+                self.assertEqual(
+                    pg_row["current_stage"], "news_collecting",
+                )
+                self.assertEqual(pg_row["progress_percent"], 35)
+                # Status stays 'running' through progress updates.
+                self.assertEqual(pg_row["status"], "running")
+                postgres_storage.reset_engine_for_tests()
 
     def test_complete_job_mirrors_terminal_state(self):
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import job_manager
-                    import postgres_storage
+                import database
+                import job_manager
+                import postgres_storage
 
-                    database.init_db()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
 
-                    record = job_manager.create_job(query="q", max_news=1)
-                    job_id = record["id"]
-                    job_manager.start_job(job_id)
-                    job_manager.complete_job(job_id, result_id=42)
+                record = job_manager.create_job(query="q", max_news=1)
+                job_id = record["id"]
+                job_manager.start_job(job_id)
+                job_manager.complete_job(job_id, result_id=42)
 
-                    pg_row = _pg_row_for_job(engine, job_id)
-                    self.assertEqual(pg_row["status"], "completed")
-                    self.assertEqual(pg_row["current_stage"], "completed")
-                    self.assertEqual(pg_row["progress_percent"], 100)
-                    self.assertEqual(pg_row["result_id"], 42)
-                    self.assertIsNone(pg_row["error_message"])
-                    self.assertIsNotNone(pg_row["completed_at"])
-                    postgres_storage.reset_engine_for_tests()
+                pg_row = _pg_row_for_job(engine, job_id)
+                self.assertEqual(pg_row["status"], "completed")
+                self.assertEqual(pg_row["current_stage"], "completed")
+                self.assertEqual(pg_row["progress_percent"], 100)
+                self.assertEqual(pg_row["result_id"], 42)
+                self.assertIsNone(pg_row["error_message"])
+                self.assertIsNotNone(pg_row["completed_at"])
+                postgres_storage.reset_engine_for_tests()
 
     def test_fail_job_mirrors_error_message(self):
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import job_manager
-                    import postgres_storage
+                import database
+                import job_manager
+                import postgres_storage
 
-                    database.init_db()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
 
-                    record = job_manager.create_job(query="q", max_news=1)
-                    job_id = record["id"]
-                    job_manager.start_job(job_id)
-                    job_manager.fail_job(job_id, "boom: openai 500")
+                record = job_manager.create_job(query="q", max_news=1)
+                job_id = record["id"]
+                job_manager.start_job(job_id)
+                job_manager.fail_job(job_id, "boom: openai 500")
 
-                    pg_row = _pg_row_for_job(engine, job_id)
-                    self.assertEqual(pg_row["status"], "failed")
-                    self.assertEqual(
-                        pg_row["error_message"], "boom: openai 500",
-                    )
-                    self.assertIsNotNone(pg_row["completed_at"])
-                    postgres_storage.reset_engine_for_tests()
+                pg_row = _pg_row_for_job(engine, job_id)
+                self.assertEqual(pg_row["status"], "failed")
+                self.assertEqual(
+                    pg_row["error_message"], "boom: openai 500",
+                )
+                self.assertIsNotNone(pg_row["completed_at"])
+                postgres_storage.reset_engine_for_tests()
 
 
 # M12.0d Stage 3c-2: JobsMirrorIsolationTests (the previous "SQLite
@@ -3412,65 +3021,49 @@ class JobManagerGetJobStatusFallbackTests(unittest.TestCase):
     def test_get_job_status_prefers_postgres_when_enabled(self):
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import job_manager
-                    import postgres_storage
+                import database
+                import job_manager
+                import postgres_storage
 
-                    database.init_db()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    _seed_job_in_pg(
-                        job_id="from-pg", status="running",
-                        query="pg-only-query",
-                        progress_percent=60,
-                    )
-                    # SQLite is empty for this job_id.
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
+                _seed_job_in_pg(
+                    job_id="from-pg", status="running",
+                    query="pg-only-query",
+                    progress_percent=60,
+                )
 
-                    status = job_manager.get_job_status("from-pg")
-                    self.assertIsNotNone(status)
-                    self.assertEqual(status["id"], "from-pg")
-                    self.assertEqual(status["job_id"], "from-pg")  # alias
-                    self.assertEqual(status["status"], "running")
-                    self.assertEqual(status["query"], "pg-only-query")
-                    self.assertEqual(status["progress_percent"], 60)
-                    postgres_storage.reset_engine_for_tests()
+                status = job_manager.get_job_status("from-pg")
+                self.assertIsNotNone(status)
+                self.assertEqual(status["id"], "from-pg")
+                self.assertEqual(status["job_id"], "from-pg")  # alias
+                self.assertEqual(status["status"], "running")
+                self.assertEqual(status["query"], "pg-only-query")
+                self.assertEqual(status["progress_percent"], 60)
+                postgres_storage.reset_engine_for_tests()
 
     def test_get_job_status_returns_none_when_pg_empty(self):
-        """M12.0d-1: PG enabled + empty → None. SQLite fallback is
-        unreachable when dual-write is enabled."""
+        """M12.0d-1: PG enabled + empty → None. M12.0e-6b-1: the mirror-
+        suppressed SQLite-only seed was dropped; the wrapper-level
+        "PG empty → None" assertion is preserved."""
         with _EnvScope():
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                sqlite_db = Path(tmp_dir) / "sqlite_local.db"
                 pg_db = Path(tmp_dir) / "pg.db"
                 _set_env(USE_POSTGRES_WRITE="true",
                          DATABASE_URL=f"sqlite:///{pg_db}")
-                with patch("database.DB_PATH", sqlite_db):
-                    import database
-                    import job_manager
-                    import postgres_storage
+                import database
+                import job_manager
+                import postgres_storage
 
-                    database.init_db()
-                    engine = postgres_storage.get_engine()
-                    postgres_storage.ensure_schema(engine)
-                    # Suppress PG mirror so create_job writes SQLite only.
-                    # Pre-M12.0d-1 the SQLite row leaked through; Stage 1
-                    # hides it under the PG-authoritative contract.
-                    with patch.object(
-                        postgres_storage, "mirror_write",
-                        lambda *a, **kw: False,
-                    ):
-                        record = job_manager.create_job(
-                            query="sqlite-only", max_news=2,
-                        )
+                engine = postgres_storage.get_engine()
+                postgres_storage.ensure_schema(engine)
 
-                    status = job_manager.get_job_status(record["id"])
-                    self.assertIsNone(status)
-                    postgres_storage.reset_engine_for_tests()
+                status = job_manager.get_job_status("never-created")
+                self.assertIsNone(status)
+                postgres_storage.reset_engine_for_tests()
 
 
 # -- Parity (1) -------------------------------------------------------
