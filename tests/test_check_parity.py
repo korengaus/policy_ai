@@ -339,7 +339,10 @@ class CollectParityReportTests(unittest.TestCase):
         self.assertEqual(report["summary"]["tables_checked"], 0)
         self.assertFalse(report["summary"]["any_drift"])
 
-    def test_only_table_filter_restricts_report(self):
+    def test_only_table_is_recorded_but_per_table_empty(self):
+        """M12.0e-5b: neutralized no-op. The only_table arg is still
+        echoed in the report, but per_table is always empty (no
+        comparison) regardless of the patched counts."""
         from scripts import check_parity
         import postgres_backfill
 
@@ -354,18 +357,22 @@ class CollectParityReportTests(unittest.TestCase):
                 only_table="analysis_results",
             )
 
-        self.assertEqual(list(report["per_table"].keys()),
-                         ["analysis_results"])
-        self.assertEqual(report["summary"]["tables_checked"], 1)
+        self.assertEqual(report["per_table"], {})
+        self.assertEqual(report["summary"]["tables_checked"], 0)
+        self.assertFalse(report["summary"]["any_drift"])
         self.assertEqual(report["only_table"], "analysis_results")
 
-    def test_drift_in_one_table_flags_summary(self):
+    def test_count_drift_is_ignored_under_pg_only(self):
+        """M12.0e-5b: even when the patched status shows mismatched
+        counts, the neutralized report performs NO comparison —
+        per_table stays empty and any_drift is False. SQLite is no
+        longer written, so count drift is meaningless."""
         from scripts import check_parity
         import postgres_backfill
 
         sqlite_counts = {n: 5 for n in _EXPECTED_TABLES}
         postgres_counts = dict(sqlite_counts)
-        postgres_counts["analysis_results"] = 3  # drift!
+        postgres_counts["analysis_results"] = 3  # would-be drift
 
         with patch.object(
             postgres_backfill, "collect_status",
@@ -376,10 +383,10 @@ class CollectParityReportTests(unittest.TestCase):
         ):
             report = check_parity.collect_parity_report()
 
-        self.assertTrue(report["summary"]["any_drift"])
-        self.assertEqual(report["summary"]["drift_tables"],
-                         ["analysis_results"])
-        self.assertEqual(report["summary"]["total_delta_abs"], 2)
+        self.assertEqual(report["per_table"], {})
+        self.assertFalse(report["summary"]["any_drift"])
+        self.assertEqual(report["summary"]["drift_tables"], [])
+        self.assertEqual(report["summary"]["total_delta_abs"], 0)
 
 
 # ---------------------------------------------------------------------------
@@ -444,45 +451,12 @@ class MainExitPolicyTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("parity OK", stdout)
 
-    def test_returns_1_when_drift_detected(self):
-        import postgres_backfill
-
-        sqlite_counts = {n: 7 for n in _EXPECTED_TABLES}
-        postgres_counts = dict(sqlite_counts)
-        postgres_counts["jobs"] = 3
-
-        with _EnvScope():
-            os.environ["USE_POSTGRES_WRITE"] = "true"
-            os.environ["DATABASE_URL"] = "postgresql+psycopg://x/y"
-            with patch.object(
-                postgres_backfill, "collect_status",
-                return_value=_make_status(
-                    sqlite_counts=sqlite_counts,
-                    postgres_counts=postgres_counts,
-                ),
-            ):
-                code, stdout, stderr = self._run_main([])
-        self.assertEqual(code, 1)
-        self.assertIn("DRIFT detected", stdout)
-
-    def test_strict_returns_1_when_enabled_but_unreachable(self):
-        import postgres_backfill
-
-        with _EnvScope():
-            os.environ["USE_POSTGRES_WRITE"] = "true"
-            os.environ["DATABASE_URL"] = "postgresql+psycopg://x/y"
-            with patch.object(
-                postgres_backfill, "collect_status",
-                return_value=_make_status(
-                    enabled=True, can_connect=False,
-                ),
-            ):
-                code, _, _ = self._run_main(["--strict"])
-        self.assertEqual(code, 1)
-
-    def test_non_strict_returns_0_when_enabled_but_unreachable(self):
-        """Without --strict, unreachable Postgres is informational; the
-        operator may run the script before bringing the DB online."""
+    def test_returns_0_when_enabled_but_unreachable(self):
+        """M12.0e-5b: under PG-only the parity check is a no-op that
+        always exits 0 — there is nothing to probe or compare, so an
+        unreachable Postgres is irrelevant to the parity exit code.
+        Replaces the pre-5b strict/non-strict + drift exit-1 tests,
+        which exercised comparison paths that no longer run."""
         import postgres_backfill
 
         with _EnvScope():
@@ -496,7 +470,24 @@ class MainExitPolicyTests(unittest.TestCase):
             ):
                 code, stdout, _ = self._run_main([])
         self.assertEqual(code, 0)
-        self.assertIn("SELECT 1 probe failed", stdout)
+        self.assertIn("parity OK", stdout)
+
+    def test_strict_flag_is_accepted_but_still_exits_0(self):
+        """M12.0e-5b: --strict is retained for CLI back-compat but has
+        no effect — the neutralized no-op always exits 0."""
+        import postgres_backfill
+
+        with _EnvScope():
+            os.environ["USE_POSTGRES_WRITE"] = "true"
+            os.environ["DATABASE_URL"] = "postgresql+psycopg://x/y"
+            with patch.object(
+                postgres_backfill, "collect_status",
+                return_value=_make_status(
+                    enabled=True, can_connect=False,
+                ),
+            ):
+                code, _, _ = self._run_main(["--strict"])
+        self.assertEqual(code, 0)
 
     def test_json_output_is_valid_json_with_expected_keys(self):
         import postgres_backfill
@@ -518,7 +509,9 @@ class MainExitPolicyTests(unittest.TestCase):
         self.assertIn("health", payload)
         self.assertIn("summary", payload)
         self.assertIn("per_table", payload)
-        self.assertIn("analysis_results", payload["per_table"])
+        # M12.0e-5b: per_table is empty under the neutralized no-op; the
+        # key is still present so consumers read the same shape.
+        self.assertEqual(payload["per_table"], {})
         self.assertFalse(payload["summary"]["any_drift"])
 
 

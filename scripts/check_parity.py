@@ -1,35 +1,32 @@
-"""Postgres dual-write parity check (M12.1).
+"""Postgres dual-write parity check (M12.1) — NEUTRALIZED in M12.0e-5a.
 
-Read-only CLI that compares per-table row counts (and, optionally, the
-per-row identity sets) between SQLite and the Postgres mirror. The
-script writes NOTHING to either database under any circumstance.
+DEPRECATED: PG-only since M12.0e-5a. Stage 0e-5a removed the SQLite
+write-fallback — SQLite is no longer a write target and Postgres is the
+sole durable store. With SQLite never written, it is permanently empty,
+so a SQLite-vs-Postgres parity comparison is vacuous. As of M12.0e-5b
+this CLI is a no-op that reports "parity OK" and always exits 0; it no
+longer compares counts or identity sets against SQLite.
 
-Three signals are reported per mirror table:
+The script writes NOTHING to either database under any circumstance.
 
-* ``sqlite_count`` — ``SELECT COUNT(*)`` against the local SQLite.
-* ``postgres_count`` — ``SELECT COUNT(*)`` against the Postgres mirror
-  table (0 when the engine is unavailable or the table is missing).
-* ``in_parity`` — ``sqlite_count == postgres_count``.
-
-When ``--sample`` is passed the script additionally fetches up to
-``--sample-limit`` ``id`` (or unique-key) values from each side, computes
-the set difference, and reports a bounded preview of rows that exist
-only in one place. The previews are capped at 20 entries so a large
-drift cannot flood the report.
+Historical behavior (pre-M12.0e-5b): three signals were reported per
+mirror table — ``sqlite_count``, ``postgres_count``, and ``in_parity``
+(``sqlite_count == postgres_count``) — with an optional ``--sample``
+mode that diffed per-row identity sets. The pure helpers that computed
+those records (:func:`compute_parity_for_table`, :func:`summarize_parity`,
+:func:`_format_identity`) are retained for reference and test coverage
+but are no longer reached by :func:`collect_parity_report`.
 
 Usage:
     python scripts/check_parity.py
     python scripts/check_parity.py --json
     python scripts/check_parity.py --table analysis_results
     python scripts/check_parity.py --sample --sample-limit 200
-    python scripts/check_parity.py --strict
+    python scripts/check_parity.py --strict   (no effect — deprecated)
 
 Exit codes:
-    0 — parity check ran cleanly AND every table is in parity
-        (or dual-write is disabled, which is a no-op pass)
-    1 — at least one table is out of parity, OR --strict was passed
-        and dual-write is enabled but Postgres is unreachable
-    2 — CLI usage error
+    0 — always (deprecated no-op; parity is vacuous under PG-only)
+    2 — CLI usage error (unknown --table, negative --sample-limit)
 
 Safety contract:
     * Read-only on both SQLite and Postgres. No INSERT / UPDATE / DELETE
@@ -37,10 +34,8 @@ Safety contract:
     * Re-running is safe and idempotent.
     * No external network requests other than the Postgres connection
       itself.
-    * SQLite remains the source of truth — a parity report saying
-      "drift" never implies SQLite is wrong; it implies Postgres is
-      behind (or that an unexpected row entered Postgres via some
-      other path).
+    * Postgres is the sole source of truth (M12.0e-5a). SQLite is no
+      longer written and is not consulted for parity.
 
 This script is the M12.1 companion to ``check_postgres_health.py``
 (connectivity probe) and ``run_postgres_backfill.py`` (row mover).
@@ -299,48 +294,30 @@ def collect_parity_report(
     sample: bool = False,
     sample_limit: int = 500,
 ) -> dict:
-    """Build the full parity report.
+    """Build the (deprecated) parity report.
 
-    Wraps :func:`postgres_backfill.collect_status` for the per-table
-    counts, then layers identity-set sampling on top when ``sample`` is
-    True. Never raises; the ``health`` block always reflects current
-    connectivity so the caller can decide policy.
+    NEUTRALIZED in M12.0e-5b. SQLite is no longer a write target
+    (M12.0e-5a), so SQLite-vs-Postgres parity is vacuous. This function
+    now short-circuits to a no-op report: ``per_table`` is empty and
+    ``summary.any_drift`` is always False. The ``health`` block is still
+    sourced from :func:`postgres_backfill.collect_status` so operators
+    keep visibility into current Postgres connectivity. The per-table
+    count/identity comparison is NOT performed — the engine is never
+    touched here.
+
+    The report dict keys are preserved exactly (``health`` / ``summary``
+    / ``per_table`` / ``sampled`` / ``sample_limit`` / ``only_table``) so
+    existing consumers (run_operational_checks parsers, test_check_parity)
+    continue to read the same shape. Never raises.
     """
     import postgres_backfill
-    import postgres_storage
 
     status = postgres_backfill.collect_status()
     health = status["health"]
-    sqlite_counts = status["sqlite_counts"]
-    postgres_counts = status["postgres_counts"]
 
-    engine = None
-    if sample and health["dual_write_enabled"]:
-        engine = postgres_storage.get_engine()
-
-    table_names = sorted(sqlite_counts.keys())
-    if only_table is not None:
-        table_names = [t for t in table_names if t == only_table]
-
+    # M12.0e-5b: no comparison. per_table stays empty; summarize_parity
+    # over an empty map yields tables_checked=0, any_drift=False.
     per_table: Dict[str, Any] = {}
-    # When dual-write is disabled, the Postgres counts are all zero (no
-    # engine) while the SQLite counts reflect real data. A row-by-row
-    # comparison would surface misleading "drift" rows even though the
-    # mirror is intentionally empty. The human report and the exit-code
-    # policy already special-case the disabled branch — keep per_table
-    # empty in JSON output for the same reason so consumers cannot
-    # accidentally act on the bogus delta.
-    if health["dual_write_enabled"]:
-        for name in table_names:
-            per_table[name] = compute_parity_for_table(
-                name,
-                sqlite_counts.get(name, 0),
-                postgres_counts.get(name, 0),
-                engine=engine,
-                sample=sample,
-                sample_limit=sample_limit,
-            )
-
     summary = summarize_parity(per_table)
     return {
         "health": health,
@@ -378,114 +355,36 @@ def _format_pad(name: str, width: int = 28) -> str:
 
 
 def _render_human(report: dict) -> str:
+    """Render the deprecated no-op report (M12.0e-5b).
+
+    SQLite is no longer written (M12.0e-5a), so there is nothing to
+    compare. The render keeps the historical header and reports
+    "parity OK" unconditionally; it never emits per-table drift. The
+    ``health`` block is preserved for operator connectivity visibility.
+    """
     health = report["health"]
-    summary = report["summary"]
-    per_table = report["per_table"]
 
     lines = ["=== Postgres Dual-Write Parity ==="]
+    lines.append("")
+    lines.append(
+        "[deprecated] PG-only since M12.0e-5a — SQLite is no longer "
+        "written; parity is vacuous. This check is a no-op."
+    )
     lines.append("")
     lines.append(f"Dual-write enabled:  {health['dual_write_enabled']}")
     lines.append(f"Database URL present:{health['database_url_present']}")
     lines.append(f"Engine available:    {health['engine_available']}")
     lines.append(f"Can connect:         {health['can_connect']}")
     lines.append("")
-
-    if not health["dual_write_enabled"]:
-        lines.append(
-            "Parity check is a no-op: dual-write is disabled "
-            "(USE_POSTGRES_WRITE != 'true')."
-        )
-        lines.append(
-            "[Safety] SQLite is the sole source of truth. Nothing to "
-            "compare."
-        )
-        return "\n".join(lines)
-
-    if not health["can_connect"]:
-        lines.append(
-            "Parity check cannot run: Postgres SELECT 1 probe failed."
-        )
-        if health.get("error"):
-            lines.append(f"  error: {health['error']}")
-        lines.append("")
-
-    lines.append("Per-table parity:")
-    for name in sorted(per_table.keys()):
-        r = per_table[name]
-        marker = "OK " if r["in_parity"] else "!! "
-        line = (
-            f"  {marker}{_format_pad(name)} | "
-            f"SQLite={r['sqlite_count']:<6} "
-            f"Postgres={r['postgres_count']:<6} "
-            f"delta={r['delta']:+d}"
-        )
-        if r.get("sampled"):
-            so = r.get("sqlite_only_count", 0)
-            po = r.get("postgres_only_count", 0)
-            line += f"  sqlite_only={so}  postgres_only={po}"
-        lines.append(line)
-
-    # Drift detail block — only printed when at least one table drifted
-    # AND --sample mode produced previews.
-    drift_lines: List[str] = []
-    for name in sorted(per_table.keys()):
-        r = per_table[name]
-        if r.get("in_parity"):
-            continue
-        previews_present = r.get("sampled") and (
-            r.get("sqlite_only_preview") or r.get("postgres_only_preview")
-        )
-        if not previews_present:
-            continue
-        drift_lines.append("")
-        drift_lines.append(f"  [{name}] drift detail")
-        if r.get("sqlite_only_preview"):
-            drift_lines.append(
-                f"    sqlite_only ({r['sqlite_only_count']}):"
-            )
-            for key in r["sqlite_only_preview"]:
-                drift_lines.append(f"      {key}")
-        if r.get("postgres_only_preview"):
-            drift_lines.append(
-                f"    postgres_only ({r['postgres_only_count']}):"
-            )
-            for key in r["postgres_only_preview"]:
-                drift_lines.append(f"      {key}")
-    if drift_lines:
-        lines.append("")
-        lines.append("Drift previews (capped at 20 keys per side):")
-        lines.extend(drift_lines)
-
-    lines.append("")
-    lines.append("Summary:")
     lines.append(
-        f"  tables_checked:     {summary['tables_checked']}"
+        "Status: parity OK — PG-only mode (M12.0e-5a); nothing to "
+        "compare."
     )
-    lines.append(
-        f"  tables_in_parity:   {summary['tables_in_parity']}"
-    )
-    lines.append(
-        f"  tables_with_drift:  {summary['tables_with_drift']}"
-    )
-    lines.append(
-        f"  total_delta_abs:    {summary['total_delta_abs']}"
-    )
-    lines.append("")
-    if summary["any_drift"]:
-        lines.append(
-            "Status: DRIFT detected. Run "
-            "`python scripts/run_postgres_backfill.py --dry-run` "
-            "to preview what would be copied."
-        )
-    else:
-        lines.append(
-            "Status: parity OK — SQLite and Postgres row counts match "
-            "on every mirror table."
-        )
-
     lines.append("")
     lines.append("[Safety] Read-only on both databases.")
-    lines.append("[Safety] SQLite is the source of truth.")
+    lines.append(
+        "[Safety] Postgres is the sole source of truth (M12.0e-5a)."
+    )
     return "\n".join(lines)
 
 
@@ -538,19 +437,11 @@ def main(argv=None) -> int:
     else:
         print(_render_human(report))
 
-    health = report["health"]
-    summary = report["summary"]
-
-    # Exit policy:
-    # * 0 when dual-write disabled (informational no-op)
-    # * 0 when enabled + parity holds
-    # * 1 when enabled + parity drift detected
-    # * 1 when --strict and enabled + cannot connect
-    if not health["dual_write_enabled"]:
-        return 0
-    if not health["can_connect"]:
-        return 1 if args.strict else 0
-    return 1 if summary["any_drift"] else 0
+    # M12.0e-5b exit policy: always 0. Parity is vacuous under PG-only
+    # (SQLite is no longer written), so there is no drift to detect and
+    # --strict has nothing to be strict about. CLI usage errors still
+    # return 2 above, before the report is built.
+    return 0
 
 
 if __name__ == "__main__":
