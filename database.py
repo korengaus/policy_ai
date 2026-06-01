@@ -320,18 +320,9 @@ def result_exists_by_url(original_url: str) -> bool:
         # SQLite. Operator should investigate via check_postgres_health.
         return False
 
-    with get_connection() as connection:
-        row = connection.execute(
-            """
-            SELECT id
-            FROM analysis_results
-            WHERE original_url = ?
-            LIMIT 1
-            """,
-            (original_url,),
-        ).fetchone()
-
-    return row is not None
+    # M12.0e-6a: SQLite read-fallback removed (dual-write OFF → no
+    # analysis_results data; PG is the sole durable store since 0e-5a).
+    return False
 
 
 def get_result_id_by_url(original_url: str):
@@ -374,20 +365,9 @@ def get_result_id_by_url(original_url: str):
             return pg_id
         # PG returned None = no matching row (or engine miss).
         return None
-    with get_connection() as connection:
-        row = connection.execute(
-            """
-            SELECT id
-            FROM analysis_results
-            WHERE original_url = ?
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            (original_url,),
-        ).fetchone()
-    if row is None:
-        return None
-    return row["id"]
+    # M12.0e-6a: SQLite read-fallback removed (dual-write OFF → no
+    # analysis_results data; PG is the sole durable store since 0e-5a).
+    return None
 
 
 def save_analysis_result(result: dict, query: str):
@@ -586,17 +566,9 @@ def get_recent_results(limit: int = 20):
             return pg_rows
         # PG returned None — engine None despite dual-write enabled.
         return []
-    with get_connection() as connection:
-        rows = connection.execute(
-            """
-            SELECT *
-            FROM analysis_results
-            ORDER BY id DESC
-            LIMIT ?
-            """,
-            (safe_limit,),
-        ).fetchall()
-    return [_row_to_dict(row) for row in rows]
+    # M12.0e-6a: SQLite read-fallback removed (dual-write OFF → no
+    # analysis_results data; PG is the sole durable store since 0e-5a).
+    return []
 
 
 def get_result_by_id(result_id: int):
@@ -632,16 +604,9 @@ def get_result_by_id(result_id: int):
             return pg_row
         # PG returned None = row not found (or engine miss).
         return None
-    with get_connection() as connection:
-        row = connection.execute(
-            """
-            SELECT *
-            FROM analysis_results
-            WHERE id = ?
-            """,
-            (result_id,),
-        ).fetchone()
-    return _row_to_dict(row) if row else None
+    # M12.0e-6a: SQLite read-fallback removed (dual-write OFF → no
+    # analysis_results data; PG is the sole durable store since 0e-5a).
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -701,30 +666,10 @@ def get_cached_embedding(text_hash: str, provider: str, model: str):
         # PG returned vector OR None (legitimate cache miss).
         # We do NOT fall through to SQLite — caller recomputes on miss.
         return pg_vector
-    try:
-        with get_connection() as connection:
-            row = connection.execute(
-                """
-                SELECT vector_json, dimensions
-                FROM embedding_cache
-                WHERE text_hash = ? AND provider = ? AND model = ?
-                LIMIT 1
-                """,
-                (text_hash, provider, model or ""),
-            ).fetchone()
-    except sqlite3.Error as error:
-        _embedding_logger.warning("embedding_cache read failed: %s", error)
-        return None
-    if row is None:
-        return None
-    try:
-        vector = json.loads(row["vector_json"])
-    except (TypeError, ValueError, json.JSONDecodeError) as error:
-        _embedding_logger.warning("embedding_cache row had unreadable vector: %s", error)
-        return None
-    if not isinstance(vector, list) or not all(isinstance(v, (int, float)) for v in vector):
-        return None
-    return [float(v) for v in vector]
+    # M12.0e-6a: SQLite read-fallback removed (dual-write OFF → cache
+    # miss; the caller recomputes the embedding). PG is the sole durable
+    # cache since 0e-5a.
+    return None
 
 
 def save_cached_embedding(
@@ -1367,28 +1312,9 @@ def get_fetch_artifacts(source_id: str = None, limit: int = 50) -> list:
         if pg_rows is not None:
             return [_row_to_fetch_artifact(r) for r in pg_rows]
         return []
-    with get_connection() as connection:
-        _ensure_source_fetch_artifacts_table(connection)
-        if source_id:
-            rows = connection.execute(
-                """
-                SELECT * FROM source_fetch_artifacts
-                WHERE source_id = ?
-                ORDER BY fetch_timestamp DESC, id DESC
-                LIMIT ?
-                """,
-                (str(source_id), capped_limit),
-            ).fetchall()
-        else:
-            rows = connection.execute(
-                """
-                SELECT * FROM source_fetch_artifacts
-                ORDER BY fetch_timestamp DESC, id DESC
-                LIMIT ?
-                """,
-                (capped_limit,),
-            ).fetchall()
-    return [_row_to_fetch_artifact(r) for r in rows]
+    # M12.0e-6a: SQLite read-fallback removed (dual-write OFF → no
+    # source_fetch_artifacts data; PG is the sole durable store since 0e-5a).
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -1550,85 +1476,54 @@ def save_extraction_result(result_dict: dict, db_path: str = None) -> int:
 
 
 def get_extraction_results(source_id: str = None, artifact_id: int = None,
-                           db_path: str = None, limit: int = 50) -> list:
+                           limit: int = 50) -> list:
     """Return extraction artifacts (newest first), optionally filtered
     by ``source_id`` and/or ``artifact_id``. ``limit`` is clamped to
-    ``[1, 500]``.
-
-    When ``db_path`` is provided the read goes to that SQLite file
-    directly (used by the CLI's ``--db-path`` flag and by tests)."""
+    ``[1, 500]``."""
     try:
         capped_limit = max(1, min(int(limit or 50), 500))
     except (TypeError, ValueError):
         capped_limit = 50
-    # M12.0c-4 / M12.0d-1: PG primary ONLY when db_path is None.
-    # Explicit db_path opts into a specific SQLite file (CLI / tests) —
-    # PG MUST be skipped and no PG-related raises can fire. When
-    # db_path is None: SQLite block below is unreachable when dual-
-    # write enabled. PG-read errors now raise.
-    if db_path is None:
+    # M12.0c-4 / M12.0d-1: PG primary. PG-read errors raise.
+    # M12.0e-6a: the explicit-db_path SQLite read path and the dual-
+    # write-OFF SQLite fallback were removed; PG is the sole durable
+    # store since 0e-5a. OFF → [].
+    try:
+        from postgres_storage import (
+            is_postgres_dual_write_enabled,
+            read_extraction_results,
+        )
+        pg_enabled = is_postgres_dual_write_enabled()
+    except Exception:
+        log.error(
+            "get_extraction_results failed to import postgres_storage",
+            exc_info=True,
+            extra={"function": "get_extraction_results"},
+        )
+        raise
+    if pg_enabled:
         try:
-            from postgres_storage import (
-                is_postgres_dual_write_enabled,
-                read_extraction_results,
+            pg_rows = read_extraction_results(
+                source_id=source_id,
+                artifact_id=artifact_id,
+                limit=capped_limit,
             )
-            pg_enabled = is_postgres_dual_write_enabled()
         except Exception:
             log.error(
-                "get_extraction_results failed to import postgres_storage",
+                "get_extraction_results PG read failed",
                 exc_info=True,
-                extra={"function": "get_extraction_results"},
+                extra={
+                    "function": "get_extraction_results",
+                    "source_id": source_id,
+                    "artifact_id": artifact_id,
+                    "limit": capped_limit,
+                },
             )
             raise
-        if pg_enabled:
-            try:
-                pg_rows = read_extraction_results(
-                    source_id=source_id,
-                    artifact_id=artifact_id,
-                    limit=capped_limit,
-                )
-            except Exception:
-                log.error(
-                    "get_extraction_results PG read failed",
-                    exc_info=True,
-                    extra={
-                        "function": "get_extraction_results",
-                        "source_id": source_id,
-                        "artifact_id": artifact_id,
-                        "limit": capped_limit,
-                    },
-                )
-                raise
-            if pg_rows is not None:
-                return [_row_to_extraction_result(r) for r in pg_rows]
-            return []
-    connection = _open_connection(db_path)
-    try:
-        _ensure_artifact_text_extractions_table(connection)
-        clauses = []
-        params: list = []
-        if source_id:
-            clauses.append("source_id = ?")
-            params.append(str(source_id))
-        if artifact_id is not None:
-            try:
-                clauses.append("artifact_id = ?")
-                params.append(int(artifact_id))
-            except (TypeError, ValueError):
-                pass
-        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        params.append(capped_limit)
-        rows = connection.execute(
-            f"""
-            SELECT * FROM artifact_text_extractions{where}
-            ORDER BY extraction_timestamp DESC, id DESC
-            LIMIT ?
-            """,
-            tuple(params),
-        ).fetchall()
-    finally:
-        connection.close()
-    return [_row_to_extraction_result(r) for r in rows]
+        if pg_rows is not None:
+            return [_row_to_extraction_result(r) for r in pg_rows]
+        return []
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -1823,7 +1718,6 @@ def get_evidence_candidates(
     analysis_id: str = None,
     source_id: str = None,
     extraction_id: int = None,
-    db_path: str = None,
     limit: int = 50,
 ) -> list:
     """Return evidence candidates (newest first), optionally filtered
@@ -1833,77 +1727,48 @@ def get_evidence_candidates(
         capped_limit = max(1, min(int(limit or 50), 500))
     except (TypeError, ValueError):
         capped_limit = 50
-    # M12.0c-4 / M12.0d-1: PG primary ONLY when db_path is None (see
-    # comment in get_extraction_results for the rationale). PG-read
-    # errors now raise.
-    if db_path is None:
+    # M12.0c-4 / M12.0d-1: PG primary. PG-read errors raise.
+    # M12.0e-6a: the explicit-db_path SQLite read path and the dual-
+    # write-OFF SQLite fallback were removed; PG is the sole durable
+    # store since 0e-5a. OFF → [].
+    try:
+        from postgres_storage import (
+            is_postgres_dual_write_enabled,
+            read_evidence_candidates,
+        )
+        pg_enabled = is_postgres_dual_write_enabled()
+    except Exception:
+        log.error(
+            "get_evidence_candidates failed to import postgres_storage",
+            exc_info=True,
+            extra={"function": "get_evidence_candidates"},
+        )
+        raise
+    if pg_enabled:
         try:
-            from postgres_storage import (
-                is_postgres_dual_write_enabled,
-                read_evidence_candidates,
+            pg_rows = read_evidence_candidates(
+                analysis_id=analysis_id,
+                source_id=source_id,
+                extraction_id=extraction_id,
+                limit=capped_limit,
             )
-            pg_enabled = is_postgres_dual_write_enabled()
         except Exception:
             log.error(
-                "get_evidence_candidates failed to import postgres_storage",
+                "get_evidence_candidates PG read failed",
                 exc_info=True,
-                extra={"function": "get_evidence_candidates"},
+                extra={
+                    "function": "get_evidence_candidates",
+                    "analysis_id": analysis_id,
+                    "source_id": source_id,
+                    "extraction_id": extraction_id,
+                    "limit": capped_limit,
+                },
             )
             raise
-        if pg_enabled:
-            try:
-                pg_rows = read_evidence_candidates(
-                    analysis_id=analysis_id,
-                    source_id=source_id,
-                    extraction_id=extraction_id,
-                    limit=capped_limit,
-                )
-            except Exception:
-                log.error(
-                    "get_evidence_candidates PG read failed",
-                    exc_info=True,
-                    extra={
-                        "function": "get_evidence_candidates",
-                        "analysis_id": analysis_id,
-                        "source_id": source_id,
-                        "extraction_id": extraction_id,
-                        "limit": capped_limit,
-                    },
-                )
-                raise
-            if pg_rows is not None:
-                return [_row_to_evidence_candidate(r) for r in pg_rows]
-            return []
-    connection = _open_connection(db_path)
-    try:
-        _ensure_artifact_evidence_candidates_table(connection)
-        clauses: list = []
-        params: list = []
-        if analysis_id is not None and str(analysis_id):
-            clauses.append("analysis_id = ?")
-            params.append(str(analysis_id))
-        if source_id:
-            clauses.append("source_id = ?")
-            params.append(str(source_id))
-        if extraction_id is not None:
-            try:
-                clauses.append("extraction_id = ?")
-                params.append(int(extraction_id))
-            except (TypeError, ValueError):
-                pass
-        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        params.append(capped_limit)
-        rows = connection.execute(
-            f"""
-            SELECT * FROM artifact_evidence_candidates{where}
-            ORDER BY candidate_timestamp DESC, id DESC
-            LIMIT ?
-            """,
-            tuple(params),
-        ).fetchall()
-    finally:
-        connection.close()
-    return [_row_to_evidence_candidate(r) for r in rows]
+        if pg_rows is not None:
+            return [_row_to_evidence_candidate(r) for r in pg_rows]
+        return []
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -2125,7 +1990,6 @@ def get_producer_comparisons(
     analysis_id: str = None,
     disagreement_pattern: str = None,
     only_disagreements: bool = False,
-    db_path: str = None,
     limit: int = 50,
 ) -> list:
     """Return verdict-producer comparisons (newest first), optionally
@@ -2136,72 +2000,48 @@ def get_producer_comparisons(
         capped_limit = max(1, min(int(limit or 50), 500))
     except (TypeError, ValueError):
         capped_limit = 50
-    # M12.0c-4 / M12.0d-1: PG primary ONLY when db_path is None.
-    # PG-read errors now raise.
-    if db_path is None:
+    # M12.0c-4 / M12.0d-1: PG primary. PG-read errors raise.
+    # M12.0e-6a: the explicit-db_path SQLite read path and the dual-
+    # write-OFF SQLite fallback were removed; PG is the sole durable
+    # store since 0e-5a. OFF → [].
+    try:
+        from postgres_storage import (
+            is_postgres_dual_write_enabled,
+            read_producer_comparisons,
+        )
+        pg_enabled = is_postgres_dual_write_enabled()
+    except Exception:
+        log.error(
+            "get_producer_comparisons failed to import postgres_storage",
+            exc_info=True,
+            extra={"function": "get_producer_comparisons"},
+        )
+        raise
+    if pg_enabled:
         try:
-            from postgres_storage import (
-                is_postgres_dual_write_enabled,
-                read_producer_comparisons,
+            pg_rows = read_producer_comparisons(
+                analysis_id=analysis_id,
+                disagreement_pattern=disagreement_pattern,
+                only_disagreements=only_disagreements,
+                limit=capped_limit,
             )
-            pg_enabled = is_postgres_dual_write_enabled()
         except Exception:
             log.error(
-                "get_producer_comparisons failed to import postgres_storage",
+                "get_producer_comparisons PG read failed",
                 exc_info=True,
-                extra={"function": "get_producer_comparisons"},
+                extra={
+                    "function": "get_producer_comparisons",
+                    "analysis_id": analysis_id,
+                    "disagreement_pattern": disagreement_pattern,
+                    "only_disagreements": only_disagreements,
+                    "limit": capped_limit,
+                },
             )
             raise
-        if pg_enabled:
-            try:
-                pg_rows = read_producer_comparisons(
-                    analysis_id=analysis_id,
-                    disagreement_pattern=disagreement_pattern,
-                    only_disagreements=only_disagreements,
-                    limit=capped_limit,
-                )
-            except Exception:
-                log.error(
-                    "get_producer_comparisons PG read failed",
-                    exc_info=True,
-                    extra={
-                        "function": "get_producer_comparisons",
-                        "analysis_id": analysis_id,
-                        "disagreement_pattern": disagreement_pattern,
-                        "only_disagreements": only_disagreements,
-                        "limit": capped_limit,
-                    },
-                )
-                raise
-            if pg_rows is not None:
-                return [_row_to_producer_comparison(r) for r in pg_rows]
-            return []
-    connection = _open_connection(db_path)
-    try:
-        _ensure_verdict_producer_comparisons_table(connection)
-        clauses: list = []
-        params: list = []
-        if analysis_id is not None and str(analysis_id):
-            clauses.append("analysis_id = ?")
-            params.append(str(analysis_id))
-        if disagreement_pattern:
-            clauses.append("disagreement_pattern = ?")
-            params.append(str(disagreement_pattern))
-        if only_disagreements:
-            clauses.append("all_three_agree = 0")
-        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        params.append(capped_limit)
-        rows = connection.execute(
-            f"""
-            SELECT * FROM verdict_producer_comparisons{where}
-            ORDER BY comparison_timestamp DESC, id DESC
-            LIMIT ?
-            """,
-            tuple(params),
-        ).fetchall()
-    finally:
-        connection.close()
-    return [_row_to_producer_comparison(r) for r in rows]
+        if pg_rows is not None:
+            return [_row_to_producer_comparison(r) for r in pg_rows]
+        return []
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -2408,7 +2248,6 @@ def get_verdict_label_attributions(
     analysis_id: str = None,
     attributed_branch_id: str = None,
     only_weak_evidence_verified: bool = False,
-    db_path: str = None,
     limit: int = 100,
 ) -> list:
     """Return verdict-label attribution rows (newest first), filtered
@@ -2419,77 +2258,53 @@ def get_verdict_label_attributions(
         capped_limit = max(1, min(int(limit or 100), 500))
     except (TypeError, ValueError):
         capped_limit = 100
-    # M12.0c-4 / M12.0d-1: PG primary ONLY when db_path is None.
-    # PG-read errors now raise.
-    if db_path is None:
+    # M12.0c-4 / M12.0d-1: PG primary. PG-read errors raise.
+    # M12.0e-6a: the explicit-db_path SQLite read path and the dual-
+    # write-OFF SQLite fallback were removed; PG is the sole durable
+    # store since 0e-5a. OFF → [].
+    try:
+        from postgres_storage import (
+            is_postgres_dual_write_enabled,
+            read_verdict_label_attributions,
+        )
+        pg_enabled = is_postgres_dual_write_enabled()
+    except Exception:
+        log.error(
+            "get_verdict_label_attributions failed to import "
+            "postgres_storage",
+            exc_info=True,
+            extra={"function": "get_verdict_label_attributions"},
+        )
+        raise
+    if pg_enabled:
         try:
-            from postgres_storage import (
-                is_postgres_dual_write_enabled,
-                read_verdict_label_attributions,
+            pg_rows = read_verdict_label_attributions(
+                analysis_id=analysis_id,
+                attributed_branch_id=attributed_branch_id,
+                only_weak_evidence_verified=only_weak_evidence_verified,
+                limit=capped_limit,
             )
-            pg_enabled = is_postgres_dual_write_enabled()
         except Exception:
             log.error(
-                "get_verdict_label_attributions failed to import "
-                "postgres_storage",
+                "get_verdict_label_attributions PG read failed",
                 exc_info=True,
-                extra={"function": "get_verdict_label_attributions"},
+                extra={
+                    "function": "get_verdict_label_attributions",
+                    "analysis_id": analysis_id,
+                    "attributed_branch_id": attributed_branch_id,
+                    "only_weak_evidence_verified":
+                        only_weak_evidence_verified,
+                    "limit": capped_limit,
+                },
             )
             raise
-        if pg_enabled:
-            try:
-                pg_rows = read_verdict_label_attributions(
-                    analysis_id=analysis_id,
-                    attributed_branch_id=attributed_branch_id,
-                    only_weak_evidence_verified=only_weak_evidence_verified,
-                    limit=capped_limit,
-                )
-            except Exception:
-                log.error(
-                    "get_verdict_label_attributions PG read failed",
-                    exc_info=True,
-                    extra={
-                        "function": "get_verdict_label_attributions",
-                        "analysis_id": analysis_id,
-                        "attributed_branch_id": attributed_branch_id,
-                        "only_weak_evidence_verified":
-                            only_weak_evidence_verified,
-                        "limit": capped_limit,
-                    },
-                )
-                raise
-            if pg_rows is not None:
-                return [
-                    _row_to_verdict_label_attribution(r)
-                    for r in pg_rows
-                ]
-            return []
-    connection = _open_connection(db_path)
-    try:
-        _ensure_verdict_label_attributions_table(connection)
-        clauses: list = []
-        params: list = []
-        if analysis_id is not None and str(analysis_id):
-            clauses.append("analysis_id = ?")
-            params.append(str(analysis_id))
-        if attributed_branch_id:
-            clauses.append("attributed_branch_id = ?")
-            params.append(str(attributed_branch_id))
-        if only_weak_evidence_verified:
-            clauses.append("is_weak_evidence_verified = 1")
-        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        params.append(capped_limit)
-        rows = connection.execute(
-            f"""
-            SELECT * FROM verdict_label_attributions{where}
-            ORDER BY diagnostic_timestamp DESC, id DESC
-            LIMIT ?
-            """,
-            tuple(params),
-        ).fetchall()
-    finally:
-        connection.close()
-    return [_row_to_verdict_label_attribution(r) for r in rows]
+        if pg_rows is not None:
+            return [
+                _row_to_verdict_label_attribution(r)
+                for r in pg_rows
+            ]
+        return []
+    return []
 
 
 def _open_connection(db_path):
@@ -2526,23 +2341,7 @@ def embedding_cache_stats() -> dict:
             "total": total,
             "per_provider": per_provider,
         }
-    try:
-        with get_connection() as connection:
-            total = connection.execute(
-                "SELECT COUNT(*) AS n FROM embedding_cache"
-            ).fetchone()["n"]
-            per_provider = connection.execute(
-                """
-                SELECT provider, COUNT(*) AS n
-                FROM embedding_cache
-                GROUP BY provider
-                ORDER BY n DESC
-                """
-            ).fetchall()
-    except sqlite3.Error as error:
-        return {"available": False, "error": str(error)}
-    return {
-        "available": True,
-        "total": int(total or 0),
-        "per_provider": {row["provider"]: int(row["n"]) for row in per_provider},
-    }
+    # M12.0e-6a: SQLite read-fallback removed (dual-write OFF → no
+    # durable embedding cache; report empty). PG is the sole durable
+    # cache since 0e-5a.
+    return {"available": True, "total": 0, "per_provider": {}}

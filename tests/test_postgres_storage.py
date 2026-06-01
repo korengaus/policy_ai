@@ -3165,69 +3165,12 @@ class DatabaseOperatorCliFallbackTests(unittest.TestCase):
                     self.assertEqual(rows, [])
                     postgres_storage.reset_engine_for_tests()
 
-    # --- db_path skip (2) --------------------------------------------
-
-    def test_get_extraction_results_with_db_path_skips_postgres(self):
-        """When the caller passes an explicit ``db_path``, PG MUST be
-        skipped — the caller is opting into a specific SQLite file
-        (CLI's ``--db-path`` flag / isolated tests)."""
-        with _EnvScope():
-            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                explicit_db = Path(tmp_dir) / "explicit.db"
-                pg_db = Path(tmp_dir) / "pg.db"
-                _set_env(USE_POSTGRES_WRITE="true",
-                         DATABASE_URL=f"sqlite:///{pg_db}")
-                import database
-                import postgres_storage
-
-                # PG has a row that would be visible if we did not
-                # skip — but the caller passed db_path, so PG MUST be
-                # ignored.
-                engine = postgres_storage.get_engine()
-                postgres_storage.ensure_schema(engine)
-                _seed_extraction_result_in_pg(
-                    artifact_id=999, source_id="pg-src",
-                    url="https://pg/should-not-appear",
-                    extraction_timestamp="2026-05-27T00:00:01",
-                )
-                # explicit_db is empty — initialise its schema directly.
-                with patch("database.DB_PATH", explicit_db):
-                    database.init_artifact_text_extractions_table()
-
-                rows = database.get_extraction_results(db_path=explicit_db)
-                # PG had a row but db_path was passed → SQLite only.
-                self.assertEqual(rows, [])
-                postgres_storage.reset_engine_for_tests()
-
-    def test_get_producer_comparisons_with_db_path_skips_postgres(self):
-        """db_path skip with a different filter shape
-        (``only_disagreements`` bool flag)."""
-        with _EnvScope():
-            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
-                explicit_db = Path(tmp_dir) / "explicit.db"
-                pg_db = Path(tmp_dir) / "pg.db"
-                _set_env(USE_POSTGRES_WRITE="true",
-                         DATABASE_URL=f"sqlite:///{pg_db}")
-                import database
-                import postgres_storage
-
-                engine = postgres_storage.get_engine()
-                postgres_storage.ensure_schema(engine)
-                _seed_producer_comparison_in_pg(
-                    analysis_id="ana-pg-skip", source="s",
-                    input_hash="h-pg-skip",
-                    comparison_timestamp="2026-05-27T00:00:01",
-                    all_three_agree=0,
-                    disagreement_pattern="p1_only",
-                )
-                with patch("database.DB_PATH", explicit_db):
-                    database.init_verdict_producer_comparisons_table()
-
-                rows = database.get_producer_comparisons(
-                    only_disagreements=True, db_path=explicit_db,
-                )
-                self.assertEqual(rows, [])
-                postgres_storage.reset_engine_for_tests()
+    # M12.0e-6a: the 2 db_path-skip tests
+    # (test_get_extraction_results_with_db_path_skips_postgres,
+    # test_get_producer_comparisons_with_db_path_skips_postgres) were
+    # removed alongside the explicit-db_path SQLite read path in
+    # database.py — get_* helpers are PG-only and no longer accept a
+    # db_path argument.
 
 
 # ---------------------------------------------------------------------------
