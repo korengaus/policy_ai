@@ -8,7 +8,7 @@ googlenewsdecoder
 langchain
 langchain-openai
 openai
-playwright
+playwright==1.60.0
 psycopg[binary]
 python-dotenv
 requests
