@@ -12,6 +12,7 @@ from typing import Optional
 from urllib.parse import quote, urljoin, urlparse
 from googlenewsdecoder import gnewsdecoder
 
+import config
 from config import RECENT_DAYS
 from text_utils import decode_response_text, sanitize_data, sanitize_text
 
@@ -154,7 +155,17 @@ def _normalize_query(query: str) -> str:
 
 def _cache_key(query: str, max_results: int) -> str:
     raw = f"{_normalize_query(query)}|{int(max_results or 0)}"
-    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+    key = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+    # M20-2 (2026-06-02): segment the news-collection cache namespace when the
+    # Naver API tier is enabled, so toggling NAVER_SEARCH_ENABLED on Render
+    # never serves a cross-contaminated entry within the 30-min TTL (Lesson 4).
+    # The DISABLED path returns the byte-identical key used pre-M20-2 — the
+    # "-nv" suffix is appended ONLY when the flag is on. This covers all three
+    # call sites (_cached_news_response, _store_news_response, and the
+    # news_cache_key debug field) because all of them route through here.
+    if config.naver_search_enabled():
+        key = f"{key}-nv"
+    return key
 
 
 def _load_news_cache() -> dict:
@@ -1023,6 +1034,9 @@ def search_google_news_rss_with_meta(query: str, max_results: int = 3):
     fallback_source_attempted = []
     fallback_error = None
     no_results_reason = None
+    # M20-2: stays None on the disabled path so the debug dict is byte-identical
+    # to pre-M20-2; set only inside the enabled Naver API tier below.
+    naver_api_count = None
 
     log.info(f"[NewsCollector] Google RSS raw count: {raw_rss_count}")
     log.info(f"[NewsCollector] Recent window results: {filtered_recent_count}")
@@ -1045,6 +1059,42 @@ def search_google_news_rss_with_meta(query: str, max_results: int = 3):
             selected = _stable_sort_news(raw_results)[:max_results]
             mode = "unfiltered_fallback"
             collection_source = "google_rss" if selected else "none"
+
+    # M20-2 (2026-06-02): Naver news API tier (Option A). Fires ONLY when the
+    # Google RSS ladder selected nothing AND NAVER_SEARCH_ENABLED is true.
+    # Disabled-by-default, so this is a no-op until the flag is flipped on
+    # Render: when the flag is false the branch is skipped entirely — no
+    # provider is constructed, zero network, and the debug dict + control flow
+    # are byte-identical to pre-M20-2. Sits AHEAD of the fragile Naver/Daum
+    # HTML scrapers so clean API results are preferred; the scrapers remain as
+    # deeper fallback (no removal — out of scope). The provider normalizes to
+    # the news-result shape (A) with google_link == original_url, so
+    # resolve_google_news_url short-circuits and the M15 post-resolve dedup in
+    # main.py works unchanged. NO log call is added here (news_collector.py is
+    # log-pinned at 331/16); observability rides on the debug dict
+    # (mode / collection_source / naver_api_count) plus the provider's own
+    # pin-OUT warnings. If the key is absent or the request fails the provider
+    # returns an empty result (never raises) and we fall through to the
+    # existing HTML scrapers exactly as today.
+    if not selected and config.naver_search_enabled():
+        # Lazy import keeps the disabled-path import graph identical to today.
+        from providers import get_search_provider
+
+        naver_result = get_search_provider("naver").search(query, limit=max_results)
+        naver_items = [item for item in (naver_result.get("items") or []) if item]
+        # Reuse the EXISTING dedup + M17b relevance filter (do not reinvent).
+        naver_items = _dedupe_news_items(naver_items)
+        if query and naver_items:
+            naver_items = [
+                item for item in naver_items
+                if _title_has_query_overlap(item.get("title", ""), query)
+            ]
+        # Bypass the 30d is_recent filter — this is a last-resort tier.
+        if naver_items:
+            selected = naver_items[:max_results]
+            mode = "naver_api"
+            collection_source = "naver_api"
+            naver_api_count = len(selected)
 
     if not selected and raw_rss_count == 0:
         log.error("[NewsCollector] Google RSS failed, trying Naver fallback")
@@ -1095,6 +1145,11 @@ def search_google_news_rss_with_meta(query: str, max_results: int = 3):
         "news_cache_key": _cache_key(query, max_results),
         "news_cache_ttl_seconds": NEWS_CACHE_TTL_SECONDS,
     }
+    # M20-2: in-branch-only debug key. naver_api_count is None on the disabled
+    # path, so this key is NOT added there — the disabled debug dict stays
+    # byte-identical to pre-M20-2.
+    if naver_api_count is not None:
+        debug["naver_api_count"] = naver_api_count
     _store_news_response(query, max_results, selected, debug)
 
     return {
