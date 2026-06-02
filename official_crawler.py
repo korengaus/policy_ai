@@ -14,7 +14,7 @@ from official_site_parsers import (
     is_bad_official_link,
 )
 from official_document_classifier import EXCLUDED_DOCUMENT_TYPES, classify_official_document
-from official_relevance import score_document_relevance
+from official_relevance import score_document_relevance, extract_query_terms
 from official_source_search import build_official_search_url
 from text_utils import decode_response_text, sanitize_data, sanitize_text
 
@@ -636,10 +636,20 @@ def _annotate_candidate_detail_fields(candidate: dict, site_key: str) -> dict:
     return candidate
 
 
+def _link_query_overlap(text, query_terms) -> int:
+    # M19-6 (C-1): count query terms present in a candidate's link text.
+    # Mirrors scripts/trace_official_detail_selection.py:97-99 — a topical
+    # selection signal that is otherwise unused. Ranking-only; never feeds
+    # any match/grade/verdict gate.
+    body = text or ""
+    return sum(1 for term in (query_terms or []) if term and term in body)
+
+
 def _candidate_selection_key(candidate: dict) -> tuple:
     return (
         1 if candidate.get("is_detail_page") else 0,
         candidate.get("relevance_score") or -1,
+        candidate.get("query_overlap_count") or 0,
         1 if candidate.get("id_detected") else 0,
         candidate.get("url_depth_score") or 0,
         len(candidate.get("text") or ""),
@@ -1255,11 +1265,15 @@ def fetch_best_official_document(search_result: dict, news_context: dict | None 
                     result["search_attempt_results"].append(attempt_result)
 
         result["parser_used"] = parser_used
+        query_terms = extract_query_terms(
+            result.get("search_query_used") or search_result.get("search_query") or ""
+        )
         for candidate in candidate_links:
             candidate.setdefault("link_score", candidate.get("score"))
             candidate.setdefault("link_reason", candidate.get("reason"))
             candidate.setdefault("relevance_score", None)
             candidate.setdefault("relevance_level", None)
+            candidate["query_overlap_count"] = _link_query_overlap(candidate.get("text"), query_terms)
             _annotate_candidate_detail_fields(candidate, result.get("site_key") or "")
         result["candidate_links"] = candidate_links
 
@@ -1387,6 +1401,7 @@ def fetch_best_official_document(search_result: dict, news_context: dict | None 
         evaluated.sort(
             key=lambda item: (
                 item["relevance"]["relevance_score"],
+                item["candidate"].get("query_overlap_count") or 0,
                 1 if item["candidate"].get("is_detail_page") else 0,
                 1 if item["candidate"].get("id_detected") else 0,
                 item["candidate"].get("url_depth_score") or 0,
