@@ -1075,8 +1075,14 @@ def search_google_news_rss_with_meta(query: str, max_results: int = 3):
         # Lazy import keeps the disabled-path import graph identical to today.
         from providers import get_search_provider
 
+        # M20-3-FIX: fetch a WIDER candidate pool than max_results. A small
+        # max_results (e.g. 1) starved the M17b _title_has_query_overlap hard
+        # filter — Naver returned only the single newest article, M17b dropped
+        # it on a title mismatch, and the tier silently lost to the RSS ladder.
+        # Fetch >= 20 (provider clamps to 100), filter, THEN take [:max_results].
+        naver_fetch_limit = max(max_results, 20)
         naver_result = get_search_provider("naver").search(
-            query, limit=max_results, sort="date",
+            query, limit=naver_fetch_limit, sort="date",
         )
         naver_items = [item for item in (naver_result.get("items") or []) if item]
         # Reuse the EXISTING dedup + M17b relevance filter (do not reinvent).

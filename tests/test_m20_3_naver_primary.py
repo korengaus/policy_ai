@@ -192,7 +192,64 @@ class SortParamTests(unittest.TestCase):
 
             spy.assert_called_once()
             self.assertEqual(spy.call_args.kwargs.get("sort"), "date")
-            self.assertEqual(spy.call_args.kwargs.get("limit"), 3)
+            # M20-3-FIX: fetch limit is decoupled from max_results (widened to
+            # >= 20) so the M17b filter has enough candidates; see FetchPoolTests.
+            self.assertEqual(spy.call_args.kwargs.get("limit"), 20)
+
+
+# ---------------------------------------------------------------------------
+# (g) M20-3-FIX regression — wide candidate pool so M17b isn't starved.
+# ---------------------------------------------------------------------------
+
+
+class FetchPoolTests(unittest.TestCase):
+    def test_naver_wins_when_ontopic_item_is_not_first(self):
+        # Mirrors the production failure: max_results=1, but Naver returns
+        # several items with the on-topic article NOT first. The OLD code
+        # fetched only limit=1 (the off-topic first item) -> M17b dropped it
+        # -> RSS won. The fix fetches a wider pool, so M17b finds the on-topic
+        # item and Naver wins.
+        with _EnvScope():
+            _set_env(NAVER_SEARCH_ENABLED="true")
+            items = [
+                _naver_raw("강남 오피스텔 살인 사건 용의자 검거", "https://press.example.com/crime/1"),
+                _naver_raw("부동산 시장 주간 동향 정리", "https://press.example.com/market/2"),
+                _naver_raw("전세대출 한도 확대 방안 발표", "https://press.example.com/ontopic/3"),
+            ]
+            provider = MockNaverSearchProvider(items=items)
+            feed = _FakeFeed([_rss_entry("전세대출 관련 기사", recent=True)])
+            with patch.object(news_collector, "_cached_news_response", return_value=None), \
+                 patch.object(news_collector, "_store_news_response"), \
+                 patch.object(news_collector, "_parse_google_news_rss", return_value=feed), \
+                 patch("providers.get_search_provider", return_value=provider):
+                out = news_collector.search_google_news_rss_with_meta("전세대출", max_results=1)
+
+            debug = out["debug"]
+            self.assertEqual(debug["collection_source"], "naver_api")
+            self.assertEqual(debug["naver_api_count"], 1)
+            self.assertEqual(len(out["results"]), 1)
+            # The selected item is the on-topic one, NOT the off-topic first item.
+            self.assertEqual(out["results"][0]["original_url"], "https://press.example.com/ontopic/3")
+            self.assertNotIn("살인", out["results"][0]["title"])
+
+    def test_provider_called_with_wide_fetch_limit(self):
+        # Pins the decoupling: the fetch limit must be >= max(max_results, 20)
+        # so it can't silently regress back to limit=max_results.
+        with _EnvScope():
+            _set_env(NAVER_SEARCH_ENABLED="true")
+            provider = MockNaverSearchProvider(
+                items=[_naver_raw("전세대출 규제", "https://press.example.com/s/1")]
+            )
+            with patch.object(news_collector, "_cached_news_response", return_value=None), \
+                 patch.object(news_collector, "_store_news_response"), \
+                 patch.object(news_collector, "_parse_google_news_rss", return_value=_FakeFeed([])), \
+                 patch.object(provider, "search", wraps=provider.search) as spy, \
+                 patch("providers.get_search_provider", return_value=provider):
+                news_collector.search_google_news_rss_with_meta("전세대출", max_results=1)
+
+            spy.assert_called_once()
+            self.assertGreaterEqual(spy.call_args.kwargs.get("limit"), 20)
+            self.assertGreaterEqual(spy.call_args.kwargs.get("limit"), 1)  # >= max_results
 
 
 # ---------------------------------------------------------------------------
