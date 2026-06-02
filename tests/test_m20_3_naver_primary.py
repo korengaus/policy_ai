@@ -1,21 +1,22 @@
-"""Tests for M20-2 — wiring the Naver news SearchProvider into news collection.
+"""Tests for M20-3 — promoting the Naver SearchProvider to PRIMARY (Option B1).
 
-Run with: python tests/test_m20_2_naver_collection_wiring.py
+Run with: python tests/test_m20_3_naver_primary.py
 
-Option A design: Naver API is a fallback tier that fires ONLY when the Google
-RSS ladder selected nothing AND NAVER_SEARCH_ENABLED is true. Covers:
+B1: when NAVER_SEARCH_ENABLED is true, Naver is tried FIRST (above the Google
+RSS ladder); if it returns on-topic items (M17b filter, sort=date) it wins and
+the RSS ladder is skipped; otherwise ``selected`` stays empty and the RSS
+ladder + existing fallbacks take over. Disabled → byte-identical to today.
 
-(a) Flag OFF  -> byte-identical control flow + debug dict; provider never
-    constructed (get_search_provider assert_not_called); no naver_api_count key.
-(b) Flag ON + RSS empty  -> Naver mock items selected; mode/collection_source
-    == "naver_api"; naver_api_count present.
-(c) Flag ON + RSS works  -> Naver provider NOT invoked; common path unchanged.
-(d) Dedup  -> overlapping Naver URLs/titles collapsed via _dedupe_news_items +
-    M17b; google_link == original_url so the M15 main.py pass behaves.
-(e) Cache segmentation  -> disabled key byte-identical to pre-M20-2; enabled
-    key gets "-nv"; toggling serves no cross-contaminated entry.
+Covers:
+(a) Flag OFF  -> RSS primary, provider never called, no naver_api_count.
+(b) Flag ON + RSS has results + Naver on-topic -> Naver WINS (promotion proof).
+(c) On-topic guarantee -> off-topic Naver item dropped by M17b, RSS wins; the
+    off-topic article never appears.
+(d) sort=date -> provider.search called with sort="date".
+(e) Dedup -> duplicate Naver URLs/titles collapsed; google_link==original_url.
+(f) Cache segmentation -> disabled base key, enabled +"-nv", no contamination.
 
-NO real API call is ever made — get_search_provider / requests are patched.
+NO real API call is ever made — get_search_provider is patched.
 """
 
 from __future__ import annotations
@@ -26,8 +27,7 @@ import sys
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
+from unittest.mock import patch
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
@@ -36,11 +36,6 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 import news_collector  # noqa: E402
 from providers.naver_search import MockNaverSearchProvider  # noqa: E402
-
-
-# ---------------------------------------------------------------------------
-# Env scope helper — mirrors test_m20_naver_search_provider._EnvScope.
-# ---------------------------------------------------------------------------
 
 
 class _EnvScope:
@@ -67,8 +62,6 @@ def _set_env(**values):
 
 
 class _FakeFeed:
-    """Minimal feedparser-result stand-in: only ``.entries`` is read."""
-
     def __init__(self, entries):
         self.entries = entries
 
@@ -94,81 +87,40 @@ def _naver_raw(title: str, originallink: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# (a) Flag OFF — byte-identical control flow, provider never constructed.
+# (a) Flag OFF — RSS primary, provider never called.
 # ---------------------------------------------------------------------------
 
 
 class FlagOffTests(unittest.TestCase):
-    def test_flag_off_no_provider_no_naver_key(self):
+    def test_flag_off_rss_primary_no_provider(self):
         with _EnvScope():
             _set_env(NAVER_SEARCH_ENABLED="false")
+            feed = _FakeFeed([_rss_entry("전세대출 규제 발표", recent=True)])
             with patch.object(news_collector, "_cached_news_response", return_value=None), \
                  patch.object(news_collector, "_store_news_response"), \
-                 patch.object(news_collector, "_parse_google_news_rss", return_value=_FakeFeed([])), \
-                 patch.object(news_collector, "search_naver_news_fallback", return_value=([], None)), \
-                 patch.object(news_collector, "search_daum_news_fallback", return_value=([], None)), \
+                 patch.object(news_collector, "_parse_google_news_rss", return_value=feed), \
                  patch("providers.get_search_provider") as mock_get_provider:
                 out = news_collector.search_google_news_rss_with_meta("전세대출", max_results=3)
 
             mock_get_provider.assert_not_called()
             debug = out["debug"]
-            # Disabled path: no Naver tier, falls through to emergency fallback
-            # exactly as pre-M20-2.
+            self.assertEqual(debug["collection_source"], "google_rss")
             self.assertNotIn("naver_api_count", debug)
-            self.assertEqual(debug["news_collection_mode"], "forced_search_fallback")
-            self.assertEqual(debug["collection_source"], "forced_search_fallback")
-            # Disabled cache key is byte-identical to the pre-M20-2 sha1 (no -nv).
-            self.assertNotIn("-nv", debug["news_cache_key"])
-
-
-# ---------------------------------------------------------------------------
-# (b) Flag ON + RSS empty — Naver tier fires.
-# ---------------------------------------------------------------------------
-
-
-class FlagOnRssEmptyTests(unittest.TestCase):
-    def test_naver_tier_selected_when_rss_empty(self):
-        with _EnvScope():
-            _set_env(NAVER_SEARCH_ENABLED="true")
-            mock_provider = MockNaverSearchProvider(items=[_naver_raw("전세대출 규제 강화", "https://press.example.com/a/1")])
-            with patch.object(news_collector, "_cached_news_response", return_value=None), \
-                 patch.object(news_collector, "_store_news_response"), \
-                 patch.object(news_collector, "_parse_google_news_rss", return_value=_FakeFeed([])), \
-                 patch.object(news_collector, "search_naver_news_fallback", return_value=([], None)), \
-                 patch.object(news_collector, "search_daum_news_fallback", return_value=([], None)), \
-                 patch("providers.get_search_provider", return_value=mock_provider) as mock_get_provider:
-                out = news_collector.search_google_news_rss_with_meta("전세대출", max_results=3)
-
-            mock_get_provider.assert_called_once_with("naver")
-            debug = out["debug"]
-            self.assertEqual(debug["news_collection_mode"], "naver_api")
-            self.assertEqual(debug["collection_source"], "naver_api")
-            self.assertEqual(debug["naver_api_count"], 1)
             self.assertEqual(len(out["results"]), 1)
-            hit = out["results"][0]
-            self.assertEqual(hit["source"], "naver_api")
-            self.assertEqual(hit["original_url"], "https://press.example.com/a/1")
-            self.assertEqual(hit["google_link"], hit["original_url"])
 
 
 # ---------------------------------------------------------------------------
-# (c) Flag ON + RSS works.
-#
-# SUPERSEDED BY M20-3 (Option B1): in M20-2 Naver was a FALLBACK that did not
-# fire when RSS had results. M20-3 promoted Naver to PRIMARY, so with the flag
-# on it is now invoked first and wins even when RSS has results. This test is
-# updated to the current (M20-3) behavior; see test_m20_3_naver_primary.py for
-# the full primary-promotion coverage.
+# (b) Flag ON + RSS has results + Naver on-topic -> Naver WINS.
 # ---------------------------------------------------------------------------
 
 
-class FlagOnRssWorksTests(unittest.TestCase):
-    def test_naver_primary_wins_over_rss_when_flag_on(self):
+class NaverPrimaryWinsTests(unittest.TestCase):
+    def test_naver_wins_even_when_rss_has_results(self):
         with _EnvScope():
             _set_env(NAVER_SEARCH_ENABLED="true")
-            feed = _FakeFeed([_rss_entry("전세대출 금리 인하 발표", recent=True)])
+            feed = _FakeFeed([_rss_entry("전세대출 금리 인하", recent=True)])
             provider = MockNaverSearchProvider(
-                items=[_naver_raw("전세대출 규제 강화", "https://press.example.com/p/1")]
+                items=[_naver_raw("전세대출 규제 강화", "https://press.example.com/n/1")]
             )
             with patch.object(news_collector, "_cached_news_response", return_value=None), \
                  patch.object(news_collector, "_store_news_response"), \
@@ -178,13 +130,73 @@ class FlagOnRssWorksTests(unittest.TestCase):
 
             mock_get_provider.assert_called_once_with("naver")
             debug = out["debug"]
+            self.assertEqual(debug["news_collection_mode"], "naver_api")
             self.assertEqual(debug["collection_source"], "naver_api")
             self.assertEqual(debug["naver_api_count"], 1)
-            self.assertEqual(out["results"][0]["original_url"], "https://press.example.com/p/1")
+            self.assertEqual(out["results"][0]["original_url"], "https://press.example.com/n/1")
+            self.assertEqual(out["results"][0]["source"], "naver_api")
 
 
 # ---------------------------------------------------------------------------
-# (d) Dedup — overlapping Naver URLs/titles collapsed.
+# (c) On-topic guarantee — off-topic Naver item dropped, RSS wins.
+# ---------------------------------------------------------------------------
+
+
+class OnTopicGuaranteeTests(unittest.TestCase):
+    def test_offtopic_naver_item_never_promoted(self):
+        with _EnvScope():
+            _set_env(NAVER_SEARCH_ENABLED="true")
+            # Naver returns an UNRELATED murder-case article (sim-style noise):
+            # its title shares no token with "전세사기" -> dropped by M17b.
+            provider = MockNaverSearchProvider(
+                items=[_naver_raw("강남 오피스텔 살인 사건 용의자 검거", "https://press.example.com/crime/7")]
+            )
+            # RSS returns an on-topic article that should become the primary card.
+            feed = _FakeFeed([_rss_entry("전세사기 피해자 지원 대책 발표", recent=True)])
+            with patch.object(news_collector, "_cached_news_response", return_value=None), \
+                 patch.object(news_collector, "_store_news_response"), \
+                 patch.object(news_collector, "_parse_google_news_rss", return_value=feed), \
+                 patch.object(news_collector, "search_naver_news_fallback", return_value=([], None)), \
+                 patch.object(news_collector, "search_daum_news_fallback", return_value=([], None)), \
+                 patch("providers.get_search_provider", return_value=provider) as mock_get_provider:
+                out = news_collector.search_google_news_rss_with_meta("전세사기", max_results=3)
+
+            mock_get_provider.assert_called_once_with("naver")
+            debug = out["debug"]
+            # Naver was tried but yielded nothing on-topic -> RSS takes over.
+            self.assertEqual(debug["collection_source"], "google_rss")
+            self.assertNotIn("naver_api_count", debug)
+            titles = [r.get("title", "") for r in out["results"]]
+            self.assertTrue(all("살인" not in t for t in titles))
+            self.assertTrue(any("전세사기" in t for t in titles))
+
+
+# ---------------------------------------------------------------------------
+# (d) sort=date is requested for the primary call.
+# ---------------------------------------------------------------------------
+
+
+class SortParamTests(unittest.TestCase):
+    def test_primary_call_uses_sort_date(self):
+        with _EnvScope():
+            _set_env(NAVER_SEARCH_ENABLED="true")
+            provider = MockNaverSearchProvider(
+                items=[_naver_raw("전세대출 규제", "https://press.example.com/s/1")]
+            )
+            with patch.object(news_collector, "_cached_news_response", return_value=None), \
+                 patch.object(news_collector, "_store_news_response"), \
+                 patch.object(news_collector, "_parse_google_news_rss", return_value=_FakeFeed([])), \
+                 patch.object(provider, "search", wraps=provider.search) as spy, \
+                 patch("providers.get_search_provider", return_value=provider):
+                news_collector.search_google_news_rss_with_meta("전세대출", max_results=3)
+
+            spy.assert_called_once()
+            self.assertEqual(spy.call_args.kwargs.get("sort"), "date")
+            self.assertEqual(spy.call_args.kwargs.get("limit"), 3)
+
+
+# ---------------------------------------------------------------------------
+# (e) Dedup across Naver items.
 # ---------------------------------------------------------------------------
 
 
@@ -194,45 +206,25 @@ class DedupTests(unittest.TestCase):
             _set_env(NAVER_SEARCH_ENABLED="true")
             items = [
                 _naver_raw("전세대출 규제 강화", "https://press.example.com/dup/1"),
-                _naver_raw("전세대출 규제 강화", "https://press.example.com/dup/1"),  # exact dup URL
+                _naver_raw("전세대출 규제 강화", "https://press.example.com/dup/1"),
                 _naver_raw("전세대출 한도 확대", "https://press.example.com/other/2"),
             ]
-            mock_provider = MockNaverSearchProvider(items=items)
+            provider = MockNaverSearchProvider(items=items)
             with patch.object(news_collector, "_cached_news_response", return_value=None), \
                  patch.object(news_collector, "_store_news_response"), \
                  patch.object(news_collector, "_parse_google_news_rss", return_value=_FakeFeed([])), \
-                 patch.object(news_collector, "search_naver_news_fallback", return_value=([], None)), \
-                 patch.object(news_collector, "search_daum_news_fallback", return_value=([], None)), \
-                 patch("providers.get_search_provider", return_value=mock_provider):
+                 patch("providers.get_search_provider", return_value=provider):
                 out = news_collector.search_google_news_rss_with_meta("전세대출", max_results=5)
 
             urls = [r["original_url"] for r in out["results"]]
-            # The exact-duplicate URL is collapsed by _dedupe_news_items.
             self.assertEqual(len(urls), len(set(urls)))
             self.assertEqual(len(out["results"]), 2)
             for r in out["results"]:
                 self.assertEqual(r["google_link"], r["original_url"])
 
-    def test_m17b_filters_zero_overlap_naver_items(self):
-        with _EnvScope():
-            _set_env(NAVER_SEARCH_ENABLED="true")
-            # Title shares NO token with the query -> dropped by M17b.
-            items = [_naver_raw("날씨 맑음 주말 나들이", "https://press.example.com/weather/9")]
-            mock_provider = MockNaverSearchProvider(items=items)
-            with patch.object(news_collector, "_cached_news_response", return_value=None), \
-                 patch.object(news_collector, "_store_news_response"), \
-                 patch.object(news_collector, "_parse_google_news_rss", return_value=_FakeFeed([])), \
-                 patch.object(news_collector, "search_naver_news_fallback", return_value=([], None)), \
-                 patch.object(news_collector, "search_daum_news_fallback", return_value=([], None)), \
-                 patch("providers.get_search_provider", return_value=mock_provider):
-                out = news_collector.search_google_news_rss_with_meta("전세대출", max_results=3)
-
-            # No Naver item survived M17b -> tier yields nothing -> emergency fallback.
-            self.assertEqual(out["debug"]["news_collection_mode"], "forced_search_fallback")
-
 
 # ---------------------------------------------------------------------------
-# (e) Cache key segmentation.
+# (f) Cache segmentation (reconfirm under primary semantics).
 # ---------------------------------------------------------------------------
 
 
@@ -254,8 +246,6 @@ class CacheSegmentationTests(unittest.TestCase):
             )
 
     def test_no_cross_contamination_on_toggle(self):
-        # Entry stored under the disabled (base) key must NOT be served once
-        # the flag is enabled (which looks up base+"-nv").
         base = self._base_key("전세대출", 3)
         fresh_entry = {
             "cached_at": datetime.now(timezone.utc).isoformat(),

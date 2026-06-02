@@ -1041,46 +1041,43 @@ def search_google_news_rss_with_meta(query: str, max_results: int = 3):
     log.info(f"[NewsCollector] Google RSS raw count: {raw_rss_count}")
     log.info(f"[NewsCollector] Recent window results: {filtered_recent_count}")
 
-    if recent_results:
-        selected = _stable_sort_news(recent_results)[:max_results]
-        mode = "recent_window"
-        collection_source = "google_rss"
-    else:
-        relaxed_results = [
-            item for item in raw_results if is_recent(item.get("published", ""), days=7)
-        ]
-        if relaxed_results:
-            log.info("[NewsCollector] Falling back to relaxed recent window results")
-            selected = _stable_sort_news(relaxed_results)[:max_results]
-            mode = "relaxed_recent_window"
-            collection_source = "google_rss"
-        else:
-            log.info("[NewsCollector] Falling back to unfiltered RSS results")
-            selected = _stable_sort_news(raw_results)[:max_results]
-            mode = "unfiltered_fallback"
-            collection_source = "google_rss" if selected else "none"
-
-    # M20-2 (2026-06-02): Naver news API tier (Option A). Fires ONLY when the
-    # Google RSS ladder selected nothing AND NAVER_SEARCH_ENABLED is true.
-    # Disabled-by-default, so this is a no-op until the flag is flipped on
-    # Render: when the flag is false the branch is skipped entirely — no
-    # provider is constructed, zero network, and the debug dict + control flow
-    # are byte-identical to pre-M20-2. Sits AHEAD of the fragile Naver/Daum
-    # HTML scrapers so clean API results are preferred; the scrapers remain as
-    # deeper fallback (no removal — out of scope). The provider normalizes to
-    # the news-result shape (A) with google_link == original_url, so
-    # resolve_google_news_url short-circuits and the M15 post-resolve dedup in
-    # main.py works unchanged. NO log call is added here (news_collector.py is
-    # log-pinned at 331/16); observability rides on the debug dict
-    # (mode / collection_source / naver_api_count) plus the provider's own
-    # pin-OUT warnings. If the key is absent or the request fails the provider
-    # returns an empty result (never raises) and we fall through to the
-    # existing HTML scrapers exactly as today.
-    if not selected and config.naver_search_enabled():
+    # M20-3 (2026-06-02): Naver news API as the PRIMARY source (Option B1),
+    # promoted from the M20-2 fallback position to ABOVE the Google RSS ladder.
+    # Gated by NAVER_SEARCH_ENABLED (default false), so this is a no-op until
+    # the flag is flipped on Render: when false, ``selected`` stays [] here,
+    # the Naver block is skipped (no provider constructed, zero network), and
+    # the ``if not selected:`` RSS ladder below runs IDENTICALLY to pre-M20-3 —
+    # byte-identical results / debug / cache key.
+    #
+    # On-topic guarantee (the M20-3 murder-article fix): the primary call uses
+    # sort="date" (NOT the provider default "sim", which surfaced a loosely-
+    # related murder-case article for "전세사기"), then the EXISTING M17b
+    # _title_has_query_overlap hard filter drops any item whose title shares no
+    # query token. If every Naver item is off-topic (or Naver returns nothing /
+    # keyless / errors → empty result, never raises), ``selected`` stays [] and
+    # the RSS ladder takes over — so an off-topic Naver article can NEVER become
+    # the primary news item. Single-source ``selected`` (pure-Naver OR pure-RSS,
+    # never merged) preserves dedup correctness: Naver items carry
+    # google_link == original_url so resolve_google_news_url short-circuits and
+    # the M15 post-resolve dedup in main.py works unchanged.
+    #
+    # NOTE (M17b limitation, future milestone): _title_has_query_overlap is
+    # substring-based, so a spaced title ("전세 사기") will not match a joined
+    # query token ("전세사기") and vice-versa; it can over-filter genuinely-
+    # relevant Naver items. Accepted as-is here — over-filtering falls back to
+    # RSS and never promotes noise. Do not change M17b in this milestone.
+    #
+    # NO log call is added (news_collector.py is log-pinned at 331/16);
+    # observability rides on the debug dict (mode / collection_source /
+    # naver_api_count) plus the provider's own pin-OUT warnings.
+    selected = []
+    if config.naver_search_enabled():
         # Lazy import keeps the disabled-path import graph identical to today.
         from providers import get_search_provider
 
-        naver_result = get_search_provider("naver").search(query, limit=max_results)
+        naver_result = get_search_provider("naver").search(
+            query, limit=max_results, sort="date",
+        )
         naver_items = [item for item in (naver_result.get("items") or []) if item]
         # Reuse the EXISTING dedup + M17b relevance filter (do not reinvent).
         naver_items = _dedupe_news_items(naver_items)
@@ -1089,12 +1086,33 @@ def search_google_news_rss_with_meta(query: str, max_results: int = 3):
                 item for item in naver_items
                 if _title_has_query_overlap(item.get("title", ""), query)
             ]
-        # Bypass the 30d is_recent filter — this is a last-resort tier.
+        # Bypass the strict 30d is_recent gate for the primary tier (sort=date
+        # already biases toward recency); M17b is the hard on-topic gate.
         if naver_items:
             selected = naver_items[:max_results]
             mode = "naver_api"
             collection_source = "naver_api"
             naver_api_count = len(selected)
+
+    if not selected:
+        if recent_results:
+            selected = _stable_sort_news(recent_results)[:max_results]
+            mode = "recent_window"
+            collection_source = "google_rss"
+        else:
+            relaxed_results = [
+                item for item in raw_results if is_recent(item.get("published", ""), days=7)
+            ]
+            if relaxed_results:
+                log.info("[NewsCollector] Falling back to relaxed recent window results")
+                selected = _stable_sort_news(relaxed_results)[:max_results]
+                mode = "relaxed_recent_window"
+                collection_source = "google_rss"
+            else:
+                log.info("[NewsCollector] Falling back to unfiltered RSS results")
+                selected = _stable_sort_news(raw_results)[:max_results]
+                mode = "unfiltered_fallback"
+                collection_source = "google_rss" if selected else "none"
 
     if not selected and raw_rss_count == 0:
         log.error("[NewsCollector] Google RSS failed, trying Naver fallback")
