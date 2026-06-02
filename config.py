@@ -25,6 +25,40 @@ def describe_ai_config() -> dict:
     }
 
 
+# M20 Phase 1: Naver search provider configuration. Read at runtime (not at
+# import time) so tests can mutate the environment and see the effect
+# immediately, mirroring the semantic-matching accessors below. The provider
+# is DISABLED BY DEFAULT (NAVER_SEARCH_ENABLED default false) so merely adding
+# the module is a no-op until a later wiring milestone enables it.
+
+
+def naver_client_id() -> str:
+    return (os.getenv("NAVER_CLIENT_ID") or "").strip()
+
+
+def naver_client_secret() -> str:
+    return (os.getenv("NAVER_CLIENT_SECRET") or "").strip()
+
+
+def naver_search_enabled() -> bool:
+    return _env_bool("NAVER_SEARCH_ENABLED", False)
+
+
+def naver_search_timeout_seconds() -> float:
+    return _env_float("NAVER_SEARCH_TIMEOUT_SECONDS", 10.0)
+
+
+def describe_naver_config() -> dict:
+    """Snapshot of the Naver provider configuration. Safe to log/serialize:
+    reports credential PRESENCE only — never the client id or secret values."""
+    return {
+        "enabled": naver_search_enabled(),
+        "client_id_present": bool(naver_client_id()),
+        "client_secret_present": bool(naver_client_secret()),
+        "timeout_seconds": naver_search_timeout_seconds(),
+    }
+
+
 # Phase 2 M5: semantic evidence matching — optional, off by default.
 # The flags below are read at runtime (not at import time) so changing
 # the environment in tests immediately takes effect. Embedding calls
