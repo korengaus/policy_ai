@@ -155,6 +155,34 @@ def describe_warm_browser_config() -> dict:
     }
 
 
+# M26-retry: ai_reasoner OpenAI client reliability knobs. The client was built
+# with timeout=20s but NO max_retries, so the SDK default (max_retries=2)
+# applied -> up to 3x20s+backoff (~90s) on a wedged call (the largest latency
+# contributor observed in M26.2). Cap retries at 1 by default (fail fast, but
+# tolerate a single transient blip) and keep the 20s per-attempt timeout, both
+# now env-tunable so the operator can revert/tune via Render without a redeploy
+# (e.g. AI_REASONER_MAX_RETRIES=0 for a ~20s hard cap). Read lazily per call.
+# Provider/model are unchanged (OpenAI gpt-4o-mini); this only bounds latency.
+
+
+def ai_reasoner_max_retries() -> int:
+    # Clamp to >= 0: the OpenAI SDK rejects a negative max_retries, and a
+    # bad/negative env value should degrade to "no retries" rather than crash.
+    return max(0, _env_int("AI_REASONER_MAX_RETRIES", 1))
+
+
+def ai_reasoner_timeout_seconds() -> float:
+    return _env_float("AI_REASONER_TIMEOUT_SECONDS", 20.0)
+
+
+def describe_ai_reasoner_reliability_config() -> dict:
+    """Snapshot of the ai_reasoner reliability knobs. Safe to log/serialize."""
+    return {
+        "max_retries": ai_reasoner_max_retries(),
+        "timeout_seconds": ai_reasoner_timeout_seconds(),
+    }
+
+
 # Phase 2 M5: semantic evidence matching — optional, off by default.
 # The flags below are read at runtime (not at import time) so changing
 # the environment in tests immediately takes effect. Embedding calls

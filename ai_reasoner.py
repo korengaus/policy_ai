@@ -2,7 +2,7 @@ import json
 import os
 import time
 
-from config import AI_MODEL
+from config import AI_MODEL, ai_reasoner_max_retries, ai_reasoner_timeout_seconds
 from llm_observability import estimate_cost_usd, record_llm_call
 from structured_logging import get_logger
 
@@ -51,7 +51,16 @@ def get_openai_client():
     if not api_key:
         return None, "missing_api_key"
 
-    return OpenAI(api_key=api_key, timeout=_AI_REASONER_TIMEOUT_SECONDS), None
+    # M26-retry: cap retries (SDK default is 2 -> up to 3x20s+backoff ~90s on a
+    # wedged call). Both timeout and max_retries are env-tunable via config
+    # (defaults: 20.0s, 1 retry) so the operator can revert/tune on Render
+    # without a redeploy. _AI_REASONER_TIMEOUT_SECONDS remains as the documented
+    # baseline; the live value comes from config.ai_reasoner_timeout_seconds().
+    return OpenAI(
+        api_key=api_key,
+        timeout=ai_reasoner_timeout_seconds(),
+        max_retries=ai_reasoner_max_retries(),
+    ), None
 
 
 def _unavailable_result(
