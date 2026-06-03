@@ -13,6 +13,11 @@ psycopg[binary]
 python-dotenv
 requests
 sqlalchemy
+# M25a — pgvector storage infrastructure (gated off via PGVECTOR_ENABLED).
+# Provides pgvector.sqlalchemy.Vector for the typed embedding_vectors column.
+# Imported defensively in postgres_storage.py: when the package is absent the
+# app still imports and runs on the JSON embedding_cache fallback.
+pgvector==0.3.6
 trafilatura
 uvicorn
 

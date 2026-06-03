@@ -486,6 +486,21 @@ def get_cached_embedding(text_hash: str, provider: str, model: str):
         )
         raise
     if pg_enabled:
+        # M25a — when PGVECTOR_ENABLED, prefer the typed embedding_vectors store,
+        # then fall back to the JSON embedding_cache. Best-effort: any pgvector
+        # error is treated as a miss and we read the JSON cache. When the gate is
+        # OFF this block is skipped entirely → byte-identical to pre-M25a.
+        import config as _config
+
+        if _config.pgvector_enabled():
+            try:
+                from postgres_storage import read_cached_embedding_vector
+
+                pgv = read_cached_embedding_vector(text_hash, provider, model)
+            except Exception:
+                pgv = None
+            if pgv is not None:
+                return pgv
         try:
             pg_vector = read_cached_embedding(text_hash, provider, model)
         except Exception:
@@ -547,6 +562,27 @@ def save_cached_embedding(
         },
         ["text_hash", "provider", "model"],
     )
+    # M25a — when PGVECTOR_ENABLED, ALSO persist to the typed embedding_vectors
+    # store (in addition to the JSON embedding_cache above, which stays the
+    # durable fallback). Best-effort: failure never changes behavior. Skipped
+    # entirely when the gate is OFF → byte-identical to pre-M25a.
+    import config as _config
+
+    if _config.pgvector_enabled():
+        try:
+            from postgres_storage import upsert_embedding_vector
+
+            upsert_embedding_vector(
+                text_hash=text_hash,
+                provider=provider,
+                model=model or "",
+                dimensions=len(vector),
+                embedding=list(vector),
+                text_preview=preview,
+                created_at=created_at,
+            )
+        except Exception:
+            pass  # embedding_cache (JSON) is the durable copy
     return True
 
 

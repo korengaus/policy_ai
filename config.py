@@ -117,6 +117,24 @@ def describe_national_law_config() -> dict:
     }
 
 
+# M25a: pgvector storage infrastructure. DISABLED BY DEFAULT
+# (PGVECTOR_ENABLED default false). When false, the embedding cache uses ONLY
+# the existing JSON embedding_cache table (byte-identical to pre-M25a) and the
+# pgvector extension / embedding_vectors table are never created. M25a is
+# storage-only: it changes no scoring and touches no verdict path.
+
+
+def pgvector_enabled() -> bool:
+    return _env_bool("PGVECTOR_ENABLED", False)
+
+
+def describe_pgvector_config() -> dict:
+    """Snapshot of the pgvector configuration. Safe to log/serialize."""
+    return {
+        "enabled": pgvector_enabled(),
+    }
+
+
 # Phase 2 M5: semantic evidence matching — optional, off by default.
 # The flags below are read at runtime (not at import time) so changing
 # the environment in tests immediately takes effect. Embedding calls

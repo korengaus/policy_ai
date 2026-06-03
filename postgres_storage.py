@@ -38,7 +38,22 @@ import sqlalchemy as sa
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
+import config
 from structured_logging import get_logger
+
+# M25a — pgvector typed-vector column type. Imported DEFENSIVELY: when the
+# pgvector package is not installed (e.g. local dev / a build without it), the
+# app must still import and run on the JSON embedding_cache fallback. ``_Vector``
+# stays None and every pgvector path no-ops gracefully.
+try:  # pragma: no cover - import availability is environment-dependent
+    from pgvector.sqlalchemy import Vector as _Vector
+except Exception:  # noqa: BLE001
+    _Vector = None
+
+# Default embedding dimensionality for the typed column. text-embedding-3-small
+# is 1536. The exact-key lookup M25a uses does not depend on this value; it is
+# the declared column width only.
+_EMBEDDING_VECTOR_DIM = 1536
 
 
 log = get_logger(__name__)
@@ -284,6 +299,44 @@ embedding_cache_table = sa.Table(
         name="ux_embedding_cache_lookup",
     ),
 )
+
+
+# M25a — pgvector typed-vector store. Lives in its OWN MetaData (NOT the shared
+# ``_metadata`` used by ensure_schema's create_all) so that:
+#   * it is never created on the disabled path / when pgvector is absent, and
+#   * a vector-table creation failure can NEVER block the main schema's
+#     create_all (which would break the whole app).
+# It mirrors embedding_cache's key discipline EXACTLY (text_hash, provider,
+# model unique) so lookups are 1:1. embedding_cache is preserved as the durable
+# JSON fallback; this table is additive.
+_vector_metadata = sa.MetaData()
+_embedding_vectors_table = None  # lazily built once the Vector type is available
+
+
+def _build_embedding_vectors_table():
+    """Lazily define + cache the embedding_vectors Table. Returns None when the
+    pgvector package is unavailable (so callers no-op gracefully)."""
+    global _embedding_vectors_table
+    if _embedding_vectors_table is not None:
+        return _embedding_vectors_table
+    if _Vector is None:
+        return None
+    _embedding_vectors_table = sa.Table(
+        "embedding_vectors", _vector_metadata,
+        sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
+        sa.Column("text_hash", sa.Text, nullable=False),
+        sa.Column("provider", sa.Text, nullable=False),
+        sa.Column("model", sa.Text),
+        sa.Column("dimensions", sa.Integer),
+        sa.Column("embedding", _Vector(_EMBEDDING_VECTOR_DIM)),
+        sa.Column("text_preview", sa.Text),
+        sa.Column("created_at", sa.Text),
+        sa.UniqueConstraint(
+            "text_hash", "provider", "model",
+            name="ux_embedding_vectors_lookup",
+        ),
+    )
+    return _embedding_vectors_table
 
 
 review_tasks_table = sa.Table(
@@ -565,6 +618,45 @@ def ensure_schema(engine: Optional[Engine]) -> bool:
         log.warning("Postgres schema create_all unexpected error: %s", exc)
         return False
     _align_serial_sequences(engine)
+    # M25a — pgvector infra, ONLY when gated on. Failures here NEVER affect the
+    # main schema's success (separate metadata + caught below); ensure_schema
+    # still returns True so the rest of the app runs on the JSON fallback.
+    if config.pgvector_enabled():
+        _ensure_pgvector(engine)
+    return True
+
+
+def _ensure_pgvector(engine: Optional[Engine]) -> bool:
+    """Create the pgvector extension + embedding_vectors table. Gated by the
+    caller on config.pgvector_enabled(). NEVER raises; on ANY failure (package
+    missing, role lacks CREATE EXTENSION rights, table create error) it logs a
+    WARNING and returns False so the pipeline falls back to embedding_cache."""
+    if engine is None:
+        return False
+    table = _build_embedding_vectors_table()
+    if table is None:
+        log.warning(
+            "pgvector enabled but pgvector package not importable; "
+            "falling back to embedding_cache (JSON)",
+        )
+        return False
+    try:
+        with engine.begin() as conn:
+            conn.execute(sa.text("CREATE EXTENSION IF NOT EXISTS vector"))
+    except Exception as exc:  # noqa: BLE001 — permission/availability dependent
+        log.warning(
+            "pgvector CREATE EXTENSION failed (role may lack permission); "
+            "falling back to embedding_cache: %s", exc,
+        )
+        return False
+    try:
+        table.create(engine, checkfirst=True)
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "pgvector embedding_vectors table create failed; "
+            "falling back to embedding_cache: %s", exc,
+        )
+        return False
     return True
 
 
@@ -1767,6 +1859,107 @@ def read_cached_embedding(
     if not all(isinstance(v, (int, float)) for v in vector):
         return None
     return [float(v) for v in vector]
+
+
+def read_cached_embedding_vector(
+    text_hash: str, provider: str, model: str,
+) -> Optional[list]:
+    """M25a — read a cached vector from the typed embedding_vectors table.
+
+    Returns the vector (list[float]) on hit, or None on miss / when pgvector is
+    disabled / unavailable / the table doesn't exist. NEVER raises — the caller
+    falls back to the JSON embedding_cache, so this is best-effort only."""
+    if not config.pgvector_enabled():
+        return None
+    table = _build_embedding_vectors_table()
+    if table is None:
+        return None
+    engine = get_engine()
+    if engine is None:
+        return None
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                sa.select(table.c.embedding).where(
+                    table.c.text_hash == text_hash,
+                    table.c.provider == provider,
+                    table.c.model == (model or ""),
+                ).limit(1)
+            ).first()
+        if row is None:
+            return None
+        raw = row._mapping.get("embedding")
+        if raw is None:
+            return None
+        # pgvector returns a numpy array / sequence; normalize to list[float].
+        vector = [float(v) for v in list(raw)]
+        return vector or None
+    except Exception as exc:  # noqa: BLE001 — best-effort; treat as miss
+        log.warning("read_cached_embedding_vector failed (treating as miss): %s", exc)
+        return None
+
+
+def upsert_embedding_vector(
+    *,
+    text_hash: str,
+    provider: str,
+    model: str,
+    dimensions: int,
+    embedding: list,
+    text_preview: str = "",
+    created_at: str = "",
+) -> bool:
+    """M25a — best-effort write of a vector into the typed embedding_vectors
+    table (INSERT ... ON CONFLICT DO UPDATE on the unique key, mirroring
+    embedding_cache). Returns True on success, False on any failure / when
+    pgvector is disabled or unavailable. NEVER raises — embedding_cache remains
+    the durable copy."""
+    if not config.pgvector_enabled():
+        return False
+    if not text_hash or not provider or not isinstance(embedding, (list, tuple)) or not embedding:
+        return False
+    table = _build_embedding_vectors_table()
+    if table is None:
+        return False
+    engine = get_engine()
+    if engine is None:
+        return False
+    row = {
+        "text_hash": text_hash,
+        "provider": provider,
+        "model": model or "",
+        "dimensions": int(dimensions or len(embedding)),
+        "embedding": list(embedding),
+        "text_preview": (text_preview or "")[:200],
+        "created_at": created_at or "",
+    }
+    try:
+        if engine.dialect.name == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+            stmt = pg_insert(table).values(**row)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["text_hash", "provider", "model"],
+                set_={
+                    "dimensions": stmt.excluded.dimensions,
+                    "embedding": stmt.excluded.embedding,
+                    "text_preview": stmt.excluded.text_preview,
+                    "created_at": stmt.excluded.created_at,
+                },
+            )
+            with engine.begin() as conn:
+                conn.execute(stmt)
+            return True
+        # Non-Postgres (test substitute): plain insert, swallow conflicts.
+        with engine.begin() as conn:
+            try:
+                conn.execute(sa.insert(table).values(**row))
+            except SQLAlchemyError:
+                pass
+        return True
+    except Exception as exc:  # noqa: BLE001 — best-effort
+        log.warning("upsert_embedding_vector failed: %s", exc)
+        return False
 
 
 def embedding_cache_stats_pg():
