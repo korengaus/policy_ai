@@ -135,6 +135,26 @@ def describe_pgvector_config() -> dict:
     }
 
 
+# M26.2: persistent warm Chromium reuse. DISABLED BY DEFAULT
+# (WARM_BROWSER_ENABLED default false), read lazily per call so a dashboard
+# flip needs no redeploy (matches the HTTP-cache flag convention). When false,
+# official_browser_crawler.fetch_rendered_page runs the verbatim cold
+# launch/teardown path — production behavior is byte-identical to pre-M26.2.
+# When true, one persistent Chromium is reused across renders via a single
+# dedicated render thread (LESSON 1: still exactly one browser, sequential).
+
+
+def warm_browser_enabled() -> bool:
+    return _env_bool("WARM_BROWSER_ENABLED", False)
+
+
+def describe_warm_browser_config() -> dict:
+    """Snapshot of the warm-browser configuration. Safe to log/serialize."""
+    return {
+        "enabled": warm_browser_enabled(),
+    }
+
+
 # Phase 2 M5: semantic evidence matching — optional, off by default.
 # The flags below are read at runtime (not at import time) so changing
 # the environment in tests immediately takes effect. Embedding calls
