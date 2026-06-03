@@ -27,6 +27,13 @@ from .naver_search import (
     MockNaverSearchProvider,
     NaverNewsSearchProvider,
 )
+from .policy_briefing import (
+    DisabledPolicyBriefingProvider,
+    MockPolicyBriefingProvider,
+    PolicyBriefingProvider,
+    fetch_and_build_policy_briefing_candidates,
+    get_document_provider,
+)
 
 
 def get_search_provider(name: str = "naver") -> SearchProvider:
@@ -63,4 +70,9 @@ __all__ = [
     "DisabledSearchProvider",
     "MockNaverSearchProvider",
     "get_search_provider",
+    "PolicyBriefingProvider",
+    "DisabledPolicyBriefingProvider",
+    "MockPolicyBriefingProvider",
+    "get_document_provider",
+    "fetch_and_build_policy_briefing_candidates",
 ]

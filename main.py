@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+import config
 from config import (
     AI_MODEL,
     MAX_ARTICLE_CHARS,
@@ -646,6 +647,25 @@ def _process_news_item_phase_a(
         official_evidence_results,
         normalized_claims,
     )
+    # M21 Phase 2b: inject Policy Briefing press releases as primary-document
+    # official candidates (Option A). Gated by POLICY_BRIEFING_ENABLED (default
+    # false): when off, no provider is constructed, zero network happens, and
+    # source_candidates / debug_summary stay byte-identical to pre-M21. The
+    # releases carry their body already (raw_text_available=True), so they skip
+    # the crawl-based enrich above and flow straight into resolve_official_evidence,
+    # which computes official_body_match (the M19-3 guard is the only path to the
+    # reliability uplift — we never set official_body_match here). All provider
+    # logging lives in providers/policy_briefing.py (pin-OUT); the only
+    # observability in this pinned file is the in-memory counter below.
+    policy_briefing_count = None
+    if config.policy_briefing_enabled():
+        from providers.policy_briefing import fetch_and_build_policy_briefing_candidates
+
+        policy_briefing_candidates, policy_briefing_count = (
+            fetch_and_build_policy_briefing_candidates(normalized_claims)
+        )
+        if policy_briefing_candidates:
+            source_candidates = source_candidates + policy_briefing_candidates
     source_candidates, official_resolution_debug = resolve_official_evidence(
         source_candidates,
         normalized_claims,
@@ -769,6 +789,11 @@ def _process_news_item_phase_a(
     debug_summary["analysis_cache_ttl_seconds"] = ANALYSIS_CACHE_TTL_SECONDS
     debug_summary.update(official_body_debug or {})
     debug_summary.update(official_resolution_debug or {})
+    # M21 Phase 2b: in-branch-only debug key. policy_briefing_count is None on
+    # the disabled path, so this key is NOT added there — the disabled
+    # debug_summary stays byte-identical to pre-M21 (mirrors naver_api_count).
+    if policy_briefing_count is not None:
+        debug_summary["policy_briefing_count"] = policy_briefing_count
     debug_summary["semantic_evidence_summary"] = semantic_evidence_summary
 
     if verification_card.get("official_mismatch"):

@@ -65,12 +65,17 @@ class SearchProviderResult(TypedDict, total=False):
 
 
 class DocumentProviderResult(TypedDict, total=False):
-    """Return shape reserved for a future primary-document provider. Defined
-    now so the interface is stable; no concrete implementation in M20."""
+    """Return shape for a primary-document provider.
+
+    M21: the Policy Briefing ``pressReleaseList`` endpoint returns MANY items
+    per call (a date-windowed feed), so ``documents`` (a list) is the field
+    that provider populates. ``document`` (singular) is retained for a future
+    fetch-one-by-id provider. Both are optional (``total=False``)."""
 
     provider: str
     available: bool
     document: Optional[Dict[str, Any]]
+    documents: List[Dict[str, Any]]
     error: Optional[str]
     debug: Dict[str, Any]
 
@@ -144,12 +149,31 @@ class SearchProvider(BaseSourceProvider):
 
 
 class PrimaryDocumentProvider(BaseSourceProvider):
-    """Primary-document-type provider — RESERVED for a future milestone.
+    """Primary-document-type provider.
 
-    Defined so the two-tier interface is stable today; no concrete
-    implementation ships in M20."""
+    Unlike a ``SearchProvider`` (query -> candidate hits), this returns the
+    original document text directly. M21 implements the first concrete
+    subclass (Policy Briefing press releases) via ``fetch_press_releases``;
+    the abstract ``fetch_document`` (one-by-id) stays reserved."""
 
     def fetch_document(
         self, identifier: Any,
     ) -> DocumentProviderResult:  # pragma: no cover - reserved
         raise NotImplementedError
+
+    def _empty_result(
+        self,
+        *,
+        error: Optional[str] = None,
+        debug: Optional[Dict[str, Any]] = None,
+    ) -> DocumentProviderResult:
+        """Build an empty, never-raising document result. Shared by the
+        disabled provider and every error path so the shape stays uniform."""
+        return {
+            "provider": self.name,
+            "available": bool(self.available),
+            "document": None,
+            "documents": [],
+            "error": error,
+            "debug": debug or {},
+        }

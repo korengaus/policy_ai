@@ -59,6 +59,35 @@ def describe_naver_config() -> dict:
     }
 
 
+# M21 Phase 2b: Policy Briefing (data.go.kr 1371000) press-release provider
+# configuration. Read at runtime (not at import time) so tests can mutate the
+# environment, mirroring the Naver accessors above. DISABLED BY DEFAULT
+# (POLICY_BRIEFING_ENABLED default false) so merely adding the provider is a
+# no-op until an operator flips the flag on Render.
+
+
+def datagokr_service_key() -> str:
+    return (os.getenv("DATAGOKR_SERVICE_KEY") or "").strip()
+
+
+def policy_briefing_enabled() -> bool:
+    return _env_bool("POLICY_BRIEFING_ENABLED", False)
+
+
+def policy_briefing_timeout_seconds() -> float:
+    return _env_float("POLICY_BRIEFING_TIMEOUT_SECONDS", 10.0)
+
+
+def describe_policy_briefing_config() -> dict:
+    """Snapshot of the Policy Briefing provider configuration. Safe to
+    log/serialize: reports key PRESENCE only — never the serviceKey value."""
+    return {
+        "enabled": policy_briefing_enabled(),
+        "service_key_present": bool(datagokr_service_key()),
+        "timeout_seconds": policy_briefing_timeout_seconds(),
+    }
+
+
 # Phase 2 M5: semantic evidence matching — optional, off by default.
 # The flags below are read at runtime (not at import time) so changing
 # the environment in tests immediately takes effect. Embedding calls
