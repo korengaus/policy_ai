@@ -1023,12 +1023,42 @@ def _process_news_item_phase_a(
     }
 
 
-def _apply_news_item_phase_b(phase_a: dict, memory: dict) -> dict:
+def _run_ai_reasoning_for_phase_a(phase_a: dict) -> dict:
+    """M26.3: the Phase-B ai_reasoner network call as a pure function of
+    ``phase_a`` (every argument is frozen at Phase A time — including
+    ``memory_context``, the Phase-A memory snapshot — so this is independent
+    of any Phase-B memory mutation and of other items). Used BOTH inline
+    (concurrency gate off) and in the concurrent fan-out (gate on), so the
+    call is identical in both paths. ``run_ai_reasoning`` never raises.
+    """
+    news = phase_a["news"]
+    return run_ai_reasoning(
+        news_title=news["title"],
+        news_summary=news["summary"],
+        article_body=phase_a["article_body"],
+        policy_claims=phase_a["policy_claims"],
+        memory_context=phase_a["memory_context"],
+        official_source_candidates=phase_a["official_source_candidates"],
+        official_evidence_results=phase_a["official_evidence_results"],
+        evidence_comparison=phase_a["evidence_comparison"],
+    )
+
+
+def _apply_news_item_phase_b(
+    phase_a: dict, memory: dict, ai_result: dict | None = None,
+) -> dict:
     """Sequential half of the per-news-item pipeline: LLM call,
     AI-driven topic, duplicate detection (against the LATEST
     memory), memory mutation, and report-item assembly. Mutates
     ``memory`` in-place — caller must ensure this runs serially in
     submission order.
+
+    M26.3: ``ai_result`` may be a precomputed reasoning result from the
+    concurrent fan-out. When None (gate off / default), ``run_ai_reasoning``
+    is called inline exactly as pre-M26.3 — byte-identical. Either way the
+    result is the same pure function of ``phase_a``; everything order-dependent
+    below (dedup, memory mutation/save, counters) stays serial in submission
+    order.
 
     Returns a dict with:
       * ``report_item``  — the per-news dict appended to report_items
@@ -1047,16 +1077,11 @@ def _apply_news_item_phase_b(phase_a: dict, memory: dict) -> dict:
     existing_ids = {article.get("article_id") for article in memory.get("articles", [])}
     duplicate = article_id in existing_ids
 
-    ai_result = run_ai_reasoning(
-        news_title=news["title"],
-        news_summary=news["summary"],
-        article_body=phase_a["article_body"],
-        policy_claims=phase_a["policy_claims"],
-        memory_context=phase_a["memory_context"],
-        official_source_candidates=phase_a["official_source_candidates"],
-        official_evidence_results=phase_a["official_evidence_results"],
-        evidence_comparison=phase_a["evidence_comparison"],
-    )
+    # M26.3: use the precomputed fan-out result when supplied; otherwise call
+    # inline exactly as pre-M26.3 (gate-off path, byte-identical). The call is
+    # the same pure function of phase_a in both paths.
+    if ai_result is None:
+        ai_result = _run_ai_reasoning_for_phase_a(phase_a)
     print_ai_results(ai_result)
 
     topic = preliminary_topic
@@ -1385,16 +1410,71 @@ def analyze_pipeline(
         deduped_phase_a_results.append(phase_a)
     phase_a_results = deduped_phase_a_results
 
+    # M26.3 — optional concurrent fan-out of the Phase-B ai_reasoner network
+    # calls. Each run_ai_reasoning is a pure function of phase_a (inputs frozen
+    # at Phase A time — see _run_ai_reasoning_for_phase_a), so running them
+    # concurrently yields the SAME per-item ai_result as sequential. ONLY the
+    # network call fans out; the order-dependent fold-back below (dedup, memory
+    # mutation/save, counters, topic) stays serial in original submission
+    # order. Network-bound, NOT CPU/Chromium — LESSON 1 (1-CPU Playwright
+    # parallelism) does not apply; the pool is bounded regardless. Gated off by
+    # default (AI_REASONER_CONCURRENCY_ENABLED): when off, ai_results stays all
+    # None and the loop calls run_ai_reasoning inline exactly as pre-M26.3
+    # (byte-identical). NO log.* is emitted here (main.py pin 331/16).
+    ai_results: list = [None] * len(phase_a_results)
+    concurrency_enabled = config.ai_reasoner_concurrency_enabled()
+    if concurrency_enabled:
+        fanout_indices = [
+            i for i, phase_a in enumerate(phase_a_results) if phase_a is not None
+        ]
+        if fanout_indices:
+            max_workers = max(
+                1, min(config.ai_reasoner_max_concurrency(), len(fanout_indices))
+            )
+            with ThreadPoolExecutor(
+                max_workers=max_workers,
+                thread_name_prefix="m26-3-ai-reasoner",
+            ) as executor:
+                future_to_index = {
+                    executor.submit(
+                        _run_ai_reasoning_for_phase_a, phase_a_results[i]
+                    ): i
+                    for i in fanout_indices
+                }
+                for future in as_completed(future_to_index):
+                    idx = future_to_index[future]
+                    try:
+                        ai_results[idx] = future.result()
+                    except Exception:  # noqa: BLE001
+                        # run_ai_reasoning never raises (catches all -> error
+                        # dict), so this is contractually unreachable. Handle
+                        # silently into an error-shaped dict — NO log.* so the
+                        # main.py pin (331/16) stays unchanged. The fold-back
+                        # treats ai_available=False like a failed reasoning.
+                        ai_results[idx] = {
+                            "ai_available": False,
+                            "ai_status": "error",
+                            "ai_status_reason": "fanout_exception",
+                            "ai_model": AI_MODEL,
+                        }
+
     # Phase B — sequential, in original submission order. LLM call +
     # memory mutation + report assembly. Order-deterministic by
-    # construction.
-    for phase_a in phase_a_results:
+    # construction. With concurrency on, the (precomputed) ai_result is
+    # folded in here in order; with it off, ai_results[i] is None and
+    # _apply_news_item_phase_b calls run_ai_reasoning inline as before.
+    for i, phase_a in enumerate(phase_a_results):
         if phase_a is None:
             # Phase A failed for this index — skip Phase B (preserves
             # the existing "exceptions swallowed at outer level"
             # contract; the operator sees the failure in logs).
             continue
-        phase_b = _apply_news_item_phase_b(phase_a, memory)
+        # Gate off -> call exactly as pre-M26.3 (2 args, byte-identical). Gate
+        # on -> fold in the precomputed fan-out result for this index.
+        if concurrency_enabled:
+            phase_b = _apply_news_item_phase_b(phase_a, memory, ai_result=ai_results[i])
+        else:
+            phase_b = _apply_news_item_phase_b(phase_a, memory)
         report_items.append(phase_b["report_item"])
         if phase_b["saved_to_memory"]:
             saved_event_count += 1

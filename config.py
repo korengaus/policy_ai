@@ -219,6 +219,35 @@ def describe_ai_reasoner_provider_config() -> dict:
     }
 
 
+# M26.3: concurrent Phase-B ai_reasoner fan-out. DISABLED BY DEFAULT
+# (AI_REASONER_CONCURRENCY_ENABLED default false) -> production byte-identical;
+# the Phase-B loop calls run_ai_reasoning inline exactly as pre-M26.3. When on,
+# the N per-item ai_reasoner network calls (pure functions of phase_a) run on a
+# bounded ThreadPoolExecutor; the order-dependent fold-back (dedup, memory,
+# topic, counters) stays serial in original order. Network-bound concurrency,
+# NOT Chromium/CPU (LESSON 1 unaffected); pool bounded by max_concurrency.
+# Read lazily per call so the operator can flip/revert on Render without a
+# redeploy.
+
+
+def ai_reasoner_concurrency_enabled() -> bool:
+    return _env_bool("AI_REASONER_CONCURRENCY_ENABLED", False)
+
+
+def ai_reasoner_max_concurrency() -> int:
+    # Bounds the fan-out pool. Default 3 mirrors MAX_PARALLEL_NEWS_ITEMS; items
+    # are <= MAX_NEWS_RESULTS (3) after dedup, so effective concurrency is small.
+    return max(1, _env_int("AI_REASONER_MAX_CONCURRENCY", 3))
+
+
+def describe_ai_reasoner_concurrency_config() -> dict:
+    """Snapshot of ai_reasoner concurrency knobs. Safe to log/serialize."""
+    return {
+        "enabled": ai_reasoner_concurrency_enabled(),
+        "max_concurrency": ai_reasoner_max_concurrency(),
+    }
+
+
 # Phase 2 M5: semantic evidence matching — optional, off by default.
 # The flags below are read at runtime (not at import time) so changing
 # the environment in tests immediately takes effect. Embedding calls
