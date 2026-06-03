@@ -183,6 +183,42 @@ def describe_ai_reasoner_reliability_config() -> dict:
     }
 
 
+# M26-provider-A: ai_reasoner provider selection ("socket + switch"). DEFAULT
+# "openai" — merging changes NOTHING in production until the operator
+# deliberately flips AI_REASONER_PROVIDER. A DEDICATED flag (not LLM_PROVIDER,
+# which is already "anthropic" for the judge) so ai_reasoner never auto-switches
+# to Claude just because the judge is on Claude. Read lazily per call. The
+# OpenAI path stays the existing Responses-API code (M26-retry caps intact); the
+# "anthropic" path reuses llm_judge.AnthropicProvider with the same caps.
+# Fallback defaults to "none" (single provider = today's behavior); opt-in only.
+
+
+def ai_reasoner_provider() -> str:
+    return (os.getenv("AI_REASONER_PROVIDER") or "openai").strip().lower()
+
+
+def ai_reasoner_fallback_provider() -> str:
+    return (os.getenv("AI_REASONER_FALLBACK_PROVIDER") or "none").strip().lower()
+
+
+def ai_reasoner_max_output_tokens() -> int:
+    # Anthropic Messages requires an explicit max_tokens; ai_reasoner's JSON
+    # schema is larger than the judge's 800 default, so use 1500 to avoid
+    # truncation. Applies to the anthropic path only (the OpenAI Responses path
+    # does not set max_tokens and is unchanged).
+    return _env_int("AI_REASONER_MAX_OUTPUT_TOKENS", 1500)
+
+
+def describe_ai_reasoner_provider_config() -> dict:
+    """Snapshot of ai_reasoner provider routing. Safe to log/serialize:
+    names/ints only — never secrets."""
+    return {
+        "provider": ai_reasoner_provider(),
+        "fallback_provider": ai_reasoner_fallback_provider(),
+        "max_output_tokens": ai_reasoner_max_output_tokens(),
+    }
+
+
 # Phase 2 M5: semantic evidence matching — optional, off by default.
 # The flags below are read at runtime (not at import time) so changing
 # the environment in tests immediately takes effect. Embedding calls

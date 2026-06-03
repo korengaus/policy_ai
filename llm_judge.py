@@ -451,6 +451,21 @@ class AnthropicProvider(ReasoningProvider):
 
     name = "anthropic"
 
+    def __init__(
+        self,
+        timeout: Optional[float] = None,
+        max_retries: Optional[int] = None,
+    ) -> None:
+        # M26-provider-A: optional reliability knobs so ai_reasoner can reuse
+        # this provider with its M26-retry caps. Defaults preserve the judge's
+        # original behavior EXACTLY: timeout falls back to
+        # _ANTHROPIC_TIMEOUT_SECONDS, and when max_retries is None the
+        # max_retries kwarg is NOT passed to the SDK (so the SDK default is
+        # used, identical to pre-M26-provider-A). The judge instantiates
+        # AnthropicProvider() with no args → byte-identical.
+        self._timeout = timeout if timeout is not None else _ANTHROPIC_TIMEOUT_SECONDS
+        self._max_retries = max_retries
+
     def is_available(self) -> bool:
         return bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
 
@@ -471,9 +486,10 @@ class AnthropicProvider(ReasoningProvider):
         model = _resolve_anthropic_model(request.model)
         start = time.time()
         try:
-            client = Anthropic(
-                api_key=api_key, timeout=_ANTHROPIC_TIMEOUT_SECONDS,
-            )
+            client_kwargs = {"api_key": api_key, "timeout": self._timeout}
+            if self._max_retries is not None:
+                client_kwargs["max_retries"] = self._max_retries
+            client = Anthropic(**client_kwargs)
             message = client.messages.create(
                 model=model,
                 max_tokens=request.max_tokens,

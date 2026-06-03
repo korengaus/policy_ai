@@ -2,7 +2,14 @@ import json
 import os
 import time
 
-from config import AI_MODEL, ai_reasoner_max_retries, ai_reasoner_timeout_seconds
+from config import (
+    AI_MODEL,
+    ai_reasoner_fallback_provider,
+    ai_reasoner_max_output_tokens,
+    ai_reasoner_max_retries,
+    ai_reasoner_provider,
+    ai_reasoner_timeout_seconds,
+)
 from llm_observability import estimate_cost_usd, record_llm_call
 from structured_logging import get_logger
 
@@ -274,7 +281,7 @@ Analysis rules:
     return prompt.strip()
 
 
-def run_ai_reasoning(
+def _run_openai_reasoning(
     news_title: str,
     news_summary: str,
     article_body: str,
@@ -283,7 +290,14 @@ def run_ai_reasoning(
     official_source_candidates: list[dict] | None = None,
     official_evidence_results: list[dict] | None = None,
     evidence_comparison: dict | None = None,
+    fell_back: bool = False,
 ) -> dict:
+    # M26-provider-A: this is the ORIGINAL run_ai_reasoning body, UNCHANGED
+    # (OpenAI Responses API + M26-retry caps), now reachable via the provider
+    # selector. The only edit is the observability `fell_back` field (was a
+    # hard-coded False literal) so it reports accurately when this runner is
+    # used as a fallback. provider stays "openai" (correct for this runner);
+    # on the default path with no fallback, fell_back=False -> logs unchanged.
     client, unavailable_reason = get_openai_client()
 
     if client is None:
@@ -362,7 +376,7 @@ def run_ai_reasoning(
                 "estimated_cost_usd": cost,
                 "latency_ms": latency_ms,
                 "provider": "openai",
-                "fell_back": False,
+                "fell_back": fell_back,
             },
         )
         record_llm_call(
@@ -455,3 +469,235 @@ def run_ai_reasoning(
             official_evidence_results=official_evidence_results,
             evidence_comparison=evidence_comparison,
         )
+
+
+def _run_anthropic_reasoning(
+    news_title: str,
+    news_summary: str,
+    article_body: str,
+    policy_claims: list[dict],
+    memory_context: str,
+    official_source_candidates: list[dict] | None = None,
+    official_evidence_results: list[dict] | None = None,
+    evidence_comparison: dict | None = None,
+    fell_back: bool = False,
+) -> dict:
+    """M26-provider-A: Anthropic (Claude) path. Reuses
+    ``llm_judge.AnthropicProvider`` (Messages API + ``content[0].text`` +
+    ``_strip_json_fences`` + usage fields, never-raises) with the SAME
+    M26-retry caps applied via its parametrized constructor. Produces the SAME
+    ``ai_result`` shape as the OpenAI path so downstream consumers
+    (topic/memory/ai_status) are unaffected. Verdict-isolated — nothing here
+    feeds any verdict field."""
+    import llm_judge  # lazy: keeps the default-path import graph unchanged
+
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        return _unavailable_result(
+            "missing_api_key",
+            official_source_candidates=official_source_candidates,
+            official_evidence_results=official_evidence_results,
+            evidence_comparison=evidence_comparison,
+            fallback_message=(
+                "ANTHROPIC_API_KEY is missing. Only rule-based analysis was performed."
+            ),
+            error_message="ANTHROPIC_API_KEY is missing.",
+        )
+
+    prompt = build_ai_prompt(
+        news_title=news_title,
+        news_summary=news_summary,
+        article_body=article_body,
+        policy_claims=policy_claims,
+        memory_context=memory_context,
+        official_source_candidates=official_source_candidates,
+        official_evidence_results=official_evidence_results,
+        evidence_comparison=evidence_comparison,
+    )
+    # The full analytical prompt (identical content to the OpenAI `input`) is
+    # the user message; a minimal system message reinforces JSON-only output.
+    # Claude has no native JSON mode; AnthropicProvider already strips ```json
+    # fences before returning raw_text. Model id resolves to ANTHROPIC_MODEL
+    # (verified real default claude-sonnet-4-6) — never an unverified id.
+    model = os.environ.get("ANTHROPIC_MODEL", "").strip() or "claude-sonnet-4-6"
+    request = llm_judge.LLMRequest(
+        system_prompt=(
+            "You are an AI policy analyst. Output ONLY a single valid JSON "
+            "object matching the requested schema — no prose, no markdown fences."
+        ),
+        user_prompt=prompt,
+        model=model,
+        max_tokens=ai_reasoner_max_output_tokens(),
+        temperature=0,
+    )
+    # Same M26-retry discipline as the OpenAI path: caps applied to the
+    # Anthropic client so a fallback/primary Claude call can't storm.
+    provider = llm_judge.AnthropicProvider(
+        timeout=ai_reasoner_timeout_seconds(),
+        max_retries=ai_reasoner_max_retries(),
+    )
+    start = time.perf_counter()
+    response = provider.call(request)  # never raises
+    latency_ms = int((time.perf_counter() - start) * 1000)
+
+    if response is None or not response.success:
+        log.warning(
+            "ai_reasoner.failed",
+            extra={
+                "reason": "api_call_failed",
+                "provider": "anthropic",
+            },
+        )
+        return _error_result(
+            "api_call_failed",
+            f"AI reasoning failed: {response.error if response else 'no response'}",
+            official_source_candidates=official_source_candidates,
+            official_evidence_results=official_evidence_results,
+            evidence_comparison=evidence_comparison,
+        )
+
+    # Record the successful API call (cost incurred) BEFORE parsing — mirrors
+    # the OpenAI path ordering so a malformed payload still rolls up metrics.
+    cost = estimate_cost_usd(
+        response.model,
+        int(response.input_tokens or 0),
+        int(response.output_tokens or 0),
+    )
+    log.info(
+        "ai_reasoner.completed",
+        extra={
+            "model": response.model,
+            "action": "reasoning",
+            "input_tokens": int(response.input_tokens or 0),
+            "output_tokens": int(response.output_tokens or 0),
+            "estimated_cost_usd": cost,
+            "latency_ms": latency_ms,
+            "provider": "anthropic",
+            "fell_back": fell_back,
+        },
+    )
+    record_llm_call(
+        caller="ai_reasoner",
+        model=response.model,
+        input_tokens=int(response.input_tokens or 0),
+        output_tokens=int(response.output_tokens or 0),
+        estimated_cost_usd=cost,
+        latency_ms=latency_ms,
+        success=True,
+        provider="anthropic",
+    )
+
+    try:
+        parsed = json.loads(response.raw_text)
+    except json.JSONDecodeError as e:
+        log.warning(
+            "ai_reasoner.failed",
+            extra={
+                "reason": "invalid_json_response",
+                "provider": "anthropic",
+                "exception_type": type(e).__name__,
+            },
+        )
+        return _error_result(
+            "invalid_json_response",
+            f"AI returned non-JSON response: {e}",
+            official_source_candidates=official_source_candidates,
+            official_evidence_results=official_evidence_results,
+            evidence_comparison=evidence_comparison,
+        )
+
+    # SAME field population as the OpenAI path so the ai_result shape is
+    # identical for downstream topic/memory/ai_status consumers.
+    parsed["ai_available"] = True
+    parsed["ai_status"] = "ok"
+    parsed["ai_status_reason"] = "ok"
+    parsed["ai_model"] = response.model
+    parsed.setdefault("official_source_needed", bool(official_source_candidates))
+    parsed.setdefault("recommended_official_sources", official_source_candidates or [])
+    parsed.setdefault(
+        "official_evidence_found",
+        any(result.get("fetched") for result in (official_evidence_results or [])),
+    )
+    parsed.setdefault(
+        "official_evidence_summary",
+        "Official page fetch results were provided as context.",
+    )
+    parsed.setdefault(
+        "official_comparison_status",
+        (evidence_comparison or {}).get("comparison_status", "unclear"),
+    )
+    parsed.setdefault(
+        "official_support_score",
+        (evidence_comparison or {}).get(
+            "semantic_support_score",
+            (evidence_comparison or {}).get("support_score", 0),
+        ),
+    )
+    parsed.setdefault(
+        "official_verification_note",
+        "Rule-based official evidence comparison was provided as context.",
+    )
+    return parsed
+
+
+_REASONER_RUNNERS = {
+    "openai": _run_openai_reasoning,
+    "anthropic": _run_anthropic_reasoning,
+}
+
+
+def run_ai_reasoning(
+    news_title: str,
+    news_summary: str,
+    article_body: str,
+    policy_claims: list[dict],
+    memory_context: str,
+    official_source_candidates: list[dict] | None = None,
+    official_evidence_results: list[dict] | None = None,
+    evidence_comparison: dict | None = None,
+) -> dict:
+    """M26-provider-A dispatcher ("socket + switch"). Routes to the configured
+    provider runner. DEFAULT ``AI_REASONER_PROVIDER="openai"`` -> the existing
+    OpenAI Responses-API path, byte-identical to pre-M26-provider-A (incl. the
+    M26-retry caps). Verdict-isolated: the returned ai_result feeds only
+    topic/memory/ai_status, never any verdict field. Signature unchanged so
+    the main.py call site is untouched.
+
+    Fallback (``AI_REASONER_FALLBACK_PROVIDER``, default "none") is OFF by
+    default -> single-provider behavior identical to today. When opt-in and the
+    primary runner reports ``ai_available=False``, the distinct fallback runner
+    is tried once with ``fell_back=True``; both runners apply the SAME
+    retry/timeout caps so a fallback can never reintroduce a retry storm.
+    """
+    primary_name = ai_reasoner_provider()
+    if primary_name not in _REASONER_RUNNERS:
+        primary_name = "openai"  # bad/unknown value -> safe default
+
+    fallback_name = ai_reasoner_fallback_provider()
+    if fallback_name not in _REASONER_RUNNERS or fallback_name == primary_name:
+        fallback_name = None  # "none"/invalid/same -> no fallback (today's behavior)
+
+    result = _REASONER_RUNNERS[primary_name](
+        news_title=news_title,
+        news_summary=news_summary,
+        article_body=article_body,
+        policy_claims=policy_claims,
+        memory_context=memory_context,
+        official_source_candidates=official_source_candidates,
+        official_evidence_results=official_evidence_results,
+        evidence_comparison=evidence_comparison,
+        fell_back=False,
+    )
+    if result.get("ai_available") or fallback_name is None:
+        return result
+
+    return _REASONER_RUNNERS[fallback_name](
+        news_title=news_title,
+        news_summary=news_summary,
+        article_body=article_body,
+        policy_claims=policy_claims,
+        memory_context=memory_context,
+        official_source_candidates=official_source_candidates,
+        official_evidence_results=official_evidence_results,
+        evidence_comparison=evidence_comparison,
+        fell_back=True,
+    )
