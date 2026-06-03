@@ -88,6 +88,35 @@ def describe_policy_briefing_config() -> dict:
     }
 
 
+# M23: National Law Information (법제처 law.go.kr DRF) provider configuration.
+# Auth is OC (env LAW_OC), NOT the data.go.kr serviceKey. Read at runtime so
+# tests can mutate the environment. DISABLED BY DEFAULT (NATIONAL_LAW_ENABLED
+# default false) so merely adding the provider is a no-op until an operator
+# flips the flag on Render.
+
+
+def law_oc() -> str:
+    return (os.getenv("LAW_OC") or "").strip()
+
+
+def national_law_enabled() -> bool:
+    return _env_bool("NATIONAL_LAW_ENABLED", False)
+
+
+def national_law_timeout_seconds() -> float:
+    return _env_float("NATIONAL_LAW_TIMEOUT_SECONDS", 10.0)
+
+
+def describe_national_law_config() -> dict:
+    """Snapshot of the National Law provider configuration. Safe to
+    log/serialize: reports OC PRESENCE only — never the OC value."""
+    return {
+        "enabled": national_law_enabled(),
+        "law_oc_present": bool(law_oc()),
+        "timeout_seconds": national_law_timeout_seconds(),
+    }
+
+
 # Phase 2 M5: semantic evidence matching — optional, off by default.
 # The flags below are read at runtime (not at import time) so changing
 # the environment in tests immediately takes effect. Embedding calls

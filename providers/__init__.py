@@ -34,6 +34,13 @@ from .policy_briefing import (
     fetch_and_build_policy_briefing_candidates,
     get_document_provider,
 )
+from .national_law import (
+    DisabledNationalLawProvider,
+    MockNationalLawProvider,
+    NationalLawProvider,
+    fetch_and_build_national_law_candidates,
+    get_law_provider,
+)
 
 
 def get_search_provider(name: str = "naver") -> SearchProvider:
@@ -75,4 +82,9 @@ __all__ = [
     "MockPolicyBriefingProvider",
     "get_document_provider",
     "fetch_and_build_policy_briefing_candidates",
+    "NationalLawProvider",
+    "DisabledNationalLawProvider",
+    "MockNationalLawProvider",
+    "get_law_provider",
+    "fetch_and_build_national_law_candidates",
 ]

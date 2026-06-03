@@ -669,6 +669,24 @@ def _process_news_item_phase_a(
         )
         if policy_briefing_candidates:
             source_candidates = source_candidates + policy_briefing_candidates
+    # M23: second primary-document source — National Law (법제처). Same Option-A
+    # injection as Policy Briefing, gated by NATIONAL_LAW_ENABLED (default
+    # false): when off, no provider is constructed, zero network happens, and
+    # source_candidates / debug_summary stay byte-identical. Law candidates carry
+    # their body (raw_text_available=True) and the stable marker national_law_mst,
+    # flowing through the SAME resolve→evaluate→extract→Lane-B path as PB. All
+    # provider logging lives in providers/national_law.py (pin-OUT); the only
+    # observability here is the in-memory counter below (no log.* in this pinned
+    # file).
+    national_law_count = None
+    if config.national_law_enabled():
+        from providers.national_law import fetch_and_build_national_law_candidates
+
+        national_law_candidates, national_law_count = (
+            fetch_and_build_national_law_candidates(normalized_claims)
+        )
+        if national_law_candidates:
+            source_candidates = source_candidates + national_law_candidates
     source_candidates, official_resolution_debug = resolve_official_evidence(
         source_candidates,
         normalized_claims,
@@ -807,6 +825,11 @@ def _process_news_item_phase_a(
     # debug_summary stays byte-identical to pre-M21 (mirrors naver_api_count).
     if policy_briefing_count is not None:
         debug_summary["policy_briefing_count"] = policy_briefing_count
+    # M23: in-branch-only debug key. national_law_count is None on the disabled
+    # path, so this key is NOT added there — disabled debug_summary stays
+    # byte-identical (mirrors policy_briefing_count).
+    if national_law_count is not None:
+        debug_summary["national_law_count"] = national_law_count
     debug_summary["semantic_evidence_summary"] = semantic_evidence_summary
 
     if verification_card.get("official_mismatch"):

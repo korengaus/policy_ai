@@ -419,7 +419,15 @@ def _resolve_source(source: dict, claims: list[dict]) -> dict:
 # (providers/policy_briefing.py to_official_source_candidates) and is NEVER
 # touched by _resolve_source or evaluate_source_candidate (which copy the dict
 # and only add official_* / reliability_* fields), so it is a stable marker.
-PRIMARY_DOCUMENT_MARKER_FIELD = "policy_briefing_news_item_id"
+#
+# M23: national_law_mst (법령일련번호) is the analogous stable marker for the
+# National Law provider (providers/national_law.py) — also never overwritten by
+# resolve/evaluate. The extractor gates on the PRESENCE of ANY of these markers,
+# so each primary-document source is recognized regardless of the
+# retrieval_method overwrite. Purely additive key-recognition: classification /
+# score / threshold logic is unchanged, so existing fixtures (which carry NONE
+# of these markers) stay byte-identical.
+_PRIMARY_DOCUMENT_MARKER_FIELDS = ("policy_briefing_news_item_id", "national_law_mst")
 PRIMARY_DOCUMENT_STRONG_CLASSIFICATION = "strong_official_direct_support"
 PRIMARY_DOCUMENT_MIN_SCORE = 75
 
@@ -439,19 +447,20 @@ def extract_primary_document_match(source_candidates: list[dict]) -> dict | None
     ``source_candidates``, or None. Reads ONLY resolve-computed fields — never
     recomputes scoring, never sets official_body_match (M19-3 guard intact).
 
-    Gate (all required): the STABLE Policy-Briefing marker
-    policy_briefing_news_item_id is present (so non-Policy-Briefing candidates
-    can never trigger this and existing fixtures stay byte-identical — the
-    marker is an M21+ field absent from every existing/IMMUTABLE fixture) AND
+    Gate (all required): a STABLE primary-document marker is present (any of
+    _PRIMARY_DOCUMENT_MARKER_FIELDS — policy_briefing_news_item_id for M21 PB,
+    national_law_mst for M23 law — so non-primary-document candidates can never
+    trigger this and existing fixtures stay byte-identical: those markers are
+    M21+/M23+ fields absent from every existing/IMMUTABLE fixture) AND
     official_body_match is True AND classification == strong_official_direct_support
     AND score >= 75.
 
-    M22-1b: keying on policy_briefing_news_item_id (not retrieval_method) because
+    M22-1b: keying on the stable markers (not retrieval_method) because
     _resolve_source overwrites retrieval_method to "official_evidence_resolved"
-    on a strong match — see PRIMARY_DOCUMENT_MARKER_FIELD comment above."""
+    on a strong match — see _PRIMARY_DOCUMENT_MARKER_FIELDS comment above."""
     best: dict | None = None
     for source in source_candidates or []:
-        if PRIMARY_DOCUMENT_MARKER_FIELD not in source:
+        if not any(field in source for field in _PRIMARY_DOCUMENT_MARKER_FIELDS):
             continue
         if not source.get("official_body_match"):
             continue
