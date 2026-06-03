@@ -10,9 +10,21 @@ from korean_constants import (
     CONCEPT_SYNONYMS_COMPARATOR as CONCEPT_SYNONYMS,
 )
 
+from official_evidence_resolution import _is_strong_primary_document_match
 from structured_logging import get_logger
 
 log = get_logger(__name__)
+
+# M22-1 — Lane-A verification levels that a strong Lane-B (Policy-Briefing)
+# match is allowed to upgrade. These are the "no real Lane-A match" levels; a
+# genuine Lane-A medium/strong match is left untouched (Lane A wins).
+_LANE_B_UPGRADABLE_LEVELS = frozenset({
+    "official_access_failed",
+    "official_document_not_found",
+    "excluded_non_policy_page",
+    "weak_official_match",
+    "low_confidence_match",
+})
 
 
 CONFLICT_PHRASES = [
@@ -264,7 +276,24 @@ def _make_summary(
     semantic_matched_concepts: list[str],
     verification_level: str,
     official_evidence_results: list[dict],
+    *,
+    lane_b_upgraded: bool = False,
+    primary_document_match: dict | None = None,
 ) -> str:
+    # M22-1 — gated Lane-B branch. Fires FIRST and ONLY when a strong
+    # Policy-Briefing match drove the medium upgrade (lane_b_upgraded=True;
+    # default False → every existing branch below is reached byte-identically).
+    # Describes a BODY match (never a semantic-concept match), inserts the live
+    # official_direct_match_score, and keeps operator-review framing — no
+    # "검증"/"확정"/"100%" overclaim, no semantic_matched_concepts reference.
+    if lane_b_upgraded and primary_document_match:
+        score = int(primary_document_match.get("score") or 0)
+        return (
+            f"정책브리핑 공식 보도자료 본문이 기사 핵심 주장과 직접 일치하는 것으로 "
+            f"확인됩니다 (직접 매칭 점수 {score}점). 다만 최종 공개 전 사람 검토와 "
+            f"원문 재확인이 필요합니다."
+        )
+
     if status == "official_access_failed":
         return "\uacf5\uc2dd \uac80\uc0c9 \ud398\uc774\uc9c0 \uc811\uadfc\uc774 \uc2e4\ud328\ud574 \uc0c1\uc138 \uacf5\uc2dd\ubb38\uc11c\ub97c \ube44\uad50\ud560 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4."
 
@@ -332,7 +361,13 @@ def _make_summary(
     )
 
 
-def _next_action(status: str, verification_level: str) -> str:
+def _next_action(
+    status: str, verification_level: str, *, lane_b_upgraded: bool = False,
+) -> str:
+    # M22-1 — gated Lane-B next-action. Fires only on the Policy-Briefing
+    # upgrade path (default False → existing branches reached byte-identically).
+    if lane_b_upgraded:
+        return "정책브리핑 보도자료 원문의 발표일·시행일·지원/규제 대상을 확인하세요."
     if status == "official_access_failed":
         return "\uacf5\uc2dd\uae30\uad00 \uc811\uadfc \uc2e4\ud328 \uc0ac\uc720\ub97c \ud655\uc778\ud558\uace0 \ubcf4\ub3c4\uc790\ub8cc/\uacf5\uc9c0 \uac8c\uc2dc\ud310\uc744 \uc218\ub3d9 \uac80\uc0c9\ud558\uc138\uc694."
     if status == "official_conflict_possible":
@@ -354,6 +389,8 @@ def compare_news_with_official_evidence(
     article_body,
     policy_claims,
     official_evidence_results,
+    *,
+    primary_document_match: dict | None = None,
 ) -> dict:
     counts = _evidence_access_counts(official_evidence_results)
     official_text = _build_official_text(official_evidence_results)
@@ -399,6 +436,24 @@ def compare_news_with_official_evidence(
         strongly_usable_count=counts["strongly_usable_count"],
         excluded_non_policy_count=counts["excluded_non_policy_count"],
     )
+    # M22-1 — Lane A↔B join. When Lane A found no real match but Lane B carries a
+    # GENUINE strong Policy-Briefing official body match (and there is no
+    # conflict to override), upgrade the categorical level to
+    # "medium_official_match" (NEVER "strong_official_match", so the
+    # draft_verified gate at verification_card.py:472 stays closed). Computed
+    # BEFORE status so _comparison_status maps it coherently to
+    # "official_support_found". semantic_support_score is left at its honest
+    # Lane-A value (not faked). Gated so existing/no-Lane-B fixtures are
+    # byte-identical; conflict precedence is preserved (skipped on conflict, and
+    # _verdict_label evaluates conflicts first regardless).
+    lane_b_upgraded = False
+    if (
+        not conflict_signals
+        and verification_level in _LANE_B_UPGRADABLE_LEVELS
+        and _is_strong_primary_document_match(primary_document_match)
+    ):
+        verification_level = "medium_official_match"
+        lane_b_upgraded = True
     evidence_quality = _quality_from_score(
         semantic_support_score=semantic_support_score,
         document_success_count=counts["document_success_count"],
@@ -441,13 +496,17 @@ def compare_news_with_official_evidence(
             semantic_matched_concepts=semantic_matched_concepts,
             verification_level=verification_level,
             official_evidence_results=official_evidence_results,
+            lane_b_upgraded=lane_b_upgraded,
+            primary_document_match=primary_document_match,
         ),
         "relevance_filter_summary": (
             f"{counts['relevance_qualified_count']} official documents passed usable=true >= 40 "
             f"or weakly_usable=true >= 35 "
             f"(strong={counts['strongly_usable_count']}, weak={counts['weakly_usable_count']})."
         ),
-        "recommended_next_action": _next_action(status, verification_level),
+        "recommended_next_action": _next_action(
+            status, verification_level, lane_b_upgraded=lane_b_upgraded,
+        ),
     }
 
 

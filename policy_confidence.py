@@ -14,6 +14,7 @@ from structured_logging import get_logger
 from korean_constants import (
     LOW_RISK_KEYWORDS_POLICY_CONFIDENCE as LOW_RISK_KEYWORDS,
 )
+from official_evidence_resolution import _is_strong_primary_document_match
 
 log = get_logger(__name__)
 GRADE_SCORES = {
@@ -120,6 +121,16 @@ def _action_priority(risk_level: str, verification_strength: str) -> str:
     return "low"
 
 
+# M22-1 — Lane B (Policy-Briefing) conservative confidence ceiling. A genuine
+# strong Lane-B official body match raises confidence to a FIXED 70 (never
+# higher) with verification_strength forced to "low". 70 < 85 blocks the
+# draft_verified gate (verification_card.py:472); "low" ∉
+# _STRONG_VERIFICATION_STRENGTHS blocks the snippet draft_verified gate
+# (verification_card.py:456). Max achievable label is therefore
+# draft_likely_true — "likely true, human still confirms".
+LANE_B_STRONG_CONFIDENCE = 70
+
+
 def calculate_policy_confidence(
     news_title: str,
     news_summary: str,
@@ -127,6 +138,8 @@ def calculate_policy_confidence(
     policy_claims: list[dict],
     official_evidence_results: list[dict],
     evidence_comparison: dict,
+    *,
+    primary_document_match: dict | None = None,
 ) -> dict:
     best_evidence = _best_official_evidence(official_evidence_results)
     official_usable = bool(best_evidence)
@@ -148,15 +161,29 @@ def calculate_policy_confidence(
     )
 
     policy_confidence_score = max(0, min(100, round(raw_score)))
+    lane_b_raised = False
     if not official_usable:
-        # audit §1.5 #5 (2026-05-26): no-official-doc confidence clamp.
-        # The 20 ceiling forces verification_strength = "none" via the
-        # _verification_strength boundaries below (>= 25 = "low"). This
-        # cascades into many P2 paths — see docs/MAGIC_THRESHOLDS.md §4.
-        # Symmetric with the `unknown` tier value in
-        # _source_confidence_score (line ~153).
-        policy_confidence_score = min(20, policy_confidence_score)
-        verification_strength = "none"
+        # M22-1 — Lane A↔B join: when Lane A has no usable official doc but Lane
+        # B carries a GENUINE strong Policy-Briefing official_body_match, raise
+        # to a fixed conservative ceiling instead of clamping to 20. Gated on
+        # not-official_usable so any Lane-A-usable case is byte-identical, and on
+        # _is_strong_primary_document_match (Policy-Briefing marker + real
+        # body-match + strong + score>=75), so existing fixtures with no Lane-B
+        # match stay byte-identical. official_body_match is read-only here
+        # (M19-3 guard); never set/faked.
+        if _is_strong_primary_document_match(primary_document_match):
+            policy_confidence_score = LANE_B_STRONG_CONFIDENCE
+            verification_strength = "low"
+            lane_b_raised = True
+        else:
+            # audit §1.5 #5 (2026-05-26): no-official-doc confidence clamp.
+            # The 20 ceiling forces verification_strength = "none" via the
+            # _verification_strength boundaries below (>= 25 = "low"). This
+            # cascades into many P2 paths — see docs/MAGIC_THRESHOLDS.md §4.
+            # Symmetric with the `unknown` tier value in
+            # _source_confidence_score (line ~153).
+            policy_confidence_score = min(20, policy_confidence_score)
+            verification_strength = "none"
     else:
         verification_strength = _verification_strength(policy_confidence_score)
 
@@ -184,6 +211,10 @@ def calculate_policy_confidence(
             f"semantic support {semantic_support_score}",
             "no usable official document",
         ]
+        if lane_b_raised:
+            reasons.append(
+                "raised by strong Policy Briefing official body match (Lane B)"
+            )
 
     if has_conflict:
         reasons.append("conflict signals detected")

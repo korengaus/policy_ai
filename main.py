@@ -38,7 +38,10 @@ from official_source_search import (
 from source_retrieval_agent import build_source_retrieval_context
 from source_reliability_agent import evaluate_source_candidates
 from official_source_body import enrich_official_source_candidates_with_bodies
-from official_evidence_resolution import resolve_official_evidence
+from official_evidence_resolution import (
+    extract_primary_document_match,
+    resolve_official_evidence,
+)
 from evidence_extraction_agent import extract_evidence_snippets
 from contradiction_agent import run_contradiction_checks
 from bias_framing_agent import analyze_bias_framing
@@ -671,6 +674,14 @@ def _process_news_item_phase_a(
         normalized_claims,
     )
     source_candidates = evaluate_source_candidates(source_candidates)
+    # M22-1 — Lane A↔B join: extract a GENUINE strong Policy-Briefing (Lane B)
+    # official body match from source_candidates so the Lane-A-only verdict
+    # producers below (compare_news_with_official_evidence, calculate_policy_confidence)
+    # can raise the verdict deterministically and conservatively. Returns None
+    # when no such match exists (incl. POLICY_BRIEFING_ENABLED=false, since no
+    # policy_briefing_api candidate is ever injected) → both producers behave
+    # byte-identically to pre-M22-1. Reads resolve-computed fields only (M19-3).
+    primary_document_match = extract_primary_document_match(source_candidates)
     evidence_extraction = extract_evidence_snippets(
         normalized_claims=normalized_claims,
         source_candidates=source_candidates,
@@ -718,6 +729,7 @@ def _process_news_item_phase_a(
         article_body=article_body,
         policy_claims=policy_claims,
         official_evidence_results=official_evidence_results,
+        primary_document_match=primary_document_match,
     )
     print_evidence_comparison(evidence_comparison)
 
@@ -728,6 +740,7 @@ def _process_news_item_phase_a(
         policy_claims=policy_claims,
         official_evidence_results=official_evidence_results,
         evidence_comparison=evidence_comparison,
+        primary_document_match=primary_document_match,
     )
     print_policy_confidence(policy_confidence)
 

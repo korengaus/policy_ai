@@ -397,6 +397,74 @@ def _resolve_source(source: dict, claims: list[dict]) -> dict:
     return item
 
 
+# M22-1 — Lane A↔B join. The verdict-confidence / verification-level producers
+# (policy_confidence.calculate_policy_confidence,
+# evidence_comparator.compare_news_with_official_evidence) read ONLY Lane A
+# (official_evidence_results, the crawl lane). A strong M21 Policy-Briefing match
+# lands in Lane B (source_candidates) and was therefore invisible to them. The
+# two readers below extract — never recompute or fake — the resolve-computed
+# Lane-B signal so a GENUINE strong official_body_match can deterministically
+# raise the verdict (bounded; see policy_confidence / evidence_comparator).
+#
+# M19-3 guard: official_body_match / official_evidence_classification /
+# official_evidence_score are set ONLY by _resolve_source above on a real
+# body-text match. These functions read those values; they never set them and
+# never grant a raise from domain trust alone.
+PRIMARY_DOCUMENT_RETRIEVAL_METHOD = "policy_briefing_api"
+PRIMARY_DOCUMENT_STRONG_CLASSIFICATION = "strong_official_direct_support"
+PRIMARY_DOCUMENT_MIN_SCORE = 75
+
+
+def _is_strong_primary_document_match(match: dict | None) -> bool:
+    """True iff ``match`` is a genuine, resolve-computed, STRONG Policy-Briefing
+    official body match eligible to raise the verdict. Pure; never raises."""
+    if not match:
+        return False
+    if match.get("classification") != PRIMARY_DOCUMENT_STRONG_CLASSIFICATION:
+        return False
+    return int(match.get("score") or 0) >= PRIMARY_DOCUMENT_MIN_SCORE
+
+
+def extract_primary_document_match(source_candidates: list[dict]) -> dict | None:
+    """Return the best strong Policy-Briefing (Lane B) official body match from
+    ``source_candidates``, or None. Reads ONLY resolve-computed fields — never
+    recomputes scoring, never sets official_body_match (M19-3 guard intact).
+
+    Gate (all required): retrieval_method == "policy_briefing_api" (the M21
+    marker, so non-Policy-Briefing candidates can never trigger this and
+    existing fixtures stay byte-identical) AND official_body_match is True AND
+    classification == strong_official_direct_support AND score >= 75."""
+    best: dict | None = None
+    for source in source_candidates or []:
+        if source.get("retrieval_method") != PRIMARY_DOCUMENT_RETRIEVAL_METHOD:
+            continue
+        if not source.get("official_body_match"):
+            continue
+        classification = (
+            source.get("official_evidence_classification")
+            or source.get("official_direct_match_classification")
+        )
+        if classification != PRIMARY_DOCUMENT_STRONG_CLASSIFICATION:
+            continue
+        score = int(
+            source.get("official_evidence_score")
+            or source.get("official_final_direct_match_score")
+            or source.get("official_body_match_score")
+            or 0
+        )
+        if score < PRIMARY_DOCUMENT_MIN_SCORE:
+            continue
+        if best is None or score > int(best.get("score") or 0):
+            best = {
+                "score": score,
+                "classification": PRIMARY_DOCUMENT_STRONG_CLASSIFICATION,
+                "title": source.get("title") or "",
+                "url": source.get("official_detail_url") or source.get("url") or "",
+                "source_id": source.get("source_id") or "",
+            }
+    return best
+
+
 def resolve_official_evidence(
     source_candidates: list[dict],
     normalized_claims: list[dict],
