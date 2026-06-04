@@ -1658,6 +1658,31 @@ def analyze_pipeline(
         "ai_status_summary": _summarize_ai_status_from_items(report_items),
         "news_results": report_items,
     })
+    # M27 — surface the per-news-item primary-document provider counters
+    # (policy_briefing_count / national_law_count) at the top level. PURE
+    # read-only aggregation of values already produced per item
+    # (main.py:888-894); observability only — touches no verdict/scoring field
+    # and emits no log. Mirrors the existing "is not None" convention: when
+    # both providers are off (production default) no item carries the counts,
+    # so the key is NOT added and the report stays byte-identical to HEAD.
+    policy_briefing_total = 0
+    national_law_total = 0
+    saw_primary_document_count = False
+    for item in report_items:
+        item_debug = item.get("debug_summary") or {}
+        policy_briefing_value = item_debug.get("policy_briefing_count")
+        if policy_briefing_value is not None:
+            policy_briefing_total += policy_briefing_value
+            saw_primary_document_count = True
+        national_law_value = item_debug.get("national_law_count")
+        if national_law_value is not None:
+            national_law_total += national_law_value
+            saw_primary_document_count = True
+    if saw_primary_document_count:
+        report["primary_document_counts"] = {
+            "policy_briefing": policy_briefing_total,
+            "national_law": national_law_total,
+        }
     _store_analysis_report(
         analysis_cache_key=analysis_cache_key,
         query=query,
