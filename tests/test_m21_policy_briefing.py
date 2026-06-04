@@ -309,6 +309,29 @@ class CandidateContractTests(unittest.TestCase):
         self.assertEqual(count, 1)
         self.assertEqual(len(candidates), 1)
 
+    def test_junk_only_overlap_excluded_after_token_cleanup(self):
+        # M36 — the doc's ONLY shared tokens with the claim are stopword/number
+        # junk (올해 / 라고 / 4조). Pre-M36 those passed the >=1 gate; after the
+        # provider-local token cleanup they no longer count, so cleaned overlap
+        # is 0 and the off-topic release is EXCLUDED (the 기상청-style case).
+        docs = [_norm_doc("j", "기상 관측 올해",
+                          "지역 날씨 올해 라고 4조 전망",
+                          url="https://www.korea.kr/news/policyNewsView.do?newsId=11")]
+        claims = [{"claim_text": "전세대출 규제 강화 올해 라고"}]
+        candidates, count = pb.to_official_source_candidates(docs, claims)
+        self.assertEqual(count, 0)
+        self.assertEqual(candidates, [])
+
+    def test_real_domain_overlap_survives_token_cleanup(self):
+        # M36 recall-safety: a genuine domain token (규제) is NOT a stopword and
+        # survives the cleanup, so a topically-relevant release is still kept.
+        docs = [_norm_doc("d", "가계대출 규제 안내", "금융 규제 본문",
+                          url="https://www.korea.kr/news/policyNewsView.do?newsId=12")]
+        claims = [{"claim_text": "전세대출 규제 강화 올해 라고"}]
+        candidates, count = pb.to_official_source_candidates(docs, claims)
+        self.assertEqual(count, 1)
+        self.assertEqual(len(candidates), 1)
+
 
 # ---------------------------------------------------------------------------
 # (5) Option-A uplift only on genuine body-match (M19-3 guard).

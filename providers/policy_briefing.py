@@ -89,6 +89,38 @@ _SOURCE_TAG = "policy_briefing"
 _TAG_RE = re.compile(r"<[^>]+>")
 _TOKEN_RE = re.compile(r"[가-힣A-Za-z0-9.%]+")
 
+# M36 — PROVIDER-LOCAL relevance-token cleanup. Used ONLY by _claim_tokens /
+# _doc_tokens (the M34 _select_documents precision filter), NEVER by the verdict
+# matcher (official_evidence_resolution._tokens is a separate tokenizer in a
+# different file). Removing these junk tokens only reduces noise overlap so
+# off-topic-ministry releases stop passing the MIN_CLAIM_TOKEN_OVERLAP gate; it
+# can never strengthen a match. CONSERVATIVE: particles / endings / quotative /
+# generic reporting + time words ONLY — NO finance/policy domain nouns.
+STOPWORDS_RELEVANCE: frozenset = frozenset({
+    "라고", "이라고", "이라며", "라며", "라는", "이라는",
+    "따르면", "따라", "때문에", "것이다", "것", "데", "대로",
+    "등", "및", "관계자", "관계자는", "제시한", "제시",
+    "유지할", "유지", "방향", "방향을",
+    "지난해", "올해", "내년", "작년", "금년",
+    "이른", "없다는", "있다는", "아닌", "인데",
+    "위해", "통해", "대한", "관련", "한편", "다만",
+})
+
+# Digit-led numeric/quantity/time token (optionally a Korean unit/counter or
+# percent), e.g. 4조 / 8조 / 1분기 / 4분기 / 2026년 / 3월 / 100억 / 50% / 1.5%.
+# Anchored so it only matches tokens that are ENTIRELY numeric+unit — a digit
+# inside a meaningful word (already rare given _TOKEN_RE) is not dropped.
+_NUMBER_UNIT_RE = re.compile(
+    r"^\d+(?:\.\d+)?(?:%|조|억|만|천|원|년|월|일|분기|개월|건|명|차|위|호|위안|달러)?$"
+)
+
+
+def _is_number_or_unit(token: str) -> bool:
+    """True iff ``token`` is a pure numeric/quantity/time token (digit-led with
+    an optional Korean unit/counter or percent). Provider-local; relevance
+    filter only."""
+    return bool(_NUMBER_UNIT_RE.match(token or ""))
+
 
 def _strip_tags(text: Optional[str]) -> str:
     """Strip HTML tags from a DataContents CDATA body and unescape entities.
@@ -428,7 +460,12 @@ def _claim_tokens(normalized_claims: List[Dict[str, Any]]) -> set:
         ):
             value = str(claim.get(field) or "")
             for token in _TOKEN_RE.findall(value):
-                if len(token) >= 2 and not token.isdigit():
+                if (
+                    len(token) >= 2
+                    and not token.isdigit()
+                    and token not in STOPWORDS_RELEVANCE
+                    and not _is_number_or_unit(token)
+                ):
                     tokens.add(token)
     return tokens
 
@@ -438,7 +475,12 @@ def _doc_tokens(document: Dict[str, Any]) -> set:
     return {
         token
         for token in _TOKEN_RE.findall(text)
-        if len(token) >= 2 and not token.isdigit()
+        if (
+            len(token) >= 2
+            and not token.isdigit()
+            and token not in STOPWORDS_RELEVANCE
+            and not _is_number_or_unit(token)
+        )
     }
 
 
@@ -454,7 +496,10 @@ def _select_documents(
     rank-to-fill/never-exclude behavior):
       (a) releases sharing ZERO claim-token overlap are EXCLUDED
           (``MIN_CLAIM_TOKEN_OVERLAP``); a release with any overlap (>=1)
-          survives — recall-safe;
+          survives — recall-safe. Overlap is measured on STOPWORD/NUMBER-CLEANED
+          token sets (M36) so junk words (라고/올해/4조) no longer count as
+          overlap; this is still input-selection only — the body-matcher
+          remains the sole judge of evidence STRENGTH for survivors;
       (b) survivors keep overlap-desc order; this selection affects ONLY
           which candidates are injected — it never touches any reliability
           score or verdict, and the body-matcher (resolve_official_evidence,
