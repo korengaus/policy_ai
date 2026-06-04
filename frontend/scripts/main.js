@@ -153,6 +153,7 @@
     let activeCategory = "전체";
     let activeTopicKey = "";
     let selectedResultIndex = null;
+    // ===== M29-A1 — pin-safe display label maps =====
     const ALERT_LABELS = {
       WATCH: "관찰",
       LOW: "낮음",
@@ -197,6 +198,10 @@
       "Keep on watchlist until usable official evidence is available.": "확인 가능한 공식 근거가 나올 때까지 관찰 목록에 유지하세요.",
       "No immediate action beyond routine monitoring.": "즉각적인 대응보다는 일반 모니터링을 유지하세요.",
     };
+    // ===== end pin-safe display label maps =====
+    // Deferred from M29-A1 (pin-sensitive): values contain regression-pinned
+    // phrases (검증 완료 / 사람 검토 대기) and VERDICT_LABELS is mutated below.
+    // Left in place to avoid byte-risk; revisit in a later pinned-cluster slice.
     const VERDICT_LABELS = {
       draft_verified: "임시 검증 완료",
       draft_likely_true: "사실 가능성 높음",
@@ -213,6 +218,7 @@
     VERDICT_LABELS.draft_needs_review = "사람 검토 대기";
     VERDICT_LABELS.draft_high_risk_review = "고위험 사람 검토 대기";
 
+    // M29-A1: SOURCE_TYPE_LABELS is also pin-safe (kept in place this slice).
     const SOURCE_TYPE_LABELS = {
       official_government: "공식 정부기관",
       public_institution: "공공기관",
