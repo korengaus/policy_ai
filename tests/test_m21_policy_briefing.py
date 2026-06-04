@@ -287,11 +287,23 @@ class CandidateContractTests(unittest.TestCase):
         self.assertEqual(pb.to_official_source_candidates([], [{"claim_text": "x"}]), ([], 0))
         self.assertEqual(pb.to_official_source_candidates([_norm_doc("a", "t", "b", url="u")], []), ([], 0))
 
-    def test_zero_overlap_release_still_injected_rank_to_fill(self):
-        # A release sharing no token with the claim is STILL injected (ranking,
-        # not exclusion) — body-match downstream is the sole usefulness decider.
+    def test_zero_overlap_release_excluded(self):
+        # M34 — reverses the prior M21 rank-to-fill/never-exclude behavior:
+        # a release sharing ZERO claim-token overlap is now EXCLUDED (the
+        # body-matcher still judges STRENGTH for survivors, but off-topic
+        # noise no longer gets injected).
         docs = [_norm_doc("z", "축제 일정 안내", "지역 축제 행사 일정 본문",
                           url="https://www.korea.kr/news/policyNewsView.do?newsId=9")]
+        claims = [{"claim_text": "전세대출 규제 강화"}]
+        candidates, count = pb.to_official_source_candidates(docs, claims)
+        self.assertEqual(count, 0)
+        self.assertEqual(candidates, [])
+
+    def test_overlap_at_least_one_release_kept(self):
+        # M34 recall-safety: a release sharing >= 1 claim token survives the
+        # precision filter and is injected.
+        docs = [_norm_doc("k", "전세대출 규제 설명", "전세대출 규제 본문",
+                          url="https://www.korea.kr/news/policyNewsView.do?newsId=10")]
         claims = [{"claim_text": "전세대출 규제 강화"}]
         candidates, count = pb.to_official_source_candidates(docs, claims)
         self.assertEqual(count, 1)
@@ -332,6 +344,11 @@ class OptionAUpliftTests(unittest.TestCase):
         self.assertEqual(cand["verification_role"], "primary_evidence")
 
     def test_non_matching_body_no_uplift(self):
+        # M34 — the doc shares ONE incidental claim token ("전세대출") so it
+        # survives the precision filter (overlap >= 1), but its body does NOT
+        # support the claim, so the matcher grants no body-match / no uplift.
+        # (A truly zero-overlap doc is now excluded upstream — see
+        # test_zero_overlap_release_excluded.)
         doc = _norm_doc(
             "nomatch",
             "지역 축제 행사 안내",
@@ -341,7 +358,8 @@ class OptionAUpliftTests(unittest.TestCase):
                 "여러 무대에서 음악 공연이 이어진다. 먹거리 장터와 "
                 "전시 부스도 함께 운영된다. 주최 측은 안전 관리에 "
                 "만전을 기하겠다고 밝혔다. 자세한 일정은 누리집에서 "
-                "확인할 수 있다고 안내했다."
+                "확인할 수 있다고 안내했다. 이 행사는 전세대출 정책과는 "
+                "무관하다."
             ),
             url="https://www.korea.kr/news/policyNewsView.do?newsId=200",
         )

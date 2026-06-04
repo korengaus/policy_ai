@@ -76,6 +76,11 @@ _KST = timezone(timedelta(hours=9))
 # ``to_official_source_candidates`` for the ranking-not-filtering contract.
 MAX_PRESS_RELEASES = 15
 
+# M34 — minimum claim-token overlap for a release to be injected. 1 = drop
+# only releases sharing ZERO meaningful tokens with the claim set (kills
+# off-topic-ministry noise; keeps anything with any overlap — recall-safe).
+MIN_CLAIM_TOKEN_OVERLAP = 1
+
 # Single page is fetched in the wiring; the param is plumbed for future use.
 DEFAULT_NUM_OF_ROWS = 100
 
@@ -445,20 +450,29 @@ def _select_documents(
 ) -> List[Dict[str, Any]]:
     """Pick which releases to inject from the full multi-ministry feed.
 
-    This is RANKING, NOT FILTERING (distinct from the M17b hard title filter):
-      (a) every release remains eligible — the downstream body-match flow
-          (resolve_official_evidence, gated by the M19-3 official_body_match
-          guard) is the SOLE decider of usefulness;
-      (b) this ordering affects ONLY which candidates are injected — it never
-          touches any reliability score or verdict;
-      (c) a release with zero claim-token overlap may STILL be injected if
-          slots remain (rank-to-fill, never exclude-on-zero).
+    M34 — RANK, then DROP off-topic releases (reverses the prior M21
+    rank-to-fill/never-exclude behavior):
+      (a) releases sharing ZERO claim-token overlap are EXCLUDED
+          (``MIN_CLAIM_TOKEN_OVERLAP``); a release with any overlap (>=1)
+          survives — recall-safe;
+      (b) survivors keep overlap-desc order; this selection affects ONLY
+          which candidates are injected — it never touches any reliability
+          score or verdict, and the body-matcher (resolve_official_evidence,
+          M19-3 official_body_match guard) remains the SOLE judge of evidence
+          STRENGTH for survivors;
+      (c) on a topic-dry feed every release may be excluded -> empty result,
+          which the pipeline handles as a clean no-official-candidate state.
     Order: by claim-token overlap desc, then recency (ApproveDate) desc,
     then id for determinism.
     """
     claim_tokens = _claim_tokens(normalized_claims)
+    relevant = [
+        doc
+        for doc in documents
+        if len(_doc_tokens(doc) & claim_tokens) >= MIN_CLAIM_TOKEN_OVERLAP
+    ]
     ranked = sorted(
-        documents,
+        relevant,
         key=lambda doc: (
             -len(_doc_tokens(doc) & claim_tokens),
             -_approve_date_sort_key(doc.get("approve_date") or ""),
