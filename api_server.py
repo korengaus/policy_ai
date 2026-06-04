@@ -196,6 +196,8 @@ class AnalyzeResult(BaseModel):
     missing_context: list = []
     last_checked_at: str = ""
     review_status: str = ""
+    human_reviewed_at: Optional[str] = None
+    human_reviewed_by: Optional[str] = None
     ai_status: str = "unavailable"
     ai_status_reason: str = "unknown"
     ai_model: str = ""
@@ -345,6 +347,8 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
                 missing_context=api_result.get("missing_context") or [],
                 last_checked_at=api_result.get("last_checked_at") or "",
                 review_status=api_result.get("review_status") or "",
+                human_reviewed_at=api_result.get("human_reviewed_at"),
+                human_reviewed_by=api_result.get("human_reviewed_by"),
                 ai_status=api_result.get("ai_status") or "unavailable",
                 ai_status_reason=api_result.get("ai_status_reason") or "unknown",
                 ai_model=api_result.get("ai_model") or "",
@@ -537,6 +541,8 @@ def _api_result_to_dict(api_result: dict) -> dict:
         "missing_context": api_result.get("missing_context") or [],
         "last_checked_at": api_result.get("last_checked_at") or "",
         "review_status": api_result.get("review_status") or "",
+        "human_reviewed_at": api_result.get("human_reviewed_at"),
+        "human_reviewed_by": api_result.get("human_reviewed_by"),
         "ai_status": api_result.get("ai_status") or "unavailable",
         "ai_status_reason": api_result.get("ai_status_reason") or "unknown",
         "ai_model": api_result.get("ai_model") or "",
@@ -670,6 +676,8 @@ def _inflate_stored_result_row(row: dict) -> dict:
             "missing_context": _parse_json_column(row.get("missing_context")) or [],
             "last_checked_at": row.get("last_checked_at") or "",
             "review_status": row.get("review_status") or "",
+            "human_reviewed_at": row.get("human_reviewed_at"),
+            "human_reviewed_by": row.get("human_reviewed_by"),
         },
         "claim_text": row.get("claim_text") or "",
         "verdict_label": row.get("verdict_label") or "",
@@ -681,6 +689,8 @@ def _inflate_stored_result_row(row: dict) -> dict:
         "missing_context": _parse_json_column(row.get("missing_context")) or [],
         "last_checked_at": row.get("last_checked_at") or "",
         "review_status": row.get("review_status") or "",
+        "human_reviewed_at": row.get("human_reviewed_at"),
+        "human_reviewed_by": row.get("human_reviewed_by"),
         "ai_status": "ok",
         "ai_status_reason": "stored_result_reconstructed",
         "ai_model": "",

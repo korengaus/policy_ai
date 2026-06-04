@@ -264,6 +264,13 @@ analysis_results_table = sa.Table(
     sa.Column("bias_framing_summary", sa.Text),
     sa.Column("debug_summary", sa.Text),
     sa.Column("created_at", sa.Text),
+    # M39a — human-reviewed badge signal (nullable; set only by a manual
+    # operator UPDATE, never by the pipeline). create_all does NOT add these
+    # to an existing live table, so _ensure_analysis_results_columns (called
+    # from ensure_schema after create_all) ALTERs the live table to match
+    # this def. NULL until set -> byte-identical when no row is marked.
+    sa.Column("human_reviewed_at", sa.Text),
+    sa.Column("human_reviewed_by", sa.Text),
 )
 
 
@@ -618,12 +625,91 @@ def ensure_schema(engine: Optional[Engine]) -> bool:
         log.warning("Postgres schema create_all unexpected error: %s", exc)
         return False
     _align_serial_sequences(engine)
+    # M39a — additive columns on the live analysis_results table. create_all
+    # above only creates MISSING TABLES; it never ALTERs an existing one, so a
+    # pre-existing live table won't gain new def columns on its own. This
+    # idempotent, dialect-aware step closes that gap so sa.select(table) reads
+    # never reference a column the live table lacks.
+    _ensure_analysis_results_columns(engine)
     # M25a — pgvector infra, ONLY when gated on. Failures here NEVER affect the
     # main schema's success (separate metadata + caught below); ensure_schema
     # still returns True so the rest of the app runs on the JSON fallback.
     if config.pgvector_enabled():
         _ensure_pgvector(engine)
     return True
+
+
+# M39a — additive-column list for analysis_results. (name, sql_type) pairs.
+# All NULLABLE, no server_default. Extend this tuple to add future additive
+# columns to this programmatic (non-Alembic) table via the same idempotent path.
+_ANALYSIS_RESULTS_ADDED_COLUMNS: tuple = (
+    ("human_reviewed_at", "TEXT"),
+    ("human_reviewed_by", "TEXT"),
+)
+
+
+def _analysis_results_existing_columns(conn, dialect: str) -> set:
+    """Return the set of column names physically present on the live
+    ``analysis_results`` table. Dialect-aware: information_schema on
+    PostgreSQL, ``PRAGMA table_info`` on SQLite (the test substitute)."""
+    if dialect == "postgresql":
+        rows = conn.execute(
+            sa.text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'analysis_results'"
+            )
+        ).all()
+        return {row[0] for row in rows}
+    # PRAGMA table_info columns: (cid, name, type, notnull, dflt_value, pk)
+    rows = conn.execute(sa.text("PRAGMA table_info(analysis_results)")).all()
+    return {row[1] for row in rows}
+
+
+def _ensure_analysis_results_columns(engine: Optional[Engine]) -> None:
+    """Idempotent additive-column step run by :func:`ensure_schema` AFTER
+    ``create_all``. Ensures the LIVE ``analysis_results`` table has the M39a
+    nullable columns so ``sa.select(analysis_results_table)`` never references
+    a column the table lacks.
+
+    Dialect-aware: PostgreSQL uses ``ADD COLUMN IF NOT EXISTS``; SQLite (no
+    such clause on ADD COLUMN) checks existence first via PRAGMA. Idempotent
+    (no-op when present). NULLABLE, no server_default. NEVER crashes startup —
+    a failure is logged (WARNING), not raised and not silently swallowed.
+
+    Column names come from the module-level constant tuple (never user input),
+    so the f-string DDL carries no injection surface.
+    """
+    if engine is None:
+        return
+    dialect = engine.dialect.name
+    try:
+        with engine.begin() as conn:
+            existing = _analysis_results_existing_columns(conn, dialect)
+            for name, col_type in _ANALYSIS_RESULTS_ADDED_COLUMNS:
+                if name in existing:
+                    continue
+                if dialect == "postgresql":
+                    conn.execute(
+                        sa.text(
+                            f"ALTER TABLE analysis_results "
+                            f"ADD COLUMN IF NOT EXISTS {name} {col_type}"
+                        )
+                    )
+                else:
+                    conn.execute(
+                        sa.text(
+                            f"ALTER TABLE analysis_results ADD COLUMN {name} {col_type}"
+                        )
+                    )
+                log.info(
+                    "ensure_schema: added analysis_results.%s (%s)", name, col_type,
+                )
+    except SQLAlchemyError as exc:
+        log.warning("ensure_schema: analysis_results column ensure failed: %s", exc)
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "ensure_schema: analysis_results column ensure unexpected error: %s", exc,
+        )
 
 
 def _ensure_pgvector(engine: Optional[Engine]) -> bool:
