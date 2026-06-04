@@ -477,6 +477,7 @@ def to_official_source_candidates(
                     "raw_text": law.get("raw_text") or "",
                     "raw_text_available": True,
                     "official_body_fetched": True,
+                    "official_body_length": len(law.get("raw_text") or ""),
                     # official_body_match is NOT set — computed downstream only.
                     "retrieval_method": "national_law_api",  # informational; resolve overwrites
                     "purpose": "primary_source",

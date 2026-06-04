@@ -508,6 +508,7 @@ def to_official_source_candidates(
                     "raw_text": doc.get("body") or "",
                     "raw_text_available": True,
                     "official_body_fetched": True,
+                    "official_body_length": len(doc.get("body") or ""),
                     # official_body_match is NOT set — computed downstream only.
                     "retrieval_method": "policy_briefing_api",
                     "purpose": "primary_source",
