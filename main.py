@@ -910,6 +910,53 @@ def _process_news_item_phase_a(
 
     print_final_decision(final_decision)
 
+    # M22-2 — record-only PRE-verdict LLM judge. A SEPARATE, INDEPENDENT
+    # invocation from the post-verdict binding block below. It runs HERE,
+    # after the verdict is fully locked (P2 calibrate_final_decision above
+    # is authoritative for policy_alert_level; verdict_label was set by
+    # build_verification_card earlier) and after the prose realignment, but
+    # BEFORE the existing post-verdict block and BEFORE the p2_alert_pre_judge
+    # snapshot — so it cannot perturb either. It writes ONLY to
+    # debug_summary["llm_judge_prejudge"] and has ZERO influence on
+    # final_decision / policy_alert_level / verdict_label /
+    # disagreement_signal. It does NOT call _apply_judge_to_final_decision.
+    #
+    # Gated by the NEW flag LLM_JUDGE_PREJUDGE_ENABLED (default off),
+    # independent of LLM_JUDGE_ENABLED. NO log.* is emitted here: main.py is
+    # a pin-IN file for the M14.4 log-count test, so the record-only path
+    # must not add a log call. The judge's own logging lives in llm_judge.py
+    # (pin-OUT). On any failure the payload degrades to None (no log), exactly
+    # mirroring the post-verdict block's None default.
+    prejudge_debug_payload = None
+    if llm_judge.llm_judge_prejudge_enabled():
+        try:
+            prejudge_input = llm_judge.JudgeInput(
+                current_label=verification_card.get("verdict_label") or "",
+                policy_confidence_score=policy_confidence.get(
+                    "policy_confidence_score"
+                ),
+                verification_strength=policy_confidence.get(
+                    "verification_strength"
+                ),
+                claim_text=(news.get("title") or "")[:1000],
+                official_sources_count=len(source_candidates or []),
+                evidence_summary=verification_card.get("evidence_summary"),
+                contradiction_summary=contradiction_summary,
+                bias_framing_summary=bias_framing_summary,
+            )
+            prejudge_verdict = llm_judge.run_judge(
+                prejudge_input, model=AI_MODEL,
+            )
+            prejudge_debug_payload = llm_judge.judge_verdict_to_dict(
+                prejudge_verdict
+            )
+            # Record-only: NEVER applied to the verdict in M22-2. Pinned
+            # False so the debug payload is unambiguous about zero influence.
+            prejudge_debug_payload["applied"] = False
+        except Exception:  # noqa: BLE001 — record-only judge must never break pipeline
+            prejudge_debug_payload = None
+    debug_summary["llm_judge_prejudge"] = prejudge_debug_payload
+
     # M13.1b — LLM judge invocation. The judge can confirm, downgrade
     # the policy_alert_level by one tier, or flag for human review.
     # It CANNOT raise the alert level, modify verdict_label, change

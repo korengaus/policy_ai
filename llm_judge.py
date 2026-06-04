@@ -128,6 +128,26 @@ def llm_judge_enabled() -> bool:
     return os.environ.get("LLM_JUDGE_ENABLED", "").strip().lower() == "true"
 
 
+def llm_judge_prejudge_enabled() -> bool:
+    """Returns True iff env var ``LLM_JUDGE_PREJUDGE_ENABLED`` equals
+    ``"true"`` (case-insensitive, leading/trailing whitespace stripped).
+
+    M22-2 — gates the SEPARATE, record-only PRE-verdict judge invocation
+    in ``main._process_news_item_phase_a``. It is INDEPENDENT of
+    :func:`llm_judge_enabled` (which gates the existing post-verdict
+    binding block): the pre-verdict judge writes ONLY to
+    ``debug_summary["llm_judge_prejudge"]`` and has zero influence on any
+    verdict field. Defaults to False so the pipeline behaves
+    byte-identically until an operator opts in via the Render dashboard.
+    Read lazily on every call so toggling the env var does not require a
+    process restart.
+    """
+    return (
+        os.environ.get("LLM_JUDGE_PREJUDGE_ENABLED", "").strip().lower()
+        == "true"
+    )
+
+
 def estimate_cost_usd(
     model: str, input_tokens: int, output_tokens: int,
 ) -> Optional[float]:
