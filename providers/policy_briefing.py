@@ -104,6 +104,16 @@ STOPWORDS_RELEVANCE: frozenset = frozenset({
     "지난해", "올해", "내년", "작년", "금년",
     "이른", "없다는", "있다는", "아닌", "인데",
     "위해", "통해", "대한", "관련", "한편", "다만",
+    # M36b — generic administrative / predicate / quantity-shape terms shared
+    # across all ministries' press releases (observed leaking off-topic
+    # ministries past the >=1 gate). NO finance/policy domain noun here:
+    # 가계대출/대출/규제/총량/금융위/은행/예금/차주/소상공인/... stay OUT of this set.
+    "대비", "계획", "증가", "증가해", "목표", "목표로", "폭", "폭이",
+    "등은", "제한", "제한될수록", "바꾸는", "했다", "늘었다",
+    "집중하기", "몰려갈", "이야기", "너무", "수밖에", "우량",
+    # English claim-status artifacts (from normalized-claim status fields), not
+    # topical. No English domain word added.
+    "proposed", "uncertain", "unknown",
 })
 
 # Digit-led numeric/quantity/time token (optionally a Korean unit/counter or
@@ -120,6 +130,32 @@ def _is_number_or_unit(token: str) -> bool:
     an optional Korean unit/counter or percent). Provider-local; relevance
     filter only."""
     return bool(_NUMBER_UNIT_RE.match(token or ""))
+
+
+# M36b — leading/trailing punctuation only (NOT internal). _TOKEN_RE keeps "."
+# for 1.5% style numbers, so sentence-ending tokens arrive as 것이다. / 했다. /
+# 늘었다. and slip past the stoplist. Stripping EDGE punctuation lets them match
+# the stoplist; an internal period (1.5%) is untouched because it is not at an
+# edge (and the trailing "%" further guards it).
+_TOKEN_STRIP_CHARS = ".,。"
+
+
+def _clean_token(token: str) -> Optional[str]:
+    """Return the relevance-cleaned form of a single token, or None if it should
+    be dropped. Strips EDGE punctuation, then applies the len>=2 / pure-digit /
+    stopword / number-unit drops to the stripped form. Provider-local; used ONLY
+    by the M34 _select_documents precision filter — never by the verdict
+    matcher. Removal-only: it can only reduce junk overlap, never strengthen a
+    match."""
+    cleaned = (token or "").strip(_TOKEN_STRIP_CHARS)
+    if (
+        len(cleaned) >= 2
+        and not cleaned.isdigit()
+        and cleaned not in STOPWORDS_RELEVANCE
+        and not _is_number_or_unit(cleaned)
+    ):
+        return cleaned
+    return None
 
 
 def _strip_tags(text: Optional[str]) -> str:
@@ -460,27 +496,18 @@ def _claim_tokens(normalized_claims: List[Dict[str, Any]]) -> set:
         ):
             value = str(claim.get(field) or "")
             for token in _TOKEN_RE.findall(value):
-                if (
-                    len(token) >= 2
-                    and not token.isdigit()
-                    and token not in STOPWORDS_RELEVANCE
-                    and not _is_number_or_unit(token)
-                ):
-                    tokens.add(token)
+                cleaned = _clean_token(token)
+                if cleaned is not None:
+                    tokens.add(cleaned)
     return tokens
 
 
 def _doc_tokens(document: Dict[str, Any]) -> set:
     text = f"{document.get('title') or ''} {document.get('body') or ''}"
     return {
-        token
+        cleaned
         for token in _TOKEN_RE.findall(text)
-        if (
-            len(token) >= 2
-            and not token.isdigit()
-            and token not in STOPWORDS_RELEVANCE
-            and not _is_number_or_unit(token)
-        )
+        if (cleaned := _clean_token(token)) is not None
     }
 
 

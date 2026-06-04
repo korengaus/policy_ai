@@ -332,6 +332,41 @@ class CandidateContractTests(unittest.TestCase):
         self.assertEqual(count, 1)
         self.assertEqual(len(candidates), 1)
 
+    def test_trailing_period_ending_excluded_after_strip(self):
+        # M36b — the only shared raw token is a sentence-ending with a trailing
+        # period (했다.). Pre-M36b it slipped past the stoplist (which has 했다,
+        # not 했다.) and created overlap; after edge-punctuation stripping it
+        # matches the stoplist and is dropped -> cleaned overlap 0 -> excluded.
+        docs = [_norm_doc("p", "지역 행사 안내", "주말 지역 행사가 열렸다고 했다.",
+                          url="https://www.korea.kr/news/policyNewsView.do?newsId=13")]
+        claims = [{"claim_text": "전세대출 규제를 강화했다고 했다."}]
+        candidates, count = pb.to_official_source_candidates(docs, claims)
+        self.assertEqual(count, 0)
+        self.assertEqual(candidates, [])
+
+    def test_generic_admin_only_overlap_excluded(self):
+        # M36b — overlaps only on generic administrative/predicate terms
+        # (대비/계획/증가) shared across all ministries -> dropped -> excluded.
+        docs = [_norm_doc("g", "기상 관측 대비 계획",
+                          "지역 날씨 대비 계획 증가 전망",
+                          url="https://www.korea.kr/news/policyNewsView.do?newsId=14")]
+        claims = [{"claim_text": "전세대출 대비 계획 증가"}]
+        candidates, count = pb.to_official_source_candidates(docs, claims)
+        self.assertEqual(count, 0)
+        self.assertEqual(candidates, [])
+
+    def test_number_token_not_broken_by_punctuation_strip(self):
+        # M36b — a number like 1.5% must stay a single number token (dropped),
+        # NOT be split by the edge-strip into a surviving fragment. The only
+        # shared raw token here is 1.5% -> number-dropped -> overlap 0 ->
+        # excluded (confirms the internal period in 1.5% is untouched).
+        docs = [_norm_doc("n", "물가 동향", "소비자 물가 1.5% 상승했다",
+                          url="https://www.korea.kr/news/policyNewsView.do?newsId=15")]
+        claims = [{"claim_text": "전세대출 금리 1.5%"}]
+        candidates, count = pb.to_official_source_candidates(docs, claims)
+        self.assertEqual(count, 0)
+        self.assertEqual(candidates, [])
+
 
 # ---------------------------------------------------------------------------
 # (5) Option-A uplift only on genuine body-match (M19-3 guard).
