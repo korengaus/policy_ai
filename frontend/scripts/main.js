@@ -1,3 +1,4 @@
+    // ===== C1 — Config, DOM handles, state & label maps =====
     const API_BASE = window.location.origin;
     // M17-search-quality: storage key bumped from
     // "policy_ai_recent_analysis" to invalidate cached entries written
@@ -227,6 +228,7 @@
       unknown: "확인 필요",
     };
 
+    // ===== C2 — Text utilities & sanitizers =====
     function repairMojibake(value) {
       const text = String(value ?? "");
       if (!/[ëìêíÃÂð]/.test(text)) return text;
@@ -372,6 +374,7 @@
         .replaceAll("'", "&#039;");
     }
 
+    // ===== C3 — AI-assist status descriptor & badge =====
     function buildAiStatusDescriptor(rawStatus) {
       const status = String(rawStatus || "").toLowerCase();
       if (status === "ok") {
@@ -434,6 +437,7 @@
       return `<span class="badge ai-status-badge ${desc.className}" title="${escapeHtml(title)}">${escapeHtml(desc.label)}</span>`;
     }
 
+    // ===== C4 — Display formatters =====
     function alertClass(level) {
       const normalized = String(level || "WATCH").toUpperCase();
       if (normalized === "HIGH") return "alert-high";
@@ -690,6 +694,7 @@
       return `강함 ${data.strong ?? 0}, 보통 ${data.medium ?? 0}, 약함 ${data.weak ?? 0}`;
     }
 
+    // ===== C5 — Pipeline-section renderers =====
     function renderEvidenceSources(sources) {
       const list = Array.isArray(sources) ? sources : [];
       if (!list.length) {
@@ -1323,6 +1328,7 @@
       }).join("")}</div>`;
     }
 
+    // ===== C6 — Status / error / busy UI & metrics =====
     function showStatus(message, success = false) {
       statusLine.textContent = message;
       statusLine.className = success ? "status-line success" : "status-line";
@@ -1385,6 +1391,7 @@
       metricsEl.style.display = "grid";
     }
 
+    // ===== C7 — Report context & selected-issue intro =====
     function setCurrentReportContext(query, maxNews, results, analyzedAt, aiStatus) {
       const safeResults = Array.isArray(results) ? results : [];
       currentReportContext = {
@@ -1462,6 +1469,7 @@
     // Phase 2 M3: in-memory cache for hydrated history records. localStorage only
     // holds slim metadata + per-result summaries; the full payload comes back from
     // /history/{result_id} on demand and lives here for the rest of the session.
+    // ===== C8 — Local history & hot topics =====
     const hydratedRecordCache = new Map();
 
     function safeReadLocalHistory() {
@@ -1903,6 +1911,7 @@
       return cloned;
     }
 
+    // ===== C9 — Local review queue & reviewer feedback =====
     function reviewStatusLabel(status) {
       const labels = {
         pending: "대기",
@@ -2362,6 +2371,7 @@
       return cloned;
     }
 
+    // ===== C10 — History-row mapping & aggregation =====
     function getResultDebugSummary(result) {
       const verification = result?.verification_card || {};
       return verification.debug_summary || result?.debug_summary || {};
@@ -2739,6 +2749,7 @@
       showStatus("최근 분석 기록을 모두 삭제했습니다.", true);
     }
 
+    // ===== C11 — Evidence-state helpers =====
     function numberValue(value, fallback = 0) {
       const parsed = Number(value);
       return Number.isFinite(parsed) ? parsed : fallback;
@@ -3264,6 +3275,7 @@
       `;
     }
 
+    // ===== C12 — Reasoning bullets & user-summary render =====
     function contradictionExplanation(summary) {
       const data = summary || {};
       const confirmed = numberValue(data.confirmed_contradiction_count ?? data.confirmed_contradictions, 0);
@@ -3460,6 +3472,7 @@
       `;
     }
 
+    // ===== C13 — Reviewer dashboard =====
     function maxSourceNumber(sources, keys) {
       const list = Array.isArray(sources) ? sources : [];
       return list.reduce((best, source) => {
@@ -3680,6 +3693,7 @@
       `;
     }
 
+    // ===== C14 — Result pipeline assembly & main render (HUB) =====
     function getResultPipelineParts(result) {
       const verification = result?.verification_card || result || {};
       const confidence = result?.policy_confidence || {};
@@ -4023,6 +4037,7 @@
       renderHotTopics();
     }
 
+    // ===== C15 — Export builders =====
     function plain(value, fallback = "-") {
       if (value === null || value === undefined || value === "") {
         return fallback;
@@ -4663,6 +4678,7 @@
       return lines.join("\n");
     }
 
+    // ===== C16 — Report download & copy =====
     async function copyReport() {
       try {
         const reportText = buildReportText();
@@ -4749,6 +4765,7 @@
       };
     }
 
+    // ===== C17 — Legacy async-job polling =====
     const JOB_POLL_INTERVAL_MS = 2000;
     const JOB_MAX_POLL_ATTEMPTS = 600;
 
@@ -4767,6 +4784,7 @@
     }
 
     // =====================================================================
+    // ===== C18 — V2 SSE async client =====
     // M15.0c — V2 client (begin)
     //
     // Functional equivalent of frontend/scripts/v2_client.js; kept inline
@@ -5146,6 +5164,7 @@
       }
     }
 
+    // ===== C19 — Analysis orchestration & event wiring (HUB) =====
     function stabilizeAnalysisResponseForRender(data, query, maxNews) {
       if (!(data.results || []).length) return data;
 
@@ -5370,6 +5389,7 @@
     //   * UI never mutates analysis_results / final_decision / policy_confidence
     //   * UI surfaces a deterministic message when REVIEW_API_ENABLED is off
     //   * No publish/correction path is exposed
+    // ===== C20 — Server-review (operator) client =====
     const SERVER_REVIEW_TOKEN_STORAGE_KEY = "policy_ai_server_review_token";
     // Only statuses the M8.x backend will actually return for a reviewer
     // are labeled. `published` / `corrected` remain reserved server-side
@@ -6216,6 +6236,7 @@
     // This is UI visibility only. Real protection of the review API
     // remains REVIEW_API_ENABLED + X-Review-Token server-side.
     // -----------------------------------------------------------------
+    // ===== C21 — Operator-tools visibility =====
     const OPERATOR_TOOLS_STORAGE_KEY = "policy_ai_operator_tools_visible";
     const OPERATOR_TOOLS_URL_FLAG = "operator_tools";
 
@@ -6322,6 +6343,7 @@
       }
     }
 
+    // ===== C22 — Test-export & init/wiring (HUB tail) =====
     // Expose pure helpers for JS regression tests (no network, no I/O).
     if (typeof window !== "undefined") {
       window.__serverReviewHelpers = {
