@@ -40,6 +40,7 @@ from source_reliability_agent import evaluate_source_candidates
 from official_source_body import enrich_official_source_candidates_with_bodies
 from official_evidence_resolution import (
     extract_primary_document_match,
+    _is_strong_primary_document_match,
     resolve_official_evidence,
 )
 from evidence_extraction_agent import extract_evidence_snippets
@@ -458,6 +459,67 @@ def _apply_judge_to_final_decision(
         final_decision["policy_alert_level"] = new_tier
         return True
     return False
+
+
+def _apply_prejudge_to_final_decision(
+    verdict,
+    final_decision: dict,
+    debug_summary: dict,
+    *,
+    primary_document_match: dict | None,
+) -> tuple[bool, str | None]:
+    """M22-3a — GUARDED, downgrade-only binding of the PRE-verdict judge.
+
+    Thin guard wrapper around :func:`_apply_judge_to_final_decision`: it
+    decides WHETHER the judge's verdict is allowed to bind, then delegates
+    the actual mutation VERBATIM to that function so the tier-drop map
+    (``_ALERT_TIER_DOWNGRADE``) and the ``flag_for_review`` path are reused
+    unchanged. NEVER raises (the delegate never raises).
+
+    Returns ``(applied, override_reason)``:
+
+    * ``applied`` — True iff this call materially changed ``final_decision``.
+    * ``override_reason`` — non-None ONLY when a ``downgrade`` was REFUSED by
+      a guard, so the prejudge debug payload can record why the downgrade did
+      not bind. None otherwise (including for confirm / flag_for_review).
+
+    Guards apply to ``downgrade`` ONLY:
+
+    (b) ``_is_strong_primary_document_match(primary_document_match)`` — a
+        genuine strong Lane-B primary-document body match (stable marker +
+        official_body_match + strong classification + score>=75). The
+        deterministic verdict then outweighs the judge: the downgrade is
+        refused (``override_reason="strong_primary_document"``). This is the
+        load-bearing guard.
+    (a) ``verdict.fell_back`` — the judge fell back to safe-confirm (no real
+        LLM judgment). Structurally impossible to pair with a ``downgrade``
+        (safe-confirm hardcodes ``action="confirm"``), enforced as
+        defense-in-depth (``override_reason="judge_fallback"``).
+
+    ``flag_for_review`` delegates straight through (sets the human-review flag
+    only; NO strong-evidence guard — a flag never changes the verdict).
+    ``confirm`` is a no-op. ``verdict_label`` is NEVER touched (neither here
+    nor in the delegate).
+    """
+    if verdict is None:
+        return False, None
+    action = getattr(verdict, "action", None)
+    if action == "downgrade":
+        # Guard (b) — strong primary-document evidence overrides the judge.
+        if _is_strong_primary_document_match(primary_document_match):
+            return False, "strong_primary_document"
+        # Guard (a) — refuse a fallback "downgrade" (defense-in-depth).
+        if getattr(verdict, "fell_back", False):
+            return False, "judge_fallback"
+        applied = _apply_judge_to_final_decision(
+            verdict, final_decision, debug_summary,
+        )
+        return bool(applied), None
+    # flag_for_review / confirm — delegate verbatim, no strong-evidence guard.
+    applied = _apply_judge_to_final_decision(
+        verdict, final_decision, debug_summary,
+    )
+    return bool(applied), None
 
 
 def _build_disagreement_signal(
@@ -910,23 +972,50 @@ def _process_news_item_phase_a(
 
     print_final_decision(final_decision)
 
-    # M22-2 — record-only PRE-verdict LLM judge. A SEPARATE, INDEPENDENT
+    # M22-3a — snapshot hoist. Capture the deterministic pre-judge P2 alert
+    # level HERE, BEFORE any judge (record-only or binding) can mutate it.
+    # Formerly captured just above the post-verdict block; hoisted up so the
+    # M22-3a guarded prejudge-binding path (below) downgrades policy_alert_level
+    # only AFTER this snapshot is taken. disagreement_signal reads this snapshot
+    # (not the live final_decision), so it stays a pure function of the
+    # deterministic P1/P2/P3 producers and remains byte-identical. The value is
+    # identical to the former capture point: nothing between here and the
+    # post-verdict block mutates policy_alert_level on the flag-off path.
+    p2_alert_pre_judge = final_decision.get("policy_alert_level")
+
+    # M22-3a — is the guarded downgrade-binding prejudge path active? Requires
+    # BOTH the M22-2 record-only flag AND the new M22-3a binding flag. Computed
+    # once so the prejudge block (which APPLIES the guarded downgrade) and the
+    # post-verdict block (which is SKIPPED for mutual exclusion) read a single
+    # consistent value. Default off → False → behavior unchanged.
+    prejudge_binding_active = (
+        llm_judge.llm_judge_prejudge_enabled()
+        and llm_judge.llm_judge_prejudge_binding_enabled()
+    )
+
+    # M22-2 / M22-3a — PRE-verdict LLM judge. A SEPARATE, INDEPENDENT
     # invocation from the post-verdict binding block below. It runs HERE,
     # after the verdict is fully locked (P2 calibrate_final_decision above
     # is authoritative for policy_alert_level; verdict_label was set by
-    # build_verification_card earlier) and after the prose realignment, but
-    # BEFORE the existing post-verdict block and BEFORE the p2_alert_pre_judge
-    # snapshot — so it cannot perturb either. It writes ONLY to
-    # debug_summary["llm_judge_prejudge"] and has ZERO influence on
-    # final_decision / policy_alert_level / verdict_label /
-    # disagreement_signal. It does NOT call _apply_judge_to_final_decision.
+    # build_verification_card earlier), after the prose realignment, and
+    # AFTER the p2_alert_pre_judge snapshot (hoisted above) — so even when it
+    # binds it cannot perturb disagreement_signal. It writes
+    # debug_summary["llm_judge_prejudge"].
     #
-    # Gated by the NEW flag LLM_JUDGE_PREJUDGE_ENABLED (default off),
-    # independent of LLM_JUDGE_ENABLED. NO log.* is emitted here: main.py is
-    # a pin-IN file for the M14.4 log-count test, so the record-only path
-    # must not add a log call. The judge's own logging lives in llm_judge.py
-    # (pin-OUT). On any failure the payload degrades to None (no log), exactly
-    # mirroring the post-verdict block's None default.
+    # M22-2 (record-only): gated by LLM_JUDGE_PREJUDGE_ENABLED alone — builds
+    # the verdict, records the payload with applied=False, mutates NOTHING.
+    # M22-3a (guarded binding): when prejudge_binding_active (BOTH prejudge
+    # flags on, default off), it additionally calls
+    # _apply_prejudge_to_final_decision, which may downgrade policy_alert_level
+    # by ONE tier (never raise, never touch verdict_label) subject to the two
+    # guards. With the binding flag off this is byte-identical to M22-2.
+    #
+    # NO log.* is emitted here: main.py is a pin-IN file for the M14.4
+    # log-count test, so this path must not add a log call. The judge's own
+    # logging lives in llm_judge.py (pin-OUT); M22-3 observability lives ONLY
+    # as structured fields (applied / override_reason) in the payload below.
+    # On any failure the payload degrades to None (no log), exactly mirroring
+    # the post-verdict block's None default.
     prejudge_debug_payload = None
     if llm_judge.llm_judge_prejudge_enabled():
         try:
@@ -950,10 +1039,27 @@ def _process_news_item_phase_a(
             prejudge_debug_payload = llm_judge.judge_verdict_to_dict(
                 prejudge_verdict
             )
-            # Record-only: NEVER applied to the verdict in M22-2. Pinned
-            # False so the debug payload is unambiguous about zero influence.
-            prejudge_debug_payload["applied"] = False
-        except Exception:  # noqa: BLE001 — record-only judge must never break pipeline
+            if prejudge_binding_active:
+                # M22-3a — guarded downgrade-only binding. Runs AFTER the
+                # p2_alert_pre_judge snapshot (hoisted above), so a downgrade
+                # here never changes disagreement_signal. The wrapper only
+                # ever lowers policy_alert_level by one tier via the delegated
+                # _apply_judge_to_final_decision, or sets the human-review
+                # flag; it never touches verdict_label.
+                applied, override_reason = _apply_prejudge_to_final_decision(
+                    prejudge_verdict,
+                    final_decision,
+                    debug_summary,
+                    primary_document_match=primary_document_match,
+                )
+                prejudge_debug_payload["applied"] = bool(applied)
+                if override_reason is not None:
+                    prejudge_debug_payload["override_reason"] = override_reason
+            else:
+                # Record-only (M22-2): NEVER applied. Pinned False so the
+                # payload is unambiguous about zero verdict influence.
+                prejudge_debug_payload["applied"] = False
+        except Exception:  # noqa: BLE001 — prejudge judge must never break pipeline
             prejudge_debug_payload = None
     debug_summary["llm_judge_prejudge"] = prejudge_debug_payload
 
@@ -968,10 +1074,18 @@ def _process_news_item_phase_a(
     # disagreement_signal MUST see the PRE-judge p2 alert so the
     # P1/P2/P3 signal stays a function of the deterministic producers
     # only. Otherwise judge downgrades would silently rewrite the
-    # signal and break the 6 M11.0d-1 snapshot fixtures.
-    p2_alert_pre_judge = final_decision.get("policy_alert_level")
+    # signal and break the 6 M11.0d-1 snapshot fixtures. The snapshot
+    # (p2_alert_pre_judge) is captured above, hoisted in M22-3a to precede
+    # the prejudge binding block.
+    #
+    # M22-3a mutual exclusion: when the guarded prejudge-binding path is
+    # active it ALSO downgrades policy_alert_level. To avoid a double
+    # downgrade, this post-verdict block is SKIPPED while prejudge-binding is
+    # active (`and not prejudge_binding_active`). When prejudge-binding is OFF
+    # (default), this condition reduces to `llm_judge.llm_judge_enabled()` —
+    # byte-identical to HEAD.
     judge_debug_payload = None
-    if llm_judge.llm_judge_enabled():
+    if llm_judge.llm_judge_enabled() and not prejudge_binding_active:
         try:
             judge_input = llm_judge.JudgeInput(
                 current_label=verification_card.get("verdict_label") or "",

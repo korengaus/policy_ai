@@ -148,6 +148,28 @@ def llm_judge_prejudge_enabled() -> bool:
     )
 
 
+def llm_judge_prejudge_binding_enabled() -> bool:
+    """Returns True iff env var ``LLM_JUDGE_PREJUDGE_BINDING_ENABLED`` equals
+    ``"true"`` (case-insensitive, leading/trailing whitespace stripped).
+
+    M22-3a — gates the GUARDED, downgrade-only BINDING behavior of the
+    pre-verdict judge. Layered ON TOP of :func:`llm_judge_prejudge_enabled`:
+    the binding path is active only when BOTH flags are true, so an operator
+    can run the pre-verdict judge record-only (observe ``debug_summary[
+    "llm_judge_prejudge"]``) and enable verdict-binding independently later.
+    Defaults to False so the pipeline behaves byte-identically (record-only,
+    then ultimately HEAD) until an operator opts in via the Render dashboard.
+    Read lazily on every call so toggling the env var does not require a
+    process restart.
+    """
+    return (
+        os.environ.get("LLM_JUDGE_PREJUDGE_BINDING_ENABLED", "")
+        .strip()
+        .lower()
+        == "true"
+    )
+
+
 def estimate_cost_usd(
     model: str, input_tokens: int, output_tokens: int,
 ) -> Optional[float]:
