@@ -3,6 +3,7 @@ import time
 
 from database import save_analysis_result
 from main import analyze_pipeline
+from scheduler_dedup import should_skip_topic
 from structured_logging import get_logger
 
 
@@ -41,6 +42,12 @@ def run_once():
 
     for query in DEFAULT_QUERIES:
         log.info(f"[Scheduler] Query: {query}", extra={"query": query})
+        # M38 — pre-analysis dedup gate. Skip the topic BEFORE analyze_pipeline
+        # (and therefore before any judge spend) when its top article is already
+        # stored. Judge-free, fail-open; its logging lives in the pin-OUT
+        # scheduler_dedup module so this file's log.* count is unchanged.
+        if should_skip_topic(query):
+            continue
         try:
             report = analyze_pipeline(query=query, max_news=1)
             results = list(_iter_api_results(report))
