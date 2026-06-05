@@ -216,6 +216,7 @@
     const REVIEW_STATUS_LABELS = {
       ai_draft_pending_human_review: "AI 초안, 사람 검토 대기",
     };
+    const HUMAN_REVIEWED_LABEL = "사람 검토됨";
     VERDICT_LABELS.draft_needs_review = "사람 검토 대기";
     VERDICT_LABELS.draft_high_risk_review = "고위험 사람 검토 대기";
 
@@ -2663,6 +2664,7 @@
         missing_context: missingContext,
         last_checked_at: safeRow.last_checked_at || "",
         review_status: safeRow.review_status || "",
+        human_reviewed_at: safeRow.human_reviewed_at || null,
       };
     }
 
@@ -3965,6 +3967,7 @@
                 <div class="summary-tile">
                   <span class="label">리뷰 상태</span>
                   <strong>${escapeHtml(formatReviewStatus(verification.review_status))}</strong>
+                  ${result.human_reviewed_at ? `<span class="review-status review-approved">${escapeHtml(HUMAN_REVIEWED_LABEL)}</span>` : ""}
                 </div>
               </div>
               <div class="verification-item full">
