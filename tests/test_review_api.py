@@ -573,5 +573,104 @@ class CISafetyTests(_ReviewAPIBase):
                 self.assertNotIn(forbidden, text)
 
 
+# ---------------------------------------------------------------------------
+# M40a — human-review promotion endpoint
+# ---------------------------------------------------------------------------
+
+
+class ReviewPromoteEndpointTests(_ReviewAPIBase):
+    """POST /review/results/{id}/promote sets/clears ONLY the M39a
+    human_reviewed_at / human_reviewed_by columns, token-gated."""
+
+    def _seed_result(self) -> int:
+        saved = self._database.save_analysis_result(
+            {
+                "title": "Promote sample",
+                "original_url": "https://example.go.kr/promote-sample",
+                "topic": "test",
+                "final_decision": {"policy_alert_level": "WATCH"},
+                "policy_confidence": {},
+                "policy_impact": {},
+                "verification_card": {
+                    "claim_text": "테스트 주장",
+                    "verdict_label": "draft_needs_review",
+                    "review_status": "ai_draft_pending_human_review",
+                },
+            },
+            "프로모트 테스트",
+        )
+        self.assertTrue(saved.get("id"), msg=str(saved))
+        return int(saved["id"])
+
+    def test_promote_requires_token(self):
+        result_id = self._seed_result()
+        with _env(**self._enabled_env()):
+            with self._client() as client:
+                resp = client.post(
+                    f"/review/results/{result_id}/promote",
+                    json={"promote": True},
+                )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_promote_unknown_id_returns_404(self):
+        with _env(**self._enabled_env()):
+            with self._client() as client:
+                resp = client.post(
+                    "/review/results/99999999/promote",
+                    json={"promote": True},
+                    headers={"X-Review-Token": TEST_TOKEN},
+                )
+        self.assertEqual(resp.status_code, 404)
+
+    def test_promote_then_unpromote_sets_only_review_columns(self):
+        result_id = self._seed_result()
+        before = self._database.get_result_by_id(result_id) or {}
+        self.assertIsNone(before.get("human_reviewed_at"))
+        with _env(**self._enabled_env()):
+            with self._client() as client:
+                promoted = client.post(
+                    f"/review/results/{result_id}/promote",
+                    json={"promote": True, "reviewer": "tester"},
+                    headers={"X-Review-Token": TEST_TOKEN},
+                )
+                self.assertEqual(promoted.status_code, 200, msg=promoted.text)
+                pbody = promoted.json()
+                self.assertTrue(pbody["ok"])
+                self.assertEqual(pbody["result_id"], result_id)
+                self.assertTrue(pbody["human_reviewed_at"])
+                self.assertEqual(pbody["human_reviewed_by"], "tester")
+
+                after = self._database.get_result_by_id(result_id) or {}
+                # ONLY the two review columns changed — verdict / review_status
+                # / alert / identity columns are byte-identical.
+                for col in (
+                    "verdict_label", "review_status", "policy_alert_level",
+                    "title", "original_url",
+                ):
+                    self.assertEqual(
+                        after.get(col), before.get(col),
+                        f"{col} must be unchanged by promote",
+                    )
+                self.assertTrue(after.get("human_reviewed_at"))
+                self.assertEqual(after.get("human_reviewed_by"), "tester")
+
+                # Un-promote clears both columns back to NULL.
+                cleared = client.post(
+                    f"/review/results/{result_id}/promote",
+                    json={"promote": False},
+                    headers={"X-Review-Token": TEST_TOKEN},
+                )
+                self.assertEqual(cleared.status_code, 200, msg=cleared.text)
+                cbody = cleared.json()
+                self.assertIsNone(cbody["human_reviewed_at"])
+                self.assertIsNone(cbody["human_reviewed_by"])
+                final = self._database.get_result_by_id(result_id) or {}
+                self.assertIsNone(final.get("human_reviewed_at"))
+                self.assertIsNone(final.get("human_reviewed_by"))
+                self.assertEqual(
+                    final.get("verdict_label"), before.get("verdict_label"),
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

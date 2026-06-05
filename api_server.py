@@ -23,6 +23,7 @@ from database import (
     list_review_tasks,
     record_review_decision,
     save_analysis_result,
+    set_analysis_human_review,
     update_review_task_status,
 )
 from db.postgres import (
@@ -1173,6 +1174,14 @@ class _ReviewDecisionRequest(BaseModel):
     decision_source: Optional[str] = None
 
 
+class _PromoteReviewRequest(BaseModel):
+    # M40a — promote=True stamps the human-reviewed columns; promote=False
+    # un-promotes (NULLs both). reviewer is a display label only, NOT auth
+    # (auth is the X-Review-Token gate); defaults to "operator".
+    promote: bool = True
+    reviewer: Optional[str] = None
+
+
 def _require_review_token(
     x_review_token: Optional[str] = Header(
         default=None, alias=review_auth.REVIEW_TOKEN_HEADER,
@@ -1425,6 +1434,53 @@ def review_record_decision(
         "decision_source": decision_source,
         "audit_version": review_workflow.AUDIT_SCHEMA_VERSION,
         "audit_record": audit_record,
+    }
+
+
+@app.post("/review/results/{result_id}/promote")
+def review_promote_result(
+    result_id: int,
+    body: _PromoteReviewRequest,
+    _: None = Depends(_require_review_token),
+) -> dict:
+    """M40a — set or clear the human-reviewed badge signal on a stored
+    ``analysis_results`` row.
+
+    Token-gated exactly like the other ``/review/*`` endpoints (same
+    503-when-disabled / 403-on-bad-token semantics via
+    ``_require_review_token``). Sets ONLY the M39a ``human_reviewed_at`` /
+    ``human_reviewed_by`` columns:
+
+    * ``promote=true``  → stamps them (reviewer defaults to "operator").
+    * ``promote=false`` → clears both back to NULL (un-promote).
+
+    Never touches verdict_label / policy_alert_level / disagreement_signal /
+    review_status / operator_review_required / truth_claim or any other
+    column. Returns the re-read review columns on success; 404 when no row
+    matches ``result_id``.
+    """
+    reviewer = (body.reviewer or "").strip() or "operator"
+    try:
+        updated = set_analysis_human_review(
+            result_id, reviewed=body.promote, reviewer=reviewer,
+        )
+    except Exception:
+        logger.exception("Failed to update human-review flag")
+        raise HTTPException(
+            status_code=500, detail="failed to update human-review flag",
+        )
+    if not updated:
+        raise HTTPException(
+            status_code=404,
+            detail=f"analysis result {result_id} not found",
+        )
+    row = get_result_by_id(result_id) or {}
+    return {
+        "ok": True,
+        "result_id": result_id,
+        "promote": body.promote,
+        "human_reviewed_at": row.get("human_reviewed_at"),
+        "human_reviewed_by": row.get("human_reviewed_by"),
     }
 
 

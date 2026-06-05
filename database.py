@@ -812,6 +812,23 @@ def update_review_task_status(task_id: str, *, new_status: str,
     return get_review_task(task_id) or {}
 
 
+def set_analysis_human_review(result_id: int, *, reviewed: bool,
+                              reviewer=None) -> bool:
+    """M40a — set/clear the human-review columns on analysis_results.
+
+    Thin PG-primary facade over
+    :func:`postgres_storage.pg_set_analysis_human_review`. Returns its
+    bool verbatim: ``True`` when a row matched and was updated, ``False``
+    otherwise (no such id, dual-write disabled, or DB error). Postgres is
+    the sole write target (M12.0e); SQLite holds no analysis_results
+    data. Never raises — touches ONLY human_reviewed_at/by."""
+    try:
+        from postgres_storage import pg_set_analysis_human_review
+        return pg_set_analysis_human_review(result_id, reviewed, reviewer)
+    except Exception:  # noqa: BLE001 — Postgres failures must not surface
+        return False
+
+
 def record_review_decision(*, decision_id: str, task_id: str, decision: str,
                            reviewer_id=None, comment=None, public_note=None,
                            previous_status=None, new_status=None,

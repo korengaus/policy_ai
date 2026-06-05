@@ -32,6 +32,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from datetime import datetime, timezone
 from typing import Optional
 
 import sqlalchemy as sa
@@ -919,6 +920,67 @@ def pg_update_review_task_status(
         log.warning(
             "pg_update_review_task_status unexpected error for %s: %s",
             task_id, exc,
+        )
+        return False
+
+
+def pg_set_analysis_human_review(
+    result_id: int, reviewed: bool, reviewer: Optional[str] = None,
+) -> bool:
+    """Set or clear the M39a human-review columns on ``analysis_results``.
+
+    M40a helper. Mirrors ``pg_update_job_fields`` /
+    ``pg_update_review_task_status``: a single parameterized
+    ``UPDATE ... WHERE id == :id`` inside ``engine.begin()``. Touches
+    ONLY ``human_reviewed_at`` / ``human_reviewed_by`` — never verdict,
+    review_status, or any invariant column.
+
+    * ``reviewed=True``  → ``human_reviewed_at`` = current UTC ISO
+      timestamp, ``human_reviewed_by`` = ``reviewer`` (default
+      ``"operator"`` when None/empty).
+    * ``reviewed=False`` → both columns set back to NULL (un-promote).
+
+    Returns ``True`` when a row matched and was updated, ``False`` when
+    dual-write is disabled, no row matched the id, or any DB error
+    fires. NEVER raises (same contract as the sibling updaters).
+    """
+    engine = get_engine()
+    if engine is None:
+        return False
+    table = _metadata.tables.get("analysis_results")
+    if table is None:
+        log.warning(
+            "pg_set_analysis_human_review: analysis_results table not registered",
+        )
+        return False
+    if reviewed:
+        reviewed_at: Optional[str] = datetime.now(timezone.utc).isoformat(
+            timespec="microseconds",
+        )
+        reviewed_by: Optional[str] = (reviewer or "").strip() or "operator"
+    else:
+        reviewed_at = None
+        reviewed_by = None
+    try:
+        with engine.begin() as conn:
+            result = conn.execute(
+                sa.update(table)
+                .where(table.c.id == int(result_id))
+                .values(
+                    human_reviewed_at=reviewed_at,
+                    human_reviewed_by=reviewed_by,
+                )
+            )
+        return (result.rowcount or 0) > 0
+    except SQLAlchemyError as exc:
+        log.warning(
+            "pg_set_analysis_human_review failed for %s: %s", result_id, exc,
+        )
+        return False
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "pg_set_analysis_human_review unexpected error for %s: %s",
+            result_id, exc,
         )
         return False
 
