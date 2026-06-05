@@ -2535,6 +2535,23 @@
               <div id="serverReviewRegisterStatus" class="server-review-status" role="status" aria-live="polite"></div>
             </div>
 
+            <div class="server-review-register-panel">
+              <h4>사람 검토됨 승격 (관리자 전용)</h4>
+              <div class="reader-note">
+                저장된 분석 결과에 <code>human_reviewed_at</code>를 설정/해제합니다. 이는 게시가 아니며
+                verdict / review_status / 신뢰도 값은 변경되지 않습니다. 비워 두면 현재 화면에 열린 결과의
+                id를 사용하고, 직접 id를 입력하면 그 결과에 적용됩니다. 승격하면 검증 카드에 "사람 검토됨"
+                배지가 표시되고, 해제하면 사라집니다.
+              </div>
+              <div class="server-review-register-actions">
+                <input id="serverReviewPromoteId" type="number" min="1" step="1" inputmode="numeric"
+                       autocomplete="off" placeholder="결과 id (비우면 현재 결과)">
+                <button id="serverReviewPromoteBtn" class="primary" type="button">사람 검토됨으로 승격</button>
+                <button id="serverReviewUnpromoteBtn" class="secondary" type="button">승격 해제</button>
+              </div>
+              <div id="serverReviewPromoteStatus" class="server-review-status" role="status" aria-live="polite"></div>
+            </div>
+
             <div class="server-review-list-panel">
               <div class="server-review-list-header">
                 <select id="serverReviewStatusFilter" aria-label="서버 검수 상태 필터">
@@ -8604,6 +8621,24 @@
       el.textContent = message;
     }
 
+    // M40b — status line for the operator-only promote panel. Mirrors
+    // serverReviewSetRegisterStatus exactly, targeting its own element.
+    function serverReviewSetPromoteStatus(kind, message) {
+      const el = document.getElementById("serverReviewPromoteStatus");
+      if (!el) return;
+      el.classList.remove("is-info", "is-success", "is-error");
+      if (!message) {
+        el.style.display = "none";
+        el.textContent = "";
+        return;
+      }
+      if (kind === "success") el.classList.add("is-success");
+      else if (kind === "error") el.classList.add("is-error");
+      else el.classList.add("is-info");
+      el.style.display = "block";
+      el.textContent = message;
+    }
+
     // -----------------------------------------------------------------
     // M9.2 — internal audit packet viewer / copy helper.
     //
@@ -8855,6 +8890,68 @@
       }
     }
 
+    // M40b — resolve which analysis_results id the promote action targets.
+    // Priority: an explicit positive-integer typed into the panel input,
+    // else the currently-focused result's result_id (the same id the
+    // ?result_id= loader uses). Returns null when neither yields a valid id.
+    function serverReviewResolvePromoteId() {
+      const input = document.getElementById("serverReviewPromoteId");
+      const typed = input && input.value ? String(input.value).trim() : "";
+      if (typed) {
+        const typedId = Number(typed);
+        return (Number.isInteger(typedId) && typedId > 0) ? typedId : null;
+      }
+      const context = currentReportContext;
+      const results = context && Array.isArray(context.results) ? context.results : [];
+      if (!results.length) return null;
+      const idx = Number.isInteger(selectedResultIndex) ? selectedResultIndex : 0;
+      const focus = results[idx] || results[0] || {};
+      const focusId = Number(focus.result_id);
+      return (Number.isInteger(focusId) && focusId > 0) ? focusId : null;
+    }
+
+    // M40b — call the token-gated M40a endpoint to set/clear the M39a
+    // human-review columns, then refresh the card in place (M39c) so the
+    // "사람 검토됨" badge appears/disappears. Operator-only (this panel
+    // lives inside #operatorTools). Reuses serverReviewFetch (X-Review-Token
+    // from sessionStorage) and the existing error messaging.
+    async function serverReviewPromoteCurrentResult(promote) {
+      const token = serverReviewGetToken();
+      if (!token) {
+        serverReviewSetPromoteStatus("error", SERVER_REVIEW_TOKEN_CLEARED_MESSAGE);
+        return;
+      }
+      const resultId = serverReviewResolvePromoteId();
+      if (!resultId) {
+        serverReviewSetPromoteStatus("error", SERVER_REVIEW_NO_CURRENT_RESULT_MESSAGE);
+        return;
+      }
+      serverReviewSetPromoteStatus(
+        "info",
+        promote ? "사람 검토됨으로 승격 중..." : "사람 검토됨 표시 해제 중...",
+      );
+      const result = await serverReviewFetch(
+        `/review/results/${encodeURIComponent(resultId)}/promote`,
+        { method: "POST", body: { promote: !!promote, reviewer: "operator" } },
+      );
+      if (!result.ok) {
+        serverReviewSetPromoteStatus("error", serverReviewFormatErrorMessage(result.status));
+        return;
+      }
+      serverReviewSetPromoteStatus(
+        "success",
+        promote
+          ? `결과 ${resultId}을(를) 사람 검토됨으로 승격했습니다.`
+          : `결과 ${resultId}의 사람 검토됨 표시를 해제했습니다.`,
+      );
+      // Best-effort in-place refresh so the badge updates without a reload.
+      try {
+        await loadServerResultById(resultId);
+      } catch (_) {
+        /* status already shown; card refresh is non-critical */
+      }
+    }
+
     function serverReviewBindEvents() {
       const saveBtn = document.getElementById("serverReviewTokenSaveBtn");
       const clearBtn = document.getElementById("serverReviewTokenClearBtn");
@@ -8870,6 +8967,21 @@
       if (registerBtn) {
         registerBtn.addEventListener("click", () => {
           serverReviewRegisterCurrentResult();
+        });
+      }
+      // M40b — operator-only promote / un-promote buttons. Optional (like
+      // registerBtn / the audit buttons): guarded so a partial DOM doesn't
+      // break binding, and explicit-click-only (no auto-fetch at bind).
+      const promoteBtn = document.getElementById("serverReviewPromoteBtn");
+      if (promoteBtn) {
+        promoteBtn.addEventListener("click", () => {
+          serverReviewPromoteCurrentResult(true);
+        });
+      }
+      const unpromoteBtn = document.getElementById("serverReviewUnpromoteBtn");
+      if (unpromoteBtn) {
+        unpromoteBtn.addEventListener("click", () => {
+          serverReviewPromoteCurrentResult(false);
         });
       }
       saveBtn.addEventListener("click", async () => {

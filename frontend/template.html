@@ -240,6 +240,23 @@
               <div id="serverReviewRegisterStatus" class="server-review-status" role="status" aria-live="polite"></div>
             </div>
 
+            <div class="server-review-register-panel">
+              <h4>사람 검토됨 승격 (관리자 전용)</h4>
+              <div class="reader-note">
+                저장된 분석 결과에 <code>human_reviewed_at</code>를 설정/해제합니다. 이는 게시가 아니며
+                verdict / review_status / 신뢰도 값은 변경되지 않습니다. 비워 두면 현재 화면에 열린 결과의
+                id를 사용하고, 직접 id를 입력하면 그 결과에 적용됩니다. 승격하면 검증 카드에 "사람 검토됨"
+                배지가 표시되고, 해제하면 사라집니다.
+              </div>
+              <div class="server-review-register-actions">
+                <input id="serverReviewPromoteId" type="number" min="1" step="1" inputmode="numeric"
+                       autocomplete="off" placeholder="결과 id (비우면 현재 결과)">
+                <button id="serverReviewPromoteBtn" class="primary" type="button">사람 검토됨으로 승격</button>
+                <button id="serverReviewUnpromoteBtn" class="secondary" type="button">승격 해제</button>
+              </div>
+              <div id="serverReviewPromoteStatus" class="server-review-status" role="status" aria-live="polite"></div>
+            </div>
+
             <div class="server-review-list-panel">
               <div class="server-review-list-header">
                 <select id="serverReviewStatusFilter" aria-label="서버 검수 상태 필터">

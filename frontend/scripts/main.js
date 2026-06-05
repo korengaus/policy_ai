@@ -5867,6 +5867,24 @@
       el.textContent = message;
     }
 
+    // M40b — status line for the operator-only promote panel. Mirrors
+    // serverReviewSetRegisterStatus exactly, targeting its own element.
+    function serverReviewSetPromoteStatus(kind, message) {
+      const el = document.getElementById("serverReviewPromoteStatus");
+      if (!el) return;
+      el.classList.remove("is-info", "is-success", "is-error");
+      if (!message) {
+        el.style.display = "none";
+        el.textContent = "";
+        return;
+      }
+      if (kind === "success") el.classList.add("is-success");
+      else if (kind === "error") el.classList.add("is-error");
+      else el.classList.add("is-info");
+      el.style.display = "block";
+      el.textContent = message;
+    }
+
     // -----------------------------------------------------------------
     // M9.2 — internal audit packet viewer / copy helper.
     //
@@ -6118,6 +6136,68 @@
       }
     }
 
+    // M40b — resolve which analysis_results id the promote action targets.
+    // Priority: an explicit positive-integer typed into the panel input,
+    // else the currently-focused result's result_id (the same id the
+    // ?result_id= loader uses). Returns null when neither yields a valid id.
+    function serverReviewResolvePromoteId() {
+      const input = document.getElementById("serverReviewPromoteId");
+      const typed = input && input.value ? String(input.value).trim() : "";
+      if (typed) {
+        const typedId = Number(typed);
+        return (Number.isInteger(typedId) && typedId > 0) ? typedId : null;
+      }
+      const context = currentReportContext;
+      const results = context && Array.isArray(context.results) ? context.results : [];
+      if (!results.length) return null;
+      const idx = Number.isInteger(selectedResultIndex) ? selectedResultIndex : 0;
+      const focus = results[idx] || results[0] || {};
+      const focusId = Number(focus.result_id);
+      return (Number.isInteger(focusId) && focusId > 0) ? focusId : null;
+    }
+
+    // M40b — call the token-gated M40a endpoint to set/clear the M39a
+    // human-review columns, then refresh the card in place (M39c) so the
+    // "사람 검토됨" badge appears/disappears. Operator-only (this panel
+    // lives inside #operatorTools). Reuses serverReviewFetch (X-Review-Token
+    // from sessionStorage) and the existing error messaging.
+    async function serverReviewPromoteCurrentResult(promote) {
+      const token = serverReviewGetToken();
+      if (!token) {
+        serverReviewSetPromoteStatus("error", SERVER_REVIEW_TOKEN_CLEARED_MESSAGE);
+        return;
+      }
+      const resultId = serverReviewResolvePromoteId();
+      if (!resultId) {
+        serverReviewSetPromoteStatus("error", SERVER_REVIEW_NO_CURRENT_RESULT_MESSAGE);
+        return;
+      }
+      serverReviewSetPromoteStatus(
+        "info",
+        promote ? "사람 검토됨으로 승격 중..." : "사람 검토됨 표시 해제 중...",
+      );
+      const result = await serverReviewFetch(
+        `/review/results/${encodeURIComponent(resultId)}/promote`,
+        { method: "POST", body: { promote: !!promote, reviewer: "operator" } },
+      );
+      if (!result.ok) {
+        serverReviewSetPromoteStatus("error", serverReviewFormatErrorMessage(result.status));
+        return;
+      }
+      serverReviewSetPromoteStatus(
+        "success",
+        promote
+          ? `결과 ${resultId}을(를) 사람 검토됨으로 승격했습니다.`
+          : `결과 ${resultId}의 사람 검토됨 표시를 해제했습니다.`,
+      );
+      // Best-effort in-place refresh so the badge updates without a reload.
+      try {
+        await loadServerResultById(resultId);
+      } catch (_) {
+        /* status already shown; card refresh is non-critical */
+      }
+    }
+
     function serverReviewBindEvents() {
       const saveBtn = document.getElementById("serverReviewTokenSaveBtn");
       const clearBtn = document.getElementById("serverReviewTokenClearBtn");
@@ -6133,6 +6213,21 @@
       if (registerBtn) {
         registerBtn.addEventListener("click", () => {
           serverReviewRegisterCurrentResult();
+        });
+      }
+      // M40b — operator-only promote / un-promote buttons. Optional (like
+      // registerBtn / the audit buttons): guarded so a partial DOM doesn't
+      // break binding, and explicit-click-only (no auto-fetch at bind).
+      const promoteBtn = document.getElementById("serverReviewPromoteBtn");
+      if (promoteBtn) {
+        promoteBtn.addEventListener("click", () => {
+          serverReviewPromoteCurrentResult(true);
+        });
+      }
+      const unpromoteBtn = document.getElementById("serverReviewUnpromoteBtn");
+      if (unpromoteBtn) {
+        unpromoteBtn.addEventListener("click", () => {
+          serverReviewPromoteCurrentResult(false);
         });
       }
       saveBtn.addEventListener("click", async () => {
