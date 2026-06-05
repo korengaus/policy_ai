@@ -9119,9 +9119,66 @@
       };
     }
 
+    // M39c — open a server-side history result directly by id via a
+    // ?result_id= query param. Mirrors the on-load param-parse style used
+    // for operator_tools (URLSearchParams off window.location.search). The
+    // param is intentionally NOT stripped afterward so the link stays
+    // shareable / reloadable. Reuses the existing v2FetchHistoryRow ->
+    // v2InflateResults (mapHistoryRowToResult) -> renderResults path, so a
+    // promoted row renders its "사람 검토됨" badge (M39b).
+    function requestedResultIdFromUrl() {
+      try {
+        const search = (window.location && window.location.search) || "";
+        if (!search) return null;
+        const raw = new URLSearchParams(search).get("result_id");
+        if (raw === null) return null;
+        const id = Number(raw);
+        if (!Number.isInteger(id) || id <= 0) return null;
+        return id;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    async function loadServerResultById(resultId) {
+      hideError();
+      showStatus("저장된 검증 결과를 불러오는 중...");
+      setBusy(true);
+      try {
+        // v2InflateResults swallows per-id fetch errors and returns an
+        // empty results array, so a missing id / network failure lands on
+        // the normal homepage state rather than crashing the page.
+        const inflated = await v2InflateResults([resultId], {});
+        const results = (inflated && inflated.results) || [];
+        if (!results.length) {
+          hideStatus();
+          return;
+        }
+        selectedResultIndex = null;
+        activeTopicKey = "";
+        setCurrentReportContext(
+          "",
+          results.length,
+          results,
+          new Date().toISOString(),
+          inflated.ai_status
+        );
+        renderResults(results);
+        showStatus("저장된 검증 결과를 불러왔습니다.", true);
+      } catch (_) {
+        hideStatus();
+      } finally {
+        setBusy(false);
+      }
+    }
+
     renderHistory(safeReadLocalHistory());
     renderReviewQueue(safeReadReviewQueue());
     renderHotTopics();
+    const requestedResultId = requestedResultIdFromUrl();
+    if (requestedResultId) {
+      loadServerResultById(requestedResultId);
+    }
     // M9.4 — decide reviewer/admin visibility BEFORE binding the
     // server-review events, so the panel is in its final state when
     // ``serverReviewBindEvents`` runs (it doesn't auto-fetch anyway,
