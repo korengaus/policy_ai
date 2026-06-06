@@ -154,6 +154,10 @@
     let activeCategory = "전체";
     let activeTopicKey = "";
     let selectedResultIndex = null;
+    // M45: server-side recent analyses (incl. cron output) used to fill the
+    // top hot-topic area when there is no live session search. Populated on
+    // load from GET /history; never written to localStorage.
+    let serverHotTopicResults = [];
     // ===== M29-A1 — pin-safe display label maps =====
     const ALERT_LABELS = {
       WATCH: "관찰",
@@ -1584,7 +1588,8 @@
         key: keyBase,
         source,
         index,
-        recordId: record?.id || "",
+        recordId: record?.id || result?.result_id || "",
+        humanReviewedAt: result?.human_reviewed_at || null,
         title: publicInstitutionName(result?.title || record?.query || "검증 뉴스"),
         topic: exportTopicLabel(result, query),
         category: resultCategory(result, query),
@@ -1615,8 +1620,14 @@
       // M17-search-quality: do NOT fall back to localStorage history.
       // The previous behaviour surfaced prior 전세대출 analyses as if
       // they were results for the user's current query, breaking trust.
-      // The page-load + empty-result paths now show the empty-state
-      // placeholder rendered by renderHotTopics instead.
+      // M45: with no live session search, fall back to SERVER analyses
+      // (GET /history, incl. cron output) — NOT localStorage. These are
+      // the homepage's "오늘의 정책 이슈" feed. Empty server list → []
+      // → renderHotTopics shows its existing placeholder.
+      if (serverHotTopicResults.length) {
+        return serverHotTopicResults.map((result, index) =>
+          topicCardFromResult(result, index, "server"));
+      }
       return [];
     }
 
@@ -1639,6 +1650,7 @@
               <span class="badge ${alertClass(card.alert)}">${escapeHtml(formatAlert(card.alert))}</span>
               <span class="badge topic-badge">${escapeHtml(card.category)}</span>
               <span class="badge topic-badge">${escapeHtml(card.topic)}</span>
+              ${card.humanReviewedAt ? `<span class="review-status review-approved">${escapeHtml(HUMAN_REVIEWED_LABEL)}</span>` : ""}
             </div>
             <h3 class="topic-card-title">${escapeHtml(card.title)}</h3>
             <div class="topic-card-summary">${escapeHtml(card.summary || "핵심 요약을 준비 중입니다.")}</div>
@@ -4900,6 +4912,24 @@
       return body.result || null;
     }
 
+    // M45: fetch the newest server-side analyses (GET /history list) and map
+    // each full row through the existing mapHistoryRowToResult adapter — the
+    // list endpoint returns the SAME row shape as /history/{id}. Used to fill
+    // the homepage hot-topic area with cron/server output. Fail-open: any
+    // error or empty body returns [] so the area falls back to its existing
+    // placeholder (mirrors loadServerResultById's graceful handling).
+    async function getServerRecentAnalyses(limit = 20) {
+      try {
+        const response = await fetch(`${API_BASE}/history?limit=${encodeURIComponent(limit)}`);
+        if (!response.ok) return [];
+        const body = await response.json();
+        const rows = Array.isArray(body?.results) ? body.results : [];
+        return rows.map(mapHistoryRowToResult);
+      } catch (_) {
+        return [];
+      }
+    }
+
     // After a V2 job finishes, the SSE "completed" event carries the
     // `pipeline_worker._build_summary_payload` shape — which only
     // includes `saved_result_ids`, not the full per-news results.
@@ -5369,6 +5399,17 @@
           const record = safeReadLocalHistory().find((item) => item.id === card.dataset.topicRecordId);
           if (record) {
             loadHistoryRecord(record, `"${record.query || "검증 뉴스"}" 카드를 불러왔습니다.`, selectedResultIndex);
+            resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
+            return;
+          }
+        }
+        // M45: server hot-topic cards carry their result_id in
+        // data-topic-record-id; open the full row via the existing M39c
+        // server-result loader (same path the ?result_id= deep link uses).
+        if (source === "server") {
+          const resultId = Number(card.dataset.topicRecordId);
+          if (Number.isInteger(resultId) && resultId > 0) {
+            loadServerResultById(resultId);
             resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
             return;
           }
@@ -6533,6 +6574,18 @@
     renderHistory(safeReadLocalHistory());
     renderReviewQueue(safeReadReviewQueue());
     renderHotTopics();
+    // M45: asynchronously fill the hot-topic area from the server (GET
+    // /history, cron output included). Fire-and-forget so it never blocks
+    // synchronous init and never touches renderHistory()/localStorage. A
+    // live session search or ?result_id= view still takes precedence inside
+    // currentTopicCards; these server cards only show when neither is active.
+    (async () => {
+      const serverResults = await getServerRecentAnalyses();
+      if (serverResults.length) {
+        serverHotTopicResults = serverResults;
+        renderHotTopics();
+      }
+    })();
     const requestedResultId = requestedResultIdFromUrl();
     if (requestedResultId) {
       loadServerResultById(requestedResultId);
