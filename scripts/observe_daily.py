@@ -13,6 +13,11 @@ that prints, in order:
     6. CONFIDENCE SUMMARY  — both policy_confidence_score and verdict_confidence
     7. HUMAN-REVIEWED      — count of human_reviewed_at IS NOT NULL
     8. OFF-TOPIC FLAGS     — advisory keyword suspects in the last N rows
+    9. COLLECTOR MIX       — data-backed: which collector won, parsed from
+                             debug_summary.collection_source (overall +
+                             per-date last 7 days)
+   10. DOMAIN MIX          — ADVISORY keyword estimate over query/title/
+                             claim_text (no domain field is stored)
 
 Every database statement is a SELECT. The script issues NO INSERT /
 UPDATE / DELETE / ALTER and never touches verdict logic, the pipeline,
@@ -36,6 +41,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -71,6 +77,39 @@ _OFFTOPIC_BUCKETS = {
         "엔저", "중동", "이란",
     ],
     "SECURITIES": ["증권", "채권운용", "투자증권", "연구원"],
+}
+
+
+# ---------------------------------------------------------------------------
+# Domain advisory keyword buckets (SECTION 10).
+#
+# IMPORTANT: these are an ADVISORY ESTIMATE, NOT a measurement. OBS-2 Phase 1
+# confirmed that analysis_results stores NO finance/legal/policy domain field
+# — `topic` is only a 9-value housing-finance sub-taxonomy (…, 미분류). So the
+# only way to gauge domain mix is a keyword scan of the already-safe text
+# columns (query + title + claim_text), exactly like _OFFTOPIC_BUCKETS above.
+# A row may match multiple buckets (or none); nothing here ranks, modifies, or
+# influences any row. Treat the counts as a rough hint for the operator.
+# ---------------------------------------------------------------------------
+_DOMAIN_BUCKETS = {
+    "FINANCE_금융": [
+        "금리", "대출", "가계부채", "DSR", "증권", "채권", "은행",
+        "금융위", "금감원", "투자", "예금", "보험",
+    ],
+    "LEGAL_법률": [
+        "법령", "법안", "시행령", "시행규칙", "판결", "판례",
+        "소송", "고시", "개정안", "위헌", "헌법", "법률",
+    ],
+    "REALESTATE_부동산": [
+        "부동산", "전세", "주택", "주담대", "분양", "청약", "임대",
+        "양도세", "종부세", "LTV",
+    ],
+    "WELFARE_복지": [
+        "복지", "지원금", "보조금", "수당", "연금", "바우처", "취약계층",
+    ],
+    "SMB_소상공인": [
+        "소상공인", "자영업", "중소기업", "새출발기금", "상생",
+    ],
 }
 
 
@@ -283,6 +322,175 @@ def _report_offtopic(conn, sa, limit: int) -> list:
     return lines
 
 
+# ---------------------------------------------------------------------------
+# SECTION 9 — COLLECTOR MIX (data-backed, from debug_summary.collection_source).
+#
+# OBS-2 Phase 1 confirmed: the collector that won (naver_api / google_rss /
+# naver_fallback / daum_fallback / forced_search_fallback / none) is stored
+# per row inside the debug_summary TEXT column as JSON under the key
+# "collection_source". debug_summary is loose-typed TEXT (NOT jsonb) and may
+# contain malformed legacy values, so it MUST be parsed Python-side with
+# json.loads inside try/except — never a ::jsonb cast in SQL. Any parse
+# failure / missing key / empty value buckets as "(unknown)".
+# ---------------------------------------------------------------------------
+
+
+_COLLECTOR_UNKNOWN = "(unknown)"
+
+
+def _collector_of(debug_summary_text) -> str:
+    """Extract collection_source from a debug_summary TEXT cell. Returns
+    '(unknown)' on NULL / non-string / parse failure / missing-or-empty key.
+    Pure Python — defends against malformed legacy rows that a ::jsonb cast
+    would choke on."""
+    if not debug_summary_text or not isinstance(debug_summary_text, str):
+        return _COLLECTOR_UNKNOWN
+    try:
+        parsed = json.loads(debug_summary_text)
+    except Exception:  # noqa: BLE001 — malformed legacy JSON must not crash
+        return _COLLECTOR_UNKNOWN
+    if not isinstance(parsed, dict):
+        return _COLLECTOR_UNKNOWN
+    value = parsed.get("collection_source")
+    if value is None:
+        return _COLLECTOR_UNKNOWN
+    text = str(value).strip()
+    return text if text else _COLLECTOR_UNKNOWN
+
+
+def _fetch_collector_rows(conn, sa) -> list:
+    """SELECT ONLY the columns SECTION 9 needs (id, created_at,
+    debug_summary) — not every column. Returns a list of (day, collector)
+    tuples with JSON parsed + bucketed in Python. day = substr(created_at,
+    1,10) or '(unknown)'."""
+    rows = conn.execute(
+        sa.text(
+            "SELECT id, created_at, debug_summary "
+            "FROM analysis_results"
+        )
+    ).all()
+    parsed = []
+    for r in rows:
+        m = r._mapping
+        created_at = m["created_at"]
+        if created_at and isinstance(created_at, str) and len(created_at) >= 10:
+            day = created_at[:10]
+        else:
+            day = "(unknown)"
+        parsed.append((day, _collector_of(m["debug_summary"])))
+    return parsed
+
+
+def _report_collector_mix(conn, sa) -> list:
+    lines = [_section("COLLECTOR MIX (data-backed; debug_summary.collection_source)")]
+    lines.append(
+        "Note: Naver became primary collector ~2026-06-02; rows before that "
+        "are google_rss by default."
+    )
+    parsed = _fetch_collector_rows(conn, sa)
+    if not parsed:
+        lines.append("(no rows)")
+        return lines
+
+    # (a) OVERALL distribution — count per collector, desc.
+    overall = {}
+    for _day, collector in parsed:
+        overall[collector] = overall.get(collector, 0) + 1
+    lines.append("")
+    lines.append("(a) OVERALL collector distribution:")
+    for collector, n in sorted(
+        overall.items(), key=lambda kv: (-kv[1], kv[0])
+    ):
+        lines.append(f"{collector:<24} {n}")
+
+    # (b) PER-DATE distribution for the last 7 dates, oldest -> newest.
+    by_day = {}
+    for day, collector in parsed:
+        bucket = by_day.setdefault(day, {})
+        bucket[collector] = bucket.get(collector, 0) + 1
+    # Newest 7 real dates first, then reverse to oldest->newest. '(unknown)'
+    # sorts to the bottom of a desc string sort, so it only appears if it is
+    # genuinely among the most recent 7 distinct day-keys.
+    last_7_days = sorted(by_day.keys(), reverse=True)[:7]
+    lines.append("")
+    lines.append("(b) PER-DATE collector distribution (last 7 dates, oldest -> newest):")
+    for day in reversed(last_7_days):
+        counts = by_day[day]
+        parts = ", ".join(
+            f"{collector}={n}"
+            for collector, n in sorted(
+                counts.items(), key=lambda kv: (-kv[1], kv[0])
+            )
+        )
+        lines.append(f"{day} : {parts}")
+    return lines
+
+
+# ---------------------------------------------------------------------------
+# SECTION 10 — DOMAIN MIX (ADVISORY keyword heuristic ONLY).
+#
+# No domain field is stored (OBS-2 Phase 1). This is a keyword estimate over
+# query + title + claim_text for the most recent N rows, bucketed via
+# _DOMAIN_BUCKETS. A row may match multiple buckets, so the per-bucket counts
+# sum to >= the scanned row count. NOT authoritative — advisory only.
+# ---------------------------------------------------------------------------
+
+
+def _classify_domain(text: str) -> list:
+    """Return the list of domain-bucket labels whose keywords appear (case-
+    insensitive substring) in ``text``. Advisory only; a row may match
+    several buckets."""
+    haystack = text.lower()
+    hits = []
+    for bucket, keywords in _DOMAIN_BUCKETS.items():
+        for kw in keywords:
+            if kw.lower() in haystack:
+                hits.append(bucket)
+                break
+    return hits
+
+
+def _report_domain_mix(conn, sa, limit: int) -> list:
+    lines = [_section(f"DOMAIN MIX (ADVISORY keyword estimate; last {limit} rows by id)")]
+    lines.append(
+        "DOMAIN MIX is an advisory keyword estimate. No domain field is "
+        "stored; topic is only a 9-value housing-finance sub-taxonomy. "
+        "Treat as a rough hint, not a measurement."
+    )
+    rows = conn.execute(
+        sa.text(
+            "SELECT id, query, title, claim_text "
+            "FROM analysis_results "
+            "ORDER BY id DESC "
+            "LIMIT :lim"
+        ).bindparams(lim=limit)
+    ).all()
+    scanned = 0
+    counts = {bucket: 0 for bucket in _DOMAIN_BUCKETS}
+    other = 0
+    for r in rows:
+        scanned += 1
+        m = r._mapping
+        query = m["query"] or ""
+        title = m["title"] or ""
+        claim_text = m["claim_text"] or ""
+        combined = f"{title}\n{claim_text}\n{query}"
+        buckets = _classify_domain(combined)
+        if not buckets:
+            other += 1
+            continue
+        for bucket in buckets:
+            counts[bucket] += 1
+    lines.append("")
+    lines.append("(rows may match multiple buckets; advisory keyword estimate, "
+                 "not a stored domain)")
+    for bucket, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])):
+        lines.append(f"{bucket:<22} {n}")
+    lines.append(f"{'(기타/미분류)':<22} {other}")
+    lines.append(f"scanned {scanned} rows")
+    return lines
+
+
 def main(argv=None) -> int:
     parser = _build_parser()
     try:
@@ -337,6 +545,13 @@ def main(argv=None) -> int:
         for line in _report_human_reviewed(conn, sa):
             print(line)
         for line in _report_offtopic(conn, sa, limit):
+            print(line)
+        # SECTION 9 — collector mix (data-backed, JSON-parsed Python-side).
+        for line in _report_collector_mix(conn, sa):
+            print(line)
+        # SECTION 10 — domain mix (advisory keyword estimate; reuses the
+        # --limit-offtopic window as the scan size).
+        for line in _report_domain_mix(conn, sa, limit):
             print(line)
 
     print("\n[Safety] READ-ONLY summary — no rows written, updated, or deleted.")
