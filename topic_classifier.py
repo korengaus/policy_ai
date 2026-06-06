@@ -1,4 +1,8 @@
-from config import QUERY
+# M43-B: neutral terminal fallback for items that match no keyword bucket.
+# Previously this fell back to config.QUERY ("전세대출"), which mis-grouped
+# unrelated items (e.g. an obituary) under 전세대출. config.QUERY is left
+# untouched because it is also analyze_pipeline's default query.
+UNCLASSIFIED_TOPIC = "미분류"
 
 
 def classify_policy_topic(
@@ -97,4 +101,4 @@ def classify_policy_topic(
     if "\uc804\uc138" in text and "\ub300\ucd9c" in text:
         return "\uc804\uc138\ub300\ucd9c \uc77c\ubc18"
 
-    return QUERY
+    return UNCLASSIFIED_TOPIC

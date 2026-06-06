@@ -103,6 +103,21 @@ UI_ONLY_TITLES = {
     "본문 영역으로 바로가기",
 }
 
+# M43-A: Korean death-notice / funeral vocabulary. A title containing any of
+# these is a personal obituary, not a policy article, and is rejected in
+# _reject_title_reason. Kept conservative — funeral-notice nouns + the "故"
+# honorific prefix only; a bare "사망" is intentionally NOT here because it
+# occurs in legitimate policy/crime news.
+OBITUARY_MARKERS = (
+    "별세",
+    "부고",
+    "빈소",
+    "발인",
+    "영결식",
+    "장례식장",
+    "故",
+)
+
 NAVER_NEWS_ZONE_SELECTORS = [
     "div.group_news",
     "ul.list_news",
@@ -389,6 +404,14 @@ def _reject_title_reason(title: str, query: str = "") -> str | None:
     normalized = _normalize_spaces(title)
     if not normalized:
         return "empty title"
+    # M43-A: reject personal death-notice / funeral items before they can
+    # become verification cards. The only relevance filter (M17b title-token
+    # overlap) is lexical and an obituary headline can pass it via incidental
+    # substrings (e.g. "보건복지부"/"장관정책보좌관" for query "복지 정책").
+    # Conservative funeral-notice vocabulary ONLY — deliberately excludes a
+    # lone "사망", which appears in legitimate policy/crime reporting.
+    if any(marker in normalized for marker in OBITUARY_MARKERS):
+        return "obituary_or_funeral_notice"
     if _low_quality_phrase(normalized):
         return f"low quality phrase: {_low_quality_phrase(normalized)}"
     if _is_media_only_title(normalized):
