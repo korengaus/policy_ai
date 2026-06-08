@@ -139,8 +139,25 @@ def _tokens(text: str) -> set[str]:
     }
 
 
+# FIN-3 — conservative numeric-text canonicalization (no new log call). Glues
+# unit/spacing/comma variants onto the digit core BEFORE the existing regex so
+# the same figure matches identically on both claim and body sides. Never alters
+# the numeric core, so unrelated numbers (e.g. 18 vs 1.8) can never collide.
+_PERCENT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(?:％|%|퍼센트|프로|percent)", re.IGNORECASE)
+
+
+def _canonicalize_numeric_text(text: str) -> str:
+    t = text or ""
+    t = t.replace(",", "")                        # thousands sep: 5,000만원 -> 5000만원
+    t = _PERCENT_RE.sub(r"\1%", t)                # "1.7 %","1.7퍼센트","1.7프로" -> "1.7%"
+    t = re.sub(r"(\d+)\s*조\s*원", r"\1조원", t)   # spacing only; 조원 stays distinct from 조
+    t = re.sub(r"(\d+)\s*억\s*원", r"\1억원", t)
+    return t
+
+
 def _numbers(text: str) -> set[str]:
-    return set(re.findall(r"\d+(?:\.\d+)?%?|\d+(?:조|억|만|천)?원|\d{4}년|\d+월|\d+일", text or ""))
+    canon = _canonicalize_numeric_text(text)
+    return set(re.findall(r"\d+(?:\.\d+)?%?|\d+(?:조|억|만|천)?원|\d{4}년|\d+월|\d+일", canon))
 
 
 def _split_sentences(text: str) -> list[str]:
