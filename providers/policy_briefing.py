@@ -85,9 +85,10 @@ MIN_CLAIM_TOKEN_OVERLAP = 1
 # Single page is fetched in the wiring; the param is plumbed for future use.
 DEFAULT_NUM_OF_ROWS = 100
 
-# FIN-5 — sane per-window page cap so a widened+paginated window can't run away
-# (bounds API cost). Only engaged when the window is widened beyond the default
-# (see fetch_and_build_policy_briefing_candidates); at default, one page only.
+# FIN-5/FIN-7 — legacy per-window page-cap constant. SUPERSEDED by
+# config.policy_briefing_max_pages() (default 1) after FIN-7 proved the API
+# ignores pageNo (page 1 == page 2). Retained only as a documented upper-bound
+# reference; no longer read by the wiring.
 MAX_PAGES_PER_WINDOW = 5
 
 _SOURCE_TAG = "policy_briefing"
@@ -668,9 +669,13 @@ def fetch_and_build_policy_briefing_candidates(
         max_releases = config.policy_briefing_max_releases()
     lookback_days = config.policy_briefing_lookback_days()
     windows = max(1, math.ceil(lookback_days / DATE_WINDOW_DAYS))
-    # Default lookback => single page (pre-FIN-5 behavior, byte-identical).
-    # Widening turns on pagination so the >=100-item-window overflow is captured.
-    max_pages = MAX_PAGES_PER_WINDOW if lookback_days > DATE_WINDOW_DAYS else 1
+    # FIN-7 — per-window pages from config (default 1). The data.go.kr
+    # pressReleaseList API IGNORES pageNo (proven 2026-06: page 1 == page 2,
+    # byte-identical items), so page 1 already holds the whole window; pages 2+
+    # were duplicates that dedup discarded while occasionally paying a 10s
+    # read-timeout. Capping at 1 removes those no-op calls — zero data lost. The
+    # real recall lever is the multi-window loop below (windows), untouched.
+    max_pages = max(1, config.policy_briefing_max_pages())
 
     reference = _now_kst()
     seen_ids: set = set()

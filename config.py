@@ -75,7 +75,10 @@ def policy_briefing_enabled() -> bool:
 
 
 def policy_briefing_timeout_seconds() -> float:
-    return _env_float("POLICY_BRIEFING_TIMEOUT_SECONDS", 10.0)
+    # FIN-7 — default lowered 10.0 -> 5.0: real pages respond ~2s, so 5s is a
+    # safe margin while letting a hung call (the API is intermittently slow)
+    # fail fast instead of paying a 10s read-timeout. Env still overrides.
+    return _env_float("POLICY_BRIEFING_TIMEOUT_SECONDS", 5.0)
 
 
 # FIN-5 — recall widening (flag-gated; defaults preserve current behavior).
@@ -93,6 +96,17 @@ def policy_briefing_lookback_days() -> int:
 # tiebreak in _select_documents once the window is widened.
 def policy_briefing_max_releases() -> int:
     return _env_int("POLICY_BRIEFING_MAX_RELEASES", 15)
+
+
+# FIN-7 — per-window page cap. DEFAULT 1: the data.go.kr pressReleaseList API
+# IGNORES pageNo (proven 2026-06: page 1 == page 2 == ... byte-identical items),
+# so a single fetch already returns the whole window; pages 2+ were pure
+# duplicates that dedup discarded while occasionally paying a 10s read-timeout.
+# Default 1 removes those no-op duplicate calls. Env can raise it if the API ever
+# starts honoring pageNo. Multi-window recall (windows = ceil(lookback/3)) is
+# unaffected — that is the real recall lever.
+def policy_briefing_max_pages() -> int:
+    return _env_int("POLICY_BRIEFING_MAX_PAGES", 1)
 
 
 def describe_policy_briefing_config() -> dict:
