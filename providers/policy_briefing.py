@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import hashlib
 import html
+import math
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -83,6 +84,11 @@ MIN_CLAIM_TOKEN_OVERLAP = 1
 
 # Single page is fetched in the wiring; the param is plumbed for future use.
 DEFAULT_NUM_OF_ROWS = 100
+
+# FIN-5 — sane per-window page cap so a widened+paginated window can't run away
+# (bounds API cost). Only engaged when the window is widened beyond the default
+# (see fetch_and_build_policy_briefing_candidates); at default, one page only.
+MAX_PAGES_PER_WINDOW = 5
 
 _SOURCE_TAG = "policy_briefing"
 
@@ -608,21 +614,84 @@ def to_official_source_candidates(
     return candidates, len(selected)
 
 
+def _fetch_window_paginated(
+    provider: PrimaryDocumentProvider,
+    start_date: str,
+    end_date: str,
+    *,
+    num_of_rows: int,
+    max_pages: int,
+) -> List[Dict[str, Any]]:
+    """Fetch ONE 3-day window, paging until a SHORT page (fewer than
+    ``num_of_rows`` items, including zero) or ``max_pages`` is reached. Calls the
+    unchanged ``fetch_press_releases`` single-page primitive once per page.
+
+    ``max_pages=1`` reproduces the pre-FIN-5 single-page fetch EXACTLY (one call,
+    page 1) — the short-page check never even runs a second iteration."""
+    documents: List[Dict[str, Any]] = []
+    for page_no in range(1, max_pages + 1):
+        result = provider.fetch_press_releases(
+            start_date=start_date,
+            end_date=end_date,
+            page_no=page_no,
+            num_of_rows=num_of_rows,
+        )
+        page_docs = result.get("documents") or []
+        documents.extend(page_docs)
+        if len(page_docs) < num_of_rows:  # short-page-stop (incl. empty/error)
+            break
+    return documents
+
+
 def fetch_and_build_policy_briefing_candidates(
     normalized_claims: List[Dict[str, Any]],
     *,
-    max_releases: int = MAX_PRESS_RELEASES,
+    max_releases: Optional[int] = None,
 ) -> tuple[List[Dict[str, Any]], int]:
-    """Top-level entry called by the pipeline (Option A). Fetches the last
-    <=3-day KST press-release window (page 1) and shapes it into official
-    source candidates. Never raises; returns ([], 0) on any failure / empty.
+    """Top-level entry called by the pipeline (Option A). Covers the last
+    ``POLICY_BRIEFING_LOOKBACK_DAYS`` days via looped non-overlapping 3-day KST
+    windows (FIN-5), paginating each window, then shapes the merged + deduped
+    releases into official source candidates. Never raises; returns ([], 0) on
+    any failure / empty.
+
+    DEFAULT (lookback=3, max=15): exactly ONE window (today-2..today), PAGE 1
+    ONLY (``max_pages=1``), dedup is a no-op on a single page, top-15 selection
+    — byte-identical to pre-FIN-5. Pagination engages ONLY when the window is
+    widened (``lookback_days > DATE_WINDOW_DAYS``), so the default fetch never
+    pulls page 2 even on a >=100-item window.
 
     The CALLER gates this behind ``config.policy_briefing_enabled()`` so the
     disabled path constructs nothing and hits no network."""
     provider = get_document_provider("policy_briefing")
-    start_date, end_date = date_window()
-    result = provider.fetch_press_releases(start_date=start_date, end_date=end_date)
-    documents = result.get("documents") or []
+
+    if max_releases is None:
+        max_releases = config.policy_briefing_max_releases()
+    lookback_days = config.policy_briefing_lookback_days()
+    windows = max(1, math.ceil(lookback_days / DATE_WINDOW_DAYS))
+    # Default lookback => single page (pre-FIN-5 behavior, byte-identical).
+    # Widening turns on pagination so the >=100-item-window overflow is captured.
+    max_pages = MAX_PAGES_PER_WINDOW if lookback_days > DATE_WINDOW_DAYS else 1
+
+    reference = _now_kst()
+    seen_ids: set = set()
+    documents: List[Dict[str, Any]] = []
+    for window_index in range(windows):
+        window_ref = reference - timedelta(days=DATE_WINDOW_DAYS * window_index)
+        start_date, end_date = date_window(reference=window_ref)
+        for doc in _fetch_window_paginated(
+            provider,
+            start_date,
+            end_date,
+            num_of_rows=DEFAULT_NUM_OF_ROWS,
+            max_pages=max_pages,
+        ):
+            dedup_key = doc.get("id") or doc.get("original_url") or ""
+            if dedup_key and dedup_key in seen_ids:
+                continue
+            if dedup_key:
+                seen_ids.add(dedup_key)
+            documents.append(doc)
+
     return to_official_source_candidates(
         documents, normalized_claims, max_releases=max_releases
     )

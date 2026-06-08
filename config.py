@@ -78,6 +78,23 @@ def policy_briefing_timeout_seconds() -> float:
     return _env_float("POLICY_BRIEFING_TIMEOUT_SECONDS", 10.0)
 
 
+# FIN-5 — recall widening (flag-gated; defaults preserve current behavior).
+# lookback_days default 3 == a single 3-day window (today-2..today). Raising it
+# covers more days via looped non-overlapping 3-day windows AND engages
+# pagination within each window (see providers/policy_briefing.py). At the
+# default value the path is byte-identical to pre-FIN-5: one window, page 1 only.
+def policy_briefing_lookback_days() -> int:
+    return _env_int("POLICY_BRIEFING_LOOKBACK_DAYS", 3)
+
+
+# FIN-5 — config-driven top-N selection cap. Default 15 == the current
+# MAX_PRESS_RELEASES so default behavior is unchanged; raise it (without a code
+# change) so a now-fetched older cited release is not dropped by the recency
+# tiebreak in _select_documents once the window is widened.
+def policy_briefing_max_releases() -> int:
+    return _env_int("POLICY_BRIEFING_MAX_RELEASES", 15)
+
+
 def describe_policy_briefing_config() -> dict:
     """Snapshot of the Policy Briefing provider configuration. Safe to
     log/serialize: reports key PRESENCE only — never the serviceKey value."""
