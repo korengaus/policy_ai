@@ -3186,6 +3186,39 @@
         .replaceAll("'", "&#039;");
     }
 
+    // SEC-2 — URL scheme allowlist for href output. escapeHtml makes a value
+    // safe INSIDE a quoted attribute but does NOT neutralize dangerous URL
+    // schemes: javascript:/data:/vbscript: contain no chars for escapeHtml to
+    // touch and stay live in an href. safeUrl gates the scheme so a scraped or
+    // LLM-supplied URL can never smuggle script into an href. Compose as
+    // escapeHtml(safeUrl(url)) — safeUrl decides scheme validity on the RAW
+    // value, escapeHtml then makes the survivor attribute-quote safe. Never
+    // throws; never blocks a legitimate http/https/mailto URL.
+    function safeUrl(value) {
+      if (typeof value !== "string" || !value) return "#";
+      try {
+        // Strip ALL ASCII control chars (tab/newline/NUL/etc.) and surrounding
+        // whitespace before the scheme test — attackers split a scheme with
+        // "java\tscript:" or a leading newline. A legitimate URL contains no
+        // control chars, so its content is left unchanged.
+        const trimmed = value.replace(/[\x00-\x1F\x7F]/g, "").trim();
+        if (!trimmed) return "#";
+        const lower = trimmed.toLowerCase();
+        if (
+          lower.startsWith("http://") ||
+          lower.startsWith("https://") ||
+          lower.startsWith("mailto:")
+        ) {
+          return trimmed;
+        }
+        // Bare fragment, relative path, javascript:/data:/vbscript:/file:,
+        // unknown or ambiguous scheme → neutralize to "#".
+        return "#";
+      } catch (error) {
+        return "#";
+      }
+    }
+
     // ===== C3 — AI-assist status descriptor & badge =====
     function buildAiStatusDescriptor(rawStatus) {
       const status = String(rawStatus || "").toLowerCase();
@@ -3516,11 +3549,11 @@
         <div class="source-list">
           ${list.map((source) => {
             const sourceTitle = escapeHtml(userFacingReportText(source.title || source.url || "근거 출처", "근거 출처"));
-            const sourceUrl = escapeHtml(source.url || "");
+            const sourceUrl = escapeHtml(safeUrl(source.url || ""));
             const sourceType = escapeHtml(formatSourceType(source.source_type));
             const score = escapeHtml(source.reliability_score ?? "-");
             const reason = escapeHtml(userFacingReportText(source.reliability_reason || "", ""));
-            const titleHtml = sourceUrl
+            const titleHtml = source.url
               ? `<a href="${sourceUrl}" target="_blank" rel="noopener noreferrer">${sourceTitle}</a>`
               : sourceTitle;
             return `
@@ -3650,7 +3683,7 @@
         ? formatDiagnosticText(formatList(data.official_mismatch_reasons))
         : "";
       const topHtml = topUrl
-        ? `<a href="${escapeHtml(topUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(topTitle)}</a>`
+        ? `<a href="${escapeHtml(safeUrl(topUrl))}" target="_blank" rel="noopener noreferrer">${escapeHtml(topTitle)}</a>`
         : escapeHtml(topTitle);
       return `
         <div class="source-reliability-summary">
@@ -3826,9 +3859,9 @@
             ${conflicts.length ? `
               <div class="source-list">
                 ${conflicts.map((conflict) => {
-                  const conflictUrl = escapeHtml(conflict.source_url || "");
+                  const conflictUrl = escapeHtml(safeUrl(conflict.source_url || ""));
                   const conflictTitle = escapeHtml(userFacingReportText(conflict.source_title || "충돌 후보", "충돌 후보"));
-                  const conflictHtml = conflictUrl
+                  const conflictHtml = conflict.source_url
                     ? `<a href="${conflictUrl}" target="_blank" rel="noopener noreferrer">${conflictTitle}</a>`
                     : conflictTitle;
                   return `
@@ -4057,8 +4090,8 @@
             </div>
             ${related.length ? related.map((snippet) => {
               const sourceTitle = escapeHtml(userFacingReportText(snippet.source_title || snippet.source_url || "출처", "출처"));
-              const sourceUrl = escapeHtml(snippet.source_url || "");
-              const sourceHtml = sourceUrl
+              const sourceUrl = escapeHtml(safeUrl(snippet.source_url || ""));
+              const sourceHtml = snippet.source_url
                 ? `<a href="${sourceUrl}" target="_blank" rel="noopener noreferrer">${sourceTitle}</a>`
                 : sourceTitle;
               return `
@@ -4089,8 +4122,8 @@
 
       return `<div class="source-candidate-list">${list.map((source) => {
         const title = escapeHtml(userFacingReportText(publicInstitutionName(source.title || source.url || "출처 후보"), "출처 후보"));
-        const url = escapeHtml(source.url || "");
-        const titleHtml = url
+        const url = escapeHtml(safeUrl(source.url || ""));
+        const titleHtml = source.url
           ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a>`
           : title;
         const exclusionLabel = sourceExclusionLabel(source);
@@ -6107,7 +6140,7 @@
                 ? '<div class="public-source-warning">상세 원문 수집 제한: 공식 페이지 접근 또는 본문 추출에 실패했습니다.</div>'
                 : "";
               const titleHtml = url
-                ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(title)}</a>`
+                ? `<a href="${escapeHtml(safeUrl(url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(title)}</a>`
                 : escapeHtml(title);
               return `
                 <article class="public-source-card">
@@ -6117,7 +6150,7 @@
                   <div class="public-source-meta">출처 유형: ${escapeHtml(publicSourceTypeLabel(source))}</div>
                   <div class="public-source-meta">근거 강도: ${escapeHtml(formatTechnicalLabel(source.evidence_strength || source.evidence_quality_label || source.supports_claim || "-"))}</div>
                   <div class="public-source-meta">신뢰/관련 점수: ${escapeHtml(score)}</div>
-                  <div class="public-source-meta">링크: ${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">원문 보기</a>` : "URL 없음"}</div>
+                  <div class="public-source-meta">링크: ${url ? `<a href="${escapeHtml(safeUrl(url))}" target="_blank" rel="noopener noreferrer">원문 보기</a>` : "URL 없음"}</div>
                   <div class="public-source-meta">${escapeHtml(reason)}</div>
                   ${fetchWarning}
                 </article>
@@ -6654,7 +6687,7 @@
           level,
         } = parts;
         const title = escapeHtml(publicInstitutionName(result.title || "제목 없음"));
-        const url = escapeHtml(result.original_url || "#");
+        const url = escapeHtml(safeUrl(result.original_url || "#"));
         const topic = exportTopicLabel(result, currentReportContext?.query || queryInput?.value || "");
         const topSourceTitle = sourceReliabilitySummary.top_source_title
           || verification.evidence_sources?.[0]?.title
@@ -6663,7 +6696,7 @@
           || verification.evidence_sources?.[0]?.url
           || "";
         const topSourceHtml = topSourceUrl
-          ? `<a href="${escapeHtml(topSourceUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(userFacingReportText(publicInstitutionName(topSourceTitle), "확인 필요"))}</a>`
+          ? `<a href="${escapeHtml(safeUrl(topSourceUrl))}" target="_blank" rel="noopener noreferrer">${escapeHtml(userFacingReportText(publicInstitutionName(topSourceTitle), "확인 필요"))}</a>`
           : escapeHtml(userFacingReportText(publicInstitutionName(topSourceTitle), "확인 필요"));
         const recommendedAction = recommendedActionForParts(parts);
         const finalScore = decision.final_score ?? confidence.policy_confidence_score ?? "-";
@@ -8588,7 +8621,7 @@
           <div style="grid-column: 1 / -1;"><strong>핵심 주장</strong>${escapeHtml(task.claim_text || "(없음)")}</div>
           <div><strong>초안 판정</strong>${escapeHtml(task.final_decision || "(없음)")}</div>
           <div><strong>신뢰도 라벨</strong>${escapeHtml(task.policy_confidence || "(없음)")}</div>
-          <div><strong>원문 URL</strong>${task.url ? `<a href="${escapeHtml(task.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(task.url)}</a>` : "(없음)"}</div>
+          <div><strong>원문 URL</strong>${task.url ? `<a href="${escapeHtml(safeUrl(task.url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(task.url)}</a>` : "(없음)"}</div>
           <div><strong>사람 검토 필요</strong>${task.human_review_required ? "예" : "아니오"}</div>
           <div><strong>생성</strong>${escapeHtml(task.created_at || "(없음)")}</div>
           <div><strong>업데이트</strong>${escapeHtml(task.updated_at || "(없음)")}</div>
