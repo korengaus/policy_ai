@@ -1596,6 +1596,7 @@
         alert: String(decision.policy_alert_level || record?.highest_alert || "WATCH").toUpperCase(),
         confidence: confidence.policy_confidence_score ?? record?.average_confidence ?? "-",
         officialStatus: officialStatusLabel(result),
+        freshness: isFreshlyBroken(result),
         reviewStatus: formatReviewStatus(verification.review_status) || "AI 초안, 사람 검토 대기",
         summary: topSummaryLine(result),
         reason: decision.decision_summary || evidenceQualityExplanation(debug.evidence_quality_summary || {}, debug.evidence_strength_summary || {}),
@@ -1650,6 +1651,7 @@
               <span class="badge ${alertClass(card.alert)}">${escapeHtml(formatAlert(card.alert))}</span>
               <span class="badge topic-badge">${escapeHtml(card.category)}</span>
               <span class="badge topic-badge">${escapeHtml(card.topic)}</span>
+              ${card.freshness ? `<span class="badge freshness-badge">🔥 ${escapeHtml(FRESHNESS_BADGE_LABEL)}</span>` : ""}
               ${card.humanReviewedAt ? `<span class="review-status review-approved">${escapeHtml(HUMAN_REVIEWED_LABEL)}</span>` : ""}
             </div>
             <h3 class="topic-card-title">${escapeHtml(card.title)}</h3>
@@ -4369,6 +4371,48 @@
         verification.source_reliability_summary || {},
         verification.debug_summary || result?.debug_summary || {}
       );
+    }
+
+    // FRESHNESS Phase 2 — conservative "freshly-broken" gate. Distinguishes a
+    // just-published issue with no official primary source yet (🔥 fresh,
+    // confirmation pending) from an old article the matcher simply missed
+    // (⚠️ unconfirmed). Returns true ONLY when ALL FOUR conditions hold:
+    //   (1) a real article publish date is present in debug_summary
+    //       (article_published_at — added backend-side only for trusted sources),
+    //   (2) the collection source is trusted: google_rss / naver_api. HTML
+    //       fallback synthesizes published=NOW (always looks fresh) and is
+    //       already excluded backend-side; re-checked here as defense in depth,
+    //   (3) the publish date is within the freshness window, AND
+    //   (4) Phase-1's "no official primary source found" state
+    //       (officialEvidenceStatus === "not_found").
+    // FAIL-SAFE: any missing/unparseable date, untrusted source, old date, or
+    // non-not_found state → false → NO badge, leaving the existing ⚠️ /
+    // official-state line untouched. An old-unmatched card is never mislabeled.
+    const FRESHNESS_WINDOW_DAYS = 7; // matches the relaxed recent window (news_collector.py:1133); do NOT widen to 30
+    const TRUSTED_FRESHNESS_SOURCES = new Set(["google_rss", "naver_api"]);
+    const FRESHNESS_BADGE_LABEL = "새로 부상한 이슈 · 공식 확인 진행 중";
+
+    function isFreshlyBroken(result) {
+      const verification = result?.verification_card || result || {};
+      const debug = verification.debug_summary || result?.debug_summary || {};
+      // (2) trusted source
+      if (!TRUSTED_FRESHNESS_SOURCES.has(String(debug.article_source || ""))) return false;
+      // (1) real date present
+      const rawDate = debug.article_published_at;
+      if (!rawDate) return false;
+      // Date.parse handles BOTH ISO-8601 (Naver API published_at) and
+      // RFC822/RFC1123 (Google RSS published) — the only formats the two
+      // trusted sources emit, each carrying an explicit tz offset (mirrors the
+      // parsedate_to_datetime tz handling at news_collector.py:719-727).
+      const parsedMs = Date.parse(rawDate);
+      if (Number.isNaN(parsedMs)) return false; // unparseable → unknown → no badge
+      // (3) within window. Upper bound rejects OLD articles (the core fail-safe);
+      // a small negative lower bound tolerates clock skew / tz-parse jitter
+      // without ever admitting a genuinely old date.
+      const ageDays = (Date.now() - parsedMs) / 86400000;
+      if (!(ageDays <= FRESHNESS_WINDOW_DAYS && ageDays >= -1)) return false;
+      // (4) no official primary source found (Phase-1 not_found gate)
+      return officialEvidenceStateForResult(result).officialEvidenceStatus === "not_found";
     }
 
     function officialDirectScoreForResult(result) {

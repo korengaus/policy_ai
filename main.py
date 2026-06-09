@@ -892,6 +892,20 @@ def _process_news_item_phase_a(
     # byte-identical (mirrors policy_briefing_count).
     if national_law_count is not None:
         debug_summary["national_law_count"] = national_law_count
+    # FRESHNESS Phase 2: surface the article publish date + collection source so
+    # the frontend can derive a CONSERVATIVE "freshly-broken" label (distinct
+    # from "old-unmatched"). Additive, byte-identical convention (mirrors
+    # policy_briefing_count): the two keys are added ONLY when a REAL parseable
+    # date exists AND the source is trusted ({google_rss, naver_api}). HTML
+    # fallback sources (naver_fallback/daum_fallback) synthesize published=NOW,
+    # so they are excluded here at the source — a synthetic date can never reach
+    # the client. When excluded, NO key is added, so existing date-less/fallback
+    # rows stay byte-identical. Pure data key (no log call site); touches no
+    # verdict field.
+    _article_published = news.get("published_at") or news.get("published")
+    if _article_published and news.get("source") in {"google_rss", "naver_api"}:
+        debug_summary["article_published_at"] = _article_published
+        debug_summary["article_source"] = news.get("source")
     debug_summary["semantic_evidence_summary"] = semantic_evidence_summary
 
     if verification_card.get("official_mismatch"):
