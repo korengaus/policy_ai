@@ -1,8 +1,8 @@
-"""HOTTOPIC Phase 2 — unit tests for the hot_topics keyword selector.
+"""HOTTOPIC Phase 2b — unit tests for the news_collector-titles keyword selector.
 
-The Anthropic client is MOCKED throughout (no live API). Tests pin the four
-safeguards, the fail-safe (any error -> []), the flag-off byte-identical path,
-and build_query_list dedup against the fixed queries.
+news_collector and the Anthropic client are MOCKED throughout (no live API, no
+live RSS). Tests pin the four safeguards, the fail-safe (any error -> []), the
+flag-off byte-identical path, build_query_list dedup, and the robust JSON parse.
 """
 
 import json
@@ -18,150 +18,194 @@ import hot_topics
 
 
 # ---------------------------------------------------------------------------
-# Fake Anthropic SDK message helpers (duck-typed; getattr-based access in
-# hot_topics works on SimpleNamespace).
+# Fakes
 # ---------------------------------------------------------------------------
-def _text_block(text):
-    return SimpleNamespace(type="text", text=text)
+def _news_item(title, summary="", source="google_rss", link="https://news/x"):
+    return {
+        "title": title,
+        "summary": summary,
+        "google_link": link,
+        "source": source,
+        "published": "Tue, 09 Jun 2026 08:00:00 GMT",
+    }
 
 
-def _search_use_block():
-    return SimpleNamespace(type="server_tool_use", name="web_search")
+def _search_return(items, collection_source="google_rss"):
+    return {"results": list(items), "debug": {"collection_source": collection_source}}
 
 
-def _search_result_block():
-    return SimpleNamespace(type="web_search_tool_result")
+def _fake_search(items, collection_source="google_rss"):
+    """Return a stand-in for search_google_news_rss_with_meta that ignores the
+    seed and always returns the same pool (dedup collapses the 5 seed calls)."""
+    def _inner(seed, max_results=8):
+        return _search_return(items, collection_source)
+    return _inner
 
 
-def _usage(input_tokens=100, output_tokens=50, web_search_requests=2):
-    return SimpleNamespace(
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        server_tool_use=SimpleNamespace(web_search_requests=web_search_requests),
-    )
-
-
-def _message(blocks, usage=None):
-    return SimpleNamespace(content=blocks, usage=usage or _usage())
-
-
-def _fenced(items):
-    """Wrap a list in a ```json fence exactly like the probe-observed output."""
-    return "```json\n" + json.dumps(items, ensure_ascii=False) + "\n```"
+def _pick_message(json_text, input_tokens=120, output_tokens=40):
+    block = SimpleNamespace(type="text", text=json_text)
+    usage = SimpleNamespace(input_tokens=input_tokens, output_tokens=output_tokens)
+    return SimpleNamespace(content=[block], usage=usage)
 
 
 def _enabled_env(**overrides):
     env = {
         "HOT_TOPIC_ENABLED": "true",
         "HOT_TOPIC_TOP_K": "3",
-        "HOT_TOPIC_MAX_SEARCHES": "5",
         "ANTHROPIC_API_KEY": "test-key",
     }
     env.update(overrides)
     return env
 
 
+# A clean 3-title policy pool used by several tests (index order preserved).
+_POOL = [
+    _news_item("부동산 세제 개편 실거주 원칙 시동", link="https://n/0"),
+    _news_item("소상공인 지원 재원 확대 촉구", link="https://n/1"),
+    _news_item("국민연금 보험료율 인상 논의 본격화", link="https://n/2"),
+]
+
+
 class FlagOffTests(unittest.TestCase):
-    def test_disabled_returns_empty_and_never_calls_api(self):
+    def test_disabled_returns_empty_and_never_fetches(self):
         with mock.patch.dict(os.environ, {"HOT_TOPIC_ENABLED": "false"}, clear=False):
             with mock.patch.object(
-                hot_topics, "_call_anthropic_web_search",
-                side_effect=AssertionError("API must not be called when flag off"),
+                hot_topics, "search_google_news_rss_with_meta",
+                side_effect=AssertionError("must not fetch when flag off"),
             ):
-                self.assertEqual(hot_topics.build_dynamic_queries(), [])
+                with mock.patch.object(
+                    hot_topics, "_call_anthropic_pick",
+                    side_effect=AssertionError("must not call LLM when flag off"),
+                ):
+                    self.assertEqual(hot_topics.build_dynamic_queries(), [])
 
     def test_build_query_list_off_is_byte_identical(self):
         fixed = ["주택담보대출 규제", "복지 예산", "양도세 세제 개편"]
         with mock.patch.dict(os.environ, {"HOT_TOPIC_ENABLED": "false"}, clear=False):
-            result = hot_topics.build_query_list(fixed)
-        self.assertEqual(result, fixed)
+            self.assertEqual(hot_topics.build_query_list(fixed), fixed)
 
 
-class WebSearchFiredSafeguardTests(unittest.TestCase):
-    def test_happy_path_filters_dedups_and_truncates(self):
-        items = [
-            {"keyword": "햇살론 개편 서민금융", "source_url": "https://a.com/1"},
-            {"keyword": "소상공인 세액공제 상가임대료", "source_url": "https://b.com/2"},
-            {"keyword": "전세 대출 규제 완화", "source_url": "https://c.com/3"},
-            {"keyword": "전세 대출 규제 완화", "source_url": "https://c.com/3b"},  # dup
-            {"keyword": "주택 공급 대책", "source_url": "https://d.com/4"},  # past top_k=3
+class HappyPathTests(unittest.TestCase):
+    def test_filters_dedups_and_truncates(self):
+        picks = [
+            {"keyword": "부동산 세제 개편", "title_index": 0},
+            {"keyword": "국민연금 보험료율 인상", "title_index": 2},
+            {"keyword": "부동산 세제 개편", "title_index": 0},      # dup -> dropped
+            {"keyword": "소상공인 지원 대책", "title_index": 1},
+            {"keyword": "주택 공급 대책", "title_index": 0},          # past top_k=3
         ]
-        msg = _message([_search_use_block(), _search_result_block(), _text_block(_fenced(items))])
         with mock.patch.dict(os.environ, _enabled_env(), clear=False):
-            with mock.patch.object(hot_topics, "_call_anthropic_web_search", return_value=msg):
-                result = hot_topics.build_dynamic_queries()
-        self.assertEqual(
-            result,
-            ["햇살론 개편 서민금융", "소상공인 세액공제 상가임대료", "전세 대출 규제 완화"],
-        )
+            with mock.patch.object(hot_topics, "search_google_news_rss_with_meta", new=_fake_search(_POOL)):
+                with mock.patch.object(
+                    hot_topics, "_call_anthropic_pick",
+                    return_value=_pick_message(json.dumps(picks, ensure_ascii=False)),
+                ):
+                    result = hot_topics.build_dynamic_queries()
+        self.assertEqual(result, ["부동산 세제 개편", "국민연금 보험료율 인상", "소상공인 지원 대책"])
 
-    def test_no_web_search_block_returns_empty(self):
-        # Valid fenced JSON but NO server_tool_use / web_search_tool_result block.
-        items = [{"keyword": "전세 대출 규제 완화", "source_url": "https://c.com/3"}]
-        msg = _message([_text_block(_fenced(items))])
+
+class SearchActuallyHappenedSafeguardTests(unittest.TestCase):
+    def test_empty_titles_returns_empty_before_llm(self):
         with mock.patch.dict(os.environ, _enabled_env(), clear=False):
-            with mock.patch.object(hot_topics, "_call_anthropic_web_search", return_value=msg):
-                self.assertEqual(hot_topics.build_dynamic_queries(), [])
+            with mock.patch.object(hot_topics, "search_google_news_rss_with_meta", new=_fake_search([])):
+                with mock.patch.object(
+                    hot_topics, "_call_anthropic_pick",
+                    side_effect=AssertionError("LLM must not be called with no titles"),
+                ):
+                    self.assertEqual(hot_topics.build_dynamic_queries(), [])
 
 
-class SourceUrlSafeguardTests(unittest.TestCase):
-    def test_missing_empty_or_non_http_source_url_dropped(self):
-        items = [
-            {"keyword": "가계부채 DSR 규제", "source_url": ""},          # empty -> drop
-            {"keyword": "청년 전세 지원금", "source_url": "ftp://x"},     # non-http -> drop
-            {"keyword": "주담대 금리 인하"},                              # missing -> drop
-            {"keyword": "부동산 양도세 개편", "source_url": "https://ok.com"},  # keep
+class ProvenanceSafeguardTests(unittest.TestCase):
+    def test_out_of_range_or_missing_title_index_dropped(self):
+        picks = [
+            {"keyword": "부동산 세제 개편", "title_index": 99},   # out of range -> drop
+            {"keyword": "소상공인 지원 대책"},                    # missing index -> drop
+            {"keyword": "국민연금 보험료율 인상", "title_index": 2},  # valid -> keep
         ]
-        msg = _message([_search_use_block(), _text_block(_fenced(items))])
         with mock.patch.dict(os.environ, _enabled_env(), clear=False):
-            with mock.patch.object(hot_topics, "_call_anthropic_web_search", return_value=msg):
-                result = hot_topics.build_dynamic_queries()
-        self.assertEqual(result, ["부동산 양도세 개편"])
+            with mock.patch.object(hot_topics, "search_google_news_rss_with_meta", new=_fake_search(_POOL)):
+                with mock.patch.object(
+                    hot_topics, "_call_anthropic_pick",
+                    return_value=_pick_message(json.dumps(picks, ensure_ascii=False)),
+                ):
+                    result = hot_topics.build_dynamic_queries()
+        self.assertEqual(result, ["국민연금 보험료율 인상"])
 
 
 class DomainFilterSafeguardTests(unittest.TestCase):
     def test_offtopic_and_non_policy_keywords_dropped(self):
-        items = [
-            {"keyword": "코스피 증권 시황", "source_url": "https://x.com"},       # denylist
-            {"keyword": "지방선거 공약", "source_url": "https://y.com"},          # denylist
-            {"keyword": "아이돌 콘서트 일정", "source_url": "https://z.com"},     # denylist
-            {"keyword": "손흥민 축구 국가대표", "source_url": "https://s.com"},   # denylist
-            {"keyword": "오늘 날씨 정보", "source_url": "https://w.com"},         # no allowlist
-            {"keyword": "미국 금리 인상 전망", "source_url": "https://m.com"},    # deny beats allow
-            {"keyword": "부동산 양도세 개편", "source_url": "https://p.com"},     # keep
+        picks = [
+            {"keyword": "코스피 증권 시황", "title_index": 0},     # denylist
+            {"keyword": "오늘 날씨 정보", "title_index": 1},        # no allowlist term
+            {"keyword": "미국 금리 인상 전망", "title_index": 2},  # deny beats allow
+            {"keyword": "故 인물 추모 정책", "title_index": 0},    # obituary marker
+            {"keyword": "부동산 세제 개편", "title_index": 0},     # keep
         ]
-        msg = _message([_search_use_block(), _text_block(_fenced(items))])
         with mock.patch.dict(os.environ, _enabled_env(), clear=False):
-            with mock.patch.object(hot_topics, "_call_anthropic_web_search", return_value=msg):
-                result = hot_topics.build_dynamic_queries()
-        self.assertEqual(result, ["부동산 양도세 개편"])
+            with mock.patch.object(hot_topics, "search_google_news_rss_with_meta", new=_fake_search(_POOL)):
+                with mock.patch.object(
+                    hot_topics, "_call_anthropic_pick",
+                    return_value=_pick_message(json.dumps(picks, ensure_ascii=False)),
+                ):
+                    result = hot_topics.build_dynamic_queries()
+        self.assertEqual(result, ["부동산 세제 개편"])
 
-    def test_obituary_marker_dropped(self):
-        items = [
-            {"keyword": "故 인물 정책 추모", "source_url": "https://o.com"},  # 故 obituary -> drop
-            {"keyword": "소상공인 지원 대책", "source_url": "https://k.com"},  # keep
-        ]
-        msg = _message([_search_use_block(), _text_block(_fenced(items))])
+
+class EmergencyFallbackExclusionTests(unittest.TestCase):
+    def test_seed_resolved_to_emergency_fallback_excluded(self):
+        # collection_source == forced_search_fallback -> whole seed skipped.
+        emerg = [_news_item("금융 정책 뉴스 검색 결과", source="forced_search_fallback")]
         with mock.patch.dict(os.environ, _enabled_env(), clear=False):
-            with mock.patch.object(hot_topics, "_call_anthropic_web_search", return_value=msg):
-                result = hot_topics.build_dynamic_queries()
-        self.assertEqual(result, ["소상공인 지원 대책"])
+            with mock.patch.object(
+                hot_topics, "search_google_news_rss_with_meta",
+                new=_fake_search(emerg, collection_source="forced_search_fallback"),
+            ):
+                self.assertEqual(hot_topics._fetch_candidate_titles(), [])
+
+    def test_per_item_emergency_source_excluded(self):
+        mixed = [
+            _news_item("부동산 세제 개편 실거주", source="google_rss", link="https://n/a"),
+            _news_item("소상공인 지원 뉴스 검색 결과", source="forced_search_fallback"),
+        ]
+        with mock.patch.dict(os.environ, _enabled_env(), clear=False):
+            with mock.patch.object(
+                hot_topics, "search_google_news_rss_with_meta",
+                new=_fake_search(mixed, collection_source="google_rss"),
+            ):
+                pooled = hot_topics._fetch_candidate_titles()
+        titles = [p["title"] for p in pooled]
+        self.assertEqual(titles, ["부동산 세제 개편 실거주"])
 
 
 class FailSafeTests(unittest.TestCase):
-    def test_api_exception_returns_empty(self):
+    def test_llm_exception_returns_empty(self):
         with mock.patch.dict(os.environ, _enabled_env(), clear=False):
-            with mock.patch.object(
-                hot_topics, "_call_anthropic_web_search",
-                side_effect=RuntimeError("network down"),
-            ):
-                self.assertEqual(hot_topics.build_dynamic_queries(), [])
+            with mock.patch.object(hot_topics, "search_google_news_rss_with_meta", new=_fake_search(_POOL)):
+                with mock.patch.object(
+                    hot_topics, "_call_anthropic_pick",
+                    side_effect=RuntimeError("anthropic down"),
+                ):
+                    self.assertEqual(hot_topics.build_dynamic_queries(), [])
+
+    def test_all_seed_fetches_fail_returns_empty(self):
+        def _boom(seed, max_results=8):
+            raise RuntimeError("rss down")
+        with mock.patch.dict(os.environ, _enabled_env(), clear=False):
+            with mock.patch.object(hot_topics, "search_google_news_rss_with_meta", new=_boom):
+                with mock.patch.object(
+                    hot_topics, "_call_anthropic_pick",
+                    side_effect=AssertionError("LLM must not be called with no titles"),
+                ):
+                    self.assertEqual(hot_topics.build_dynamic_queries(), [])
 
     def test_malformed_json_returns_empty(self):
-        msg = _message([_search_use_block(), _text_block("```json\nnot valid json[\n```")])
         with mock.patch.dict(os.environ, _enabled_env(), clear=False):
-            with mock.patch.object(hot_topics, "_call_anthropic_web_search", return_value=msg):
-                self.assertEqual(hot_topics.build_dynamic_queries(), [])
+            with mock.patch.object(hot_topics, "search_google_news_rss_with_meta", new=_fake_search(_POOL)):
+                with mock.patch.object(
+                    hot_topics, "_call_anthropic_pick",
+                    return_value=_pick_message("not valid json ["),
+                ):
+                    self.assertEqual(hot_topics.build_dynamic_queries(), [])
 
     def test_missing_api_key_returns_empty(self):
         env = _enabled_env()
@@ -169,8 +213,8 @@ class FailSafeTests(unittest.TestCase):
         with mock.patch.dict(os.environ, env, clear=False):
             os.environ.pop("ANTHROPIC_API_KEY", None)
             with mock.patch.object(
-                hot_topics, "_call_anthropic_web_search",
-                side_effect=AssertionError("must not call API without key"),
+                hot_topics, "search_google_news_rss_with_meta",
+                side_effect=AssertionError("must not fetch without key"),
             ):
                 self.assertEqual(hot_topics.build_dynamic_queries(), [])
 
@@ -181,11 +225,10 @@ class BuildQueryListMergeTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"HOT_TOPIC_ENABLED": "true"}, clear=False):
             with mock.patch.object(
                 hot_topics, "build_dynamic_queries",
-                return_value=["주택담보대출 규제", "햇살론 개편 서민금융"],
+                return_value=["주택담보대출 규제", "부동산 세제 개편"],
             ):
                 result = hot_topics.build_query_list(fixed)
-        # Fixed first, dup removed, new dynamic appended.
-        self.assertEqual(result, ["주택담보대출 규제", "복지 예산", "햇살론 개편 서민금융"])
+        self.assertEqual(result, ["주택담보대출 규제", "복지 예산", "부동산 세제 개편"])
 
     def test_fixed_order_preserved_and_dynamic_appended(self):
         fixed = ["a 대출", "b 복지"]
@@ -198,55 +241,25 @@ class BuildQueryListMergeTests(unittest.TestCase):
 
 
 class RobustJsonParseTests(unittest.TestCase):
-    """HOTTOPIC Phase 2-fix (FIX 2): the JSON array must be extracted regardless
-    of fence presence / surrounding prose. All four shapes yield the same list."""
+    """_extract_json_array must handle fence/bare/raw/prose shapes identically."""
 
-    _ITEMS = [{"keyword": "전세 대출 규제 완화", "source_url": "https://c.com/3"}]
-    _EXPECTED = ["전세 대출 규제 완화"]
-
-    def _run_with_text(self, text):
-        msg = _message([_search_use_block(), _search_result_block(), _text_block(text)])
-        with mock.patch.dict(os.environ, _enabled_env(), clear=False):
-            with mock.patch.object(hot_topics, "_call_anthropic_web_search", return_value=msg):
-                return hot_topics.build_dynamic_queries()
+    _ITEMS = [{"keyword": "부동산 세제 개편", "title_index": 0}]
 
     def test_fenced_json_block(self):
         text = "```json\n" + json.dumps(self._ITEMS, ensure_ascii=False) + "\n```"
-        self.assertEqual(self._run_with_text(text), self._EXPECTED)
+        self.assertEqual(hot_topics._extract_json_array(text), self._ITEMS)
 
     def test_bare_fence_block(self):
         text = "```\n" + json.dumps(self._ITEMS, ensure_ascii=False) + "\n```"
-        self.assertEqual(self._run_with_text(text), self._EXPECTED)
+        self.assertEqual(hot_topics._extract_json_array(text), self._ITEMS)
 
     def test_raw_json_no_fence(self):
         text = json.dumps(self._ITEMS, ensure_ascii=False)
-        self.assertEqual(self._run_with_text(text), self._EXPECTED)
+        self.assertEqual(hot_topics._extract_json_array(text), self._ITEMS)
 
     def test_json_embedded_in_prose(self):
-        text = (
-            "다음은 오늘의 정책 키워드입니다:\n"
-            + json.dumps(self._ITEMS, ensure_ascii=False)
-            + "\n위 키워드를 검증 파이프라인에 사용하세요."
-        )
-        self.assertEqual(self._run_with_text(text), self._EXPECTED)
-
-
-class InputTokenWarnGuardTests(unittest.TestCase):
-    """FIX-1(iv): an over-ceiling input_tokens count WARNS but never drops
-    results — the call still returns its filtered keywords."""
-
-    def test_over_ceiling_input_tokens_still_returns_keywords(self):
-        items = [{"keyword": "소상공인 지원 대책", "source_url": "https://k.com"}]
-        # input_tokens far above the 25000 default warn ceiling.
-        usage = _usage(input_tokens=99999, output_tokens=200, web_search_requests=3)
-        msg = _message(
-            [_search_use_block(), _search_result_block(), _text_block(_fenced(items))],
-            usage=usage,
-        )
-        with mock.patch.dict(os.environ, _enabled_env(), clear=False):
-            with mock.patch.object(hot_topics, "_call_anthropic_web_search", return_value=msg):
-                result = hot_topics.build_dynamic_queries()
-        self.assertEqual(result, ["소상공인 지원 대책"])
+        text = "결과: " + json.dumps(self._ITEMS, ensure_ascii=False) + " 입니다."
+        self.assertEqual(hot_topics._extract_json_array(text), self._ITEMS)
 
 
 if __name__ == "__main__":

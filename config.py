@@ -363,13 +363,28 @@ def describe_semantic_config() -> dict:
     }
 
 
-# HOTTOPIC Phase 2: AI web-search hot-topic keyword selector configuration.
-# Read at runtime (not import time) so tests can mutate the environment,
-# mirroring the Naver / Policy-Briefing accessors above. DISABLED BY DEFAULT
-# (HOT_TOPIC_ENABLED default false) so the new upstream keyword layer is a no-op
-# — scheduler.py iterates exactly DEFAULT_QUERIES — until an operator flips the
-# flag on Render. The keyword selector lives entirely in the pin-OUT hot_topics
-# module and touches no verdict field.
+# HOTTOPIC hot-topic keyword selector configuration. Read at runtime (not import
+# time) so tests can mutate the environment, mirroring the Naver / Policy-Briefing
+# accessors above. DISABLED BY DEFAULT (HOT_TOPIC_ENABLED default false) so the
+# upstream keyword layer is a no-op — scheduler.py iterates exactly
+# DEFAULT_QUERIES — until an operator flips the flag on Render. The selector lives
+# entirely in the pin-OUT hot_topics module and touches no verdict field.
+#
+# Phase 2b engine: fresh news TITLES via news_collector across broad policy seeds
+# -> a tool-free Anthropic pick. (Replaced the web_search engine, which injected
+# full result bodies -> ~100k input tokens, 3.6x the 30k/min rate limit. Titles
+# only measure ~4k tokens — see HOTTOPIC Phase 2a probe.) The obsolete
+# web_search-only knobs (HOT_TOPIC_MAX_SEARCHES / HOT_TOPIC_INPUT_TOKEN_WARN)
+# were removed with that engine.
+_DEFAULT_HOT_TOPIC_SEEDS = (
+    "금융 정책",
+    "부동산 정책",
+    "복지 정책",
+    "세제 개편",
+    "소상공인 지원",
+)
+
+
 def hot_topic_enabled() -> bool:
     return _env_bool("HOT_TOPIC_ENABLED", False)
 
@@ -378,22 +393,25 @@ def hot_topic_top_k() -> int:
     return _env_int("HOT_TOPIC_TOP_K", 3)
 
 
-def hot_topic_max_searches() -> int:
-    # HOTTOPIC Phase 2-fix — default lowered 5 -> 3. The web_search server tool
-    # injects full fetched-page bodies into the model context, so input tokens
-    # scale with search count. A prod live-test hit input=96,670 tokens at
-    # max_uses=5 — ~3x the org rate limit of 30,000 input tokens/minute for
-    # claude-sonnet-4-6, which 429s the next call. max_uses=3 + the lean prompt
-    # keeps a single daily call well under the 30k/min ceiling. Env overrides.
-    return _env_int("HOT_TOPIC_MAX_SEARCHES", 3)
+def hot_topic_seed_queries() -> list[str]:
+    # Broad DOMAIN seeds (deliberately NOT the fixed-7 specific queries, and NOT
+    # the noisy bare "정책" seed — Phase 2a probe). Comma-separated env override
+    # lets seeds be tuned without a code change; blank entries are dropped.
+    raw = os.getenv("HOT_TOPIC_SEED_QUERIES")
+    if raw is None or not raw.strip():
+        return list(_DEFAULT_HOT_TOPIC_SEEDS)
+    seeds = [part.strip() for part in raw.split(",") if part.strip()]
+    return seeds or list(_DEFAULT_HOT_TOPIC_SEEDS)
 
 
-def hot_topic_input_token_warn() -> int:
-    # HOTTOPIC Phase 2-fix — input-token drift alarm. If a call's
-    # usage.input_tokens exceeds this, hot_topics logs a WARNING (tokens already
-    # spent; this only surfaces drift toward the 30k/min limit — it never drops
-    # results). 0 disables the guard.
-    return _env_int("HOT_TOPIC_INPUT_TOKEN_WARN", 25000)
+def hot_topic_titles_per_seed() -> int:
+    return _env_int("HOT_TOPIC_TITLES_PER_SEED", 8)
+
+
+def hot_topic_include_snippets() -> bool:
+    # Default OFF — titles-only measured ~4k tokens; snippets ~8k. Opt in only if
+    # titles alone prove too sparse for the pick.
+    return _env_bool("HOT_TOPIC_INCLUDE_SNIPPETS", False)
 
 
 def describe_hot_topic_config() -> dict:
@@ -401,8 +419,9 @@ def describe_hot_topic_config() -> dict:
     return {
         "enabled": hot_topic_enabled(),
         "top_k": hot_topic_top_k(),
-        "max_searches": hot_topic_max_searches(),
-        "input_token_warn": hot_topic_input_token_warn(),
+        "seed_queries": hot_topic_seed_queries(),
+        "titles_per_seed": hot_topic_titles_per_seed(),
+        "include_snippets": hot_topic_include_snippets(),
     }
 
 
