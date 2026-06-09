@@ -2,6 +2,7 @@ import argparse
 import time
 
 from database import save_analysis_result
+from hot_topics import build_query_list
 from main import analyze_pipeline
 from scheduler_dedup import should_skip_topic
 from structured_logging import get_logger
@@ -42,7 +43,12 @@ def run_once():
     # JSON-log queryability.
     log.info("[Scheduler] Starting run...")
 
-    for query in DEFAULT_QUERIES:
+    # HOTTOPIC Phase 2 — fixed 7 + (flag-gated) dynamic AI hot-topic keywords.
+    # build_query_list returns exactly DEFAULT_QUERIES when HOT_TOPIC_ENABLED is
+    # off (byte-identical), and appends filtered dynamic keywords when on. All
+    # selector logic + logging live in the pin-OUT hot_topics module, so this
+    # file gains only the call (no new log.* line; pins 331/16 unchanged).
+    for query in build_query_list(DEFAULT_QUERIES):
         log.info(f"[Scheduler] Query: {query}", extra={"query": query})
         # M38 — pre-analysis dedup gate. Skip the topic BEFORE analyze_pipeline
         # (and therefore before any judge spend) when its top article is already

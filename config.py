@@ -363,6 +363,34 @@ def describe_semantic_config() -> dict:
     }
 
 
+# HOTTOPIC Phase 2: AI web-search hot-topic keyword selector configuration.
+# Read at runtime (not import time) so tests can mutate the environment,
+# mirroring the Naver / Policy-Briefing accessors above. DISABLED BY DEFAULT
+# (HOT_TOPIC_ENABLED default false) so the new upstream keyword layer is a no-op
+# — scheduler.py iterates exactly DEFAULT_QUERIES — until an operator flips the
+# flag on Render. The keyword selector lives entirely in the pin-OUT hot_topics
+# module and touches no verdict field.
+def hot_topic_enabled() -> bool:
+    return _env_bool("HOT_TOPIC_ENABLED", False)
+
+
+def hot_topic_top_k() -> int:
+    return _env_int("HOT_TOPIC_TOP_K", 3)
+
+
+def hot_topic_max_searches() -> int:
+    return _env_int("HOT_TOPIC_MAX_SEARCHES", 5)
+
+
+def describe_hot_topic_config() -> dict:
+    """Snapshot of the hot-topic selector configuration. Safe to log/serialize."""
+    return {
+        "enabled": hot_topic_enabled(),
+        "top_k": hot_topic_top_k(),
+        "max_searches": hot_topic_max_searches(),
+    }
+
+
 # audit §1.5 #3 re-audit (2026-05-26): STAGE_ORDER shares Korean
 # tokens (발언, 검토, 추진, 논의) with multiple keyword lists in
 # policy_confidence.py, policy_impact.py, and bias_framing_agent.py.
