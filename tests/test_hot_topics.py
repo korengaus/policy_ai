@@ -197,5 +197,57 @@ class BuildQueryListMergeTests(unittest.TestCase):
         self.assertEqual(result, ["a 대출", "b 복지", "c 전세 지원"])
 
 
+class RobustJsonParseTests(unittest.TestCase):
+    """HOTTOPIC Phase 2-fix (FIX 2): the JSON array must be extracted regardless
+    of fence presence / surrounding prose. All four shapes yield the same list."""
+
+    _ITEMS = [{"keyword": "전세 대출 규제 완화", "source_url": "https://c.com/3"}]
+    _EXPECTED = ["전세 대출 규제 완화"]
+
+    def _run_with_text(self, text):
+        msg = _message([_search_use_block(), _search_result_block(), _text_block(text)])
+        with mock.patch.dict(os.environ, _enabled_env(), clear=False):
+            with mock.patch.object(hot_topics, "_call_anthropic_web_search", return_value=msg):
+                return hot_topics.build_dynamic_queries()
+
+    def test_fenced_json_block(self):
+        text = "```json\n" + json.dumps(self._ITEMS, ensure_ascii=False) + "\n```"
+        self.assertEqual(self._run_with_text(text), self._EXPECTED)
+
+    def test_bare_fence_block(self):
+        text = "```\n" + json.dumps(self._ITEMS, ensure_ascii=False) + "\n```"
+        self.assertEqual(self._run_with_text(text), self._EXPECTED)
+
+    def test_raw_json_no_fence(self):
+        text = json.dumps(self._ITEMS, ensure_ascii=False)
+        self.assertEqual(self._run_with_text(text), self._EXPECTED)
+
+    def test_json_embedded_in_prose(self):
+        text = (
+            "다음은 오늘의 정책 키워드입니다:\n"
+            + json.dumps(self._ITEMS, ensure_ascii=False)
+            + "\n위 키워드를 검증 파이프라인에 사용하세요."
+        )
+        self.assertEqual(self._run_with_text(text), self._EXPECTED)
+
+
+class InputTokenWarnGuardTests(unittest.TestCase):
+    """FIX-1(iv): an over-ceiling input_tokens count WARNS but never drops
+    results — the call still returns its filtered keywords."""
+
+    def test_over_ceiling_input_tokens_still_returns_keywords(self):
+        items = [{"keyword": "소상공인 지원 대책", "source_url": "https://k.com"}]
+        # input_tokens far above the 25000 default warn ceiling.
+        usage = _usage(input_tokens=99999, output_tokens=200, web_search_requests=3)
+        msg = _message(
+            [_search_use_block(), _search_result_block(), _text_block(_fenced(items))],
+            usage=usage,
+        )
+        with mock.patch.dict(os.environ, _enabled_env(), clear=False):
+            with mock.patch.object(hot_topics, "_call_anthropic_web_search", return_value=msg):
+                result = hot_topics.build_dynamic_queries()
+        self.assertEqual(result, ["소상공인 지원 대책"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -66,9 +66,21 @@ log = get_logger(__name__)
 # Anthropic web_search server-tool spec (probe-confirmed at HEAD 041c8fdf44).
 _WEB_SEARCH_TOOL_TYPE = "web_search_20250305"
 _DEFAULT_MODEL = "claude-sonnet-4-6"
-# Small ceiling — the selector only needs a short JSON array back; the search
-# reasoning happens server-side inside the tool loop.
-_MAX_OUTPUT_TOKENS = 2048
+# HOTTOPIC Phase 2-fix — INPUT-TOKEN BUDGET. The web_search server tool injects
+# the FULL content of each fetched page into the model context, so input tokens
+# scale with the number of searches. A prod live-test measured input=96,670
+# tokens with max_uses=5 — ~3x the org rate limit of 30,000 input tokens/minute
+# for claude-sonnet-4-6, which 429s the next call. The web_search_20250305 tool
+# exposes NO documented per-result content-truncation knob (only max_uses /
+# allowed_domains / blocked_domains / user_location), so input is bounded via two
+# levers: (i) HOT_TOPIC_MAX_SEARCHES default lowered 5 -> 3 (config.py), and
+# (iii) a lean prompt that tells the model NOT to echo article bodies. With
+# max_uses=3 + the lean prompt a single daily call should land well under ~20k
+# input tokens, comfortably below the 30k/min ceiling. The post-call input-token
+# warn guard (FIX-1 iv) surfaces drift but cannot prevent already-spent tokens.
+# Output stays small — only a short JSON array is returned (reasoning is
+# server-side inside the tool loop).
+_MAX_OUTPUT_TOKENS = 1024
 
 
 # ---------------------------------------------------------------------------
@@ -123,11 +135,13 @@ def _build_prompt(pool_size: int) -> str:
         "웹 검색을 사용해 오늘 한국에서 가장 화제가 되는 '정책' 관련 이슈를 찾아, "
         "검증 파이프라인에 넣을 검색 키워드를 추려 주세요.\n"
         "요구사항:\n"
-        "1. 반드시 웹 검색을 수행할 것.\n"
+        "1. 웹 검색을 간결하게 1~3회만 수행할 것(같은 주제를 반복 검색하지 말 것).\n"
         "2. 연예·스포츠·정치인물·선거·증권시세·해외시장 등 정책과 무관한 주제는 제외할 것.\n"
         "3. 각 키워드는 한국 정부·금융당국·지자체의 정책·제도·지원·규제와 직접 관련될 것.\n"
         f"4. 최대 {pool_size}개의 키워드를 고를 것(2~4 단어의 한국어 검색어 형태).\n"
         "5. 각 키워드마다 근거가 된 실제 기사 URL(http 또는 https)을 함께 제시할 것.\n"
+        "6. 기사 본문·인용문·요약을 출력에 절대 옮겨 적지 말 것. "
+        "키워드와 출처 URL만 추출할 것.\n"
         "출력 형식: 다른 설명 없이 JSON 배열만 출력. "
         '예: [{"keyword":"햇살론 개편 서민금융","source_url":"https://example.com/article"}]'
     )
@@ -138,14 +152,43 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", str(text or "")).strip().lower()
 
 
-def _strip_code_fence(text: str) -> str:
-    """Strip a leading ```json (or bare ```) fence and trailing ``` from the
-    model's final text block. Probe-confirmed: the JSON array comes fenced."""
-    stripped = str(text or "").strip()
-    if stripped.startswith("```"):
-        stripped = re.sub(r"^```[a-zA-Z0-9]*\s*", "", stripped)
-        stripped = re.sub(r"\s*```$", "", stripped)
-    return stripped.strip()
+def _extract_json_array(text: str):
+    """Robustly extract the top-level JSON array from the model's final text.
+
+    HOTTOPIC Phase 2-fix (FIX 2): a prod live-test showed the single
+    fence-strip parser failing ("Expecting value: line 1 column 1") because the
+    real response did not match the one fenced shape the probe saw. This handles
+    ALL of: (a) a ```json ... ``` fenced block, (b) a bare ``` ... ``` fence,
+    (c) raw JSON with no fence, (d) a JSON array embedded in surrounding prose.
+
+    Strategy: strip a leading/trailing ``` fence if present and try a direct
+    parse; if that fails, regex-search for the first top-level ``[ ... ]`` array
+    (DOTALL) anywhere in the original text and parse that substring. Returns the
+    parsed ``list`` or ``None`` when nothing parseable is found (caller is
+    fail-safe)."""
+    if not text:
+        return None
+    candidate = str(text).strip()
+    if candidate.startswith("```"):
+        candidate = re.sub(r"^```[a-zA-Z0-9]*\s*", "", candidate)
+        candidate = re.sub(r"\s*```$", "", candidate).strip()
+    try:
+        parsed = json.loads(candidate)
+        if isinstance(parsed, list):
+            return parsed
+    except (ValueError, TypeError):
+        pass
+    # Fallback: first top-level JSON array anywhere in the raw text (covers
+    # prose around the array, or a fence we could not cleanly strip).
+    match = re.search(r"\[.*\]", str(text), re.DOTALL)
+    if match:
+        try:
+            parsed = json.loads(match.group(0))
+            if isinstance(parsed, list):
+                return parsed
+        except (ValueError, TypeError):
+            pass
+    return None
 
 
 def _passes_domain_filter(keyword: str) -> bool:
@@ -260,6 +303,19 @@ def build_dynamic_queries() -> list[str]:
         input_tokens = int(getattr(usage, "input_tokens", 0) or 0) if usage else 0
         output_tokens = int(getattr(usage, "output_tokens", 0) or 0) if usage else 0
         web_search_requests = _web_search_request_count(usage)
+        # FIX-1(iv): surface input-token drift. web_search injects full page
+        # bodies, so a runaway search count can blow past the 30k/min org rate
+        # limit. The tokens are already spent here — this only WARNS (the real
+        # prevention is max_uses=3 + the lean prompt); it never drops results.
+        warn_ceiling = config.hot_topic_input_token_warn()
+        if warn_ceiling and input_tokens > warn_ceiling:
+            log.warning(
+                f"[HotTopics] input_tokens={input_tokens} exceeded warn ceiling "
+                f"{warn_ceiling}; web_search injected large result bodies. The 30k/min "
+                "org rate limit is the hard constraint — consider lowering "
+                "HOT_TOPIC_MAX_SEARCHES.",
+                extra={"input_tokens": input_tokens, "warn_ceiling": warn_ceiling},
+            )
         cost = estimate_cost_usd(model, input_tokens, output_tokens)
         record_llm_call(
             caller="hot_topics",
@@ -284,14 +340,13 @@ def build_dynamic_queries() -> list[str]:
             },
         )
 
-        # Parse the fenced JSON array from the final text block(s).
-        raw_text = _strip_code_fence(_join_text_blocks(content_blocks))
-        if not raw_text:
-            log.warning("[HotTopics] Empty text block; no keywords parsed.")
-            return []
-        parsed = json.loads(raw_text)
-        if not isinstance(parsed, list):
-            log.warning("[HotTopics] Parsed JSON is not a list; discarding.")
+        # Robustly extract the JSON array from the final text block(s) —
+        # handles fenced / bare-fenced / raw / prose-embedded shapes (FIX 2).
+        parsed = _extract_json_array(_join_text_blocks(content_blocks))
+        if parsed is None:
+            log.warning(
+                "[HotTopics] Could not extract a JSON array from response; returning [].",
+            )
             return []
 
         survivors: list[str] = []

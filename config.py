@@ -379,7 +379,21 @@ def hot_topic_top_k() -> int:
 
 
 def hot_topic_max_searches() -> int:
-    return _env_int("HOT_TOPIC_MAX_SEARCHES", 5)
+    # HOTTOPIC Phase 2-fix — default lowered 5 -> 3. The web_search server tool
+    # injects full fetched-page bodies into the model context, so input tokens
+    # scale with search count. A prod live-test hit input=96,670 tokens at
+    # max_uses=5 — ~3x the org rate limit of 30,000 input tokens/minute for
+    # claude-sonnet-4-6, which 429s the next call. max_uses=3 + the lean prompt
+    # keeps a single daily call well under the 30k/min ceiling. Env overrides.
+    return _env_int("HOT_TOPIC_MAX_SEARCHES", 3)
+
+
+def hot_topic_input_token_warn() -> int:
+    # HOTTOPIC Phase 2-fix — input-token drift alarm. If a call's
+    # usage.input_tokens exceeds this, hot_topics logs a WARNING (tokens already
+    # spent; this only surfaces drift toward the 30k/min limit — it never drops
+    # results). 0 disables the guard.
+    return _env_int("HOT_TOPIC_INPUT_TOKEN_WARN", 25000)
 
 
 def describe_hot_topic_config() -> dict:
@@ -388,6 +402,7 @@ def describe_hot_topic_config() -> dict:
         "enabled": hot_topic_enabled(),
         "top_k": hot_topic_top_k(),
         "max_searches": hot_topic_max_searches(),
+        "input_token_warn": hot_topic_input_token_warn(),
     }
 
 
