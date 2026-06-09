@@ -39,6 +39,14 @@
         <button class="category-tab" type="button" data-category="소비자">소비자</button>
         <button class="category-tab" type="button" data-category="사회">사회</button>
       </div>
+      <div class="hot-topics-sort" aria-label="핫토픽 정렬">
+        <label class="hot-topics-sort-label" for="hotTopicsSort">정렬</label>
+        <select id="hotTopicsSort" class="hot-topics-sort-select">
+          <option value="최신순">최신순</option>
+          <option value="위험도순">위험도순</option>
+          <option value="검토됨 우선">검토됨 우선</option>
+        </select>
+      </div>
     </section>
 
     <section class="panel">
@@ -107,6 +115,9 @@
       </div>
       <div id="hotTopics" class="topic-card-grid">
         <div class="empty-state">분석을 실행하거나 최근 분석을 불러오면 검증 뉴스 카드가 표시됩니다.</div>
+      </div>
+      <div class="hot-topics-load-more-wrap">
+        <button id="hotTopicsLoadMore" class="secondary hot-topics-load-more" type="button" hidden>더 보기</button>
       </div>
     </section>
 

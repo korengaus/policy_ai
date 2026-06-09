@@ -866,6 +866,38 @@
       color: #fff;
     }
 
+    /* HOTSORT Phase 2 — #hotTopics sort control + "더 보기" button. */
+    .hot-topics-sort {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 10px 0 0;
+    }
+
+    .hot-topics-sort-label {
+      font-size: 13px;
+      font-weight: 900;
+      color: #334155;
+    }
+
+    .hot-topics-sort-select {
+      min-height: 34px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      background: #fff;
+      color: #334155;
+      padding: 6px 10px;
+      font-size: 13px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .hot-topics-load-more-wrap {
+      display: flex;
+      justify-content: center;
+      margin: 16px 0 0;
+    }
+
     .news-home-section {
       margin: 16px 0;
     }
@@ -2334,6 +2366,14 @@
         <button class="category-tab" type="button" data-category="소비자">소비자</button>
         <button class="category-tab" type="button" data-category="사회">사회</button>
       </div>
+      <div class="hot-topics-sort" aria-label="핫토픽 정렬">
+        <label class="hot-topics-sort-label" for="hotTopicsSort">정렬</label>
+        <select id="hotTopicsSort" class="hot-topics-sort-select">
+          <option value="최신순">최신순</option>
+          <option value="위험도순">위험도순</option>
+          <option value="검토됨 우선">검토됨 우선</option>
+        </select>
+      </div>
     </section>
 
     <section class="panel">
@@ -2402,6 +2442,9 @@
       </div>
       <div id="hotTopics" class="topic-card-grid">
         <div class="empty-state">분석을 실행하거나 최근 분석을 불러오면 검증 뉴스 카드가 표시됩니다.</div>
+      </div>
+      <div class="hot-topics-load-more-wrap">
+        <button id="hotTopicsLoadMore" class="secondary hot-topics-load-more" type="button" hidden>더 보기</button>
       </div>
     </section>
 
@@ -2895,6 +2938,8 @@
     const selectedIssueIntroEl = document.getElementById("selectedIssueIntro");
     const hotTopicsEl = document.getElementById("hotTopics");
     const categoryTabsEl = document.getElementById("categoryTabs");
+    const hotTopicsSortEl = document.getElementById("hotTopicsSort");
+    const hotTopicsLoadMoreEl = document.getElementById("hotTopicsLoadMore");
 
     const metricResults = document.getElementById("metricResults");
     const metricAlert = document.getElementById("metricAlert");
@@ -2906,6 +2951,14 @@
     let currentReviewId = null;
     let currentReportContext = null;
     let activeCategory = "전체";
+    // HOTSORT Phase 2 — client-side sort + "더 보기" pagination for #hotTopics.
+    // No server-side view/engagement counter exists, so the sort uses ONLY
+    // existing honest signals: recency (server order = id DESC), risk
+    // (policy_alert_level), reviewed (human_reviewed_at). hotTopicsVisibleCount
+    // slices the filtered+sorted set; the category and sort handlers reset it.
+    let activeSort = "최신순";
+    const HOT_TOPICS_CHUNK = 9;
+    let hotTopicsVisibleCount = HOT_TOPICS_CHUNK;
     let activeTopicKey = "";
     let selectedResultIndex = null;
     // M45: server-side recent analyses (incl. cron output) used to fill the
@@ -4386,16 +4439,45 @@
       return [];
     }
 
+    // HOTSORT Phase 2 — stable sort of the category-filtered card array.
+    // Array.prototype.sort is stable, so equal keys preserve the incoming
+    // server order (id DESC = latest-first) — that IS the "최신순" tie-break,
+    // so no created_at mapping is needed. Honest signals only (no view counter).
+    function sortTopicCards(cards, sortKey) {
+      const list = cards.slice();
+      if (sortKey === "위험도순") {
+        list.sort((a, b) => (ALERT_RANK[b.alert] || 0) - (ALERT_RANK[a.alert] || 0));
+      } else if (sortKey === "검토됨 우선") {
+        list.sort((a, b) => (b.humanReviewedAt ? 1 : 0) - (a.humanReviewedAt ? 1 : 0));
+      }
+      // "최신순" -> keep server order (latest-first); no reorder.
+      return list;
+    }
+
+    function updateHotTopicsLoadMore(total, shown) {
+      if (!hotTopicsLoadMoreEl) return;
+      if (total > shown) {
+        hotTopicsLoadMoreEl.hidden = false;
+        hotTopicsLoadMoreEl.textContent = `더 보기 (${shown}/${total})`;
+      } else {
+        hotTopicsLoadMoreEl.hidden = true;
+      }
+    }
+
     function renderHotTopics(preferredResults) {
       if (!hotTopicsEl) return;
-      const cards = currentTopicCards(preferredResults).filter((card) => {
+      // Pipeline: filter (category) -> sort (activeSort) -> slice (visibleCount).
+      const filtered = currentTopicCards(preferredResults).filter((card) => {
         return activeCategory === "전체" || card.category === activeCategory;
       });
-      if (!cards.length) {
+      if (!filtered.length) {
         hotTopicsEl.innerHTML = '<div class="empty-state">검색을 실행하면 검증 카드가 표시됩니다.</div>';
+        updateHotTopicsLoadMore(0, 0);
         return;
       }
-      hotTopicsEl.innerHTML = cards.map((card) => {
+      const sorted = sortTopicCards(filtered, activeSort);
+      const visible = sorted.slice(0, hotTopicsVisibleCount);
+      hotTopicsEl.innerHTML = visible.map((card) => {
         const quality = card.quality || {};
         const selected = (card.key && card.key === activeTopicKey)
           || (card.source === "current" && Number.isInteger(selectedResultIndex) && Number(card.index) === selectedResultIndex);
@@ -4421,6 +4503,7 @@
           </article>
         `;
       }).join("");
+      updateHotTopicsLoadMore(sorted.length, visible.length);
     }
 
     // Phase 2 M3: project each full result down to only the fields the topic
@@ -7716,7 +7799,7 @@
     // the homepage hot-topic area with cron/server output. Fail-open: any
     // error or empty body returns [] so the area falls back to its existing
     // placeholder (mirrors loadServerResultById's graceful handling).
-    async function getServerRecentAnalyses(limit = 20) {
+    async function getServerRecentAnalyses(limit = 50) {
       try {
         const response = await fetch(`${API_BASE}/history?limit=${encodeURIComponent(limit)}`);
         if (!response.ok) return [];
@@ -8182,6 +8265,20 @@
         categoryTabsEl.querySelectorAll("[data-category]").forEach((item) => {
           item.classList.toggle("active", item === tab);
         });
+        hotTopicsVisibleCount = HOT_TOPICS_CHUNK;  // reset paging on filter change
+        renderHotTopics();
+      });
+    }
+    if (hotTopicsSortEl) {
+      hotTopicsSortEl.addEventListener("change", () => {
+        activeSort = hotTopicsSortEl.value || "최신순";
+        hotTopicsVisibleCount = HOT_TOPICS_CHUNK;  // reset paging on sort change
+        renderHotTopics();
+      });
+    }
+    if (hotTopicsLoadMoreEl) {
+      hotTopicsLoadMoreEl.addEventListener("click", () => {
+        hotTopicsVisibleCount += HOT_TOPICS_CHUNK;
         renderHotTopics();
       });
     }

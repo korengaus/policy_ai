@@ -860,6 +860,38 @@
       color: #fff;
     }
 
+    /* HOTSORT Phase 2 — #hotTopics sort control + "더 보기" button. */
+    .hot-topics-sort {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 10px 0 0;
+    }
+
+    .hot-topics-sort-label {
+      font-size: 13px;
+      font-weight: 900;
+      color: #334155;
+    }
+
+    .hot-topics-sort-select {
+      min-height: 34px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      background: #fff;
+      color: #334155;
+      padding: 6px 10px;
+      font-size: 13px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .hot-topics-load-more-wrap {
+      display: flex;
+      justify-content: center;
+      margin: 16px 0 0;
+    }
+
     .news-home-section {
       margin: 16px 0;
     }
