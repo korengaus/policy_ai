@@ -53,11 +53,11 @@
       <div class="controls">
         <div>
           <label for="query">검색어</label>
-          <input id="query" type="text" placeholder="검색어를 입력하세요" autocomplete="off">
+          <input id="query" type="text" placeholder="검색어를 입력하세요" autocomplete="off" maxlength="200">
         </div>
         <div>
           <label for="maxNews">뉴스 개수</label>
-          <input id="maxNews" type="number" min="1" value="1">
+          <input id="maxNews" type="number" min="1" max="10" value="1">
         </div>
         <button id="analyzeBtn" class="primary" type="button">분석하기</button>
         <button id="historyBtn" class="secondary" type="button">최근 분석 불러오기</button>

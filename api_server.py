@@ -266,13 +266,20 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
     query = (request.query or "").strip()
     if not query:
         raise HTTPException(status_code=400, detail="query must not be empty")
+    if len(query) > 200:
+        raise HTTPException(status_code=400, detail="검색어는 200자 이내로 입력해주세요.")
     if request.max_news <= 0:
         raise HTTPException(status_code=400, detail="max_news must be greater than 0")
+    # SEC-4 — clamp max_news to [1, 10] so a large value can't multiply
+    # per-item pipeline cost/latency. Silent clamp (mirrors the
+    # timeout_seconds clamp in /jobs/analyze); the <=0 guard above still
+    # rejects non-positive values with a 400 first.
+    max_news = max(1, min(request.max_news, 10))
 
     started = time.perf_counter()
-    logger.info("Analyze request received: query=%s max_news=%s", query, request.max_news)
+    logger.info("Analyze request received: query=%s max_news=%s", query, max_news)
 
-    report = analyze_pipeline(query=query, max_news=request.max_news)
+    report = analyze_pipeline(query=query, max_news=max_news)
     results = []
     # M15-dedup-1 Part B — defensive dedup at response boundary.
     # main.py's post-resolve URL dedup pass should suppress duplicates
@@ -744,19 +751,24 @@ async def jobs_analyze(request: JobCreateRequest) -> JobStatusResponse:
     query = (request.query or "").strip()
     if not query:
         raise HTTPException(status_code=400, detail="query must not be empty")
+    if len(query) > 200:
+        raise HTTPException(status_code=400, detail="검색어는 200자 이내로 입력해주세요.")
     if request.max_news <= 0:
         raise HTTPException(status_code=400, detail="max_news must be greater than 0")
+    # SEC-4 — clamp max_news to [1, 10] (silent; mirrors the timeout_seconds
+    # clamp below). The <=0 guard above still rejects non-positive values.
+    max_news = max(1, min(request.max_news, 10))
 
     timeout_seconds = request.timeout_seconds or job_manager.get_default_job_timeout_seconds()
     timeout_seconds = max(30, min(int(timeout_seconds), 3600))
 
-    record = job_manager.create_job(query=query, max_news=request.max_news)
+    record = job_manager.create_job(query=query, max_news=max_news)
     logger.info(
         "Async job accepted: id=%s query=%s max_news=%s timeout=%ss",
-        record["id"], query, request.max_news, timeout_seconds,
+        record["id"], query, max_news, timeout_seconds,
     )
     task = asyncio.create_task(
-        _execute_job(record["id"], query, request.max_news, timeout_seconds)
+        _execute_job(record["id"], query, max_news, timeout_seconds)
     )
     _track_background_task(task)
     return _job_status_to_response(record)
@@ -921,8 +933,13 @@ def v2_analyze(request: AnalyzeRequest) -> V2AnalyzeResponse:
     query = (request.query or "").strip()
     if not query:
         raise HTTPException(status_code=400, detail="query must not be empty")
+    if len(query) > 200:
+        raise HTTPException(status_code=400, detail="검색어는 200자 이내로 입력해주세요.")
     if request.max_news <= 0:
         raise HTTPException(status_code=400, detail="max_news must be greater than 0")
+    # SEC-4 — clamp max_news to [1, 10] (silent). The <=0 guard above still
+    # rejects non-positive values with a 400 first.
+    max_news = max(1, min(request.max_news, 10))
 
     import job_queue
     queue = job_queue.get_queue()
@@ -945,7 +962,7 @@ def v2_analyze(request: AnalyzeRequest) -> V2AnalyzeResponse:
     try:
         job = queue.enqueue(
             pipeline_worker.run_analyze_pipeline_job,
-            args=(query, int(request.max_news)),
+            args=(query, int(max_news)),
             kwargs={"job_id": ""},
             job_timeout=600,
         )
@@ -972,7 +989,7 @@ def v2_analyze(request: AnalyzeRequest) -> V2AnalyzeResponse:
 
     logger.info(
         "v2_analyze.enqueued: job_id=%s query=%s max_news=%s",
-        job.id, query, request.max_news,
+        job.id, query, max_news,
     )
     return V2AnalyzeResponse(
         job_id=str(job.id),
