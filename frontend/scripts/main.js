@@ -346,6 +346,65 @@
       lineReplacements.forEach(([pattern, replacement]) => {
         text = text.replace(pattern, replacement);
       });
+      // UI-2 — full-phrase Korean map for the classification_reasons strings
+      // emitted by official_document_classifier.py and embedded (untranslated)
+      // into comparison_summary → evidence_summary by evidence_comparator.py
+      // (_make_summary excluded_non_policy_page / weak_official_match branches).
+      // Display-only laundering; the backend literals stay English because they
+      // double as should_exclude predicates (official_document_classifier.py
+      // :323-327). Ordered longest/most-specific first so a short phrase cannot
+      // partial-match inside a longer one. The "insufficient material ..." /
+      // "insufficient matched ..." / "FSC detail press URL" reasons are already
+      // handled by the UI-1 lineReplacements above and are NOT duplicated here.
+      const classificationReasonLabels = [
+        [/generic policy title with weak concept\/keyword overlap/gi, "일반적 정책 제목, 핵심 개념/키워드 일치 약함"],
+        [/FSC unrelated general finance\/foreign-affairs press release/gi, "금융위 일반 금융/대외 보도자료(주제 무관)"],
+        [/classified as usable official evidence candidate/gi, "사용 가능한 공식 근거 후보로 분류됨"],
+        [/Gov24 civil-service\/application guide page/gi, "정부24 민원/신청 안내 페이지"],
+        [/insufficient core concept or query-token overlap/gi, "핵심 개념 또는 검색어 일치 부족"],
+        [/Gov24 policy\/service index page/gi, "정부24 정책/서비스 목록 페이지"],
+        [/document text is shorter than 300 characters/gi, "본문이 300자 미만"],
+        [/generic list\/index title or URL/gi, "일반 목록/색인 제목 또는 링크"],
+        [/no clear policy-document signal/gi, "명확한 정책 문서 신호 없음"],
+        [/guide\/FAQ\/minwon signal/gi, "안내/FAQ/민원 신호"],
+        [/main\/menu\/index URL/gi, "메인/메뉴/색인 페이지"],
+        [/IBK detail\/news URL/gi, "기업은행 상세/뉴스 페이지"],
+        [/error\/not-found signal/gi, "오류 또는 페이지 없음 신호"],
+        [/attachment-only URL/gi, "첨부파일 전용 링크"],
+        [/search page/gi, "검색 페이지"],
+      ];
+      classificationReasonLabels.forEach(([pattern, replacement]) => {
+        text = text.replace(pattern, replacement);
+      });
+      // UI-2 — document_type enum values leak in TWO forms: the "{type}:" prefix
+      // (excluded_non_policy_page branch) and the "유형 {type}" no-colon form
+      // (weak_official_match branch). A bare word-boundary replace per enum key
+      // covers BOTH ("implementation_plan: …" → "시행 계획: …" and
+      // "유형 implementation_plan" → "유형 시행 계획"). UI-1's colon-suffixed
+      // press_release: / official_notice: / official_page: / official_search:
+      // replacements ran in lineReplacements above and already consumed those
+      // colon forms, so these bare maps only catch the still-leaking no-colon
+      // occurrences — no regression. Underscore is a word char, so e.g.
+      // \bimplementation\b (UI-1 concept key) never matches inside
+      // implementation_plan. Longer enum keys first for safety.
+      const documentTypeLabels = [
+        [/\bservice_index_page\b/g, "서비스 목록 페이지"],
+        [/\bmenu_or_index_page\b/g, "메뉴/목록 페이지"],
+        [/\bimplementation_plan\b/g, "시행 계획"],
+        [/\bnon_policy_page\b/g, "정책 외 페이지"],
+        [/\bunrelated_page\b/g, "관련 없는 페이지"],
+        [/\battachment_only\b/g, "첨부 전용"],
+        [/\bpolicy_release\b/g, "정책 발표"],
+        [/\bpress_release\b/g, "보도자료"],
+        [/\bofficial_notice\b/g, "공식 고시"],
+        [/\bservice_page\b/g, "서비스 페이지"],
+        [/\bsearch_page\b/g, "검색 페이지"],
+        [/\bfaq_or_guide\b/g, "안내/FAQ"],
+        [/\berror_page\b/g, "오류 페이지"],
+      ];
+      documentTypeLabels.forEach(([pattern, replacement]) => {
+        text = text.replace(pattern, replacement);
+      });
       // UI-1 — closed-set token→Korean map for the 9 policy-concept keys the
       // backend (evidence_comparator.py CONCEPT_SYNONYMS_* / _make_summary)
       // joins untranslated into the Korean comparison_summary →
