@@ -3247,6 +3247,24 @@
       let text = sanitizeDisplayText(value || "");
       if (!text) return text;
       const replacements = [
+        // UI-4 — extend institution map to all 18 catalog source_name values
+        // (official_source_search.py). Display-only; source_name stays English
+        // in the backend (matching key). These NEW entries are listed BEFORE
+        // the original 8 so the more-specific "IBK Industrial Bank of Korea"
+        // is matched before the generic "Bank of Korea" substring below.
+        // "Current article body" is the news-fallback source title
+        // (evidence_extraction_agent.py:459); laundered here at display.
+        [/IBK Industrial Bank of Korea/gi, "중소기업은행(IBK)"],
+        [/Korea Housing Finance Corporation/gi, "한국주택금융공사"],
+        [/National Tax Service/gi, "국세청"],
+        [/Korean National Police Agency/gi, "경찰청"],
+        [/National Assembly/gi, "국회"],
+        [/Local Government/gi, "지방자치단체"],
+        [/Fair Trade Commission/gi, "공정거래위원회"],
+        [/Ministry of Justice/gi, "법무부"],
+        [/Korea Policy Briefing/gi, "정책브리핑"],
+        [/Government24/gi, "정부24"],
+        [/Current article body/gi, "현재 기사 본문"],
         [/Financial Services Commission/gi, "금융위원회"],
         [/Financial Supervisory Service/gi, "금융감독원"],
         [/Ministry of Land,\s*Infrastructure and Transport/gi, "국토교통부"],
@@ -3537,6 +3555,15 @@
         official_detail_not_verified: "공식 상세 자료 미확인",
         official_body_fetched_unmatched: "공식 본문 직접 일치 부족",
         official_candidate_metadata_overlap_without_body: "공식 후보 메타데이터만 일부 일치",
+        // UI-4 — extraction_method enums that leaked as raw English in the
+        // public "추출 방식" field (renderEvidenceSnippets). Backend literals
+        // stay English (scoring predicates at evidence_extraction_agent.py
+        // :239-264); this is display-only. article_body_sentence_overlap is
+        // kept identical to the formatTechnicalLabel mapping for consistency.
+        article_body_sentence_overlap: "기사 본문 문장 일치",
+        official_body_sentence_overlap: "공식 본문 문장 일치",
+        news_fallback_metadata_overlap: "뉴스 보조 메타데이터 일치",
+        no_relevant_sentence_found: "관련 문장 없음",
         official_candidate_not_fetched: "공식 후보 문서 미수집",
         official_candidate_without_body: "공식 후보 본문 미확보",
         official_body_mismatch: "공식 본문 불일치 가능성",
@@ -4176,7 +4203,7 @@
               근거 품질: 강함 ${escapeHtml(strongCount)}, 보통 ${escapeHtml(mediumCount)}, 약함 ${escapeHtml(weakCount)}, 최고 ${escapeHtml(bestScore)}
             </div>
             ${related.length ? related.map((snippet) => {
-              const sourceTitle = escapeHtml(userFacingReportText(snippet.source_title || snippet.source_url || "출처", "출처"));
+              const sourceTitle = escapeHtml(userFacingReportText(publicInstitutionName(snippet.source_title || snippet.source_url || "출처"), "출처"));
               const sourceUrl = escapeHtml(safeUrl(snippet.source_url || ""));
               const sourceHtml = snippet.source_url
                 ? `<a href="${sourceUrl}" target="_blank" rel="noopener noreferrer">${sourceTitle}</a>`
@@ -4185,7 +4212,7 @@
                 <div class="evidence-snippet-text">${escapeHtml(userFacingReportText(snippet.evidence_text || "-", "-"))}</div>
                 <div class="evidence-snippet-grid">
                   <div><span class="label">출처</span><br>${sourceHtml}</div>
-                  <div><span class="label">발행처</span><br>${escapeHtml(snippet.publisher || "-")}</div>
+                  <div><span class="label">발행처</span><br>${escapeHtml(publicInstitutionName(snippet.publisher || "-"))}</div>
                   <div><span class="label">근거 유형</span><br>${escapeHtml(formatEvidenceType(snippet.evidence_type))}</div>
                   <div><span class="label">관련도</span><br>${escapeHtml(snippet.relevance_score ?? "-")}</div>
                   <div><span class="label">품질 점수</span><br>${escapeHtml(snippet.evidence_quality_score ?? "-")}</div>
