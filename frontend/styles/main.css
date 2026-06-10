@@ -995,7 +995,7 @@
     .topic-card-grid {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 12px;
+      gap: 16px;
     }
 
     .topic-card {
@@ -1007,7 +1007,7 @@
       border-radius: 12px;
       background: #fff;
       box-shadow: var(--shadow);
-      padding: 15px;
+      padding: 18px;
       cursor: pointer;
     }
 

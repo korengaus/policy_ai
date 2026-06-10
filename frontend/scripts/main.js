@@ -336,8 +336,36 @@
         [/\bofficial_notice\s*:\s*/gi, "공식 공지: "],
         [/\bofficial_page\s*:\s*/gi, "공식 페이지: "],
         [/\bofficial_search\s*:\s*/gi, "공식 검색 결과: "],
+        // UI-1 — leaked English score labels in the low_confidence_match
+        // sentence (evidence_comparator.py: "semantic score N점, keyword
+        // score N점"). Remap only the English label words; the numeric value
+        // and the trailing Korean "점" are left intact.
+        [/\bsemantic score\b/gi, "의미 점수"],
+        [/\bkeyword score\b/gi, "키워드 점수"],
       ];
       lineReplacements.forEach(([pattern, replacement]) => {
+        text = text.replace(pattern, replacement);
+      });
+      // UI-1 — closed-set token→Korean map for the 9 policy-concept keys the
+      // backend (evidence_comparator.py CONCEPT_SYNONYMS_* / _make_summary)
+      // joins untranslated into the Korean comparison_summary →
+      // evidence_summary string. They reach here verbatim (e.g.
+      // "매칭 개념은 implementation, regulation입니다"). Word-boundary replace
+      // per key so a key cannot partially match inside another word; the keys
+      // are independent (none is a substring of another). Display-only — the
+      // saved payload and verdict logic are untouched.
+      const conceptTokenLabels = [
+        [/\brental_loan\b/g, "전세대출"],
+        [/\bmortgage_loan\b/g, "주택담보대출"],
+        [/\binterest_rate\b/g, "금리"],
+        [/\bregulation\b/g, "규제"],
+        [/\bsubsidy_support\b/g, "지원"],
+        [/\btarget_group\b/g, "지원 대상"],
+        [/\bimplementation\b/g, "시행"],
+        [/\breview_stage\b/g, "추진 단계"],
+        [/\bofficial_statement\b/g, "공식 발표"],
+      ];
+      conceptTokenLabels.forEach(([pattern, replacement]) => {
         text = text.replace(pattern, replacement);
       });
       const hiddenFragments = [
