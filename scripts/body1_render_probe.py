@@ -4,7 +4,7 @@
 # SERVER_RENDERED_PARSEABLE / SERVER_RENDERED_BUT_GENERIC_MISSES / JS_RENDERED_EMPTY / FETCH_FAILED
 # so we know which need a SITE_RULES entry vs are structurally hard. Safe to run in the Worker Shell.
 import os, json, re, collections
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse, urljoin, quote
 
 import psycopg
 import requests
@@ -18,7 +18,11 @@ url = os.environ["DATABASE_URL"].replace("postgresql+psycopg://", "postgresql://
 TARGETS = ["moef.go.kr", "mss.go.kr", "police.go.kr", "nts.go.kr", "khug.or.kr",
            "moj.go.kr", "ftc.go.kr", "korea.kr"]
 BASELINES = ["fsc.go.kr", "molit.go.kr"]
-ALL_DOMAINS = TARGETS + BASELINES
+# fsc.go.kr-search = the SHAPE the failing fsc candidates actually carry
+# (fsc.go.kr/search?srchTxt=...), distinct from the board-url baseline above.
+# Confirms whether the search shape is JS_RENDERED_EMPTY (Playwright-only).
+SHAPE_CHECKS = ["fsc.go.kr-search"]
+ALL_DOMAINS = TARGETS + BASELINES + SHAPE_CHECKS
 
 # constructed fallbacks ONLY if the DB has no stored official_search_url for the domain.
 FALLBACKS = {
@@ -32,6 +36,7 @@ FALLBACKS = {
     "korea.kr": "https://www.korea.kr/news/pressReleaseList.do",
     "fsc.go.kr": "https://www.fsc.go.kr/no010101",
     "molit.go.kr": "https://www.molit.go.kr/USR/NEWS/m_71/lst.jsp",
+    "fsc.go.kr-search": "https://www.fsc.go.kr/search?srchTxt=" + quote("가계대출 금리"),
 }
 
 HEADERS = {
@@ -80,6 +85,15 @@ with psycopg.connect(url) as conn, conn.cursor() as cur:
 
 
 def pick_url(d):
+    if d == "fsc.go.kr-search":
+        # prefer a REAL stored fsc search-shape URL (search?srchTxt=/.../search...),
+        # not the board url; fall back to a constructed search URL.
+        cands = by_domain.get("fsc.go.kr") or {}
+        search_shaped = [u for u in cands if "/search" in u.lower() or "srchtxt" in u.lower()]
+        if search_shaped:
+            best = max(search_shaped, key=lambda u: cands[u])
+            return best, "stored_db(search-shape)"
+        return FALLBACKS.get(d, ""), "fallback_constructed"
     if by_domain.get(d):
         return by_domain[d].most_common(1)[0][0], "stored_db"
     return FALLBACKS.get(d, ""), "fallback_constructed"
@@ -111,7 +125,7 @@ print("=" * 72)
 
 for d in ALL_DOMAINS:
     target_url, src = pick_url(d)
-    tag = "[BASELINE]" if d in BASELINES else ""
+    tag = "[BASELINE]" if d in BASELINES else ("[SHAPE CHECK]" if d in SHAPE_CHECKS else "")
     print("\n#### %s %s  (url_source=%s)" % (d, tag, src))
     if not target_url:
         print("  VERDICT: FETCH_FAILED (no stored url and no fallback)")
