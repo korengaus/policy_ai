@@ -2330,6 +2330,32 @@
         margin-top: 4px;
         text-align: left;
       }
+
+      /* MOBILE-1b — .history-row (52px 1fr auto) is not collapsed by the
+         grid rules above. Reflow so the #N badge and text share the top
+         row and the 삭제 button wraps to its own full-width row below.
+         Reflow only — every element stays visible. */
+      .history-row {
+        grid-template-columns: auto 1fr;
+      }
+
+      .history-actions {
+        grid-column: 1 / -1;
+      }
+    }
+
+    /* MOBILE-1b — ultra-narrow tail (~360–480px). The 820px block above
+       leaves these dense "고급 검증 정보" inner grids at 2 columns, which
+       is cramped on very narrow phones. Collapse them to a single column.
+       Additive only; 820px stays the primary breakpoint. */
+    @media (max-width: 480px) {
+      .normalized-grid,
+      .source-reliability-summary,
+      .evidence-extraction-summary,
+      .evidence-snippet-grid,
+      .pipeline-debug-grid {
+        grid-template-columns: 1fr;
+      }
     }
   </style>
 </head>
