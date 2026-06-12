@@ -77,6 +77,34 @@ MAX_ARTICLE_CHARS = 5000   # mirrors config.MAX_ARTICLE_CHARS discipline
 _SOURCE_TAG = "national_law"
 _TOKEN_RE = re.compile(r"[가-힣A-Za-z0-9.%]+")
 
+# REL-1 R1 — minimum claim-token overlap on the law BODY for a fetched statute to
+# be injected as an official candidate. Mirrors
+# providers/policy_briefing.MIN_CLAIM_TOKEN_OVERLAP (M34) — and, like M34, the
+# discriminator is the law CONTENT (body), NOT the 법령명: a genuinely relevant
+# statute can be name-disjoint from the claim (e.g. 법령명 "금융소비자 보호에 관한
+# 법률" vs a 금융위/전세대출 claim → 0 name overlap) yet its body overlaps strongly
+# (the M23 strong-match fixture is exactly this case). Gating on 법령명 would drop
+# such matches. Verdict-isolated input selection only — the body-matcher
+# (resolve_official_evidence, M19-3 official_body_match guard) stays the SOLE judge
+# of evidence STRENGTH for survivors. Fail-safe: dropping ALL laws for a topic-dry
+# row is correct (inject nothing > inject a wrong statute).
+MIN_LAW_CLAIM_OVERLAP = 1
+
+# Provider-local relevance stoplist (mirrors the M36/M36b cleanup doctrine; kept
+# DISTINCT per consumer per docs/KOREAN_CONSTANTS.md). Strips statute-structural
+# and generic-administrative words so they can never be the single token that lets
+# an off-topic statute pass MIN_LAW_CLAIM_OVERLAP. Domain terms (금융/대출/부동산/
+# 전세대출 …) are intentionally KEPT — for a statute they are genuine topic signal,
+# not noise. Used ONLY by the REL-1 body-overlap selection filter, NEVER by the
+# verdict matcher (a separate tokenizer in official_evidence_resolution).
+_LAW_RELEVANCE_STOPWORDS = frozenset({
+    "법률", "시행령", "시행규칙", "규칙", "규정", "특별법", "조례", "예규", "고시",
+    "훈령", "법령", "관한", "관련", "일부", "전부", "개정", "제정", "폐지", "조문",
+    "별표", "부칙", "조항", "항목", "사항", "경우", "이하", "이상", "해당", "각호",
+    "정책", "관리", "지원", "제도", "사업", "기본", "운영", "추진", "강화", "개선",
+    "방안", "대상", "기준", "내용", "필요", "대한", "위한", "따른", "통한",
+})
+
 # Body tags that hold human-readable article text (shallow-gather, decision d).
 _ARTICLE_TEXT_TAGS = ("조문제목", "조문내용", "항내용", "호내용")
 
@@ -406,6 +434,26 @@ def _claim_tokens(normalized_claims: List[Dict[str, Any]]) -> set:
     return tokens
 
 
+def _is_material_token(token: str) -> bool:
+    """True iff ``token`` is a >=2-char, non-digit, non-stopword term (REL-1 R1)."""
+    t = (token or "").strip()
+    if len(t) < 2 or t.isdigit():
+        return False
+    return t not in _LAW_RELEVANCE_STOPWORDS and t.lower() not in _LAW_RELEVANCE_STOPWORDS
+
+
+def _material_claim_tokens(normalized_claims: List[Dict[str, Any]]) -> set:
+    """Claim tokens with the REL-1 stoplist applied (material terms only)."""
+    return {t for t in _claim_tokens(normalized_claims) if _is_material_token(t)}
+
+
+def _law_body_material_tokens(law: Dict[str, Any]) -> set:
+    """Material tokens of a fetched law's BODY (raw_text). Mirrors M34 _doc_tokens
+    (content overlap), NOT 법령명 — see MIN_LAW_CLAIM_OVERLAP for why."""
+    raw = law.get("raw_text") or ""
+    return {t for t in _TOKEN_RE.findall(raw) if _is_material_token(t)}
+
+
 def _derive_queries(normalized_claims: List[Dict[str, Any]]) -> List[str]:
     """Derive <= MAX_SEARCHES distinct statute-like query strings from claims.
     Keyword-based (law search matches 법령명), deduped, capped."""
@@ -431,8 +479,11 @@ def _derive_queries(normalized_claims: List[Dict[str, Any]]) -> List[str]:
 def _rank_laws(
     laws: List[Dict[str, Any]], normalized_claims: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
-    """Rank-to-fill (never exclude): order by 법령명 token overlap with claims
-    desc, then MST for determinism."""
+    """Rank-to-fill (never exclude) by 법령명 token overlap — used ONLY to choose
+    which laws spend the body-fetch budget. The relevance DROP is applied AFTER
+    body fetch on the law CONTENT (REL-1 R1; see fetch_and_build /
+    MIN_LAW_CLAIM_OVERLAP), because a relevant statute can be 법령명-disjoint from
+    the claim. Order: 법령명 overlap desc, then MST for determinism."""
     claim_tokens = _claim_tokens(normalized_claims)
 
     def overlap(law: Dict[str, Any]) -> int:
@@ -528,6 +579,20 @@ def fetch_and_build_national_law_candidates(
         raw_text = _assemble_body_text(body.get("articles") or [])
         if raw_text.strip():
             laws_with_body.append({**law, "raw_text": raw_text})
+
+    # REL-1 R1 — RANK (above) then DROP body-irrelevant statutes (mirror M34 PB
+    # _select_documents): a fetched law is injected only if its BODY shares
+    # >= MIN_LAW_CLAIM_OVERLAP material tokens with the claims. Removes the
+    # off-topic statutes (e.g. 세월호/가족돌봄/산림 시행령 attached to finance
+    # claims) behind the REL-1 C-bucket wrong-doc attachments, while keeping
+    # name-disjoint-but-body-relevant matches. Fail-safe: an empty result is the
+    # correct no-official-candidate state (the caller then injects nothing).
+    claim_tokens = _material_claim_tokens(normalized_claims)
+    laws_with_body = [
+        law
+        for law in laws_with_body
+        if len(_law_body_material_tokens(law) & claim_tokens) >= MIN_LAW_CLAIM_OVERLAP
+    ]
 
     return to_official_source_candidates(laws_with_body, normalized_claims)
 

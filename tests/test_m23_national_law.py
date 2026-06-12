@@ -315,5 +315,56 @@ class CoexistenceTests(unittest.TestCase):
         self.assertEqual(best["score"], 82)
 
 
+# ---------------------------------------------------------------------------
+# REL-1 R1 — body-overlap selection filter (off-topic statutes dropped)
+# ---------------------------------------------------------------------------
+
+
+# An off-topic statute: 법령명 + body are about 세월호 (no finance terms), so a
+# finance claim (_CLAIM) shares ZERO body tokens with it.
+_OFFTOPIC_SEARCH_XML = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    "<LawSearch><resultCode>00</resultCode><totalCnt>1</totalCnt>"
+    "<law id=\"1\"><법령일련번호>900001</법령일련번호><법령ID>009001</법령ID>"
+    "<법령명한글><![CDATA[4·16세월호참사 피해구제 및 지원 등을 위한 특별법 시행령]]></법령명한글>"
+    "<시행일자>20200101</시행일자><소관부처명><![CDATA[해양수산부]]></소관부처명>"
+    "<법령상세링크>/lsInfoP.do?lsiSeq=900001</법령상세링크></law></LawSearch>"
+)
+_OFFTOPIC_BODY_XML = (
+    '<?xml version="1.0" encoding="UTF-8"?><법령><기본정보><법령ID>009001</법령ID></기본정보>'
+    "<조문><조문단위><조문번호>3</조문번호><조문제목><![CDATA[피해자 범위]]></조문제목>"
+    "<조문내용><![CDATA[세월호 참사 피해자에 대한 배상금과 추모 사업 및 진상규명 절차를 규정한다]]></조문내용>"
+    "</조문단위></조문></법령>"
+)
+
+
+class RelOneBodyOverlapTests(unittest.TestCase):
+    def test_offtopic_statute_dropped(self):
+        # 세월호 statute returned for a finance claim -> body shares 0 material
+        # tokens -> dropped before injection (no wrong official candidate).
+        prov = nl.MockNationalLawProvider(
+            search_xml=_OFFTOPIC_SEARCH_XML, body_xml_by_mst={"900001": _OFFTOPIC_BODY_XML})
+        cands, n = nl.fetch_and_build_national_law_candidates([_CLAIM], provider=prov)
+        self.assertEqual((cands, n), ([], 0))
+
+    def test_name_disjoint_body_relevant_kept(self):
+        # The canonical M23 law (법령명 "금융소비자 보호에 관한 법률") is name-disjoint
+        # from _CLAIM but its BODY overlaps (전세대출/DSR/규제) -> MUST survive the
+        # REL-1 filter (regression guard against over-filtering).
+        cands, n = nl.fetch_and_build_national_law_candidates([_CLAIM], provider=_mock_provider())
+        self.assertEqual(n, 1)
+        self.assertEqual(len(cands), 1)
+        self.assertEqual(cands[0]["national_law_mst"], "276291")
+
+    def test_material_token_helpers(self):
+        # structural / generic-admin words are stripped; domain terms are kept.
+        self.assertFalse(nl._is_material_token("시행령"))
+        self.assertFalse(nl._is_material_token("관한"))
+        self.assertTrue(nl._is_material_token("전세대출"))
+        body_toks = nl._law_body_material_tokens({"raw_text": "전세대출 한도와 DSR 규제 시행령"})
+        self.assertIn("전세대출", body_toks)
+        self.assertNotIn("시행령", body_toks)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
