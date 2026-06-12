@@ -18,7 +18,7 @@ with psycopg.connect(url) as conn, conn.cursor() as cur:
             body=s.get("official_body_text") or ""
             if len(body)>=300:
                 sel.append((len(body), rid, ctext, ncl, s, body))
-sel.sort(reverse=True)
+sel.sort(key=lambda x: x[0], reverse=True)
 sel=sel[:10]
 if not sel:
     print("MARKER: no source_candidate with official_body_text>=300 stored — body text unavailable in DB")
