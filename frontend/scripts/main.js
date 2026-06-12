@@ -4175,8 +4175,8 @@
                 <span class="label">핵심 주장</span><br>
                 ${escapeHtml(exportClaimText(result))}
               </div>
-              ${renderReviewerDecisionDashboard(result, userContext)}
-              ${renderReviewerActionCard(result, userContext)}
+              ${operatorToolsFlagSet() ? renderReviewerDecisionDashboard(result, userContext) : ""}
+              ${operatorToolsFlagSet() ? renderReviewerActionCard(result, userContext) : ""}
               <div class="news-section-title">상세 검증 정보</div>
               <div class="reader-note">더 자세한 주장별 근거, 반박 가능성, 표현 방식 점검은 아래 고급 정보에서 펼쳐볼 수 있습니다.</div>
               ${advancedVerificationDetails}
