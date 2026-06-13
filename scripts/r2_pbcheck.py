@@ -19,7 +19,9 @@ if str(ROOT) not in sys.path:
 
 import psycopg
 # IMPORT the provider's real tokenizers — do NOT reimplement, so probe == filter.
-from providers.policy_briefing import _claim_tokens, _doc_tokens, _clean_token  # noqa: F401
+# _TOKEN_RE is the provider's own token splitter; PART C tokenizes the TITLE-only through
+# the SAME _TOKEN_RE -> _clean_token path _doc_tokens uses, just without the body.
+from providers.policy_briefing import _claim_tokens, _doc_tokens, _clean_token, _TOKEN_RE  # noqa: F401
 
 url = os.environ["DATABASE_URL"].replace("postgresql+psycopg://", "postgresql://").replace("postgresql+psycopg2://", "postgresql://")
 
@@ -102,6 +104,42 @@ def josa_suffix(t):
     return ""
 
 
+# ---- PART C helpers — TITLE-only topic-overlap (a genuinely different mechanism) ----
+# STRIP RULE (printed in output): for a cleaned token, if it ends with one of _JOSA AND the
+# remaining content stem is >=2 chars, drop that trailing particle (가능성을 -> 가능성,
+# 정부는 -> 정부, 우려가 -> 우려). Otherwise keep the token as-is. Applied to BOTH the claim
+# side and the title side so suffixed/bare forms align before intersecting. Conservative:
+# only the trailing particle is removed; nothing internal is touched.
+def josa_strip(t):
+    j = josa_suffix(t)
+    return t[: len(t) - len(j)] if j else t
+
+
+def title_tokens(title):
+    # title-ONLY tokens via the provider's own _TOKEN_RE -> _clean_token path (the exact
+    # path _doc_tokens uses on title+body, here restricted to the release TITLE).
+    return {
+        cleaned
+        for token in _TOKEN_RE.findall(title or "")
+        if (cleaned := _clean_token(token)) is not None
+    }
+
+
+def topic_tokens(token_set):
+    # josa-strip, then drop BROAD words and any sub-2-char stem -> the SPECIFIC-topic set.
+    out = set()
+    for t in token_set:
+        s = josa_strip(t)
+        if len(s) >= 2 and s not in BROAD_DOMAIN_TOKENS:
+            out.add(s)
+    return out
+
+
+def title_overlap(claim_token_set, title):
+    # specific-topic overlap between the claim and the release TITLE only.
+    return topic_tokens(claim_token_set) & topic_tokens(title_tokens(title))
+
+
 rows = []
 with psycopg.connect(url) as conn, conn.cursor() as cur:
     cur.execute("SELECT id, policy_confidence_score, claim_text, normalized_claims, source_candidates "
@@ -113,6 +151,8 @@ hist = collections.Counter()      # {">=2 specific", "1 specific", "0 specific"}
 per_row = []                      # (id, pcs, overlap_set, n_specific, n_broad)
 n_high = 0                        # pcs>=70 rows with an official body winner
 n_pb_backed = 0                   # ... whose winner is PB
+hist_a_title = collections.Counter()   # PART C: good-row TITLE-overlap histogram
+per_row_a_title = []                   # PART C: (id, pcs, title_overlap_set, n)
 
 for rid, pcs, ctext, ncl, cands in rows:
     if (pcs or 0) < HIGH_CONF_CUTOFF:
@@ -148,6 +188,12 @@ for rid, pcs, ctext, ncl, cands in rows:
 
     per_row.append((rid, pcs, sorted(overlap), n_spec, len(broad)))
 
+    # PART C — TITLE-only topic overlap (claim_tok already computed above)
+    t_ov = title_overlap(claim_tok, cand_title(winner))
+    n_t = len(t_ov)
+    hist_a_title[">=2 specific" if n_t >= 2 else ("1 specific" if n_t == 1 else "0 specific")] += 1
+    per_row_a_title.append((rid, pcs, sorted(t_ov), n_t))
+
 
 # ===================== PART B — the TARGET: wrong korea.kr C-bucket rows =====================
 # C-bucket (pcs<=10, body exists, best match <55) whose ATTACHED winning doc is korea.kr —
@@ -161,6 +207,8 @@ n_wrong = 0                         # C-bucket korea.kr-attached rows
 n_wrong_pb = 0                      # ... tagged policy_briefing_api (sanity: should ~= n_wrong)
 n_broad_only = 0                    # 0-specific rows whose overlap is entirely BROAD words
 n_empty_overlap = 0                 # 0-specific rows whose recomputed overlap is empty
+hist_b_title = collections.Counter()   # PART C: wrong-row TITLE-overlap histogram
+per_row_b_title = []                   # PART C: (id, pcs, title_overlap_set, n)
 
 for rid, pcs, ctext, ncl, cands in rows:
     if (pcs or 0) > 10:
@@ -178,7 +226,8 @@ for rid, pcs, ctext, ncl, cands in rows:
     if (attached.get("retrieval_method") or "") == PB_RETRIEVAL_METHOD:
         n_wrong_pb += 1
 
-    overlap = _claim_tokens(ncl) & _doc_tokens(cand_as_doc(attached))
+    claim_tok = _claim_tokens(ncl)
+    overlap = claim_tok & _doc_tokens(cand_as_doc(attached))
     for t in overlap:
         tok_freq[t] += 1
     specific = overlap - BROAD_DOMAIN_TOKENS
@@ -194,6 +243,12 @@ for rid, pcs, ctext, ncl, cands in rows:
         else:
             n_empty_overlap += 1
     per_row_b.append((rid, pcs, sorted(overlap), n_spec, len(overlap & BROAD_DOMAIN_TOKENS)))
+
+    # PART C — TITLE-only topic overlap for the wrong korea.kr attachment
+    t_ov = title_overlap(claim_tok, cand_title(attached))
+    n_t = len(t_ov)
+    hist_b_title[">=2 specific" if n_t >= 2 else ("1 specific" if n_t == 1 else "0 specific")] += 1
+    per_row_b_title.append((rid, pcs, sorted(t_ov), n_t))
 
 
 # ============================== OUTPUT ==============================
@@ -247,13 +302,43 @@ print("  distinct overlap tokens: %d ; of which josa-suffixed: %d %s" % (
     len(tok_freq), n_josa,
     "(many -> josa-stripping needed, not just BROAD expansion)" if n_josa >= max(3, len(tok_freq) // 5) else ""))
 print()
-print("=== DECISION FRAMING (N NOT picked here — read both histograms + the freq table) ===")
-print("  Lever C/B is viable IFF the two histograms are SEPARABLE by the threshold:")
-print("    good rows (PART A) cluster at >=2 specific  AND  wrong rows (PART B) at <2 / broad-only.")
-print("  - If PART B wrong rows ALSO show >=2 'specific' that are actually generic-noise")
-print("    (가능성을/우려가 type), the threshold does NOT separate them -> EXPAND BROAD to cover")
-print("    the high-freq non-[B] residue (and/or josa-strip), then re-run this probe before picking N.")
-print("  - If after a clean BROAD/josa pass good rows stay >=2 and wrong rows fall to <2 -> Lever C.")
-print("  - If wrong rows are mostly broad-only already -> Lever B (broad-exclude, keep >=1 specific) suffices.")
-print("  - If good rows themselves drop below 2 specific under the clean pass -> escalate (defer to")
-print("    matcher / official_relevance R3, out of scope) rather than lose the recall lifeline.")
+print("=== BODY-overlap framing (PART A vs B) — the M34 mechanism R2 was scoped to tighten ===")
+print("  Lever C/B viable IFF body histograms SEPARABLE: good >=2 specific AND wrong <2/broad-only.")
+print("  OBSERVED (per operator): they do NOT separate — wrong rows also cluster >=2 'specific' on")
+print("  generic-admin/josa residue. Body BODIES are full of generic language, so a body-token-count")
+print("  gate structurally cannot discriminate topic. => BODY-overlap tightening (R2-as-scoped) REFUTED.")
+print("  PART C below tests a DIFFERENT mechanism (claim<->release-TITLE overlap) before R2's fate.")
+print()
+print("=== PART C — TITLE-only topic overlap (josa-stripped, BROAD-excluded), both populations ===")
+print("  STRIP RULE: drop a trailing _JOSA particle iff the remaining stem is >=2 chars")
+print("  (가능성을->가능성, 정부는->정부, 우려가->우려); applied to BOTH claim and title sides.")
+print("  _JOSA particles:", list(_JOSA))
+print()
+print("  (a) GOOD PB-backed high rows — TITLE-overlap histogram:")
+for k in (">=2 specific", "1 specific", "0 specific"):
+    print("      %-13s : %d" % (k, hist_a_title[k]))
+print("  (b) WRONG korea.kr rows — TITLE-overlap histogram (compare directly to (a)):")
+for k in (">=2 specific", "1 specific", "0 specific"):
+    print("      %-13s : %d" % (k, hist_b_title[k]))
+print()
+print("  (c) per-row TITLE-overlap token sets — GOOD rows (up to 15): (id, pcs, title_overlap, n)")
+for r in per_row_a_title[:15]:
+    print("    ", r)
+if len(per_row_a_title) > 15:
+    print("     ... (%d more)" % (len(per_row_a_title) - 15))
+print("  (c) per-row TITLE-overlap token sets — WRONG rows (up to 15): (id, pcs, title_overlap, n)")
+for r in per_row_b_title[:15]:
+    print("    ", r)
+if len(per_row_b_title) > 15:
+    print("     ... (%d more)" % (len(per_row_b_title) - 15))
+print()
+print("=== TITLE-gate DECISION FRAMING (N NOT picked here — read PART C (a)/(b)/(c)) ===")
+print("  A title-overlap gate at injection is VIABLE IFF the populations SEPARATE on title tokens:")
+print("    good rows keep >=1 (ideally >=2) specific TITLE-overlap tokens")
+print("    AND wrong rows fall to 0-1 specific TITLE-overlap tokens.")
+print("  - If they separate -> R2 pivots to a TITLE-overlap injection gate (provider-local, removal-")
+print("    only, a genuinely different mechanism than the refuted body gate); pick the title threshold next.")
+print("  - If BOTH still cluster the same way (good AND wrong both >=2, or both ~0) -> NO injection")
+print("    gate (body or title) separates them -> R2 is genuinely DEAD. The wrong-doc problem then")
+print("    moves to the verdict/display layer (honestly show 'no topically-matched official source')")
+print("    -> a separate design question, NOT R2/R3, and NOT an injection filter.")
