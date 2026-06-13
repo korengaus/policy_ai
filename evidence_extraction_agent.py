@@ -6,7 +6,76 @@ from text_utils import sanitize_text
 
 from structured_logging import get_logger
 
+# REL-1 R2-redefined — provider tokenizers IMPORTED (never reimplemented) so the
+# claim<->official-TITLE relevance notion in the official-snippet selection sort is
+# byte-identical to the r2_pbcheck PART C measurement that validated this change.
+from providers.policy_briefing import (
+    _claim_tokens as _pb_claim_tokens,
+    _clean_token as _pb_clean_token,
+    _TOKEN_RE as _PB_TOKEN_RE,
+)
+
 log = get_logger(__name__)
+
+
+# REL-1 R2-redefined — claim<->official-TITLE topic-relevance term for the official-snippet
+# selection sort in extract_evidence_snippets. Pure, removal-FREE re-order: it never drops a
+# candidate, never changes any score, and never touches the verdict matcher
+# (official_evidence_resolution). It only refines WHICH already-fetched official candidate is
+# preferred for evidence_snippets[:2] AMONG candidates of equal match-status. Validated by
+# scripts/r2_typeflip.py (N_label_flip=0): the re-order changes the surfaced document but never
+# the verdict_label / confidence. Same BROAD set + _JOSA strip rule (stem>=2) as r2_pbcheck PART C.
+_R2_BROAD_DOMAIN_TOKENS = frozenset({
+    "대출", "금융", "부동산", "정책", "지원", "대책", "규제", "제도", "방안", "계획",
+    "관리", "강화", "확대", "추진", "개선", "발표", "정부", "시장", "경제", "제한",
+})
+_R2_JOSA = ("으로서", "으로써", "에서는", "에게서", "으로", "에서", "에게", "한테", "까지",
+            "부터", "에는", "에도", "이라", "라는", "이는", "을", "를", "은", "는", "이",
+            "가", "의", "에", "로", "와", "과", "도", "만", "랑")
+
+
+def _r2_josa_strip(token: str) -> str:
+    for particle in sorted(_R2_JOSA, key=len, reverse=True):
+        if token.endswith(particle) and len(token) - len(particle) >= 2:
+            return token[: len(token) - len(particle)]
+    return token
+
+
+def _r2_topic_tokens(token_set: set) -> set:
+    out = set()
+    for token in token_set:
+        stem = _r2_josa_strip(token)
+        if len(stem) >= 2 and stem not in _R2_BROAD_DOMAIN_TOKENS:
+            out.add(stem)
+    return out
+
+
+def _r2_title_topic_tokens(title: str) -> set:
+    return _r2_topic_tokens(
+        {c for tok in _PB_TOKEN_RE.findall(title or "") if (c := _pb_clean_token(tok)) is not None}
+    )
+
+
+def _r2_claim_topic_tokens(normalized_claims: list) -> set:
+    # ROW-LEVEL claim topic (full claim set) — matches the validated r2_typeflip simulation,
+    # which prepended -title_overlap computed against topic_tokens(_claim_tokens(normalized_claims)).
+    # Guarded: any tokenizer failure -> empty set -> the relevance term is 0 (no reorder).
+    try:
+        return _r2_topic_tokens(_pb_claim_tokens(normalized_claims or []))
+    except Exception:
+        return set()
+
+
+def _official_title_relevance(claim_topic: set, source: dict) -> int:
+    # SPECIFIC-topic overlap between the row claim set and the official candidate TITLE. Guarded:
+    # empty claim OR empty title -> 0, so the sort falls through to the existing score key and
+    # never reorders on missing data. Never raises.
+    if not claim_topic:
+        return 0
+    title = source.get("official_detail_title") or source.get("title") or source.get("publisher") or ""
+    if not title:
+        return 0
+    return len(claim_topic & _r2_title_topic_tokens(title))
 
 
 def _now_iso() -> str:
@@ -449,6 +518,10 @@ def extract_evidence_snippets(
     sentences = _split_sentences(article_body)
     evidence_snippets = []
 
+    # REL-1 R2-redefined — row-level claim topic for the official-snippet selection re-order
+    # below. Computed once per call; empty when claims/tokenizer yield nothing (term -> 0).
+    row_claim_topic = _r2_claim_topic_tokens(normalized_claims)
+
     news_sources = [
         source
         for source in (source_candidates or [])
@@ -502,6 +575,10 @@ def extract_evidence_snippets(
         official_body_sources.sort(
             key=lambda source: (
                 not bool(source.get("official_body_match")),
+                # REL-1 R2-redefined: prefer the more claim<->title topic-relevant candidate, but
+                # ONLY among candidates of equal match-status (official_body_match stays the FIRST
+                # key) so a matched (>=55) doc can never be demoted below a sub-55 one. Removal-free.
+                -_official_title_relevance(row_claim_topic, source),
                 -(int(source.get("official_evidence_score") or source.get("official_final_direct_match_score") or source.get("official_body_match_score") or 0)),
                 source.get("publisher") or "",
                 source.get("url") or "",
