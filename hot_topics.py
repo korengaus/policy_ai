@@ -114,6 +114,12 @@ _ALLOWLIST = (
 _LOCAL_DENYLIST = (
     # election / political personalities
     "선거", "당선", "득표", "지방선거", "여당", "야당", "대선", "총선", "공천", "탄핵",
+    # HOTTOPIC-SAFETY P2 — current high-profile politician NAMES. Substring-safe
+    # (none is a substring of a legitimate policy keyword) and enforced post-pick
+    # by _passes_domain_filter, closing the name+policy compound leak (e.g.
+    # "이재명 부동산 대책"). NAMES ONLY: office words (의원/장관/대통령) excluded as
+    # substring-unsafe or over-blocky. Revisit as the political roster changes.
+    "이재명", "윤석열", "한동훈", "이준석", "김건희",
     # securities trading / market quotes
     "증권", "채권운용", "투자증권", "코스피", "코스닥", "주가", "상장", "공모주",
     # foreign markets
