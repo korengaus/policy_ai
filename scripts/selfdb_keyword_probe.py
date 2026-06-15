@@ -117,6 +117,44 @@ _STOPWORDS = {
     "종합", "속보", "정부", "이날", "당국", "만원",
 }
 
+# ---------------------------------------------------------------------------
+# SELFDB-3 person/office filter — PROBE-LOCAL, kept SEPARATE from _STOPWORDS
+# (general junk) and from hot_topics._DENYLIST (which SELFDB-2 showed missed
+# 이재명; we DIAGNOSE that in the Part-A block but do NOT rely on it here).
+# Purpose: keep the daily watch list free of politician names + pure
+# political-office words, which must never become an auto-card keyword
+# (defamation risk). EDITABLE — current-figures list needs occasional updates.
+# ---------------------------------------------------------------------------
+# Unambiguous full names — matched as SUBSTRING (so 이재명정부 / 윤석열표 etc. are
+# also caught). All are 3-syllable specific names with no common-word collision.
+_PERSON_NAMES = {
+    "이재명", "윤석열", "한동훈", "이준석", "김건희",
+}
+# Ambiguous-or-generic terms — matched by EXACT token equality ONLY, never
+# substring, to avoid over-blocking:
+#   - 조국 also means "homeland", so only a BARE 조국 token is dropped (조국통일
+#     survives). Listed per spec; revisit if it proves to drop real content.
+#   - office words like 의원 occur inside 병의원/의원실, so exact-only.
+# NOTE: 시장 is DELIBERATELY NOT blocked here — it is ambiguous (market / mayor)
+# and is handled elsewhere; blocking it would kill real economic keywords.
+_PERSON_OFFICE_EXACT = {
+    "조국", "대통령", "대통령실", "국무총리", "장관", "의원", "국회의원",
+    "청와대", "여당", "야당", "與野",   # 與野 is hanja -> not even tokenized; belt-and-suspenders
+}
+
+# Records what the person/office filter removed THIS run, so Section 7 can show
+# the operator exactly what got blocked (over-block sanity check).
+_BLOCKED_PERSON_RUN: set = set()
+
+
+def _is_person_or_office(tok: str) -> bool:
+    """True if tok is a blocked politician name (substring) or a pure political-
+    office word (exact). 시장 is intentionally absent (market/mayor ambiguity)."""
+    if tok in _PERSON_OFFICE_EXACT:
+        return True
+    return any(name in tok for name in _PERSON_NAMES)
+
+
 # Trailing single-syllable Korean particles (josa) to strip so e.g. "대출을" and
 # "대출이" both fold to "대출". Only applied when the remaining stem is >=2 chars.
 _TRAILING_PARTICLES = ("은", "는", "이", "가", "을", "를", "에", "의", "도", "로",
@@ -177,7 +215,9 @@ def _keywords_of(text: str) -> set:
       (b) drop tokens that are not majority-Hangul — i.e. require >=2 Hangul
           syllables, which removes English/system tokens (ai, the, news, view,
           pick, bok, lh, pdf) and bare ASCII,
-      (c) drop _STOPWORDS (the main editable lever)."""
+      (c) drop _STOPWORDS (the main editable lever),
+      (d) drop _PERSON_BLOCK person names / political-office words (SELFDB-3),
+          recording each into _BLOCKED_PERSON_RUN for the Section-7 audit line."""
     out = set()
     for raw in _TOKEN_RE.findall(text or ""):
         tok = _normalize_token(raw)
@@ -186,6 +226,9 @@ def _keywords_of(text: str) -> set:
         if _hangul_count(tok) < 2:   # drops pure-Latin / system tokens
             continue
         if tok in _STOPWORDS:
+            continue
+        if _is_person_or_office(tok):   # SELFDB-3 person/office filter
+            _BLOCKED_PERSON_RUN.add(tok)
             continue
         out.add(tok)
     return out
@@ -386,6 +429,43 @@ def main() -> int:
         print("   MUST be applied first — same as hot_topics safeguard (c).)")
     print()
 
+    # ---- SECTION 5b: DENYLIST DIAGNOSTIC (Part A — read-only) --------------
+    # WHY: SELFDB-2 surfaced 이재명 / 대통령 in the watch list yet Section 5 said
+    # "no denylist hit", so hot_topics._DENYLIST missed a sitting politician. We
+    # diagnose the CAUSE (not-in-list vs match-method) before deciding whether the
+    # LIVE hot-topic path needs the same fix (a separate milestone). READ-ONLY.
+    print("=== 5b. DENYLIST DIAGNOSTIC (Part A — hot_topics._DENYLIST, read-only) ===")
+    print("  _DENYLIST source: %s" % _DENYLIST_SOURCE)
+    print("  _DENYLIST size  : %d entries" % len(_DENYLIST))
+    if _DENYLIST:
+        sample = list(_DENYLIST)[:30]
+        print("  first %d entries: %s" % (len(sample), ", ".join(map(str, sample))))
+        # Does it contain political-person / office markers at all? (exact membership)
+        probes = ["이재명", "대통령", "윤석열", "한동훈", "이준석"]
+        print("  political-marker presence (exact membership in _DENYLIST):")
+        for p in probes:
+            print("    %-6s : %s" % (p, "PRESENT" if p in _DENYLIST else "absent"))
+        # HOW Section 5 matches: _looks_risky tests `any(marker in keyword)` = SUBSTRING.
+        print("  Section-5 match method: SUBSTRING  (any(marker in keyword) via _looks_risky)")
+        target = "이재명"
+        exact_hit = target in _DENYLIST
+        substr_hit = any(str(m) in target for m in _DENYLIST)
+        print("  test %r vs _DENYLIST:" % target)
+        print("    exact membership (%r in _DENYLIST)            : %s" % (target, exact_hit))
+        print("    substring match  (any marker is substr of it) : %s" % substr_hit)
+        if substr_hit:
+            cause = "match-method OK — marker present; Section-5 scan scope/order issue (investigate)"
+        elif exact_hit:
+            cause = "match-method-mismatch (exact-present but substring-scan failed — logically odd)"
+        else:
+            cause = "not-in-list (hot_topics._DENYLIST contains NO marker matching 이재명)"
+    else:
+        cause = "denylist-not-importable/empty (cannot diagnose; import failed in this env)"
+    print("  >>> CONCLUSION: denylist miss cause = [%s]" % cause)
+    print("  (NOTE: hot_topics.py is NOT modified here — the probe's own Part-B person")
+    print("   filter below makes the watch list safe; the LIVE fix is a separate milestone.)")
+    print()
+
     # ---- SECTION 6: VERDICT ----------------------------------------------
     print("=== 6. VERDICT ===")
     n_out_rising = len(watch)   # cleaned top-K ∩ rising ∩ out-of-seed (count-bug fix)
@@ -423,6 +503,13 @@ def main() -> int:
             print("  %-16s recent=%-3d older=%-3d  %-5s%s" % (kw, rdf, odf, indicator, flag))
         if len(watch) > WATCH_CAP:
             print("  ... (+%d more; showing top %d by recent df)" % (len(watch) - WATCH_CAP, WATCH_CAP))
+    # SELFDB-3: show what the person/office filter removed this run, so the
+    # operator can sanity-check it is not over-blocking real policy terms.
+    if _BLOCKED_PERSON_RUN:
+        print("  [blocked this run by person/office filter: %s]"
+              % ", ".join(sorted(_BLOCKED_PERSON_RUN)))
+    else:
+        print("  [blocked this run by person/office filter: none]")
     print()
     print("  TAKEAWAY: %d clean out-of-seed rising policy-candidate keyword(s) today "
           "(log this number)." % len(watch))
