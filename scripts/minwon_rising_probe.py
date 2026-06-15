@@ -61,15 +61,24 @@ ENDPOINT_BASE = "https://apis.data.go.kr/1140100/minAnalsInfoView5"
 RISING_OP = "minRisingKeyword5"
 RISING_URL = f"{ENDPOINT_BASE}/{RISING_OP}"
 
-TIMEOUT_SECONDS = 10
+TIMEOUT_SECONDS = 15     # Phase 1c: raised from 10s (responses took up to ~8s)
 MAX_RESULT = 30          # spec param maxResult
 TOP_N = 30               # how many to display per target run
 RAW_SAMPLE = 15          # verbatim item dicts in the raw-sample section
+RAW_DUMP_CHARS = 1500    # how much of response.text to dump per timestamp
+RAW_DUMP_COUNT = 3       # how many of the first timestamps to dump in full
 
 # analysisTime hour-sweep (YYYYMMDDHH). Civil-complaint aggregation updates a few
 # times a day; try a few hours per date, stop at the first non-empty.
 SWEEP_HOURS = ["23", "18", "12", "09"]
 N_DATES = 3              # most-recent N dates to sweep (yesterday back N)
+
+# Phase 1c aggregation-LAG test: the spec example date is 2021050614 (a 2021
+# date), so data may only exist for clearly-older dates. Test two older dates
+# (one hour each) alongside the recent sweep; if these return data but recent
+# ones do not, lag is confirmed.
+OLD_DATES = ["20260601", "20260520"]
+OLD_DATE_HOUR = "12"
 
 # The two target runs (★ the head-to-head this milestone exists to compare).
 TARGET_ALL = "pttn,dfpt,saeol,prpl,qna"     # all types, broadest
@@ -199,30 +208,67 @@ def _request(params_no_key, key, mode):
     return _http_raw(RISING_URL, merged)
 
 
+def _aslist(node):
+    """Normalize an items node to a list of dicts (single dict -> [dict])."""
+    if isinstance(node, dict):
+        return [node]
+    if isinstance(node, list):
+        return [x for x in node if isinstance(x, dict)]
+    return []
+
+
+def _find_items(data):
+    """Phase 1c robust multi-shape locator. Tries item paths in order and returns
+    (item_list, detected_path). Handles the {response:{header,body}} wrapper, a
+    bare {body:...}, items as {item:[...]} / [...] / single-dict, and top-level
+    items/item. Returns ([], 'none') when nothing matches."""
+    if not isinstance(data, dict):
+        return [], "none"
+    roots = []
+    resp = data.get("response")
+    if isinstance(resp, dict):
+        roots.append(("response.", resp))
+    roots.append(("", data))
+    for prefix, root in roots:
+        if not isinstance(root, dict):
+            continue
+        body = root.get("body")
+        if isinstance(body, dict):
+            items = body.get("items")
+            if isinstance(items, dict) and "item" in items:
+                return _aslist(items["item"]), prefix + "body.items.item"
+            if isinstance(items, list):
+                return _aslist(items), prefix + "body.items[list]"
+            if isinstance(items, dict):  # items dict without an 'item' key
+                return _aslist(items), prefix + "body.items[dict]"
+            if "item" in body:
+                return _aslist(body["item"]), prefix + "body.item"
+        # root-level items / item (no body wrapper)
+        items = root.get("items")
+        if isinstance(items, dict) and "item" in items:
+            return _aslist(items["item"]), prefix + "items.item"
+        if isinstance(items, list):
+            return _aslist(items), prefix + "items[list]"
+        if "item" in root:
+            return _aslist(root["item"]), prefix + "item"
+    return [], "none"
+
+
 def _parse_items(text):
     """Parse a data.go.kr response (JSON OR XML) into
-    (result_code, result_msg, [item dicts], kind). Never raises."""
+    (result_code, result_msg, [item dicts], kind, detected_path). Never raises."""
     txt = (text or "").strip()
     try:
         data = json.loads(txt)
         resp = data.get("response", data) if isinstance(data, dict) else {}
         header = resp.get("header", {}) if isinstance(resp, dict) else {}
-        body = resp.get("body", {}) if isinstance(resp, dict) else {}
         rc = str(header.get("resultCode", "")).strip()
         rm = str(header.get("resultMsg", "")).strip()
-        raw_items = []
-        items_node = body.get("items") if isinstance(body, dict) else None
-        if isinstance(items_node, dict):
-            raw_items = items_node.get("item", [])
-        elif isinstance(items_node, list):
-            raw_items = items_node
-        if isinstance(raw_items, dict):
-            raw_items = [raw_items]
+        raw_items, path = _find_items(data)
         out = []
-        for it in raw_items or []:
-            if isinstance(it, dict):
-                out.append({str(k): ("" if v is None else str(v)) for k, v in it.items()})
-        return rc, rm, out, "json"
+        for it in raw_items:
+            out.append({str(k): ("" if v is None else str(v)) for k, v in it.items()})
+        return rc, rm, out, "json", ("json:" + path)
     except Exception:
         pass
     try:
@@ -241,9 +287,9 @@ def _parse_items(text):
                 d[child.tag.split("}")[-1]] = (child.text or "").strip()
             if d:
                 out.append(d)
-        return rc.strip(), rm.strip(), out, "xml"
+        return rc.strip(), rm.strip(), out, "xml", ("xml:.//item" if out else "xml:none")
     except Exception:
-        return "", "PARSE_ERROR", [], "none"
+        return "", "PARSE_ERROR", [], "none", "none"
 
 
 def _fetch(analysis_time, target, key, mode):
@@ -257,11 +303,22 @@ def _fetch(analysis_time, target, key, mode):
     r = _request(params_no_key, key, mode)
     if not r["ok"]:
         return {"status": None, "elapsed": r["elapsed"], "ctype": "", "rc": "", "rm": "",
-                "items": [], "kind": "none", "keyerr": False, "text": "", "error": r.get("error")}
-    rc, rm, items, kind = _parse_items(r["text"])
+                "items": [], "kind": "none", "path": "none", "keyerr": False, "text": "",
+                "error": r.get("error")}
+    rc, rm, items, kind, path = _parse_items(r["text"])
     return {"status": r["status"], "elapsed": r["elapsed"], "ctype": r["ctype"], "rc": rc,
-            "rm": rm, "items": items, "kind": kind, "keyerr": _looks_like_key_error(r["text"]),
-            "text": r["text"], "error": None}
+            "rm": rm, "items": items, "kind": kind, "path": path,
+            "keyerr": _looks_like_key_error(r["text"]), "text": r["text"], "error": None}
+
+
+def _dump_raw(tag, f, dump_state):
+    """Print the first RAW_DUMP_CHARS of response.text for the first few
+    timestamps (dump_state is a 1-element mutable counter)."""
+    if dump_state[0] <= 0 or not f.get("text"):
+        return
+    dump_state[0] -= 1
+    print("    RAW BODY [%s] (first %d chars):" % (tag, RAW_DUMP_CHARS))
+    print("    " + (f["text"][:RAW_DUMP_CHARS]))
 
 
 def _kw_row(item):
@@ -316,9 +373,12 @@ def main():
     print()
 
     # ---- SECTION 1: CONNECTION / GATEWAY CHECK ----------------------------
-    # Resolve serviceKey mode (a then b) on the first timestamp, then hour-sweep
-    # the recent dates with the broad target to find a non-empty timestamp.
+    # Resolve serviceKey mode (a then b) on the first timestamp, hour-sweep the
+    # recent dates, then a lag test on older dates. Phase 1c: dump the raw
+    # response body + detected items-path for the first few timestamps so an
+    # items=0 result can be diagnosed (wrong path vs genuinely empty vs lag).
     print("=== 1. CONNECTION / GATEWAY CHECK ===")
+    dump_state = [RAW_DUMP_COUNT]
     working_mode = None
     key_error_seen = False
     first_at = dates[0] + SWEEP_HOURS[0]
@@ -330,9 +390,10 @@ def main():
         if f["error"]:
             print("    mode %s [%s] -> TRANSPORT ERROR %s" % (mode, desc, f["error"]))
             continue
-        print("    mode %s [%s] -> HTTP %s  %.2fs  parse=%s  rc=%r  rm=%r  items=%d%s"
-              % (mode, desc, f["status"], f["elapsed"], f["kind"], f["rc"], f["rm"][:36],
-                 len(f["items"]), "  [KEY-ERROR?]" if f["keyerr"] else ""))
+        print("    mode %s [%s] -> HTTP %s  %.2fs  parse=%s  path=%s  rc=%r  rm=%r  items=%d%s"
+              % (mode, desc, f["status"], f["elapsed"], f["kind"], f["path"], f["rc"],
+                 f["rm"][:36], len(f["items"]), "  [KEY-ERROR?]" if f["keyerr"] else ""))
+        _dump_raw("%s mode-%s" % (first_at, mode), f, dump_state)
         if f["keyerr"]:
             key_error_seen = True
         if f["kind"] != "none" and not f["keyerr"] and (len(f["items"]) > 0 or f["rm"] == "NORMAL SERVICE."):
@@ -358,9 +419,10 @@ def main():
             if f["error"]:
                 print("    %s -> TRANSPORT ERROR %s" % (at, f["error"]))
                 continue
-            print("    %s -> HTTP %s  %.2fs  ctype=%s  parse=%s  rc=%r  rm=%r  items=%d"
+            print("    %s -> HTTP %s  %.2fs  ctype=%s  parse=%s  path=%s  rc=%r  rm=%r  items=%d"
                   % (at, f["status"], f["elapsed"], (f["ctype"] or "")[:22], f["kind"],
-                     f["rc"], f["rm"][:28], len(f["items"])))
+                     f["path"], f["rc"], f["rm"][:24], len(f["items"])))
+            _dump_raw(at, f, dump_state)
             if f["keyerr"]:
                 key_error_seen = True
             if len(f["items"]) > 0:
@@ -368,10 +430,38 @@ def main():
                 break
         if chosen_at:
             break
+
+    # (1c) aggregation-LAG test — clearly-older dates (one hour each). If these
+    # return data but recent ones do not, lag is confirmed.
+    print("\n  (1c) aggregation-lag test (older dates, mode=%r, target=ALL, hour=%s):"
+          % (working_mode, OLD_DATE_HOUR))
+    old_hit = None
+    for od in OLD_DATES:
+        at = od + OLD_DATE_HOUR
+        f = _fetch(at, TARGET_ALL, api_key, working_mode)
+        if f["error"]:
+            print("    %s -> TRANSPORT ERROR %s" % (at, f["error"]))
+            continue
+        print("    %s -> HTTP %s  %.2fs  parse=%s  path=%s  rc=%r  rm=%r  items=%d"
+              % (at, f["status"], f["elapsed"], f["kind"], f["path"], f["rc"],
+                 f["rm"][:24], len(f["items"])))
+        _dump_raw(at, f, dump_state)
+        if f["keyerr"]:
+            key_error_seen = True
+        if len(f["items"]) > 0 and old_hit is None:
+            old_hit = at
+    if old_hit and not chosen_at:
+        chosen_at = old_hit
+        print("    NOTE: recent dates returned 0 but %s HAS data -> AGGREGATION LAG confirmed." % old_hit)
+    elif old_hit:
+        print("    (older date %s also has data.)" % old_hit)
+
     if chosen_at:
-        print("  => chosen analysisTime for the head-to-head: %s" % chosen_at)
+        print("\n  => chosen analysisTime for the head-to-head: %s" % chosen_at)
     else:
-        print("  => no timestamp returned items. Sections 2-6 will be empty; check key/spec above.")
+        print("\n  => no timestamp (recent OR older) returned items. Inspect the RAW BODY dumps")
+        print("     above: is <body> empty (genuinely no data), or is the items path different")
+        print("     from what _find_items detected (path=...)?")
     print()
 
     # Run the two target sets on the SAME chosen timestamp (fair comparison).
@@ -382,12 +472,13 @@ def main():
 
     # ---- SECTION 2: RAW RESPONSE SAMPLE -----------------------------------
     print("=== 2. RAW RESPONSE SAMPLE (verbatim item objects, so schema is visible) ===")
-    if items_all:
-        print("  analysisTime=%s target=ALL — first %d items:" % (chosen_at, RAW_SAMPLE))
-        for i, it in enumerate(items_all[:RAW_SAMPLE]):
+    sample_label, sample_items = ("ALL", items_all) if items_all else ("POLICY-leaning", items_pol)
+    if sample_items:
+        print("  analysisTime=%s target=%s — first %d items:" % (chosen_at, sample_label, RAW_SAMPLE))
+        for i, it in enumerate(sample_items[:RAW_SAMPLE]):
             print("    [%2d] %s" % (i, it))
     else:
-        print("  (no items on the chosen timestamp for target=ALL — see Section 1.)")
+        print("  (no items on the chosen timestamp for either target — see Section 1 raw dumps.)")
     print()
 
     # ---- SECTION 3: RISING KEYWORDS (two target runs) ---------------------
