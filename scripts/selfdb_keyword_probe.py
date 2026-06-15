@@ -94,14 +94,27 @@ SEED_QUERIES = [
 ]
 
 
-# Common Korean functional words / verb-y tokens to drop from the keyword pool.
-# Small and conservative — just enough to stop the frequency table being topped
-# by glue words. NOT a domain filter.
+# Korean stopword / fragment denylist — the MAIN noise lever for this probe.
+# EDITABLE: grow this SET as new junk surfaces in the daily watch list. These are
+# functional words, sentence fragments, and generic nouns that are NOT topic
+# keywords. SELFDB-2 added the observed junk that polluted SELFDB-1's output
+# (등을 / 방안 / 대상 / 부담 / 따르면 / 가능성 / 이후 / 것으 / 있는 ...).
+# Borderline-token choices (commented so they can be revisited):
+#   - 가격 is deliberately KEPT OUT of this set (i.e. NOT dropped): it can carry
+#     real housing-price signal (집값/분양가). Add it here later if it proves noisy.
+#   - 만원 IS dropped: as a bare currency unit it is never a standalone topic.
 _STOPWORDS = {
-    "있다", "없다", "했다", "한다", "하는", "위해", "위한", "대한", "대해", "관련",
-    "이번", "올해", "지난", "오는", "최근", "그리고", "하지만", "이라고", "라고",
-    "이라며", "면서", "통해", "라며", "기자", "뉴스", "사진", "단독", "종합", "속보",
-    "정부", "이날", "당국", "그러나", "또한", "이어", "밝혔다", "전했다", "예정",
+    # verbs / predicates / quotatives / connectors
+    "있다", "없다", "했다", "한다", "하는", "있는", "것이다", "것으", "따르면",
+    "위해", "위한", "대한", "대해", "관련", "통해", "이라고", "라고", "이라며",
+    "라며", "면서", "그리고", "하지만", "그러나", "또한", "또는", "이어",
+    "밝혔다", "전했다", "역시", "적극", "두고", "한편", "특히", "그동안",
+    # time / hedge / quantity-shape fragments
+    "이번", "올해", "지난", "오는", "최근", "이후", "향후", "가운데", "가능성",
+    "우려", "예정", "수준", "정도", "경우", "모든", "하나", "그것", "이것",
+    # generic admin / report nouns + observed fragments
+    "방안", "대상", "부담", "등을", "등의", "기자", "뉴스", "사진", "단독",
+    "종합", "속보", "정부", "이날", "당국", "만원",
 }
 
 # Trailing single-syllable Korean particles (josa) to strip so e.g. "대출을" and
@@ -136,6 +149,11 @@ except Exception:
         _DENYLIST_SOURCE = "none"
 
 
+def _hangul_count(s: str) -> int:
+    """Number of Hangul-syllable chars (U+AC00–U+D7A3) in s."""
+    return sum(1 for ch in s if "가" <= ch <= "힣")
+
+
 def _normalize_token(tok: str) -> str:
     """Light noun-friendly normalization: strip ONE trailing particle when the
     stem stays >=2 chars. Latin tokens are returned lowercased unchanged."""
@@ -149,12 +167,23 @@ def _normalize_token(tok: str) -> str:
 
 
 def _keywords_of(text: str) -> set:
-    """Distinct normalized keyword tokens in a piece of text (for document
-    frequency we only care about presence per row, hence a set)."""
+    """Distinct CLEANED keyword tokens in a piece of text (document frequency only
+    cares about presence per row, hence a set).
+
+    SELFDB-2 noise filter — applied HERE in the ONE extraction point so the
+    frequency ranking, the rising computation, and the headline count all share
+    the SAME cleaned set:
+      (a) drop length-1 tokens,
+      (b) drop tokens that are not majority-Hangul — i.e. require >=2 Hangul
+          syllables, which removes English/system tokens (ai, the, news, view,
+          pick, bok, lh, pdf) and bare ASCII,
+      (c) drop _STOPWORDS (the main editable lever)."""
     out = set()
     for raw in _TOKEN_RE.findall(text or ""):
         tok = _normalize_token(raw)
         if len(tok) < 2:
+            continue
+        if _hangul_count(tok) < 2:   # drops pure-Latin / system tokens
             continue
         if tok in _STOPWORDS:
             continue
@@ -231,7 +260,7 @@ def main() -> int:
                 continue  # outside the lookback window
             rows.append((rid, day, f"{title or ''}\n{claim_text or ''}"))
 
-    print("SELFDB-1 Phase 1 — self-DB keyword aggregation probe (READ-ONLY)")
+    print("SELFDB-2 Phase 1 — self-DB keyword aggregation probe (READ-ONLY, noise-filtered)")
     print(f"  lookback={LOOKBACK_DAYS}d  top_k={TOP_K}  rising_ratio={RISING_RATIO}  "
           f"min_df={MIN_DF}  cutoff>={cutoff}")
     print(f"  denylist source: {_DENYLIST_SOURCE}")
@@ -304,31 +333,38 @@ def main() -> int:
     print()
 
     # ---- SECTION 4: RISING SIGNAL (the other key measurement) -------------
+    # COUNT-BUG FIX (SELFDB-2): the headline must agree with the displayed table.
+    # SELFDB-1 reported the rising-out count over the WHOLE min_df vocabulary (a
+    # noise-laden flood -> false "238"). Here the watch set is restricted to the
+    # cleaned, ranked TOP_K (the same `top` shown in Sections 2-3): keywords that
+    # are in top-K AND rising AND out-of-seed. That is the only number that drives
+    # Sections 6-7.
     print("=== 4. RISING SIGNAL (recent half vs older half) ===")
     print("    recent half (day >= %s): %d rows | older half: %d rows" %
           (midpoint, n_recent, n_older))
     print("    rising := recent_df >= %d AND recent_df >= %.1f x older_df "
           "(older_df==0 -> brand-new)" % (RISING_MIN_RECENT_DF, RISING_RATIO))
-    rising = []
-    for kw in df_total:
-        rdf = df_recent[kw]
-        odf = df_older[kw]
-        if rdf < RISING_MIN_RECENT_DF:
-            continue
-        if odf == 0 or rdf >= RISING_RATIO * odf:
-            rising.append((kw, rdf, odf))
-    # Sort by recent df, then by absolute delta.
-    rising.sort(key=lambda t: (-t[1], -(t[1] - t[2])))
-    rising_out = [t for t in rising if not _is_in_seed(t[0])]
-    if not rising:
-        print("  (no keyword met the rising threshold)")
-    for kw, rdf, odf in rising[:TOP_K]:
+    top_set = {kw for kw, _ in top}
+
+    def _is_rising(kw):
+        rdf, odf = df_recent[kw], df_older[kw]
+        return rdf >= RISING_MIN_RECENT_DF and (odf == 0 or rdf >= RISING_RATIO * odf)
+
+    # rising keywords WITHIN the cleaned top-K (sorted by recent df, then delta).
+    rising_topk = [(kw, df_recent[kw], df_older[kw]) for kw, _ in top if _is_rising(kw)]
+    rising_topk.sort(key=lambda t: (-t[1], -(t[1] - t[2])))
+    # The watch set = rising AND out-of-seed AND within cleaned top-K.
+    watch = [(kw, rdf, odf) for (kw, rdf, odf) in rising_topk if not _is_in_seed(kw)]
+
+    if not rising_topk:
+        print("  (no top-%d keyword met the rising threshold)" % TOP_K)
+    for kw, rdf, odf in rising_topk:
         tag = "IN-SEED " if _is_in_seed(kw) else "OUT     "
         risk = "  [RISK?]" if _looks_risky(kw) else ""
         print("  %-16s recent=%-3d older=%-3d %s%s" % (kw, rdf, odf, tag, risk))
-    print("  >>> RISING & OUT-OF-SEED keywords: %d" % len(rising_out))
-    if rising_out:
-        print("      " + ", ".join(t[0] for t in rising_out))
+    print("  >>> clean OUT-OF-SEED & RISING (within top-%d): %d" % (TOP_K, len(watch)))
+    if watch:
+        print("      " + ", ".join(t[0] for t in watch))
     print()
 
     # ---- SECTION 5: NOISE / SAFETY SCAN -----------------------------------
@@ -352,23 +388,44 @@ def main() -> int:
 
     # ---- SECTION 6: VERDICT ----------------------------------------------
     print("=== 6. VERDICT ===")
-    n_out_rising = len(rising_out)
-    print("  OUT-OF-SEED-and-RISING count = %d   <<< this number decides Phase 2" % n_out_rising)
+    n_out_rising = len(watch)   # cleaned top-K ∩ rising ∩ out-of-seed (count-bug fix)
+    print("  OUT-OF-SEED-and-RISING count (clean, within top-%d) = %d   <<< decides Phase 2"
+          % (TOP_K, n_out_rising))
     if n_out_rising == 0:
-        print("  Self-DB aggregation surfaced NO out-of-seed rising term over the last")
+        print("  Self-DB aggregation surfaced NO clean out-of-seed rising term over the last")
         print("  %d days. The corpus mostly ECHOES the fixed cron seed list — as feared," % LOOKBACK_DAYS)
         print("  rows collected under fixed seeds reproduce those seeds. On this evidence")
         print("  SELFDB Phase 2 (engine integration) adds little NEW signal and is likely")
         print("  NOT worth building. Re-measure after more/broader data accumulates.")
     elif n_out_rising <= 3:
-        print("  Self-DB aggregation surfaced a FEW (%d) out-of-seed rising terms. Weak but" % n_out_rising)
-        print("  non-zero signal. Operator should eyeball whether those terms are real")
+        print("  Self-DB aggregation surfaced a FEW (%d) clean out-of-seed rising terms. Weak" % n_out_rising)
+        print("  but non-zero signal. Operator should eyeball whether those terms are real")
         print("  emerging policy issues (worth Phase 2) or extraction noise / risky names")
         print("  (see Section 5) before committing to an engine.")
     else:
-        print("  Self-DB aggregation surfaced %d out-of-seed rising terms — a real signal" % n_out_rising)
+        print("  Self-DB aggregation surfaced %d clean out-of-seed rising terms — a real signal" % n_out_rising)
         print("  beyond the seed echo. Phase 2 MAY be worth building, BUT only behind the")
         print("  Section-5 denylist filter (defamation-risk). Operator decides.")
+    print()
+
+    # ---- SECTION 7: DAILY WATCH LIST -------------------------------------
+    # The ONE thing the operator reads each morning (observation routine step 5).
+    # Short, scannable: the cleaned out-of-seed rising policy-candidate keywords,
+    # each with recent/older document frequency and a simple rising indicator.
+    print("=== 7. DAILY WATCH LIST (clean out-of-seed rising policy candidates) ===")
+    WATCH_CAP = 15
+    if not watch:
+        print("  (none today — no clean out-of-seed rising keyword in the top-%d.)" % TOP_K)
+    else:
+        for kw, rdf, odf in watch[:WATCH_CAP]:
+            indicator = "NEW" if odf == 0 else ("x%.1f" % (rdf / odf))
+            flag = "  [RISK? denylist hit]" if _looks_risky(kw) else ""
+            print("  %-16s recent=%-3d older=%-3d  %-5s%s" % (kw, rdf, odf, indicator, flag))
+        if len(watch) > WATCH_CAP:
+            print("  ... (+%d more; showing top %d by recent df)" % (len(watch) - WATCH_CAP, WATCH_CAP))
+    print()
+    print("  TAKEAWAY: %d clean out-of-seed rising policy-candidate keyword(s) today "
+          "(log this number)." % len(watch))
     print()
     print("[Safety] READ-ONLY probe — SELECT-only; no rows written, updated, or deleted.")
     return 0
