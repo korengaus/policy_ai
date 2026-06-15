@@ -1,35 +1,41 @@
-# MINWON-PROBE Phase 1 — ACRC (국민권익위원회) civil-complaint rising-keyword API probe.
+# MINWON-PROBE Phase 1b — ACRC (국민권익위원회) civil-complaint rising-keyword API probe.
 # READ-ONLY, THROWAWAY. Outbound HTTPS to data.go.kr ONLY. NO Postgres, NO pipeline,
 # NO provider, NO repo-state change. One self-contained script — no abstractions.
 #
 # WHAT / WHY
 # ----------
-# We are evaluating a NEW external source for hot-topic auto-detection: the ACRC
-# civil-complaint big-data API (data.go.kr dataset 15101903,
-# "민원빅데이터_분석정보_API_2022", org 1140100, view minAnalsInfoView5). The
-# candidate operation is /minRisingKeyword5 (급등 키워드 = keywords that surged
-# vs. the previous day). This probe MEASURES two things BEFORE any provider is
-# built (the web_search + fss lessons: estimate vs measured diverged wildly):
-#   (a) CONTENT FIT  — are the rising keywords POLICY-relevant (전세사기/보조금/
-#       대출/부동산) or daily-life complaint noise (층간소음/주차/쓰레기/포트홀)?
-#   (b) GATEWAY STABILITY — does apis.data.go.kr/1140100 return clean responses,
-#       or errors/timeouts? (M23 lesson: apis.data.go.kr/1170000 returned 500s.)
+# Evaluating a NEW external source for hot-topic auto-detection: the ACRC
+# civil-complaint big-data API (data.go.kr dataset 15101903, org 1140100, view
+# minAnalsInfoView5, op /minRisingKeyword5 = 급등 키워드). Measures BEFORE any
+# provider is built (web_search + fss lessons):
+#   (a) CONTENT FIT  — policy-relevant terms (전세사기/보조금/대출/부동산) vs
+#       daily-life complaint noise (층간소음/주차/쓰레기/포트홀)?
+#   (b) GATEWAY STABILITY — clean responses from apis.data.go.kr/1140100 or
+#       errors/timeouts? (M23 lesson: apis.data.go.kr/1170000 returned 500s.)
 #
-# KEY HANDLING (no secrets in repo)
-# ---------------------------------
-# Service key is read from env MINWON_API_KEY ONLY. NEVER hardcoded, NEVER printed,
-# NEVER written to a file. The operator sets it inline for ONE Worker-Shell run.
-# data.go.kr keys come in Encoding / Decoding forms; this probe passes the key via
-# the requests `params` dict (which single-encodes it — same as
-# providers/policy_briefing.py). If the gateway returns a service-key error, it
-# prints a one-line hint to try the OTHER key form. It does NOT loop / brute-force.
+# PHASE 1b FIX — CONFIRMED SPEC (from the official Swagger; Phase 1 500'd on
+# guessed params: we sent an 8-digit date, the API wants a 10-digit analysisTime).
+#   serviceKey  : issued key. Spec example marks it "인증키(URL Encode)" — the
+#                 ENCODING form. requests' params= dict would percent-encode it
+#                 AGAIN (double-encoding breaks it). So this probe implements TWO
+#                 modes and tries (a) then (b), printing which worked:
+#                   mode a — serviceKey appended PRE-ENCODED to the URL string
+#                            (NOT in params dict; no re-encoding).
+#                   mode b — serviceKey placed in the params dict (DECODING key;
+#                            requests encodes exactly once).
+#   analysisTime: YYYYMMDDHH (TEN digits, includes hour) e.g. 2021050614. Swept
+#                 across a few hours per recent date until items come back.
+#   maxResult   : 30.
+#   target      : analysis-target filter. pttn(일반민원) dfpt(고충민원)
+#                 saeol(수집민원) prpl(제안) qna(정책Q&A). Run TWICE per chosen
+#                 timestamp: ALL-types vs POLICY-LEANING (qna,prpl,dfpt) to see if
+#                 type-filtering yields cleaner policy keywords.
+#   dataType    : json.
+# Response schema (confirmed): body.items.item = list of objects with fields
+#   date, keyword, df, rank, prevRatio, prevDf.
 #
-# PARAM NAMES (honest discovery, not silent guessing)
-# ---------------------------------------------------
-# The exact date-param name for /minRisingKeyword5 is not certain from outside the
-# spec, so SECTION 1 TRIES a small bounded set of candidate names ONCE each against
-# the most-recent date and PRINTS which (if any) produced parseable items, plus the
-# raw response when none do — so the operator can correct the name. No retry-storm.
+# KEY HANDLING: read from env MINWON_API_KEY ONLY. NEVER hardcoded/printed/written.
+# Operator sets it inline for ONE Worker-Shell run. No retry-storm, no brute-force.
 #
 # STOP-FIRST: Phase 1 is this probe only. No provider, no integration.
 
@@ -37,6 +43,7 @@ import os
 import sys
 import time
 import json
+from urllib.parse import urlencode
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -50,27 +57,23 @@ HEADERS = {
     "Connection": "close",
 }
 
-# Base view per the dataset; the rising-keyword operation is appended.
 ENDPOINT_BASE = "https://apis.data.go.kr/1140100/minAnalsInfoView5"
 RISING_OP = "minRisingKeyword5"
 RISING_URL = f"{ENDPOINT_BASE}/{RISING_OP}"
 
-# Secondary op — "오늘의 민원 이슈" (today's civil-complaint issue, sentence-form).
-# Its exact path is NOT confirmed from outside the spec, so SECTION 1b best-effort
-# TRIES these candidate operation names ONCE on the most-recent date and reports
-# which (if any) responded. Focus stays on /minRisingKeyword5.
-SECONDARY_OP_CANDIDATES = [
-    "minTodayIssue5", "minTodayMinwonIssue5", "minIssueView5",
-    "minTodayKeyword5", "minToalIssue5",
-]
-
-# Candidate date-param names tried in SECTION 1 (printed, not silently guessed).
-CANDIDATE_DATE_PARAMS = ["target_date", "searchDt", "baseDt", "base_date", "stdDt", "regDt"]
-
 TIMEOUT_SECONDS = 10
-NUM_OF_ROWS = 50
-TOP_N_PER_DATE = 15
-N_DATES = 5  # most-recent N dates to scan (API may lag — a few may be empty)
+MAX_RESULT = 30          # spec param maxResult
+TOP_N = 30               # how many to display per target run
+RAW_SAMPLE = 15          # verbatim item dicts in the raw-sample section
+
+# analysisTime hour-sweep (YYYYMMDDHH). Civil-complaint aggregation updates a few
+# times a day; try a few hours per date, stop at the first non-empty.
+SWEEP_HOURS = ["23", "18", "12", "09"]
+N_DATES = 3              # most-recent N dates to sweep (yesterday back N)
+
+# The two target runs (★ the head-to-head this milestone exists to compare).
+TARGET_ALL = "pttn,dfpt,saeol,prpl,qna"     # all types, broadest
+TARGET_POLICY = "qna,prpl,dfpt"             # policy-leaning: 정책Q&A + 제안 + 고충민원
 
 # Korea Standard Time — complaints are KST-dated.
 _KST = timezone(timedelta(hours=9))
@@ -78,7 +81,7 @@ _KST = timezone(timedelta(hours=9))
 
 # Cron seed queries — COPIED read-only (do NOT import scheduler.py; it is pin-IN
 # for the 331/16 log pins). Authority for IN-SEED vs OUT-OF-SEED. Update this copy
-# if scheduler.DEFAULT_QUERIES changes. (Equal to DEFAULT_QUERIES at HEAD b1f172fb53.)
+# if scheduler.DEFAULT_QUERIES changes. (Equal to DEFAULT_QUERIES at HEAD 80577b62c4.)
 SEED_QUERIES = [
     "주택담보대출 규제",
     "스트레스 DSR 가계부채",
@@ -89,7 +92,7 @@ SEED_QUERIES = [
     "복지 예산",
 ]
 
-# Policy-relevance buckets (substring match). The economy/finance/housing/welfare/
+# Policy-relevance buckets (substring match) — economy/finance/housing/welfare/
 # tax/policy vocabulary our site actually verifies.
 _POLICY_MARKERS = (
     "대출", "금리", "DSR", "가계부채", "전세", "전세사기", "주택", "부동산", "주담대",
@@ -100,7 +103,7 @@ _POLICY_MARKERS = (
     "고용", "일자리", "최저임금", "임금체불", "노동", "건강보험", "국민연금",
 )
 
-# Daily-life civil-complaint buckets — the local-life noise we do NOT verify.
+# Daily-life civil-complaint buckets — local-life noise we do NOT verify.
 _DAILYLIFE_MARKERS = (
     "층간소음", "소음", "주차", "불법주정차", "주정차", "쓰레기", "포트홀", "악취",
     "가로등", "보도블록", "도로", "신호등", "횡단보도", "가로수", "반려동물", "유기견",
@@ -111,8 +114,8 @@ _DAILYLIFE_MARKERS = (
 
 
 def _classify(keyword, denylist):
-    """POLICY / DAILY_LIFE / PERSON / UNCLASSIFIED for one keyword. PERSON =
-    denylist (politician/election/obituary/securities/foreign) — defamation-risk."""
+    """POLICY / DAILY_LIFE / PERSON / UNCLASSIFIED. PERSON = denylist
+    (politician/election/obituary/securities/foreign) — defamation-risk."""
     k = keyword or ""
     if denylist and any(m in k for m in denylist):
         return "PERSON"
@@ -143,9 +146,9 @@ def _is_in_seed(keyword):
     return any(k in st or st in k for st in _SEED_TOKENS)
 
 
-# Optional denylist import (read-only) for the PERSON/NAME bucket. Degrades to a
-# note if unimportable; never reimplemented here.
 def _load_denylist():
+    """Read-only import for the PERSON/NAME bucket; degrades to a note if
+    unimportable; never reimplemented here."""
     try:
         from hot_topics import _DENYLIST as dl  # type: ignore
         return tuple(dl), "hot_topics._DENYLIST"
@@ -161,35 +164,45 @@ def _looks_like_key_error(text):
     """Service-key error signatures from data.go.kr (XML or JSON)."""
     t = (text or "").upper()
     return any(sig in t for sig in (
-        "SERVICE_KEY_IS_NOT_REGISTERED", "SERVICEKEY", "SERVICE KEY",
-        "NOT_REGISTERED", "UNREGISTERED", "등록되지 않은", "활용 신청",
-        "INVALID_REQUEST_PARAMETER_ERROR", "NO_OPENAPI_SERVICE_ERROR",
+        "SERVICE_KEY_IS_NOT_REGISTERED", "NOT_REGISTERED", "UNREGISTERED",
+        "등록되지 않은", "활용 신청", "SERVICEKEYANDDATA", "INVALID_KEY",
     )) or "REGISTERED" in t
 
 
-def _http_get(url, params):
-    """GET with browser UA + 10s timeout. Returns dict; never raises."""
+def _http_raw(url, params):
+    """GET with browser UA + 10s timeout. params may be None (mode a builds the
+    full URL itself). Returns a dict; never raises."""
     start = time.time()
     try:
         resp = requests.get(url, params=params, headers=HEADERS,
                             timeout=TIMEOUT_SECONDS, allow_redirects=True)
-        elapsed = time.time() - start
-        return {
-            "ok": True, "status": resp.status_code, "elapsed": elapsed,
-            "ctype": resp.headers.get("Content-Type", ""), "text": resp.text or "",
-        }
+        return {"ok": True, "status": resp.status_code, "elapsed": time.time() - start,
+                "ctype": resp.headers.get("Content-Type", ""), "text": resp.text or ""}
     except Exception as exc:
-        return {
-            "ok": False, "status": None, "elapsed": time.time() - start,
-            "ctype": "", "text": "", "error": "%s: %s" % (type(exc).__name__, str(exc)[:120]),
-        }
+        return {"ok": False, "status": None, "elapsed": time.time() - start, "ctype": "",
+                "text": "", "error": "%s: %s" % (type(exc).__name__, str(exc)[:120])}
+
+
+def _request(params_no_key, key, mode):
+    """serviceKey double-encoding guard.
+       mode 'a' — append PRE-ENCODED serviceKey to the URL string (not in params
+                  dict; other params url-encoded once). Use the ENCODING key.
+       mode 'b' — serviceKey in the params dict (requests encodes once). Use the
+                  DECODING key.
+    The same env value is tried both ways so the probe is robust to which form
+    the operator pasted."""
+    if mode == "a":
+        full = RISING_URL + "?serviceKey=" + key + "&" + urlencode(params_no_key)
+        return _http_raw(full, None)
+    merged = dict(params_no_key)
+    merged["serviceKey"] = key
+    return _http_raw(RISING_URL, merged)
 
 
 def _parse_items(text):
-    """Parse a data.go.kr response (JSON OR XML) into (result_code, result_msg,
-    [item dicts], kind). Each item dict = {field_tag: text}. Never raises."""
+    """Parse a data.go.kr response (JSON OR XML) into
+    (result_code, result_msg, [item dicts], kind). Never raises."""
     txt = (text or "").strip()
-    # Try JSON first (dataset is JSON+XML; we request type=json).
     try:
         data = json.loads(txt)
         resp = data.get("response", data) if isinstance(data, dict) else {}
@@ -212,23 +225,20 @@ def _parse_items(text):
         return rc, rm, out, "json"
     except Exception:
         pass
-    # Fall back to XML.
     try:
         import xml.etree.ElementTree as ET
         root = ET.fromstring(txt)
         header = root.find(".//header")
         rc = (header.findtext("resultCode") if header is not None else "") or ""
         rm = (header.findtext("resultMsg") if header is not None else "") or ""
-        # OpenAPI gateway error envelope (cmmMsgHeader) — no body/header pair.
-        if header is None:
+        if header is None:  # OpenAPI gateway error envelope (cmmMsgHeader)
             rc = root.findtext(".//returnReasonCode") or rc
             rm = root.findtext(".//returnAuthMsg") or root.findtext(".//errMsg") or rm
         out = []
         for item in root.findall(".//item"):
             d = {}
             for child in list(item):
-                tag = child.tag.split("}")[-1]
-                d[tag] = (child.text or "").strip()
+                d[child.tag.split("}")[-1]] = (child.text or "").strip()
             if d:
                 out.append(d)
         return rc.strip(), rm.strip(), out, "xml"
@@ -236,23 +246,47 @@ def _parse_items(text):
         return "", "PARSE_ERROR", [], "none"
 
 
-def _keyword_of(item):
-    """Best-effort: pull the keyword string out of an item dict whose schema we
-    don't know yet. Prefer a field whose tag looks keyword-ish; else the longest
-    Hangul-bearing value."""
-    if not item:
-        return ""
-    for k, v in item.items():
-        kl = k.lower()
-        if any(s in kl for s in ("keyword", "word", "sword", "rising", "issue", "kwrd")):
-            if v:
-                return v
-    # fallback: longest value that contains Hangul
-    best = ""
-    for v in item.values():
-        if any("가" <= ch <= "힣" for ch in v) and len(v) > len(best):
-            best = v
-    return best
+def _fetch(analysis_time, target, key, mode):
+    """One /minRisingKeyword5 call. Returns a normalized result dict."""
+    params_no_key = {
+        "analysisTime": analysis_time,
+        "maxResult": MAX_RESULT,
+        "target": target,
+        "dataType": "json",
+    }
+    r = _request(params_no_key, key, mode)
+    if not r["ok"]:
+        return {"status": None, "elapsed": r["elapsed"], "ctype": "", "rc": "", "rm": "",
+                "items": [], "kind": "none", "keyerr": False, "text": "", "error": r.get("error")}
+    rc, rm, items, kind = _parse_items(r["text"])
+    return {"status": r["status"], "elapsed": r["elapsed"], "ctype": r["ctype"], "rc": rc,
+            "rm": rm, "items": items, "kind": kind, "keyerr": _looks_like_key_error(r["text"]),
+            "text": r["text"], "error": None}
+
+
+def _kw_row(item):
+    """Confirmed schema accessor: (keyword, df, rank, prevRatio)."""
+    return (item.get("keyword", ""), item.get("df", ""),
+            item.get("rank", ""), item.get("prevRatio", ""))
+
+
+def _bucket_report(label, items, denylist):
+    """Print POLICY/DAILY_LIFE/PERSON/UNCLASSIFIED for one target run; return
+    (policy_count, total, out_of_seed_policy_list)."""
+    distinct = sorted({(it.get("keyword") or "") for it in items} - {""})
+    buckets = {"POLICY": [], "DAILY_LIFE": [], "PERSON": [], "UNCLASSIFIED": []}
+    for k in distinct:
+        buckets[_classify(k, denylist)].append(k)
+    total = len(distinct)
+    pol = len(buckets["POLICY"])
+    pol_pct = (100.0 * pol / total) if total else 0.0
+    print("  [%s] distinct keywords: %d" % (label, total))
+    for b in ("POLICY", "DAILY_LIFE", "PERSON", "UNCLASSIFIED"):
+        lst = buckets[b]
+        print("    %-13s (%d): %s" % (b, len(lst), ", ".join(lst[:30]) if lst else "(none)"))
+    print("    >>> POLICY-RELEVANT: %d/%d (%.0f%%)" % (pol, total, pol_pct))
+    out_policy = [k for k in buckets["POLICY"] if not _is_in_seed(k)]
+    return pol, total, pol_pct, out_policy
 
 
 def main():
@@ -266,189 +300,170 @@ def main():
 
     denylist, denylist_src = _load_denylist()
 
-    # Recent dates in KST (yesterday back N), YYYYMMDD. The API may lag a day or
-    # two, so several recent dates are tried.
     today_kst = datetime.now(_KST).date()
     dates = [(today_kst - timedelta(days=d)).strftime("%Y%m%d") for d in range(1, N_DATES + 1)]
 
     print("=" * 80)
-    print("MINWON-PROBE Phase 1 — ACRC rising-keyword API probe (READ-ONLY, throwaway)")
+    print("MINWON-PROBE Phase 1b — ACRC rising-keyword API probe (READ-ONLY, throwaway)")
     print("=" * 80)
     print("endpoint :", RISING_URL)
-    print("op       :", RISING_OP, "(dataset 15101903 / org 1140100 / minAnalsInfoView5)")
+    print("params   : serviceKey(dual-mode), analysisTime=YYYYMMDDHH, maxResult=%d, target, dataType=json"
+          % MAX_RESULT)
     print("key      : present (read from MINWON_API_KEY; never printed)")
-    print("dates    :", ", ".join(dates), "(KST, yesterday back %d)" % N_DATES)
-    print("denylist : %s (%d markers) for PERSON/NAME bucket" % (denylist_src, len(denylist)))
+    print("dates    :", ", ".join(dates), "(KST) x hours", SWEEP_HOURS)
+    print("targets  : ALL=%r  vs  POLICY-LEANING=%r" % (TARGET_ALL, TARGET_POLICY))
+    print("denylist : %s (%d markers)" % (denylist_src, len(denylist)))
     print()
 
-    # ---- SECTION 1: CONNECTION / GATEWAY CHECK + date-param discovery -------
+    # ---- SECTION 1: CONNECTION / GATEWAY CHECK ----------------------------
+    # Resolve serviceKey mode (a then b) on the first timestamp, then hour-sweep
+    # the recent dates with the broad target to find a non-empty timestamp.
     print("=== 1. CONNECTION / GATEWAY CHECK ===")
-    base_params = {"serviceKey": api_key, "pageNo": 1, "numOfRows": NUM_OF_ROWS, "type": "json"}
-    probe_date = dates[0]
-    working_param = None
+    working_mode = None
     key_error_seen = False
-
-    print("  (1a) date-param discovery on %s — trying candidate names once each:" % probe_date)
-    discovery_raw = {}  # param -> raw text (for printing if none work)
-    for pname in CANDIDATE_DATE_PARAMS:
-        params = dict(base_params)
-        params[pname] = probe_date
-        r = _http_get(RISING_URL, params)
-        if not r["ok"]:
-            print("    %-12s -> TRANSPORT ERROR %s" % (pname, r.get("error")))
+    first_at = dates[0] + SWEEP_HOURS[0]
+    print("  (1a) serviceKey mode resolution on analysisTime=%s, target=ALL:" % first_at)
+    for mode in ("a", "b"):
+        f = _fetch(first_at, TARGET_ALL, api_key, mode)
+        desc = ("a=URL-appended (ENCODING key)" if mode == "a"
+                else "b=params-dict (DECODING key)")
+        if f["error"]:
+            print("    mode %s [%s] -> TRANSPORT ERROR %s" % (mode, desc, f["error"]))
             continue
-        rc, rm, items, kind = _parse_items(r["text"])
-        if _looks_like_key_error(r["text"]):
+        print("    mode %s [%s] -> HTTP %s  %.2fs  parse=%s  rc=%r  rm=%r  items=%d%s"
+              % (mode, desc, f["status"], f["elapsed"], f["kind"], f["rc"], f["rm"][:36],
+                 len(f["items"]), "  [KEY-ERROR?]" if f["keyerr"] else ""))
+        if f["keyerr"]:
             key_error_seen = True
-        n = len(items)
-        print("    %-12s -> HTTP %s  %.2fs  parse=%s  resultCode=%r resultMsg=%r  items=%d"
-              % (pname, r["status"], r["elapsed"], kind, rc, rm[:40], n))
-        discovery_raw[pname] = r["text"]
-        if n > 0 and working_param is None:
-            working_param = pname
-            break  # first param name that yields items wins; stop (no brute-force)
-
-    if working_param:
-        print("  => WORKING date-param: %r" % working_param)
+        if f["kind"] != "none" and not f["keyerr"] and (len(f["items"]) > 0 or f["rm"] == "NORMAL SERVICE."):
+            working_mode = mode
+            break
+    if working_mode:
+        print("  => WORKING serviceKey mode: %r" % working_mode)
     else:
-        print("  => NO candidate date-param produced items. Raw response (first 600 chars)")
-        print("     of the FIRST attempt — inspect for the real param name / error:")
-        if discovery_raw:
-            first_txt = next(iter(discovery_raw.values()))
-            print("     " + " ".join(first_txt[:600].split()))
+        print("  => neither mode cleanly succeeded on the first timestamp.")
         if key_error_seen:
-            print("  !! SERVICE-KEY ERROR detected. data.go.kr keys have TWO forms:")
-            print("     try the OTHER form (Encoding <-> Decoding) of MINWON_API_KEY. Do NOT loop.")
+            print("  !! SERVICE-KEY ERROR. Try the OTHER key form (Encoding <-> Decoding) in")
+            print("     MINWON_API_KEY. mode a expects the ENCODING form; mode b the DECODING")
+            print("     form. Do NOT loop. (Proceeding with mode 'b' for the rest, best-effort.)")
+        working_mode = working_mode or "b"
 
-    # Per-date status table using the working param (or the first candidate if none
-    # worked, so the table still shows gateway behaviour per date).
-    use_param = working_param or CANDIDATE_DATE_PARAMS[0]
-    print("\n  (1b) per-date gateway behaviour (param=%r):" % use_param)
-    per_date_items = {}
+    # Hour-sweep with the broad target to find a non-empty (date,hour).
+    print("\n  (1b) hour-sweep (mode=%r, target=ALL) until items appear per date:" % working_mode)
+    chosen_at = None
     for d in dates:
-        params = dict(base_params)
-        params[use_param] = d
-        r = _http_get(RISING_URL, params)
-        if not r["ok"]:
-            print("    %s -> TRANSPORT ERROR %s" % (d, r.get("error")))
-            per_date_items[d] = []
-            continue
-        rc, rm, items, kind = _parse_items(r["text"])
-        per_date_items[d] = items
-        flag = ""
-        if _looks_like_key_error(r["text"]):
-            flag = "  [KEY-ERROR?]"
-        print("    %s -> HTTP %s  %.2fs  ctype=%s  parse=%s  rc=%r  items=%d%s"
-              % (d, r["status"], r["elapsed"], (r["ctype"] or "")[:24], kind, rc, len(items), flag))
-    print()
-
-    # ---- SECTION 1b: secondary "오늘의 민원 이슈" op discovery (best-effort) --
-    print("=== 1c. SECONDARY OP DISCOVERY — '오늘의 민원 이슈' (best-effort) ===")
-    print("  exact path unknown from outside spec; trying candidate op names once on %s:" % probe_date)
-    secondary_found = None
-    for op in SECONDARY_OP_CANDIDATES:
-        url = f"{ENDPOINT_BASE}/{op}"
-        params = dict(base_params)
-        params[use_param] = probe_date
-        r = _http_get(url, params)
-        if not r["ok"]:
-            print("    %-22s -> TRANSPORT ERROR %s" % (op, r.get("error")))
-            continue
-        rc, rm, items, kind = _parse_items(r["text"])
-        no_svc = "NO_OPENAPI_SERVICE" in (r["text"] or "").upper()
-        print("    %-22s -> HTTP %s  parse=%s  rc=%r  items=%d%s"
-              % (op, r["status"], kind, rc, len(items), "  [no such service]" if no_svc else ""))
-        if len(items) > 0 and secondary_found is None:
-            secondary_found = op
-    if secondary_found:
-        print("  => secondary op responding with items: %r" % secondary_found)
+        for h in SWEEP_HOURS:
+            at = d + h
+            f = _fetch(at, TARGET_ALL, api_key, working_mode)
+            if f["error"]:
+                print("    %s -> TRANSPORT ERROR %s" % (at, f["error"]))
+                continue
+            print("    %s -> HTTP %s  %.2fs  ctype=%s  parse=%s  rc=%r  rm=%r  items=%d"
+                  % (at, f["status"], f["elapsed"], (f["ctype"] or "")[:22], f["kind"],
+                     f["rc"], f["rm"][:28], len(f["items"])))
+            if f["keyerr"]:
+                key_error_seen = True
+            if len(f["items"]) > 0:
+                chosen_at = at
+                break
+        if chosen_at:
+            break
+    if chosen_at:
+        print("  => chosen analysisTime for the head-to-head: %s" % chosen_at)
     else:
-        print("  => no secondary 'today issue' op resolved from the candidate list above.")
-        print("     (Operator: confirm the exact op path in the dataset Swagger if this matters.)")
+        print("  => no timestamp returned items. Sections 2-6 will be empty; check key/spec above.")
     print()
 
-    # Gather all keywords across dates for sections 2-5.
-    first_good_date = next((d for d in dates if per_date_items.get(d)), None)
+    # Run the two target sets on the SAME chosen timestamp (fair comparison).
+    run_all = _fetch(chosen_at, TARGET_ALL, api_key, working_mode) if chosen_at else None
+    run_pol = _fetch(chosen_at, TARGET_POLICY, api_key, working_mode) if chosen_at else None
+    items_all = run_all["items"] if run_all else []
+    items_pol = run_pol["items"] if run_pol else []
 
     # ---- SECTION 2: RAW RESPONSE SAMPLE -----------------------------------
-    print("=== 2. RAW RESPONSE SAMPLE (one successful date, verbatim items) ===")
-    if first_good_date:
-        print("  date=%s — first %d item dicts (full field set, so the schema is visible):"
-              % (first_good_date, TOP_N_PER_DATE))
-        for i, it in enumerate(per_date_items[first_good_date][:TOP_N_PER_DATE]):
+    print("=== 2. RAW RESPONSE SAMPLE (verbatim item objects, so schema is visible) ===")
+    if items_all:
+        print("  analysisTime=%s target=ALL — first %d items:" % (chosen_at, RAW_SAMPLE))
+        for i, it in enumerate(items_all[:RAW_SAMPLE]):
             print("    [%2d] %s" % (i, it))
     else:
-        print("  (no date returned items — cannot sample schema. See Section 1 raw output.)")
+        print("  (no items on the chosen timestamp for target=ALL — see Section 1.)")
     print()
 
-    # ---- SECTION 3: RISING KEYWORDS BY DATE -------------------------------
-    print("=== 3. RISING KEYWORDS BY DATE (top %d per date) ===" % TOP_N_PER_DATE)
-    all_keywords = []  # (date, keyword)
-    for d in dates:
-        items = per_date_items.get(d) or []
-        kws = [_keyword_of(it) for it in items]
-        kws = [k for k in kws if k]
-        for k in kws:
-            all_keywords.append((d, k))
-        shown = kws[:TOP_N_PER_DATE]
-        print("  %s (%d kw): %s" % (d, len(kws), ", ".join(shown) if shown else "(none)"))
+    # ---- SECTION 3: RISING KEYWORDS (two target runs) ---------------------
+    print("=== 3. RISING KEYWORDS — top %d (keyword | df | rank | prevRatio) ===" % TOP_N)
+    for label, run, items in (("ALL-types", run_all, items_all),
+                              ("POLICY-leaning", run_pol, items_pol)):
+        hdr = "rc=%r rm=%r" % (run["rc"], run["rm"]) if run else "no run"
+        print("  --- target=%s  (%s)  count=%d ---" % (label, hdr, len(items)))
+        if not items:
+            print("    (none)")
+            continue
+        for it in items[:TOP_N]:
+            kw, df, rank, pr = _kw_row(it)
+            print("    %-20s df=%-6s rank=%-4s prevRatio=%s" % (kw[:20], df, rank, pr))
     print()
 
-    # ---- SECTION 4: POLICY-FIT CLASSIFICATION (the key measurement) -------
-    print("=== 4. POLICY-FIT CLASSIFICATION (across all returned keywords) ===")
-    distinct_kw = sorted({k for _, k in all_keywords})
-    buckets = {"POLICY": [], "DAILY_LIFE": [], "PERSON": [], "UNCLASSIFIED": []}
-    for k in distinct_kw:
-        buckets[_classify(k, denylist)].append(k)
-    total = len(distinct_kw)
-    print("  distinct keywords across all dates:", total)
-    for label in ("POLICY", "DAILY_LIFE", "PERSON", "UNCLASSIFIED"):
-        lst = buckets[label]
-        print("  %-13s (%d): %s" % (label, len(lst), ", ".join(lst[:30]) if lst else "(none)"))
-    pol = len(buckets["POLICY"])
-    pol_pct = (100.0 * pol / total) if total else 0.0
-    print("  >>> POLICY-RELEVANT: %d of %d distinct keywords (%.0f%%)" % (pol, total, pol_pct))
-    print("  (UNCLASSIFIED = neither policy nor known daily-life marker; operator eyeballs.)")
+    # ---- SECTION 4: POLICY-FIT (per target run) ---------------------------
+    print("=== 4. POLICY-FIT CLASSIFICATION (all-types vs policy-leaning) ===")
+    pol_all = pol_polrun = None
+    out_policy_all = out_policy_pol = []
+    if items_all or items_pol:
+        pol_a, tot_a, pct_a, out_policy_all = _bucket_report("ALL-types", items_all, denylist)
+        pol_p, tot_p, pct_p, out_policy_pol = _bucket_report("POLICY-leaning", items_pol, denylist)
+        pol_all, pol_polrun = pct_a, pct_p
+        improved = (pct_p - pct_a)
+        print("  >>> target-filter effect: policy %% ALL=%.0f%% -> POLICY-leaning=%.0f%%  (%+.0f pts)"
+              % (pct_a, pct_p, improved))
+    else:
+        print("  (no items to classify.)")
     print()
 
-    # ---- SECTION 5: OVERLAP WITH OUR SEEDS --------------------------------
+    # ---- SECTION 5: OVERLAP WITH SEEDS (per target run) -------------------
     print("=== 5. OVERLAP WITH OUR CRON SEEDS ===")
-    in_seed = [k for k in distinct_kw if _is_in_seed(k)]
-    out_seed = [k for k in distinct_kw if not _is_in_seed(k)]
-    out_policy = [k for k in out_seed if _classify(k, denylist) == "POLICY"]
-    print("  IN-SEED  (already covered by DEFAULT_QUERIES): %d" % len(in_seed))
-    print("    " + (", ".join(in_seed[:30]) if in_seed else "(none)"))
-    print("  OUT-OF-SEED (potential NEW signal): %d" % len(out_seed))
-    print("    " + (", ".join(out_seed[:30]) if out_seed else "(none)"))
-    print("  OUT-OF-SEED AND POLICY-RELEVANT: %d" % len(out_policy))
-    print("    " + (", ".join(out_policy[:30]) if out_policy else "(none)"))
+    for label, items, out_policy in (("ALL-types", items_all, out_policy_all),
+                                     ("POLICY-leaning", items_pol, out_policy_pol)):
+        distinct = sorted({(it.get("keyword") or "") for it in items} - {""})
+        in_seed = [k for k in distinct if _is_in_seed(k)]
+        out_seed = [k for k in distinct if not _is_in_seed(k)]
+        print("  --- target=%s ---" % label)
+        print("    IN-SEED (%d): %s" % (len(in_seed), ", ".join(in_seed[:30]) if in_seed else "(none)"))
+        print("    OUT-OF-SEED (%d): %s" % (len(out_seed), ", ".join(out_seed[:30]) if out_seed else "(none)"))
+        print("    OUT-OF-SEED AND POLICY-RELEVANT (%d): %s"
+              % (len(out_policy), ", ".join(out_policy[:30]) if out_policy else "(none)"))
     print()
 
     # ---- SECTION 6: VERDICT -----------------------------------------------
     print("=== 6. VERDICT ===")
-    dates_with_items = sum(1 for d in dates if per_date_items.get(d))
-    stable = dates_with_items >= max(1, N_DATES // 2) and not key_error_seen
-    print("  (a) GATEWAY: %d/%d dates returned parseable items; key-error seen=%s -> %s"
-          % (dates_with_items, N_DATES, key_error_seen,
-             "looks STABLE" if stable else "UNSTABLE / needs key-form or param fix"))
-    print("  (b) CONTENT FIT: %d/%d distinct keywords policy-relevant (%.0f%%)"
-          % (pol, total, pol_pct))
-    print("  (c) NEW SIGNAL — POLICY-RELEVANT-and-OUT-OF-SEED keyword count = %d  <<< headline"
-          % len(out_policy))
-    if total == 0:
-        verdict = "INCONCLUSIVE — no items parsed (fix param name / key form, then re-run)."
+    stable = bool(chosen_at) and not key_error_seen
+    headline = len(out_policy_pol) if out_policy_pol else len(out_policy_all)
+    print("  (a) GATEWAY: chosen_at=%s  key-error-seen=%s  serviceKey-mode=%r -> %s"
+          % (chosen_at, key_error_seen, working_mode,
+             "looks STABLE" if stable else "UNSTABLE / fix key-form or spec"))
+    if pol_all is not None:
+        print("  (b) CONTENT FIT: policy%% ALL=%.0f%%  POLICY-leaning=%.0f%%  (filter %+.0f pts)"
+              % (pol_all, pol_polrun, pol_polrun - pol_all))
+    else:
+        print("  (b) CONTENT FIT: no items parsed.")
+    print("  (c) NEW SIGNAL — POLICY-AND-OUT-OF-SEED count = %d  <<< headline" % headline)
+    if not chosen_at:
+        verdict = "INCONCLUSIVE — no items parsed (fix key form / spec, then re-run)."
     elif not stable:
-        verdict = "MARGINAL/UNUSABLE on stability — resolve gateway/key/param first."
-    elif pol_pct < 25:
+        verdict = "MARGINAL/UNUSABLE on stability — resolve gateway/key first."
+    elif (pol_polrun or 0) < 25 and (pol_all or 0) < 25:
         verdict = ("UNUSABLE on content — dominated by daily-life complaint noise; "
-                   "policy share too low for our hot-topic engine.")
-    elif len(out_policy) == 0:
+                   "policy share too low even with the policy-leaning target filter.")
+    elif headline == 0:
         verdict = ("MARGINAL — policy terms appear but none beyond our existing seeds; "
                    "little NEW signal over what the cron already collects.")
     else:
         verdict = ("PROMISING — stable gateway, real policy share, and %d out-of-seed "
                    "policy term(s). A provider MAY be worth building (behind the PERSON/"
-                   "NAME denylist filter)." % len(out_policy))
+                   "NAME denylist filter)." % headline)
+    if pol_all is not None and (pol_polrun - pol_all) >= 10:
+        verdict += " Target-filtering MEANINGFULLY improves the policy ratio (use qna,prpl,dfpt)."
+    elif pol_all is not None:
+        verdict += " Target-filtering does NOT meaningfully change the policy ratio."
     print("  PLAIN READ:", verdict)
     print()
     print("[Safety] READ-ONLY throwaway probe — outbound HTTPS only; no DB, no writes, "
