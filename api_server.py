@@ -262,11 +262,7 @@ def health_queue() -> dict:
         }
 
 
-@app.post(
-    "/analyze",
-    response_model=AnalyzeResponse,
-    dependencies=[Depends(analyze_rate_limiter)],
-)
+@app.post("/analyze", response_model=AnalyzeResponse, dependencies=[Depends(analyze_rate_limiter)])
 def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
     query = (request.query or "").strip()
     if not query:
@@ -751,11 +747,7 @@ async def _execute_job(job_id: str, query: str, max_news: int, timeout_seconds: 
             logger.exception("Failed to record job failure: id=%s", job_id)
 
 
-@app.post(
-    "/jobs/analyze",
-    response_model=JobStatusResponse,
-    dependencies=[Depends(analyze_rate_limiter)],
-)
+@app.post("/jobs/analyze", response_model=JobStatusResponse, dependencies=[Depends(analyze_rate_limiter)])
 async def jobs_analyze(request: JobCreateRequest) -> JobStatusResponse:
     query = (request.query or "").strip()
     if not query:
@@ -931,12 +923,7 @@ def _v2_serialize_job_status(payload: dict) -> dict:
     }
 
 
-@app.post(
-    "/v2/analyze",
-    response_model=V2AnalyzeResponse,
-    status_code=202,
-    dependencies=[Depends(analyze_rate_limiter)],
-)
+@app.post("/v2/analyze", response_model=V2AnalyzeResponse, status_code=202, dependencies=[Depends(analyze_rate_limiter)])
 def v2_analyze(request: AnalyzeRequest) -> V2AnalyzeResponse:
     """Enqueue an analysis job and return immediately with a job_id.
 
