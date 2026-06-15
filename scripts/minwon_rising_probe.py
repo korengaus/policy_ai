@@ -124,13 +124,23 @@ _DAILYLIFE_MARKERS = (
 
 def _classify(keyword, denylist):
     """POLICY / DAILY_LIFE / PERSON / UNCLASSIFIED. PERSON = denylist
-    (politician/election/obituary/securities/foreign) — defamation-risk."""
+    (politician/election/obituary/securities/foreign) — defamation-risk.
+
+    Phase 1d: ACRC keywords are often underscore-compound (e.g. '건강보험료_조정',
+    '불법주정차_단속'), so markers are tested against the WHOLE keyword AND each
+    underscore-split token, so a policy/daily token inside a compound still
+    counts."""
     k = keyword or ""
-    if denylist and any(m in k for m in denylist):
+    parts = [k] + [p for p in k.split("_") if p and p != k]
+
+    def any_marker(markers):
+        return any(m in p for m in markers for p in parts)
+
+    if denylist and any_marker(denylist):
         return "PERSON"
-    if any(m in k for m in _POLICY_MARKERS):
+    if any_marker(_POLICY_MARKERS):
         return "POLICY"
-    if any(m in k for m in _DAILYLIFE_MARKERS):
+    if any_marker(_DAILYLIFE_MARKERS):
         return "DAILY_LIFE"
     return "UNCLASSIFIED"
 
@@ -224,6 +234,16 @@ def _find_items(data):
     items/item. Returns ([], 'none') when nothing matches."""
     if not isinstance(data, dict):
         return [], "none"
+    # Phase 1d: this ACRC API returns its rows under a NON-STANDARD top-level
+    # "returnObject" array (NOT body.items.item). Try it FIRST. Also handle a
+    # single-dict value and a response.returnObject nesting, for safety.
+    for prefix, root in (("", data), ("response.", data.get("response"))):
+        if isinstance(root, dict) and "returnObject" in root:
+            ro = root["returnObject"]
+            if isinstance(ro, list):
+                return _aslist(ro), prefix + "returnObject[list]"
+            if isinstance(ro, dict):
+                return _aslist(ro), prefix + "returnObject[dict]"
     roots = []
     resp = data.get("response")
     if isinstance(resp, dict):
@@ -361,7 +381,7 @@ def main():
     dates = [(today_kst - timedelta(days=d)).strftime("%Y%m%d") for d in range(1, N_DATES + 1)]
 
     print("=" * 80)
-    print("MINWON-PROBE Phase 1b — ACRC rising-keyword API probe (READ-ONLY, throwaway)")
+    print("MINWON-PROBE Phase 1d — ACRC rising-keyword API probe (READ-ONLY, throwaway)")
     print("=" * 80)
     print("endpoint :", RISING_URL)
     print("params   : serviceKey(dual-mode), analysisTime=YYYYMMDDHH, maxResult=%d, target, dataType=json"
