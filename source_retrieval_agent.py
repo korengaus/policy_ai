@@ -316,27 +316,16 @@ def create_source_candidates(
             }
         )
 
-        claim_query = " ".join(_keywords_from_claim(claim)[:5]) or original_query
-        for source in (official_source_candidates or [])[:5]:
-            source_candidates.append(
-                {
-                    "source_id": _source_id(
-                        str(index),
-                        source.get("source_name") or "",
-                        source.get("official_search_url") or "",
-                    ),
-                    "claim_index": index,
-                    "title": source.get("source_name") or "",
-                    "url": source.get("official_search_url") or "",
-                    "publisher": source.get("source_name") or "",
-                    "source_type": _official_source_type(source.get("source_type") or ""),
-                    "retrieval_method": "official_search_url_candidate",
-                    "query_used": claim_query,
-                    "purpose": "primary_source",
-                    "raw_text_available": False,
-                    "retrieved_at": retrieved_at,
-                }
-            )
+        # ASSEMBLY-SKIP (SIX Phase 5): we no longer mint a bodyless
+        # "official_search_url_candidate" per (claim x recommended institution).
+        # Those candidates carried title=institution name, url=.../search.do?query=...,
+        # raw_text_available=False, body len 0 -> they can NEVER match
+        # (official_body_match=False) yet were spammed across hundreds of claims
+        # (one institution attached to 219 distinct claims) and falsely advertised
+        # "공식 후보 있음". Excluding them at assembly is removal-free (no stored data
+        # deleted), leaves the matcher / Lane-A crawl / Lane-B (no primary-doc marker)
+        # untouched, and does not move policy_confidence_score (built from the
+        # separate Lane-A official_evidence_results, not these candidates).
 
     # M14.0-print-a (2026-05-26): print → log.info conversion.
     log.info(
