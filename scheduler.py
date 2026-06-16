@@ -24,6 +24,11 @@ DEFAULT_QUERIES = [
     "양도세 세제 개편",
     "소상공인 지원",
     "복지 예산",
+    # WELFARE-SEED — welfare-domain expansion (program-level; one domain at a time)
+    "기초생활보장",
+    "노인 돌봄",
+    "장애인 지원",
+    "아동수당",
 ]
 
 
