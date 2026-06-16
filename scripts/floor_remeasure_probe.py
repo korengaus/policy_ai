@@ -20,23 +20,35 @@
 #   print an overlap HINT but labels it "HINT — human confirms" and never treats
 #   it as the answer.
 #
+# PERFORMANCE (Phase 3-DIAG-fix)
+# ------------------------------
+# The first run HUNG (not a loop — pure slowness): PART B recomputed
+# _sentence_match_score over 203 floor rows x candidates x sentences, and
+# sanitize_text/repair_mojibake per token is too slow on the 1-CPU Worker Shell.
+# This version: (1) SAMPLES the first FLOOR_SAMPLE_N floor rows for PART B/C
+# (PART A still counts the FULL corpus); (2) PREFERS the persisted ②
+# official_evidence_score / official_matched_sentences[0] off the candidate dict,
+# recomputing via _sentence_match_score ONLY when the stored score is absent; and
+# (3) CAPS any unavoidable recompute to RECOMPUTE_SENTENCE_CAP sentences and
+# MAX_CANDS_PER_ROW candidates. ②'s url menu-fix changes classification only, not
+# the stored official_evidence_score, so the stored score stays valid here.
+#
 # FLOOR DEFINITION (confirmed against policy_confidence.calculate_policy_confidence)
 # --------------------------------------------------------------------------------
 # The no-usable-official-doc / no-strong-Lane-B branch clamps
 # policy_confidence_score = min(20, ...) AND sets verification_strength = "none"
 # (policy_confidence.py:185-186). A row is treated as AT THE FLOOR when its stored
 # policy_confidence_score <= FLOOR_MAX (20). verification_strength is also read and
-# reported for transparency (the clamp branch is the only one forcing "none" at a
-# clamped 20). This mirrors fss_match_probe's pcs read.
+# reported for transparency. This mirrors fss_match_probe's pcs read.
 #
 # PART A — corpus + M37-style funnel (candidates -> body>=300 -> scored>0 ->
 #          medium>=55 -> strong>=75), with M37's 183->111->101->18->0 alongside.
-# PART B — per floor row, best official candidate + FALL-REASON bucket (i)-(v);
-#          bucket (iii) HUMAN-READ blocks; josa-effect count.
+# PART B — per SAMPLED floor row, best official candidate + FALL-REASON bucket
+#          (i)-(v); bucket (iii) HUMAN-READ blocks; josa-effect count.
 # PART C — bucket (iii) threshold sensitivity 50/52/55 (no-josa, production) AND
 #          a josa-tokenizer counterfactual (② math recomputed with ③'s josa
-#          tokenizer), cross-tabbed vs the human (a)/(b) placeholder. SENSITIVITY
-#          ONLY — no production threshold/tokenizer changed.
+#          tokenizer), cross-tabbed vs the human (a)/(b) placeholder, plus the
+#          local-replica self-check. SENSITIVITY ONLY — no production change.
 
 import os
 import re
@@ -84,7 +96,14 @@ FLOOR_MAX = 20
 MEDIUM_SCORE_BAR = 55
 STRONG_SCORE_BAR = 75
 HAS_BODY_MIN_CHARS = 300
-SENTENCE_CAP = 80
+
+# --- performance bounds (Phase 3-DIAG-fix) ---------------------------------
+# PART B/C process only the first FLOOR_SAMPLE_N floor rows; PART A counts ALL.
+FLOOR_SAMPLE_N = 40
+# When recompute is unavoidable (stored ② score absent), cap the sentence loop.
+RECOMPUTE_SENTENCE_CAP = 30
+# Cap official candidates inspected per floor row.
+MAX_CANDS_PER_ROW = 8
 
 # Markers (provider = candidate provenance).
 PB_MARKER = "policy_briefing_news_item_id"
@@ -142,13 +161,9 @@ def _claim_for(item, claims):
     return {}, ci
 
 
-def _body_title_url(item):
-    """Mirror _resolve_source's body/title/url selection EXACTLY (read-only)."""
-    raw = item.get("official_body_text") or item.get("body_text") or item.get("raw_text") or ""
-    body_text = sanitize_text(raw)
-    title = item.get("title") or item.get("official_detail_title") or ""
-    url = item.get("official_detail_url") or item.get("official_body_url") or item.get("url") or ""
-    return body_text, sanitize_text(title), title, url
+def _raw_body(item):
+    """Mirror _resolve_source's body selection (read-only)."""
+    return sanitize_text(item.get("official_body_text") or item.get("body_text") or item.get("raw_text") or "")
 
 
 def _local_sentence_score(claim_text, sentence, source_title, tokenizer):
@@ -175,14 +190,12 @@ def _local_sentence_score(claim_text, sentence, source_title, tokenizer):
     return final
 
 
-def _recompute_candidate(item, claim):
-    """Re-run ② from raw_text EXACTLY as _resolve_source (no I/O). Returns the
-    authoritative ② best score (via real _sentence_match_score), the local-oer
-    replica best (self-check), the josa-replica best (counterfactual), plus gates."""
-    body_text, source_title, title, url = _body_title_url(item)
-    claim_text = _claim_text(claim)
-    sentences = _split_sentences(body_text)[:SENTENCE_CAP]
-
+def _capped_recompute_scores(body_text, source_title, claim, claim_text, *, need_josa):
+    """The SLOW path, CAPPED to RECOMPUTE_SENTENCE_CAP sentences. Returns
+    (real_best, real_best_sentence, oer_local_best, josa_best, n_sentences).
+    real_best uses the authoritative _sentence_match_score; oer_local_best/josa_best
+    use the local tokenizer-swap replica (computed only when need_josa)."""
+    sentences = _split_sentences(body_text)[:RECOMPUTE_SENTENCE_CAP]
     real_best = 0
     real_best_sentence = ""
     oer_local_best = 0
@@ -192,54 +205,97 @@ def _recompute_candidate(item, claim):
         if real > real_best:
             real_best = real
             real_best_sentence = sanitize_text(s)
-        ol = _local_sentence_score(claim_text, s, source_title, oer_tokens)
-        if ol > oer_local_best:
-            oer_local_best = ol
-        jl = _local_sentence_score(claim_text, s, source_title, osb_tokens)
-        if jl > josa_best:
-            josa_best = jl
+        if need_josa:
+            ol = _local_sentence_score(claim_text, s, source_title, oer_tokens)
+            if ol > oer_local_best:
+                oer_local_best = ol
+            jl = _local_sentence_score(claim_text, s, source_title, osb_tokens)
+            if jl > josa_best:
+                josa_best = jl
+    return real_best, real_best_sentence, oer_local_best, josa_best, len(sentences)
 
-    has_body = bool(body_text and len(body_text) >= HAS_BODY_MIN_CHARS)
+
+def _read_candidate(item, claim, *, need_detail=False):
+    """STORED-PREFERRED candidate read (fast path). Reads the persisted ②
+    official_evidence_score / official_matched_sentences[0] off the candidate dict
+    (mirrors fss_matcher_falpoint_probe); recomputes via _sentence_match_score ONLY
+    when the stored score is ABSENT, and then capped. url/has_body gates are cheap.
+    Detail fields (body text, token overlap, ③ josa) computed only when need_detail."""
+    claim_text = _claim_text(claim)
+    title = item.get("title") or item.get("official_detail_title") or ""
+    source_title = sanitize_text(title)
+    url = item.get("official_detail_url") or item.get("official_body_url") or item.get("url") or ""
     url_status = score_official_url(url, title).get("official_url_resolution_status")
     url_ok = url_status != "weak_or_search_page"
-    classification = _classify_official_evidence(real_best, has_body, url_status)
+
+    if "official_body_length" in item:
+        body_len = int(item.get("official_body_length") or 0)
+    else:
+        body_len = len(_raw_body(item))
+    has_body = body_len >= HAS_BODY_MIN_CHARS
+
+    if "official_evidence_score" in item:
+        score_source = "stored"
+        real_score = int(item.get("official_evidence_score") or 0)
+        oms = item.get("official_matched_sentences") or []
+        real_best_sentence = sanitize_text(oms[0].get("sentence") or "") if (oms and _is_dict(oms[0])) else ""
+    else:
+        score_source = "recomputed"
+        real_score, real_best_sentence, _ol, _jl, _sy = _capped_recompute_scores(
+            _raw_body(item), source_title, claim, claim_text, need_josa=False
+        )
+
+    classification = _classify_official_evidence(real_score, has_body, url_status)
     match = classification in {"strong_official_direct_support", "medium_official_contextual_support"}
 
-    # token overlap (no-josa, production-relevant)
-    ctoks = set(oer_tokens(claim_text))
-    btoks = set(oer_tokens(body_text))
-    inter = ctoks & btoks
-    material_inter = sorted(t for t in inter if len(t) >= 3)
-
-    # ③ josa whole-body counterfactual (does josa tokenizer rescue it?)
-    c = dict(claim or {})
-    c["_official_title_for_match"] = title
-    three = official_body_supports_claim(c, f"{title} {body_text}")
-
-    return {
+    rec = {
         "kind": _source_kind(item),
         "title": title,
+        "source_title": source_title,
         "url": url,
         "url_status": url_status,
         "url_ok": url_ok,
-        "body_len": len(body_text),
-        "body_text": body_text,
-        "sentence_yield": len(sentences),
-        "real_score": real_best,
+        "body_len": body_len,
+        "has_body": has_body,
+        "real_score": real_score,
         "real_best_sentence": real_best_sentence,
-        "oer_local_score": oer_local_best,        # self-check vs real_score
-        "josa_score": josa_best,                  # ② math with josa tokenizer
+        "score_source": score_source,
         "classification": classification,
         "match": match,
-        "has_body": has_body,
-        "inter_n": len(inter),
-        "material_inter_n": len(material_inter),
-        "three_supports": bool(three.get("supports")),
-        "three_score": int(three.get("match_score") or 0),
-        # stored ② fields (for drift awareness)
-        "stored_score": int(item.get("official_evidence_score") or 0),
+        "claim": claim,
+        "claim_text": claim_text,
         "stored_match": bool(item.get("official_body_match")),
+        "_item": item,
+        # detail fields (filled when need_detail)
+        "body_text": "",
+        "inter_n": 0,
+        "material_inter_n": 0,
+        "sentence_yield": 0,
+        "three_supports": False,
+        "three_score": 0,
+        "josa_score": 0,
     }
+
+    if need_detail:
+        body_text = _raw_body(item)
+        rec["body_text"] = body_text
+        ctoks = set(oer_tokens(claim_text))
+        btoks = set(oer_tokens(body_text))
+        inter = ctoks & btoks
+        rec["inter_n"] = len(inter)
+        rec["material_inter_n"] = len([t for t in inter if len(t) >= 3])
+        rec["sentence_yield"] = len(_split_sentences(body_text))
+        if not real_best_sentence and body_text:
+            _rb, rbs, _ol, _jl, _sy = _capped_recompute_scores(
+                body_text, source_title, claim, claim_text, need_josa=False
+            )
+            rec["real_best_sentence"] = rbs
+        c = dict(claim or {})
+        c["_official_title_for_match"] = title
+        three = official_body_supports_claim(c, f"{title} {body_text}")
+        rec["three_supports"] = bool(three.get("supports"))
+        rec["three_score"] = int(three.get("match_score") or 0)
+    return rec
 
 
 def main() -> int:
@@ -270,6 +326,9 @@ def main() -> int:
     scope = "whole corpus" if not cutoff else ("created_at >= %s" % cutoff)
     print("  scope: %s   (LOOKBACK_DAYS=%d; 0 = whole corpus)" % (scope, LOOKBACK_DAYS))
     print("  floor: policy_confidence_score <= %d  (the min(20) clamp; vstr='none' branch)" % FLOOR_MAX)
+    print("  perf: PART A counts ALL rows; PART B/C SAMPLE first %d floor rows; stored ②"
+          " preferred, recompute capped at %d sentences / %d cands per row."
+          % (FLOOR_SAMPLE_N, RECOMPUTE_SENTENCE_CAP, MAX_CANDS_PER_ROW))
     print()
     if not rows:
         print("  No rows in scope — nothing to measure.")
@@ -301,21 +360,25 @@ def main() -> int:
     print("  floor-row verification_strength tally: %s" % dict(vstr_counter))
     print()
 
-    # Funnel over ALL official candidates across ALL rows.
+    # Funnel over ALL official candidates across ALL rows (stored ② preferred).
     n_candidates = 0
     n_have_body = 0
     n_scored = 0
     n_medium = 0
     n_strong = 0
-    selfcheck_ok = 0
-    selfcheck_bad = []
+    n_stored = 0
+    n_recomputed = 0
     for rid, query, pcs, vstr, cands, claims in rows:
         for c in cands:
             if not _is_dict(c) or c.get("source_type") not in OFFICIAL_TYPES:
                 continue
             claim, _ci = _claim_for(c, claims)
-            rec = _recompute_candidate(c, claim)
+            rec = _read_candidate(c, claim)
             n_candidates += 1
+            if rec["score_source"] == "stored":
+                n_stored += 1
+            else:
+                n_recomputed += 1
             if rec["has_body"]:
                 n_have_body += 1
             if rec["real_score"] > 0:
@@ -324,10 +387,6 @@ def main() -> int:
                 n_medium += 1
             if rec["real_score"] >= STRONG_SCORE_BAR:
                 n_strong += 1
-            if rec["oer_local_score"] == rec["real_score"]:
-                selfcheck_ok += 1
-            else:
-                selfcheck_bad.append((rid, rec["real_score"], rec["oer_local_score"]))
 
     print("  CURRENT funnel (official candidates):")
     print("    candidates                 : %d" % n_candidates)
@@ -335,35 +394,29 @@ def main() -> int:
     print("    -> ② scored (>0)           : %d" % n_scored)
     print("    -> medium (②>=%d)          : %d" % (MEDIUM_SCORE_BAR, n_medium))
     print("    -> strong (②>=%d)          : %d" % (STRONG_SCORE_BAR, n_strong))
+    print("  score source: stored=%d recomputed(capped)=%d" % (n_stored, n_recomputed))
     print("  M37 funnel (for SHAPE compare): %s" % M37_FUNNEL)
-    print("  local-replica vs real _sentence_match_score self-check: %d/%d agree"
-          % (selfcheck_ok, n_candidates))
-    if selfcheck_bad:
-        print("  ★ MISMATCH (local ② replica drifted from production) — josa counterfactual")
-        print("    in PART C should be read with caution. First few:")
-        for rid, rs, ls in selfcheck_bad[:8]:
-            print("      row %s real=%d local_oer=%d" % (rid, rs, ls))
     print()
 
     # =======================================================================
+    floor_sample = floor_rows[:FLOOR_SAMPLE_N]
     print("=== PART B — floor rows: best official candidate + fall-reason bucket ===")
+    print("  PART B/C computed over a SAMPLE of N=%d of %d floor rows."
+          % (len(floor_sample), len(floor_rows)))
     buckets = collections.Counter()
     bucket_iii_rows = []     # for the human-read blocks + PART C
     josa_effect = 0
     table = []
-    for rid, query, pcs, vstr, cands, claims in floor_rows:
-        officials = [c for c in cands if _is_dict(c) and c.get("source_type") in OFFICIAL_TYPES]
+    for rid, query, pcs, vstr, cands, claims in floor_sample:
+        officials = [c for c in cands if _is_dict(c) and c.get("source_type") in OFFICIAL_TYPES][:MAX_CANDS_PER_ROW]
         if not officials:
             buckets["(i) no official candidate"] += 1
             table.append((rid, query, "-", 0, "-", False, 0, 0, 0))
             continue
-        recs = []
-        for c in officials:
-            claim, _ci = _claim_for(c, claims)
-            rec = _recompute_candidate(c, claim)
-            rec["claim_text"] = _claim_text(claim)
-            recs.append(rec)
-        best = max(recs, key=lambda r: r["real_score"])
+        recs = [_read_candidate(c, _claim_for(c, claims)[0]) for c in officials]
+        best_lite = max(recs, key=lambda r: r["real_score"])
+        # enrich the chosen best with detail (body/overlap/③) for the table + blocks
+        best = _read_candidate(best_lite["_item"], best_lite["claim"], need_detail=True)
         table.append((rid, query, best["kind"], best["real_score"], best["classification"],
                       best["match"], best["material_inter_n"], best["body_len"], best["sentence_yield"]))
 
@@ -381,14 +434,14 @@ def main() -> int:
         else:
             buckets["(vi) other"] += 1
 
-    print("  floor rows with a best-candidate read: %d" % len(floor_rows))
+    print("  floor rows in sample with a best-candidate read: %d" % len(floor_sample))
     print("  %-58s | %4s | %-34s | %5s" % ("row | query", "②", "band", "ovlp"))
     print("  " + "-" * 110)
     for rid, query, kind, score, band, match, ovlp, blen, syield in table:
         print("  %-6s %-8s %-40s | %4d | %-34s | %3d  (len=%d sy=%d match=%s)"
               % (rid, kind, str(query or "")[:40], score, str(band)[:34], ovlp, blen, syield, match))
     print()
-    print("  FALL-REASON bucket counts:")
+    print("  FALL-REASON bucket counts (over the N=%d sample):" % len(floor_sample))
     for label in (
         "(i) no official candidate",
         "(ii) best body len<300 (too short)",
@@ -412,12 +465,12 @@ def main() -> int:
         print("  [iii #%d] row=%s  query=%s  source=%s" % (i, rid, str(query or "")[:50], best["kind"]))
         print("    CLAIM (full): %s" % (best["claim_text"] or "(empty)"))
         print("    cand title: %s" % (best["title"] or "(none)"))
-        print("    ② score=%d (band=%s)  best sentence: %s"
-              % (best["real_score"], best["classification"], best["real_best_sentence"][:160]))
+        print("    ② score=%d (band=%s, src=%s)  best sentence: %s"
+              % (best["real_score"], best["classification"], best["score_source"], best["real_best_sentence"][:160]))
         print("    token overlap |claim∩body| material(>=3char)=%d  total=%d  body_len=%d  sy=%d"
               % (best["material_inter_n"], best["inter_n"], best["body_len"], best["sentence_yield"]))
-        print("    ③ josa: supports=%s score=%d   ② josa-tokenizer score=%d"
-              % (best["three_supports"], best["three_score"], best["josa_score"]))
+        print("    ③ josa: supports=%s score=%d"
+              % (best["three_supports"], best["three_score"]))
         print("    HINT (human confirms): %s" % hint)
         print("    BODY[:%d]: %s" % (BODY_PREVIEW_CHARS, best["body_text"][:BODY_PREVIEW_CHARS]))
     print()
@@ -427,17 +480,39 @@ def main() -> int:
     if not bucket_iii_rows:
         print("  (no bucket (iii) rows to size)")
     else:
+        # Capped ② recompute over the (small) bucket-iii sample: josa counterfactual
+        # + local-replica self-check. real_score above may be stored; josa_score is
+        # the capped recompute — labeled accordingly.
+        selfcheck_ok = 0
+        selfcheck_bad = []
+        for rid, query, best in bucket_iii_rows:
+            real_c, _rs, oer_c, josa_c, _sy = _capped_recompute_scores(
+                best["body_text"], best["source_title"], best["claim"], best["claim_text"], need_josa=True
+            )
+            best["josa_score"] = josa_c
+            best["real_capped"] = real_c
+            if real_c == oer_c:
+                selfcheck_ok += 1
+            else:
+                selfcheck_bad.append((rid, real_c, oer_c))
+
         print("  how many bucket-(iii) best candidates reach a match at hypothetical ② bars:")
-        print("    (production tokenizer, NO josa — bucket (iii) is <55 by definition)")
+        print("    (production tokenizer, NO josa; real_score = stored where available)")
         for thr in SENSITIVITY_THRESHOLDS:
             n = sum(1 for _, _, b in bucket_iii_rows if b["real_score"] >= thr)
             print("      ②>=%-3d : %d / %d" % (thr, n, len(bucket_iii_rows)))
-        print("  same, with the JOSA-tokenizer counterfactual (② math, ③'s josa _tokens):")
+        print("  same, with the JOSA-tokenizer counterfactual (② math, ③'s josa _tokens, capped):")
         for thr in SENSITIVITY_THRESHOLDS:
             n = sum(1 for _, _, b in bucket_iii_rows if b["josa_score"] >= thr)
             print("      ②(josa)>=%-3d : %d / %d" % (thr, n, len(bucket_iii_rows)))
         print("  ③ josa whole-body would-pass count (alt tokenizer lever): %d / %d"
               % (sum(1 for _, _, b in bucket_iii_rows if b["three_supports"]), len(bucket_iii_rows)))
+        print("  local-replica vs real _sentence_match_score self-check (capped): %d/%d agree"
+              % (selfcheck_ok, len(bucket_iii_rows)))
+        if selfcheck_bad:
+            print("  ★ MISMATCH (local ② replica drifted) — josa counterfactual with caution:")
+            for rid, rc, oc in selfcheck_bad[:8]:
+                print("      row %s real_capped=%d local_oer=%d" % (rid, rc, oc))
         print()
         print("  cross-tab placeholder (HINT only — replace with your (a)/(b) hand-read):")
         print("    %-10s | %-8s | %-12s | %-12s" % ("hint", "②score", "②>=50?", "②josa>=55?"))
@@ -448,12 +523,12 @@ def main() -> int:
     print()
 
     # =======================================================================
-    print("=== CLOSING — which lever does the DATA point to? ===")
+    print("=== CLOSING — which lever does the DATA point to? (over the N=%d sample) ===" % len(floor_sample))
     n_iii = buckets.get("(iii) scored, body>=300, url ok, but ②<55 (SPLIT BY HAND)", 0)
     n_i = buckets.get("(i) no official candidate", 0)
     n_ii = buckets.get("(ii) best body len<300 (too short)", 0)
-    print("  floor rows: total=%d | (i)no-candidate=%d | (ii)short=%d | (iii)under-bar=%d | josa-rescuable=%d"
-          % (len(floor_rows), n_i, n_ii, n_iii, josa_effect))
+    print("  floor sample: total=%d | (i)no-candidate=%d | (ii)short=%d | (iii)under-bar=%d | josa-rescuable=%d"
+          % (len(floor_sample), n_i, n_ii, n_iii, josa_effect))
     print("  - (i) dominates  -> RETRIEVAL supply (no official body reaches the claim).")
     print("  - (iii) dominates AND human reads them OFF-topic -> RETRIEVAL RELEVANCE (wrong body attached).")
     print("  - (iii) dominates AND human reads them ON-topic  -> THRESHOLD/TOKENIZER (matcher under-scores).")
