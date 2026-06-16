@@ -454,7 +454,9 @@ def main() -> int:
         print("    exact membership (%r in _DENYLIST)            : %s" % (target, exact_hit))
         print("    substring match  (any marker is substr of it) : %s" % substr_hit)
         if substr_hit:
-            cause = "match-method OK — marker present; Section-5 scan scope/order issue (investigate)"
+            cause = ("match-method OK — marker present in _DENYLIST; Section-5 top-K shows no hit "
+                     "because the probe's own person filter (_is_person_or_office) removes such "
+                     "names upstream in _keywords_of — expected, not a scan bug")
         elif exact_hit:
             cause = "match-method-mismatch (exact-present but substring-scan failed — logically odd)"
         else:
