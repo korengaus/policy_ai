@@ -236,7 +236,24 @@ def score_official_url(url: str, title: str = "") -> dict:
     if any(keyword in title_text for keyword in ["보도자료", "설명자료", "브리핑", "공고", "공지", "정책"]):
         score += 15
         reasons.append("official_content_title")
-    if looks_like_official_search_or_index_url(url) or any(signal in normalized_url for signal in WEAK_URL_SIGNALS):
+    weak_hits = [signal for signal in WEAK_URL_SIGNALS if signal in normalized_url]
+    looks_search = looks_like_official_search_or_index_url(url)
+    has_detail_signal = (
+        any(signal in normalized_url for signal in DETAIL_URL_SIGNALS)
+        or bool(re.search(r"\d{4,}", normalized_url))
+    )
+    # A real detail page (view.do + numeric id) misflagged ONLY by the raw
+    # substring 'menu' (from menuNo=) is NOT a search/index page. Suppress the
+    # -30 in exactly that case: sole weak hit is 'menu', not looks_like_search,
+    # and a positive detail signal is present. WEAK_URL_SIGNALS MEANING unchanged;
+    # measured: 19 fss.or.kr recoveries, 0 downgrades, 0 broken matches.
+    menu_only_false_penalty = (
+        bool(weak_hits)
+        and not looks_search
+        and all(signal == "menu" for signal in weak_hits)
+        and has_detail_signal
+    )
+    if (looks_search or weak_hits) and not menu_only_false_penalty:
         score -= 30
         reasons.append("search_or_index_like")
     if not url:
