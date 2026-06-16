@@ -749,6 +749,23 @@ def _process_news_item_phase_a(
         )
         if national_law_candidates:
             source_candidates = source_candidates + national_law_candidates
+    # FSS-PROVIDER — FSS 보도자료 candidates, same Lane-A injection as Policy
+    # Briefing / National Law, gated by FSS_ENABLED (default false): when off, no
+    # provider is constructed, zero network happens, and source_candidates /
+    # debug_summary stay byte-identical. FSS candidates carry their cleaned body
+    # (raw_text_available=True) and the stable marker fss_bodo_content_id, which is
+    # DELIBERATELY NOT a member of _PRIMARY_DOCUMENT_MARKER_FIELDS — so FSS gets
+    # Lane-A injection only and NO Lane-B verdict-raise uplift (the matcher decides
+    # if a body matches). All provider logging lives in providers/fss_press_release.py
+    # (pin-OUT); the only observability here is the in-memory counter below (no
+    # log.* in this pinned file).
+    fss_count = None
+    if config.fss_enabled():
+        from providers.fss_press_release import fetch_and_build_fss_candidates
+
+        fss_candidates, fss_count = fetch_and_build_fss_candidates(normalized_claims)
+        if fss_candidates:
+            source_candidates = source_candidates + fss_candidates
     source_candidates, official_resolution_debug = resolve_official_evidence(
         source_candidates,
         normalized_claims,
@@ -892,6 +909,11 @@ def _process_news_item_phase_a(
     # byte-identical (mirrors policy_briefing_count).
     if national_law_count is not None:
         debug_summary["national_law_count"] = national_law_count
+    # FSS-PROVIDER: in-branch-only debug key. fss_count is None on the disabled
+    # path, so this key is NOT added there — disabled debug_summary stays
+    # byte-identical (mirrors policy_briefing_count / national_law_count).
+    if fss_count is not None:
+        debug_summary["fss_count"] = fss_count
     # FRESHNESS Phase 2: surface the article publish date + collection source so
     # the frontend can derive a CONSERVATIVE "freshly-broken" label (distinct
     # from "old-unmatched"). Additive, byte-identical convention (mirrors
@@ -1681,6 +1703,7 @@ def analyze_pipeline(
     # so the key is NOT added and the report stays byte-identical to HEAD.
     policy_briefing_total = 0
     national_law_total = 0
+    fss_total = 0
     saw_primary_document_count = False
     for item in report_items:
         item_debug = item.get("debug_summary") or {}
@@ -1692,10 +1715,15 @@ def analyze_pipeline(
         if national_law_value is not None:
             national_law_total += national_law_value
             saw_primary_document_count = True
+        fss_value = item_debug.get("fss_count")
+        if fss_value is not None:
+            fss_total += fss_value
+            saw_primary_document_count = True
     if saw_primary_document_count:
         report["primary_document_counts"] = {
             "policy_briefing": policy_briefing_total,
             "national_law": national_law_total,
+            "fss": fss_total,
         }
     _store_analysis_report(
         analysis_cache_key=analysis_cache_key,

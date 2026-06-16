@@ -148,6 +148,47 @@ def describe_national_law_config() -> dict:
     }
 
 
+# FSS-PROVIDER: FSS 보도자료 (bodoInfo) press-release provider configuration. Auth
+# is FSS_API_KEY (a 32-char authKey), distinct from DATAGOKR_SERVICE_KEY (M21) and
+# LAW_OC (M23). Read at runtime so tests can mutate the environment. DISABLED BY
+# DEFAULT (FSS_ENABLED default false) so merely adding the provider is a no-op
+# until an operator flips the flag on Render. Conservative defaults mirror the
+# FIN-5/7 knobs: one recent 7-day window per run (1 GET; well under the FSS
+# 30-calls/day, 1-month-range limit).
+
+
+def fss_api_key() -> str:
+    return (os.getenv("FSS_API_KEY") or "").strip()
+
+
+def fss_enabled() -> bool:
+    return _env_bool("FSS_ENABLED", False)
+
+
+def fss_timeout_seconds() -> float:
+    return _env_float("FSS_TIMEOUT_SECONDS", 5.0)
+
+
+def fss_lookback_days() -> int:
+    return _env_int("FSS_LOOKBACK_DAYS", 7)
+
+
+def fss_max_releases() -> int:
+    return _env_int("FSS_MAX_RELEASES", 15)
+
+
+def describe_fss_config() -> dict:
+    """Snapshot of the FSS provider configuration. Safe to log/serialize:
+    reports key PRESENCE only — never the authKey value."""
+    return {
+        "enabled": fss_enabled(),
+        "api_key_present": bool(fss_api_key()),
+        "timeout_seconds": fss_timeout_seconds(),
+        "lookback_days": fss_lookback_days(),
+        "max_releases": fss_max_releases(),
+    }
+
+
 # M25a: pgvector storage infrastructure. DISABLED BY DEFAULT
 # (PGVECTOR_ENABLED default false). When false, the embedding cache uses ONLY
 # the existing JSON embedding_cache table (byte-identical to pre-M25a) and the
