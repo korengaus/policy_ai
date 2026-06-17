@@ -98,8 +98,10 @@ def _commands() -> List[List[str]]:
         [python, "tests/test_review_audit_trail.py"],
         [python, "tests/test_operator_preflight.py"],
         [python, "tests/test_review_bundle.py"],
-        [python, "tests/test_review_api_exposure_smoke.py"],
-        [python, "tests/test_review_api_token_gate_smoke.py"],
+        # AUTH-2d: the token-gate / public-exposure smoke tests were deleted
+        # with the X-Review-Token gate (admin auth is session-only). Their
+        # invocations are removed here so validate.py / CI enumerate only
+        # existing files.
         [python, "tests/test_review_ui_local_demo.py"],
         [python, "tests/test_source_registry.py"],
         # M10.1 — URL classifier CLI smoke + assertions.
