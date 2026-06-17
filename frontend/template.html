@@ -218,6 +218,35 @@
             검수 큐에 등록하기 위한 내부 작업 영역이며, 이 화면에서 발행되는 결과는 없습니다.
           </div>
           <div class="server-review-panel">
+            <!-- AUTH-2c — account login (primary). Establishes a signed
+                 session cookie via /auth/login. The token panel below remains
+                 as the documented dual-accept fallback (retired in 2d). -->
+            <div class="server-review-login-panel">
+              <label for="serverReviewLoginUser">관리자 로그인 (계정 기반)</label>
+              <input
+                id="serverReviewLoginUser"
+                type="text"
+                autocomplete="username"
+                spellcheck="false"
+                placeholder="사용자 이름"
+              >
+              <label for="serverReviewLoginPass">비밀번호</label>
+              <input
+                id="serverReviewLoginPass"
+                type="password"
+                autocomplete="current-password"
+                spellcheck="false"
+                placeholder="비밀번호"
+              >
+              <div class="server-review-login-actions">
+                <button id="serverReviewLoginBtn" class="primary" type="button">로그인</button>
+                <button id="serverReviewLogoutBtn" class="secondary" type="button">로그아웃</button>
+              </div>
+              <div class="server-review-token-note">
+                계정으로 로그인하면 세션 쿠키로 인증됩니다. 아래 토큰 칸은 호환용 대체 수단으로 그대로 유지됩니다.
+              </div>
+              <div id="serverReviewLoginStatus" class="server-review-login-status" role="status" aria-live="polite"></div>
+            </div>
             <div class="server-review-token-panel">
               <label for="serverReviewToken">리뷰 API 토큰 (X-Review-Token)</label>
               <input

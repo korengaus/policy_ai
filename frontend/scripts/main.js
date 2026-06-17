@@ -6484,6 +6484,158 @@
       }
     }
 
+    // ===== AUTH-2c — operator account login (additive; token path unchanged) =====
+    // Establishes a signed session cookie via /auth/login. serverReviewFetch
+    // and the X-Review-Token path are NOT touched — dual-accept stays live
+    // until 2d. The submitted password is read into a local var, sent, and the
+    // input cleared; it is NEVER written to the DOM, sessionStorage,
+    // localStorage, or any log (unlike the token, which lives in sessionStorage
+    // by design).
+    const AUTH_LOGIN_PATH = "/auth/login";
+    const AUTH_LOGOUT_PATH = "/auth/logout";
+    const AUTH_ME_PATH = "/auth/me";
+    const AUTH_LOGIN_FAILED_MESSAGE =
+      "로그인에 실패했습니다. 사용자 이름과 비밀번호를 확인해 주세요.";
+    const AUTH_LOGIN_ERROR_MESSAGE =
+      "로그인 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.";
+    const AUTH_LOGGED_OUT_MESSAGE = "로그아웃되었습니다.";
+
+    function authLoggedInLabel(role) {
+      return `관리자(${String(role || "admin")})로 로그인됨`;
+    }
+
+    // Display-only mirror of the last-known /auth/me state. The real gate is
+    // server-side (require_admin dual-accept); this only drives UI enablement.
+    let authSessionActive = false;
+
+    // privilegedReady = authenticated session OR a legacy token is present.
+    function serverReviewPrivilegedReady() {
+      return authSessionActive || serverReviewGetToken() !== "";
+    }
+
+    function authSetStatus(kind, message) {
+      const el = document.getElementById("serverReviewLoginStatus");
+      if (!el) return;
+      el.classList.remove("is-info", "is-success", "is-error");
+      if (!message) {
+        el.style.display = "none";
+        el.textContent = "";
+        return;
+      }
+      if (kind === "success") el.classList.add("is-success");
+      else if (kind === "error") el.classList.add("is-error");
+      else el.classList.add("is-info");
+      el.style.display = "block";
+      el.textContent = message;
+    }
+
+    function authReflectSession(authenticated, role) {
+      authSessionActive = !!authenticated;
+      const loginBtn = document.getElementById("serverReviewLoginBtn");
+      const logoutBtn = document.getElementById("serverReviewLogoutBtn");
+      if (authenticated) {
+        authSetStatus("success", authLoggedInLabel(role));
+        if (loginBtn) loginBtn.disabled = true;
+        if (logoutBtn) logoutBtn.disabled = false;
+      } else {
+        if (loginBtn) loginBtn.disabled = false;
+        if (logoutBtn) logoutBtn.disabled = true;
+      }
+    }
+
+    async function authFetchJson(path, options) {
+      const opts = options || {};
+      const init = {
+        method: opts.method || "GET",
+        // Same-origin: the httponly session cookie is sent/stored by the
+        // browser. JS never reads or writes the cookie itself.
+        credentials: "same-origin",
+        headers: Object.assign(
+          { "Content-Type": "application/json" }, opts.headers || {},
+        ),
+      };
+      if (opts.body != null) {
+        init.body = typeof opts.body === "string" ? opts.body : JSON.stringify(opts.body);
+      }
+      let resp;
+      try {
+        resp = await fetch(`${API_BASE}${path}`, init);
+      } catch (err) {
+        return { ok: false, status: 0, body: null };
+      }
+      let body = null;
+      try {
+        body = await resp.json();
+      } catch (_) {
+        body = null;
+      }
+      return { ok: resp.ok, status: resp.status, body };
+    }
+
+    async function authMe() {
+      const res = await authFetchJson(AUTH_ME_PATH, { method: "GET" });
+      const authenticated = !!(res.ok && res.body && res.body.authenticated);
+      const role = (res.body && res.body.role) || null;
+      authReflectSession(authenticated, role);
+      return { authenticated: authenticated, role: role };
+    }
+
+    async function authLogin(username, password) {
+      const res = await authFetchJson(AUTH_LOGIN_PATH, {
+        method: "POST",
+        body: { username: username || "", password: password || "" },
+      });
+      // Clear the password input immediately — never leave it on-screen, never
+      // persist it anywhere.
+      const passInput = document.getElementById("serverReviewLoginPass");
+      if (passInput) passInput.value = "";
+      if (res.ok && res.body && res.body.ok) {
+        const role = res.body.role || "admin";
+        authReflectSession(true, role);
+        return { ok: true, role: role };
+      }
+      // Generic failure — never reveal username-vs-password, never echo the
+      // submitted password.
+      authSetStatus(
+        "error",
+        res.status === 0 ? AUTH_LOGIN_ERROR_MESSAGE : AUTH_LOGIN_FAILED_MESSAGE,
+      );
+      authReflectSession(false, null);
+      return { ok: false };
+    }
+
+    async function authLogout() {
+      await authFetchJson(AUTH_LOGOUT_PATH, { method: "POST" });
+      authReflectSession(false, null);
+      authSetStatus("info", AUTH_LOGGED_OUT_MESSAGE);
+      return { ok: true };
+    }
+
+    function authBindEvents() {
+      const loginBtn = document.getElementById("serverReviewLoginBtn");
+      const logoutBtn = document.getElementById("serverReviewLogoutBtn");
+      const userInput = document.getElementById("serverReviewLoginUser");
+      const passInput = document.getElementById("serverReviewLoginPass");
+      if (loginBtn && userInput && passInput) {
+        loginBtn.addEventListener("click", async () => {
+          const username = (userInput.value || "").trim();
+          // Read the password into a local var only; do NOT persist it.
+          const password = passInput.value || "";
+          await authLogin(username, password);
+        });
+      }
+      if (logoutBtn) {
+        logoutBtn.addEventListener("click", async () => {
+          await authLogout();
+        });
+      }
+      // Reflect current session state, but only when the operator panel is
+      // actually exposed — avoids an /auth/me ping on every public page load.
+      if (loginBtn && operatorToolsFlagSet()) {
+        authMe();
+      }
+    }
+
     function serverReviewBindEvents() {
       const saveBtn = document.getElementById("serverReviewTokenSaveBtn");
       const clearBtn = document.getElementById("serverReviewTokenClearBtn");
@@ -6760,6 +6912,17 @@
         hideOperatorToolsElement: hideOperatorToolsElement,
         hideOperatorToolsAndResetState: hideOperatorToolsAndResetState,
         applyOperatorToolsVisibility: applyOperatorToolsVisibility,
+        // AUTH-2c — account login helpers (additive; existing members above
+        // are unchanged in name, signature, and value).
+        authLogin: authLogin,
+        authLogout: authLogout,
+        authMe: authMe,
+        loginPath: AUTH_LOGIN_PATH,
+        logoutPath: AUTH_LOGOUT_PATH,
+        mePath: AUTH_ME_PATH,
+        loginFailedMessage: AUTH_LOGIN_FAILED_MESSAGE,
+        loggedInLabel: authLoggedInLabel,
+        privilegedReady: serverReviewPrivilegedReady,
       };
     }
 
@@ -6842,3 +7005,7 @@
     applyOperatorToolsVisibility();
     operatorToolsBindEvents();
     serverReviewBindEvents();
+    // AUTH-2c — bind the account login/logout form and reflect session state
+    // (authMe) when the operator panel is exposed. Additive; does not alter
+    // the token path or any existing binding.
+    authBindEvents();
