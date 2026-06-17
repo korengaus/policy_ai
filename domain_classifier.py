@@ -44,7 +44,7 @@ _MAX_OUTPUT_TOKENS = 24
 _CLAIM_SNIPPET = 240
 
 
-def _build_prompt(title: str, claim_text: str | None) -> str:
+def _build_domain_prompt(title: str, claim_text: str | None) -> str:
     """Tight single-label classification prompt. TOOL-FREE: plain text in, one
     label out. No web_search, no tools."""
     claim_snip = (claim_text or "").strip().replace("\n", " ")[:_CLAIM_SNIPPET]
@@ -85,7 +85,7 @@ def _call_anthropic_tool_free(prompt: str, model: str, api_key: str):
     )
 
 
-def _join_text_blocks(content_blocks) -> str:
+def _join_domain_text_blocks(content_blocks) -> str:
     """Concatenate the text of all ``text`` blocks (mirrors hot_topics)."""
     parts = []
     for block in content_blocks or []:
@@ -128,7 +128,7 @@ def classify_domain(title: str, claim_text: str | None = None) -> str:
             return FALLBACK_LABEL
 
         model = os.environ.get("ANTHROPIC_MODEL", "").strip() or _DEFAULT_MODEL
-        prompt = _build_prompt(title, claim_text)
+        prompt = _build_domain_prompt(title, claim_text)
 
         start = time.time()
         message = _call_anthropic_tool_free(prompt, model, api_key)
@@ -153,7 +153,7 @@ def classify_domain(title: str, claim_text: str | None = None) -> str:
         except Exception:  # observability must never break classification
             pass
 
-        label = _parse_label(_join_text_blocks(getattr(message, "content", None) or []))
+        label = _parse_label(_join_domain_text_blocks(getattr(message, "content", None) or []))
         log.info(
             "[DomainClassifier] tool-free domain label: "
             f"label={label} input={input_tokens} output={output_tokens} "
