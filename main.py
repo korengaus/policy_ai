@@ -62,6 +62,7 @@ from policy_decision import (
 )
 from policy_scoring import calibrate_final_decision
 from topic_classifier import classify_policy_topic
+import domain_classifier
 from timeline import print_timeline_summary
 from verification_card import build_verification_card, print_verification_card
 from pipeline_debug import build_pipeline_debug_summary
@@ -1314,12 +1315,26 @@ def _apply_news_item_phase_b(
 
     log.info("\n" + "=" * 80)
 
+    # CLASSIFY-2a — forward domain classification (metadata only; flag-gated,
+    # fail-soft). When CLASSIFY_ENABLED is off -> domain=None, zero API call.
+    # classify_domain NEVER raises (errors -> 기타-미분류); the defensive
+    # claim_text lookup below also cannot raise. domain feeds NO verdict field.
+    domain = (
+        domain_classifier.classify_domain(
+            news.get("title"),
+            (phase_a.get("verification_card") or {}).get("claim_text"),
+        )
+        if config.classify_enabled()
+        else None
+    )
+
     report_item = sanitize_data({
         "title": news.get("title"),
         "published": news.get("published"),
         "original_url": original_url,
         "summary": news.get("summary"),
         "topic": topic,
+        "domain": domain,
         "claims": phase_a["claims"],
         "normalized_claims": phase_a["normalized_claims"],
         "source_queries": phase_a["source_queries"],

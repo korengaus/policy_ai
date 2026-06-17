@@ -362,6 +362,13 @@ def semantic_matching_enabled() -> bool:
     return _env_bool("SEMANTIC_MATCHING_ENABLED", False)
 
 
+def classify_enabled() -> bool:
+    # CLASSIFY-2a — forward domain classification at analysis time. Default
+    # False (ships dark): no classify call, rows persist with domain=NULL until
+    # the operator sets CLASSIFY_ENABLED=true per service. Read at runtime.
+    return _env_bool("CLASSIFY_ENABLED", False)
+
+
 def embedding_provider() -> str:
     return (os.getenv("EMBEDDING_PROVIDER") or "disabled").strip().lower()
 

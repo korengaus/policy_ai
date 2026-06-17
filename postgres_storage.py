@@ -272,6 +272,12 @@ analysis_results_table = sa.Table(
     # this def. NULL until set -> byte-identical when no row is marked.
     sa.Column("human_reviewed_at", sa.Text),
     sa.Column("human_reviewed_by", sa.Text),
+    # CLASSIFY-2a — domain category label (nullable METADATA; set by the
+    # tool-free domain_classifier at analysis time, never by the verdict path).
+    # create_all does NOT add this to an existing live table, so
+    # _ensure_analysis_results_columns ALTERs it in. NULL until classified
+    # (existing rows stay NULL until the separate 2b backfill).
+    sa.Column("domain", sa.Text),
 )
 
 
@@ -668,6 +674,10 @@ def ensure_schema(engine: Optional[Engine]) -> bool:
 _ANALYSIS_RESULTS_ADDED_COLUMNS: tuple = (
     ("human_reviewed_at", "TEXT"),
     ("human_reviewed_by", "TEXT"),
+    # CLASSIFY-2a — domain category label (nullable metadata). Additive ALTER
+    # only; _align_serial_sequences / _INT_PK_MIRROR_TABLES are unaffected
+    # (additive column, not a new table).
+    ("domain", "TEXT"),
 )
 
 

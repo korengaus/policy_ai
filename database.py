@@ -315,6 +315,9 @@ def save_analysis_result(result: dict, query: str):
             or result.get("debug_summary")
         ),
         created_at,
+        # CLASSIFY-2a — domain category label (metadata only; never a verdict
+        # field). None when CLASSIFY_ENABLED is off or classification failed.
+        result.get("domain"),
     )
 
     # M12.0d Stage 3c-3: build the Postgres mirror payload once. The
@@ -334,6 +337,8 @@ def save_analysis_result(result: dict, query: str):
         "evidence_extraction_summary", "contradiction_checks",
         "contradiction_summary", "bias_framing_analysis",
         "bias_framing_summary", "debug_summary", "created_at",
+        # CLASSIFY-2a — must stay in lockstep with the values tuple above.
+        "domain",
     )
     row_dict = dict(zip(_ANALYSIS_RESULTS_COLUMN_ORDER, values))
 

@@ -566,6 +566,8 @@ class DatabaseDualWriteIsolationTests(unittest.TestCase):
                     "claim_text": "주장",
                     "verdict_label": "draft_likely_true",
                     "verdict_confidence": 70,
+                    # CLASSIFY-2a — domain metadata persists round-trip.
+                    "domain": "finance",
                     "verification_card": {
                         "claim_text": "주장",
                         "verdict_label": "draft_likely_true",
@@ -587,6 +589,24 @@ class DatabaseDualWriteIsolationTests(unittest.TestCase):
                     rows[0]["original_url"], sample["original_url"],
                 )
                 self.assertEqual(rows[0]["id"], status["id"])
+
+                # CLASSIFY-2a — the domain label round-trips as metadata.
+                fetched = database.get_result_by_id(status["id"])
+                self.assertEqual(fetched.get("domain"), "finance")
+
+                # A row saved WITHOUT a domain persists domain=NULL/None.
+                sample2 = {
+                    "title": "no domain",
+                    "original_url": "https://example.com/pg-only-2",
+                    "topic": "정책",
+                    "claim_text": "주장",
+                }
+                status2 = database.save_analysis_result(
+                    sanitize_data(sample2), query="pg-only-test",
+                )
+                self.assertTrue(status2["saved"])
+                fetched2 = database.get_result_by_id(status2["id"])
+                self.assertIsNone(fetched2.get("domain"))
                 postgres_storage.reset_engine_for_tests()
 
     def test_save_analysis_result_pg_write_failure_reports_not_saved(self):
