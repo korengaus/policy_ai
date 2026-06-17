@@ -384,6 +384,24 @@ review_decisions_table = sa.Table(
 )
 
 
+# AUTH-2a — account login store. New, additive table (created by
+# ensure_schema's create_all; no ALTER needed). Mirrors review_tasks_table's
+# declaration idioms (shared _metadata, sa.Text columns, created_at/updated_at).
+# Holds ONLY login identity — never any verdict/scoring field. ``role`` ships
+# now (default 'admin') so future non-admin users extend the same table; only
+# 'admin' exists today. ``password_hash`` stores a bcrypt hash ONLY (see
+# accounts.py); the plaintext password is never stored.
+accounts_table = sa.Table(
+    "accounts", _metadata,
+    sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
+    sa.Column("username", sa.Text, nullable=False, unique=True),
+    sa.Column("password_hash", sa.Text, nullable=False),
+    sa.Column("role", sa.Text, nullable=False, server_default=sa.text("'admin'")),
+    sa.Column("created_at", sa.Text),
+    sa.Column("updated_at", sa.Text),
+)
+
+
 source_fetch_artifacts_table = sa.Table(
     "source_fetch_artifacts", _metadata,
     sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
@@ -563,6 +581,10 @@ MIRROR_TABLE_NAMES: tuple = tuple(sorted(_metadata.tables.keys()))
 # has no sequences).
 _INT_PK_MIRROR_TABLES: tuple = (
     "analysis_results",
+    # AUTH-2a — accounts is an INT-PK mirror table written via mirror_write
+    # (id stripped → PG SERIAL owns assignment), so its sequence must be
+    # aligned on PostgreSQL alongside the other INT-PK tables.
+    "accounts",
     "embedding_cache",
     "source_fetch_artifacts",
     "artifact_text_extractions",
@@ -1382,6 +1404,32 @@ def read_review_task_by_task_id(task_id: str) -> Optional[dict]:
         )
         raise PostgresReadError(
             f"read_review_task_by_task_id failed: {exc}"
+        ) from exc
+
+
+def read_account_by_username(username: str) -> Optional[dict]:
+    """Return the accounts row for ``username`` as a RAW dict, or None when
+    the engine is unbuilt / the row is missing. ``username`` is UNIQUE so at
+    most one row matches. Mirrors read_review_task_by_task_id's shape.
+
+    Raises :class:`PostgresReadError` on engine / SQL errors."""
+    engine = get_engine()
+    if engine is None:
+        return None
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                sa.select(accounts_table).where(
+                    accounts_table.c.username == username
+                )
+            ).first()
+        return dict(row._mapping) if row is not None else None
+    except SQLAlchemyError as exc:
+        log.error(
+            "read_account_by_username failed: %s", exc, exc_info=True,
+        )
+        raise PostgresReadError(
+            f"read_account_by_username failed: {exc}"
         ) from exc
 
 

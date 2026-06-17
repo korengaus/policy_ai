@@ -1,5 +1,7 @@
 alembic
 anthropic
+# AUTH-2a — bcrypt password hashing for the accounts login store (accounts.py).
+bcrypt==5.0.0
 beautifulsoup4
 fastapi
 feedparser

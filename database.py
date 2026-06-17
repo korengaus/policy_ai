@@ -943,6 +943,106 @@ def list_review_decisions(task_id: str) -> list:
 
 
 # ---------------------------------------------------------------------------
+# AUTH-2a: account login store.
+#
+# Caller-facing layer for the ``accounts`` table (declared in
+# postgres_storage.py). Mirrors the review-table layering exactly: reads go
+# through postgres_storage.read_account_by_username via a PG-primary gate;
+# writes go through postgres_storage.mirror_write. Password hashing lives in
+# accounts.py (bcrypt) and is invoked here at create time — only the hash is
+# ever stored, never the plaintext. Nothing here touches any verdict field.
+#
+# Keeping create/get in this layer means api_server (AUTH-2b) reaches accounts
+# through database.py and never imports postgres_storage directly (Phase-0
+# import-discipline guard, test_postgres_storage.py:3109).
+# ---------------------------------------------------------------------------
+
+
+class AccountExistsError(Exception):
+    """Raised by :func:`create_account` when ``username`` already exists.
+    Callers that want idempotent behavior (e.g. scripts/create_admin.py)
+    pre-check with :func:`get_account_by_username` or catch this."""
+
+
+def _row_to_account(row) -> dict:
+    """Raw account row (dict from postgres_storage) → plain dict. No
+    transformation needed today; kept for parity with _row_to_review_task
+    and as the single place to shape account rows if columns grow."""
+    if not row:
+        return {}
+    return dict(row)
+
+
+def get_account_by_username(username: str):
+    """Return the account dict for ``username``, or None when missing /
+    dual-write disabled. PG-primary read, mirroring get_review_task."""
+    if not username:
+        return None
+    try:
+        from postgres_storage import (
+            is_postgres_dual_write_enabled,
+            read_account_by_username,
+        )
+        pg_enabled = is_postgres_dual_write_enabled()
+    except Exception:
+        log.error(
+            "get_account_by_username failed to import postgres_storage",
+            exc_info=True,
+            extra={"function": "get_account_by_username"},
+        )
+        raise
+    if not pg_enabled:
+        return None
+    try:
+        pg_row = read_account_by_username(username)
+    except Exception:
+        log.error(
+            "get_account_by_username PG read failed",
+            exc_info=True,
+            extra={"function": "get_account_by_username"},
+        )
+        raise
+    return _row_to_account(pg_row) if pg_row else None
+
+
+def create_account(username: str, plain_password: str, role: str = "admin"):
+    """Create one account with a bcrypt-hashed password.
+
+    Hashing happens here (via accounts.hash_password); ONLY the hash is
+    persisted — the plaintext is never stored, logged, or returned. Raises
+    :class:`AccountExistsError` when ``username`` already exists, ``ValueError``
+    on empty username/password, and ``RuntimeError`` if the persist fails.
+    Returns the stored account dict on success.
+    """
+    username = (username or "").strip()
+    if not username:
+        raise ValueError("username must be non-empty")
+    if not plain_password:
+        raise ValueError("password must be non-empty")
+    if get_account_by_username(username):
+        raise AccountExistsError(f"account already exists: {username}")
+    # Local import keeps database import-light and avoids loading bcrypt
+    # unless an account is actually created.
+    from accounts import hash_password
+    password_hash = hash_password(plain_password)
+    now = datetime.now(timezone.utc).isoformat()
+    from postgres_storage import mirror_write
+    ok = mirror_write(
+        "accounts",
+        {
+            "username": username,
+            "password_hash": password_hash,
+            "role": (role or "admin"),
+            "created_at": now,
+            "updated_at": now,
+        },
+    )
+    if not ok:
+        raise RuntimeError("failed to persist account")
+    return get_account_by_username(username)
+
+
+# ---------------------------------------------------------------------------
 # Phase 2 M10.2: source-fetch-artifact persistence.
 #
 # Read-only catalog of operator-triggered static fetches against
