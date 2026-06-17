@@ -139,18 +139,34 @@ def _synthetic_payload(claim: str, *, idx: int = 0):
     }
 
 
+ADMIN_USER = "admin"
+ADMIN_PASS = "audit-trail-test-pw-123"
+
+
 def _enabled_env():
-    return {"REVIEW_API_ENABLED": "true", "REVIEW_API_TOKEN": TEST_TOKEN}
+    # AUTH-2d: token env vars are no longer read; kept as a no-op so the
+    # existing ``with _env(**_enabled_env()):`` wrappers stay valid. Auth now
+    # comes from the session cookie established by ``_client()``.
+    return {}
 
 
 class _AuditAPIBase(unittest.TestCase):
-    def _client(self):
+    def _client(self, *, login: bool = True):
         from fastapi.testclient import TestClient
-        return TestClient(self._api_server.app)
+        client = TestClient(self._api_server.app)
+        if login:
+            resp = client.post(
+                "/auth/login",
+                json={"username": ADMIN_USER, "password": ADMIN_PASS},
+            )
+            assert resp.status_code == 200, resp.text
+        return client
 
     def setUp(self):
         self._db_ctx = _temp_db()
         self._database, self._api_server, _ = self._db_ctx.__enter__()
+        # AUTH-2d: seed an admin so tests authenticate via /auth/login.
+        self._database.create_account(ADMIN_USER, ADMIN_PASS, role="admin")
 
     def tearDown(self):
         try:
@@ -575,32 +591,27 @@ class ReviewWorkflowHelperTests(unittest.TestCase):
 
 
 class AuditPacketGatingTests(_AuditAPIBase):
-    """A. Disabled / 403 / 404 gates behave like every other /review/* surface."""
+    """A. Session gate (AUTH-2d) + 404 behave like every other /review/* surface."""
 
-    def test_audit_packet_disabled_when_review_api_disabled(self):
-        # No env → 503 with "disabled" detail.
-        with _env(REVIEW_API_ENABLED=None, REVIEW_API_TOKEN=None):
-            with self._client() as client:
-                resp = client.get(
-                    "/review/tasks/anything/audit-packet"
-                )
-        self.assertEqual(resp.status_code, 503)
-        self.assertIn("disabled", resp.json()["detail"].lower())
+    def test_audit_packet_401_no_session(self):
+        # AUTH-2d: no session (and no token fallback) → 401.
+        with self._client(login=False) as client:
+            resp = client.get("/review/tasks/anything/audit-packet")
+        self.assertEqual(resp.status_code, 401)
 
-    def test_audit_packet_403_missing_token(self):
-        with _env(**_enabled_env()):
-            with self._client() as client:
-                resp = client.get("/review/tasks/anything/audit-packet")
-        self.assertEqual(resp.status_code, 403)
+    def test_audit_packet_401_invalid_session(self):
+        with self._client(login=False) as client:
+            client.cookies.set("policy_ai_session", "garbage.not-a-valid-session")
+            resp = client.get("/review/tasks/anything/audit-packet")
+        self.assertEqual(resp.status_code, 401)
 
-    def test_audit_packet_403_wrong_token(self):
-        with _env(**_enabled_env()):
-            with self._client() as client:
-                resp = client.get(
-                    "/review/tasks/anything/audit-packet",
-                    headers={"X-Review-Token": "wrong-token"},
-                )
-        self.assertEqual(resp.status_code, 403)
+    def test_audit_packet_token_header_does_not_authenticate(self):
+        with self._client(login=False) as client:
+            resp = client.get(
+                "/review/tasks/anything/audit-packet",
+                headers={"X-Review-Token": TEST_TOKEN},
+            )
+        self.assertEqual(resp.status_code, 401)
 
     def test_audit_packet_404_for_missing_task(self):
         with _env(**_enabled_env()):

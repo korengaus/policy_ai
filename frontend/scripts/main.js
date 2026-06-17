@@ -5671,15 +5671,14 @@
       });
     }
     // ---- Phase 2 M8.1: server-backed reviewer UI ---------------------------
-    // Wires the existing FastAPI /review/* endpoints to a token-gated admin
-    // panel. Safety contract:
-    //   * token is held only in sessionStorage and the X-Review-Token header,
-    //     never logged, never written to localStorage or any committed file
+    // Wires the FastAPI /review/* endpoints to the admin panel. Auth is the
+    // signed session cookie (AUTH-2d: session-only; the legacy X-Review-Token
+    // path was retired). Safety contract:
+    //   * gated calls carry only the httponly session cookie (same-origin)
     //   * UI never mutates analysis_results / final_decision / policy_confidence
-    //   * UI surfaces a deterministic message when REVIEW_API_ENABLED is off
+    //   * a 401 from any gated call means "log in first"
     //   * No publish/correction path is exposed
     // ===== C20 — Server-review (operator) client =====
-    const SERVER_REVIEW_TOKEN_STORAGE_KEY = "policy_ai_server_review_token";
     // Only statuses the M8.x backend will actually return for a reviewer
     // are labeled. `published` / `corrected` remain reserved server-side
     // but the UI does NOT carry a display label for them — there is no
@@ -5690,16 +5689,12 @@
       approved: "승인됨 (approved)",
       rejected: "반려됨 (rejected)",
     };
-    const SERVER_REVIEW_API_DISABLED_MESSAGE =
-      "리뷰 API가 비활성화되어 있습니다. 로컬/운영 환경에서 REVIEW_API_ENABLED 설정이 필요합니다.";
-    const SERVER_REVIEW_API_FORBIDDEN_MESSAGE =
-      "X-Review-Token이 누락되었거나 일치하지 않습니다. 토큰을 다시 확인해 주세요.";
     const SERVER_REVIEW_NO_CURRENT_RESULT_MESSAGE =
       "등록할 분석 결과가 없습니다. 먼저 분석을 실행하거나 기록에서 결과를 선택하세요.";
-    // Surfaced by every gated action (refresh / register / decision) after
-    // the operator clears the token, so the lockout state is unambiguous.
-    const SERVER_REVIEW_TOKEN_CLEARED_MESSAGE =
-      "검수 토큰이 해제되었습니다. 서버 검수 작업을 보려면 다시 토큰을 적용해 주세요.";
+    // Surfaced by every gated action (refresh / register / decision) when no
+    // authenticated session is present, so the lockout state is unambiguous.
+    const SERVER_REVIEW_LOGIN_REQUIRED_MESSAGE =
+      "관리자 로그인이 필요합니다. 먼저 로그인해 주세요.";
     const SERVER_REVIEW_FROM_RESULT_PATH = "/review/tasks/from-result";
 
     // M9.2 — internal audit packet UI (read-only, explicit click only).
@@ -5711,7 +5706,7 @@
     const SERVER_REVIEW_AUDIT_PACKET_NO_TASK_MESSAGE =
       "감사 패킷을 불러올 검수 작업을 먼저 선택하세요.";
     const SERVER_REVIEW_AUDIT_PACKET_NO_TOKEN_MESSAGE =
-      "검수 토큰이 없습니다. 먼저 토큰을 적용해 주세요.";
+      "관리자 로그인이 필요합니다. 먼저 로그인해 주세요.";
     const SERVER_REVIEW_AUDIT_PACKET_NOT_FOUND_MESSAGE =
       "감사 패킷을 찾을 수 없습니다. 검수 작업이 삭제되었거나 더 이상 존재하지 않을 수 있습니다.";
     const SERVER_REVIEW_AUDIT_PACKET_COPY_OK_MESSAGE =
@@ -5724,34 +5719,9 @@
     let serverReviewSelectedTaskId = null;
     let serverReviewLastList = [];
 
-    function serverReviewGetToken() {
-      try {
-        return (window.sessionStorage && sessionStorage.getItem(SERVER_REVIEW_TOKEN_STORAGE_KEY)) || "";
-      } catch (_) {
-        return "";
-      }
-    }
-
-    function serverReviewSetToken(value) {
-      try {
-        if (!window.sessionStorage) return false;
-        if (value) {
-          sessionStorage.setItem(SERVER_REVIEW_TOKEN_STORAGE_KEY, value);
-        } else {
-          sessionStorage.removeItem(SERVER_REVIEW_TOKEN_STORAGE_KEY);
-        }
-        return true;
-      } catch (_) {
-        return false;
-      }
-    }
-
     function serverReviewFormatErrorMessage(status, detail) {
-      if (status === 503) {
-        return SERVER_REVIEW_API_DISABLED_MESSAGE;
-      }
-      if (status === 403) {
-        return SERVER_REVIEW_API_FORBIDDEN_MESSAGE;
+      if (status === 401) {
+        return SERVER_REVIEW_LOGIN_REQUIRED_MESSAGE;
       }
       if (status === 404) {
         return "요청한 검수 작업을 찾을 수 없습니다.";
@@ -5791,16 +5761,14 @@
 
     async function serverReviewFetch(path, options) {
       const opts = options || {};
-      const token = serverReviewGetToken();
-      if (!token) {
-        return { ok: false, status: 0, reason: "no_token", body: null };
-      }
+      // AUTH-2d: session-only. The gated calls carry just the httponly
+      // session cookie (same-origin); no X-Review-Token header. A 401 from
+      // the backend means the operator must log in.
       const headers = Object.assign(
         { "Content-Type": "application/json" },
         opts.headers || {},
-        { "X-Review-Token": token },
       );
-      const init = { method: opts.method || "GET", headers };
+      const init = { method: opts.method || "GET", headers, credentials: "same-origin" };
       if (opts.body != null) {
         init.body = typeof opts.body === "string" ? opts.body : JSON.stringify(opts.body);
       }
@@ -5868,14 +5836,13 @@
       serverReviewResetAuditPacketView();
     }
 
-    // Full lockout after token clear: also drop the cached task list so a
-    // stale row cannot be selected, blanked the register banner, and
-    // re-renders the empty placeholder in the list area. Used by the token
-    // clear button and the gated-action helpers below.
+    // Full lockout reset (used when the operator panel is hidden): drop the
+    // cached task list so a stale row cannot be selected, blank the register
+    // banner, and re-render the empty placeholder in the list area.
     function serverReviewResetAfterTokenClear() {
       serverReviewLastList = [];
       serverReviewClearDetail();
-      serverReviewRenderEmpty("토큰을 적용하면 서버 검수 큐를 불러옵니다.");
+      serverReviewRenderEmpty("로그인하면 서버 검수 큐를 불러옵니다.");
       serverReviewSetRegisterStatus(null, "");
     }
 
@@ -5995,10 +5962,9 @@
     async function serverReviewLoadList() {
       const list = document.getElementById("serverReviewList");
       if (!list) return;
-      const token = serverReviewGetToken();
-      if (!token) {
-        serverReviewSetStatusBanner("info", "토큰을 적용하면 서버 검수 큐를 불러옵니다.");
-        serverReviewRenderEmpty("토큰을 적용하면 서버 검수 큐를 불러옵니다.");
+      if (!serverReviewPrivilegedReady()) {
+        serverReviewSetStatusBanner("info", SERVER_REVIEW_LOGIN_REQUIRED_MESSAGE);
+        serverReviewRenderEmpty("로그인하면 서버 검수 큐를 불러옵니다.");
         serverReviewClearDetail();
         return;
       }
@@ -6028,9 +5994,8 @@
     async function serverReviewLoadDetail(taskId) {
       const id = String(taskId || "").trim();
       if (!id) return;
-      const token = serverReviewGetToken();
-      if (!token) {
-        serverReviewSetStatusBanner("error", SERVER_REVIEW_TOKEN_CLEARED_MESSAGE);
+      if (!serverReviewPrivilegedReady()) {
+        serverReviewSetStatusBanner("error", SERVER_REVIEW_LOGIN_REQUIRED_MESSAGE);
         return;
       }
       // M9.2 — selecting a different task must drop any previously loaded
@@ -6057,8 +6022,8 @@
     }
 
     async function serverReviewSubmitDecision() {
-      if (!serverReviewGetToken()) {
-        serverReviewSetStatusBanner("error", SERVER_REVIEW_TOKEN_CLEARED_MESSAGE);
+      if (!serverReviewPrivilegedReady()) {
+        serverReviewSetStatusBanner("error", SERVER_REVIEW_LOGIN_REQUIRED_MESSAGE);
         return;
       }
       const id = serverReviewSelectedTaskId;
@@ -6177,7 +6142,7 @@
     // Safety contract pinned by tests/review_ui.test.js:
     //   * Never auto-fetched. Only explicit button click triggers the
     //     GET /review/tasks/{id}/audit-packet request.
-    //   * Token sent only as X-Review-Token via serverReviewFetch.
+    //   * Authenticated via the session cookie through serverReviewFetch.
     //   * No publish/correct affordance. The copy success message
     //     explicitly says "내부 검수 기록 확인용이며 게시물이 아닙니다".
     //   * View is reset on task change + token clear.
@@ -6274,8 +6239,7 @@
     }
 
     async function serverReviewLoadAuditPacket() {
-      const token = serverReviewGetToken();
-      if (!token) {
+      if (!serverReviewPrivilegedReady()) {
         serverReviewSetAuditPacketStatus(
           "error", SERVER_REVIEW_AUDIT_PACKET_NO_TOKEN_MESSAGE,
         );
@@ -6375,11 +6339,10 @@
     }
 
     async function serverReviewRegisterCurrentResult() {
-      const token = serverReviewGetToken();
-      if (!token) {
+      if (!serverReviewPrivilegedReady()) {
         serverReviewSetRegisterStatus(
           "error",
-          SERVER_REVIEW_TOKEN_CLEARED_MESSAGE,
+          SERVER_REVIEW_LOGIN_REQUIRED_MESSAGE,
         );
         return;
       }
@@ -6442,15 +6405,14 @@
       return (Number.isInteger(focusId) && focusId > 0) ? focusId : null;
     }
 
-    // M40b — call the token-gated M40a endpoint to set/clear the M39a
+    // M40b — call the session-gated M40a endpoint to set/clear the M39a
     // human-review columns, then refresh the card in place (M39c) so the
     // "사람 검토됨" badge appears/disappears. Operator-only (this panel
-    // lives inside #operatorTools). Reuses serverReviewFetch (X-Review-Token
-    // from sessionStorage) and the existing error messaging.
+    // lives inside #operatorTools). Reuses serverReviewFetch (session cookie)
+    // and the existing error messaging.
     async function serverReviewPromoteCurrentResult(promote) {
-      const token = serverReviewGetToken();
-      if (!token) {
-        serverReviewSetPromoteStatus("error", SERVER_REVIEW_TOKEN_CLEARED_MESSAGE);
+      if (!serverReviewPrivilegedReady()) {
+        serverReviewSetPromoteStatus("error", SERVER_REVIEW_LOGIN_REQUIRED_MESSAGE);
         return;
       }
       const resultId = serverReviewResolvePromoteId();
@@ -6484,13 +6446,11 @@
       }
     }
 
-    // ===== AUTH-2c — operator account login (additive; token path unchanged) =====
-    // Establishes a signed session cookie via /auth/login. serverReviewFetch
-    // and the X-Review-Token path are NOT touched — dual-accept stays live
-    // until 2d. The submitted password is read into a local var, sent, and the
-    // input cleared; it is NEVER written to the DOM, sessionStorage,
-    // localStorage, or any log (unlike the token, which lives in sessionStorage
-    // by design).
+    // ===== AUTH-2c/2d — operator account login (session-only auth) =====
+    // Establishes a signed session cookie via /auth/login. Since AUTH-2d this
+    // is the ONLY admin auth path (the legacy X-Review-Token was retired). The
+    // submitted password is read into a local var, sent, and the input cleared;
+    // it is NEVER written to the DOM, sessionStorage, localStorage, or any log.
     const AUTH_LOGIN_PATH = "/auth/login";
     const AUTH_LOGOUT_PATH = "/auth/logout";
     const AUTH_ME_PATH = "/auth/me";
@@ -6505,12 +6465,13 @@
     }
 
     // Display-only mirror of the last-known /auth/me state. The real gate is
-    // server-side (require_admin dual-accept); this only drives UI enablement.
+    // server-side (require_admin, session-only since AUTH-2d); this only drives
+    // UI enablement / the "log in first" guard messages.
     let authSessionActive = false;
 
-    // privilegedReady = authenticated session OR a legacy token is present.
+    // AUTH-2d: privilegedReady = authenticated session ONLY (token path gone).
     function serverReviewPrivilegedReady() {
-      return authSessionActive || serverReviewGetToken() !== "";
+      return authSessionActive;
     }
 
     function authSetStatus(kind, message) {
@@ -6637,15 +6598,12 @@
     }
 
     function serverReviewBindEvents() {
-      const saveBtn = document.getElementById("serverReviewTokenSaveBtn");
-      const clearBtn = document.getElementById("serverReviewTokenClearBtn");
-      const tokenInput = document.getElementById("serverReviewToken");
       const refreshBtn = document.getElementById("serverReviewRefreshBtn");
       const filterEl = document.getElementById("serverReviewStatusFilter");
       const listEl = document.getElementById("serverReviewList");
       const submitBtn = document.getElementById("serverReviewSubmitDecisionBtn");
       const registerBtn = document.getElementById("serverReviewRegisterCurrentBtn");
-      if (!saveBtn || !clearBtn || !tokenInput || !refreshBtn || !filterEl || !listEl || !submitBtn) {
+      if (!refreshBtn || !filterEl || !listEl || !submitBtn) {
         return;
       }
       if (registerBtn) {
@@ -6668,41 +6626,16 @@
           serverReviewPromoteCurrentResult(false);
         });
       }
-      saveBtn.addEventListener("click", async () => {
-        const value = (tokenInput.value || "").trim();
-        if (!value) {
-          serverReviewSetStatusBanner("error", "토큰 값을 입력해 주세요.");
-          return;
-        }
-        const ok = serverReviewSetToken(value);
-        // Clear the visible input so the token is not left on-screen.
-        tokenInput.value = "";
-        if (!ok) {
-          serverReviewSetStatusBanner("error", "이 브라우저에서는 세션 저장소를 사용할 수 없습니다.");
-          return;
-        }
-        serverReviewSetStatusBanner("success", "토큰을 적용했습니다. 큐를 불러옵니다...");
-        // Token apply is an explicit operator action; loading the list
-        // here matches the documented M8.1 UX. No other init path auto-
-        // fetches /review/tasks.
-        await serverReviewLoadList();
-      });
-      clearBtn.addEventListener("click", () => {
-        serverReviewSetToken("");
-        tokenInput.value = "";
-        serverReviewResetAfterTokenClear();
-        serverReviewSetStatusBanner("info", SERVER_REVIEW_TOKEN_CLEARED_MESSAGE);
-      });
       refreshBtn.addEventListener("click", () => {
-        if (!serverReviewGetToken()) {
-          serverReviewSetStatusBanner("error", SERVER_REVIEW_TOKEN_CLEARED_MESSAGE);
+        if (!serverReviewPrivilegedReady()) {
+          serverReviewSetStatusBanner("error", SERVER_REVIEW_LOGIN_REQUIRED_MESSAGE);
           return;
         }
         serverReviewLoadList();
       });
       filterEl.addEventListener("change", () => {
-        if (!serverReviewGetToken()) {
-          serverReviewSetStatusBanner("error", SERVER_REVIEW_TOKEN_CLEARED_MESSAGE);
+        if (!serverReviewPrivilegedReady()) {
+          serverReviewSetStatusBanner("error", SERVER_REVIEW_LOGIN_REQUIRED_MESSAGE);
           return;
         }
         serverReviewLoadList();
@@ -6740,20 +6673,19 @@
           serverReviewCopyAuditPacket();
         });
       }
-      // M8.7 — page initialization must NOT auto-call /review/tasks even
-      // when a token is already in sessionStorage. The operator must
-      // explicitly trigger queue refresh / register / decision actions.
-      // This keeps the reviewer UI a strictly manual, internal/admin
+      // M8.7 — page initialization must NOT auto-call /review/tasks. The
+      // operator must explicitly trigger queue refresh / register / decision
+      // actions. This keeps the reviewer UI a strictly manual, internal/admin
       // workflow.
-      if (serverReviewGetToken()) {
+      if (serverReviewPrivilegedReady()) {
         serverReviewSetStatusBanner(
           "info",
-          "저장된 세션 토큰이 있습니다. '큐 새로고침'을 누르면 검수 큐를 불러옵니다.",
+          "로그인되었습니다. '큐 새로고침'을 누르면 검수 큐를 불러옵니다.",
         );
       } else {
         serverReviewSetStatusBanner(
           "info",
-          "로컬/운영용 리뷰 토큰을 입력하면 서버 검수 큐가 표시됩니다.",
+          "관리자 로그인 후 서버 검수 큐를 사용할 수 있습니다.",
         );
       }
     }
@@ -6766,11 +6698,11 @@
     // sessionStorage flag and is then stripped from the URL so the
     // share-link is clean) or by re-using an existing sessionStorage
     // flag set earlier in the same browser tab. Hiding clears the
-    // operator-mode flag, the review session token, and any loaded
-    // queue / detail / audit-packet state.
+    // operator-mode flag and any loaded queue / detail / audit-packet
+    // state (it does NOT end the server session — use 로그아웃 for that).
     //
-    // This is UI visibility only. Real protection of the review API
-    // remains REVIEW_API_ENABLED + X-Review-Token server-side.
+    // This is UI visibility only. Real protection of the review API is the
+    // require_admin session gate server-side (AUTH-2d: session-only).
     // -----------------------------------------------------------------
     // ===== C21 — Operator-tools visibility =====
     const OPERATOR_TOOLS_STORAGE_KEY = "policy_ai_operator_tools_visible";
@@ -6843,17 +6775,14 @@
     }
 
     function hideOperatorToolsAndResetState() {
-      // Clear visibility flag.
+      // Clear visibility flag and reset every piece of in-memory review-side
+      // UI state (cached queue / detail / register banner). Hiding the panel
+      // is local UI only — it does NOT end the server session (use 로그아웃 for
+      // that); AUTH-2d removed the token, so there is no token to clear here.
       setOperatorToolsFlag(false);
-      // Clear the review session token + every piece of in-memory
-      // review-side UI state. M8.7 already pinned the lockout helper;
-      // we reuse it so the behavior is consistent with 토큰 해제.
-      try {
-        serverReviewSetToken("");
-      } catch (_) { /* helper may not be defined in some fixtures */ }
       try {
         serverReviewResetAfterTokenClear();
-      } catch (_) { /* same */ }
+      } catch (_) { /* helper may not be defined in some fixtures */ }
       hideOperatorToolsElement();
     }
 
@@ -6886,10 +6815,8 @@
         formatErrorMessage: serverReviewFormatErrorMessage,
         formatStatusLabel: serverReviewFormatStatusLabel,
         buildFromResultPayload: buildReviewTaskFromResultPayload,
-        disabledMessage: SERVER_REVIEW_API_DISABLED_MESSAGE,
-        forbiddenMessage: SERVER_REVIEW_API_FORBIDDEN_MESSAGE,
+        loginRequiredMessage: SERVER_REVIEW_LOGIN_REQUIRED_MESSAGE,
         noCurrentResultMessage: SERVER_REVIEW_NO_CURRENT_RESULT_MESSAGE,
-        tokenClearedMessage: SERVER_REVIEW_TOKEN_CLEARED_MESSAGE,
         fromResultPath: SERVER_REVIEW_FROM_RESULT_PATH,
         statusLabels: SERVER_REVIEW_STATUS_LABELS,
         // M9.2 audit packet — exposed for tests/review_ui.test.js.

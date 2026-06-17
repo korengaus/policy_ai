@@ -64,6 +64,12 @@ except Exception:
 # ``REVIEW_API_TOKEN`` from the environment.
 DEFAULT_DEMO_TOKEN = "local-review-demo-token"
 
+# AUTH-2d: --verify mode authenticates via a session cookie, so it seeds an
+# ephemeral local admin and logs in. These creds live only in the demo's temp
+# DB, are never printed, and are NOT a real secret.
+_VERIFY_ADMIN_USER = "demo-verify-admin"
+_VERIFY_ADMIN_PASS = "demo-verify-pw-local-only-not-a-real-secret"  # noqa: S105
+
 DEMO_DB_FILENAME = "review_ui_local_demo.sqlite"
 REPORTS_DIR_NAME = "reports"
 
@@ -371,14 +377,12 @@ def _seed_demo_db(db_path: Path) -> List[str]:
 def _run_verify(db_path: Path, token: str) -> Dict[str, object]:
     """Exercise the seeded DB against the FastAPI app via TestClient.
 
-    Reuses the documented review-env override + module-reload pattern
-    so any module-level caches see the temp DB. Sets
-    ``REVIEW_API_ENABLED`` / ``REVIEW_API_TOKEN`` only for the duration
-    of the verify block and restores prior values on exit (even on
-    exception).
+    AUTH-2d: auth is the signed session cookie. The verify run seeds an
+    ephemeral admin in the demo DB, logs in via ``POST /auth/login``, and uses
+    the session cookie for all ``/review/*`` calls — there is no review token.
+    The ``token`` argument is the demo's display label only; it must never
+    appear in the audit-packet response (defensive leak check below).
     """
-    keys = ("REVIEW_API_ENABLED", "REVIEW_API_TOKEN")
-    original_env = {k: os.environ.get(k) for k in keys}
     out: Dict[str, object] = {
         "passed": False,
         "list_status": None,
@@ -389,74 +393,86 @@ def _run_verify(db_path: Path, token: str) -> Dict[str, object]:
         "no_token_in_audit_packet": None,
         "errors": [],
     }
-    try:
-        os.environ["REVIEW_API_ENABLED"] = "true"
-        os.environ["REVIEW_API_TOKEN"] = token
-        with _override_database_path(db_path) as database:
-            try:
-                from fastapi.testclient import TestClient  # type: ignore
-                import api_server  # noqa: F401
-            except Exception as error:
-                out["errors"].append(
-                    f"failed to import FastAPI / api_server: {error}"
+    with _override_database_path(db_path) as database:
+        try:
+            from fastapi.testclient import TestClient  # type: ignore
+            import api_server  # noqa: F401
+        except Exception as error:
+            out["errors"].append(
+                f"failed to import FastAPI / api_server: {error}"
+            )
+            return out
+
+        # Seed an ephemeral admin (idempotent) so we can establish a session.
+        try:
+            database.create_account(
+                _VERIFY_ADMIN_USER, _VERIFY_ADMIN_PASS, role="admin",
+            )
+        except getattr(database, "AccountExistsError", Exception):
+            pass
+        except Exception as error:
+            out["errors"].append(f"could not seed verify admin: {error}")
+            return out
+
+        try:
+            with TestClient(api_server.app) as client:
+                login = client.post(
+                    "/auth/login",
+                    json={
+                        "username": _VERIFY_ADMIN_USER,
+                        "password": _VERIFY_ADMIN_PASS,
+                    },
                 )
-                return out
+                if login.status_code != 200:
+                    out["errors"].append(
+                        f"verify admin login failed: HTTP {login.status_code}"
+                    )
+                    return out
 
-            try:
-                with TestClient(api_server.app) as client:
-                    list_resp = client.get(
-                        "/review/tasks",
-                        headers={"X-Review-Token": token},
-                    )
-                    out["list_status"] = list_resp.status_code
-                    body = list_resp.json() if list_resp.status_code == 200 else {}
-                    tasks = body.get("tasks") or []
-                    if not tasks:
-                        out["errors"].append("no tasks visible in list endpoint")
-                        return out
-                    task_id = tasks[0].get("task_id")
-                    out["task_visible"] = bool(task_id)
+                list_resp = client.get("/review/tasks")
+                out["list_status"] = list_resp.status_code
+                body = list_resp.json() if list_resp.status_code == 200 else {}
+                tasks = body.get("tasks") or []
+                if not tasks:
+                    out["errors"].append("no tasks visible in list endpoint")
+                    return out
+                task_id = tasks[0].get("task_id")
+                out["task_visible"] = bool(task_id)
 
-                    detail_resp = client.get(
-                        f"/review/tasks/{task_id}",
-                        headers={"X-Review-Token": token},
-                    )
-                    out["detail_status"] = detail_resp.status_code
+                detail_resp = client.get(f"/review/tasks/{task_id}")
+                out["detail_status"] = detail_resp.status_code
 
-                    packet_resp = client.get(
-                        f"/review/tasks/{task_id}/audit-packet",
-                        headers={"X-Review-Token": token},
-                    )
-                    out["audit_packet_status"] = packet_resp.status_code
-                    packet_body = (
-                        packet_resp.json() if packet_resp.status_code == 200 else {}
-                    )
-                    contract = (packet_body.get("safety_contract") or {})
-                    out["audit_packet_publication_false"] = (
-                        contract.get("publication") is False
-                    )
-                    serialized = json.dumps(packet_body, ensure_ascii=False)
-                    out["no_token_in_audit_packet"] = token not in serialized
-            except Exception as error:
-                out["errors"].append(f"TestClient run failed: {error}")
-                return out
+                packet_resp = client.get(
+                    f"/review/tasks/{task_id}/audit-packet",
+                )
+                out["audit_packet_status"] = packet_resp.status_code
+                packet_body = (
+                    packet_resp.json() if packet_resp.status_code == 200 else {}
+                )
+                contract = (packet_body.get("safety_contract") or {})
+                out["audit_packet_publication_false"] = (
+                    contract.get("publication") is False
+                )
+                serialized = json.dumps(packet_body, ensure_ascii=False)
+                # Defensive: neither the demo display label nor the verify admin
+                # password may appear in the packet.
+                out["no_token_in_audit_packet"] = (
+                    token not in serialized
+                    and _VERIFY_ADMIN_PASS not in serialized
+                )
+        except Exception as error:
+            out["errors"].append(f"TestClient run failed: {error}")
+            return out
 
-        out["passed"] = bool(
-            out["list_status"] == 200
-            and out["detail_status"] == 200
-            and out["audit_packet_status"] == 200
-            and out["task_visible"]
-            and out["audit_packet_publication_false"] is True
-            and out["no_token_in_audit_packet"] is True
-            and not out["errors"]
-        )
-    finally:
-        # Restore env exactly as it was, including unset.
-        for k, v in original_env.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
+    out["passed"] = bool(
+        out["list_status"] == 200
+        and out["detail_status"] == 200
+        and out["audit_packet_status"] == 200
+        and out["task_visible"]
+        and out["audit_packet_publication_false"] is True
+        and out["no_token_in_audit_packet"] is True
+        and not out["errors"]
+    )
     return out
 
 

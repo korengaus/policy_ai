@@ -1,9 +1,11 @@
-"""Phase 2 M8.3: tests for ``scripts/smoke_review_workflow.py``.
+"""Phase 2 M8.3 (AUTH-2d session model): tests for
+``scripts/smoke_review_workflow.py``.
 
 Verifies that:
     * the self-contained smoke passes end-to-end against a temp SQLite DB,
-    * every documented sub-check returns ``passed=True``,
-    * the dummy token never appears in stdout, stderr, or the JSON summary,
+    * every documented sub-check returns ``passed=True`` (auth is the session
+      cookie — AUTH-2d retired the X-Review-Token gate),
+    * the ephemeral admin password never appears in stdout/stderr,
     * the script does not require ``OPENAI_API_KEY`` / network / Postgres,
     * the script does not modify Render env or import verdict modules,
     * the CLI rejects a run without ``--self-contained``.
@@ -103,7 +105,7 @@ class SelfContainedSmokeTests(unittest.TestCase):
         summary = _extract_json_summary(out)
         self.assertTrue(summary["passed"], msg=summary)
         for key in (
-            "disabled_check", "token_check", "task_creation_check",
+            "session_gate_check", "task_creation_check",
             "idempotency_check", "list_detail_check", "decision_check",
             "verdict_isolation_check", "publication_absent_check",
             "audit_trail_check",   # M9.0
@@ -158,13 +160,14 @@ class SelfContainedSmokeTests(unittest.TestCase):
 
 
 class SecretsAndIsolationTests(unittest.TestCase):
-    DUMMY_TOKEN_LITERAL = "smoke-dummy-token-internal-only-do-not-publish"
-
-    def test_dummy_token_never_appears_in_smoke_output(self):
+    # AUTH-2d: there is no review token anymore. The smoke uses an ephemeral
+    # admin password (sent only to /auth/login) which must never be echoed.
+    def test_admin_password_never_appears_in_smoke_output(self):
+        import scripts.smoke_review_workflow as smoke  # noqa: E402
         rc, out, err = _run_smoke("--self-contained")
         self.assertEqual(rc, 0)
-        self.assertNotIn(self.DUMMY_TOKEN_LITERAL, out)
-        self.assertNotIn(self.DUMMY_TOKEN_LITERAL, err)
+        self.assertNotIn(smoke._ADMIN_PASS, out)
+        self.assertNotIn(smoke._ADMIN_PASS, err)
         # API-key style literals also never appear.
         self.assertNotIn("sk-", out)
 

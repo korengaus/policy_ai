@@ -243,29 +243,14 @@
                 <button id="serverReviewLogoutBtn" class="secondary" type="button">로그아웃</button>
               </div>
               <div class="server-review-token-note">
-                계정으로 로그인하면 세션 쿠키로 인증됩니다. 아래 토큰 칸은 호환용 대체 수단으로 그대로 유지됩니다.
+                계정으로 로그인하면 세션 쿠키로 인증됩니다. 검수 도구는 로그인한 관리자만 사용할 수 있습니다.
               </div>
               <div id="serverReviewLoginStatus" class="server-review-login-status" role="status" aria-live="polite"></div>
             </div>
-            <div class="server-review-token-panel">
-              <label for="serverReviewToken">리뷰 API 토큰 (X-Review-Token)</label>
-              <input
-                id="serverReviewToken"
-                type="password"
-                autocomplete="off"
-                spellcheck="false"
-                placeholder="로컬/운영용 리뷰 토큰을 붙여넣으세요"
-              >
-              <div class="server-review-token-actions">
-                <button id="serverReviewTokenSaveBtn" class="primary" type="button">토큰 적용</button>
-                <button id="serverReviewTokenClearBtn" class="secondary" type="button">토큰 해제</button>
-              </div>
-              <div class="server-review-token-note">
-                토큰은 브라우저 세션 저장소에만 보관되며 서버 호출 시 X-Review-Token 헤더로만 전송됩니다.
-                코드, 로그, URL에는 포함되지 않습니다.
-              </div>
-              <div id="serverReviewStatus" class="server-review-status" role="status" aria-live="polite"></div>
-            </div>
+            <!-- AUTH-2d: the legacy X-Review-Token paste box was removed; login
+                 above is the only admin auth path. #serverReviewStatus is the
+                 shared queue/action status banner and stays. -->
+            <div id="serverReviewStatus" class="server-review-status" role="status" aria-live="polite"></div>
 
             <div class="server-review-register-panel">
               <h4>분석 결과 → 검수 큐 등록</h4>

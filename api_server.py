@@ -41,7 +41,6 @@ from request_context import (
     reset_request_id,
     set_request_id,
 )
-import review_auth
 import review_workflow
 from text_utils import sanitize_data
 
@@ -1177,8 +1176,8 @@ def v2_job_stream(job_id: str):
 # ---------------------------------------------------------------------------
 # Phase 2 M8.0: server-backed reviewer workflow endpoints.
 #
-# Disabled by default — gated by ``review_auth.require_review_token`` which
-# checks the ``REVIEW_API_ENABLED`` env var + the ``X-Review-Token`` header.
+# Admin-only — gated by ``require_admin`` (session-only since AUTH-2d): a
+# request without an authenticated session is rejected with 401.
 # No endpoint here mutates analysis_results, final_decision,
 # policy_confidence, verification_card, or any verdict-side field. The
 # only writes are to review_tasks / review_decisions (the new tables).
@@ -1210,30 +1209,20 @@ class _ReviewDecisionRequest(BaseModel):
 class _PromoteReviewRequest(BaseModel):
     # M40a — promote=True stamps the human-reviewed columns; promote=False
     # un-promotes (NULLs both). reviewer is a display label only, NOT auth
-    # (auth is the X-Review-Token gate); defaults to "operator".
+    # (auth is the require_admin session gate); defaults to "operator".
     promote: bool = True
     reviewer: Optional[str] = None
 
 
-def _require_review_token(
-    x_review_token: Optional[str] = Header(
-        default=None, alias=review_auth.REVIEW_TOKEN_HEADER,
-    ),
-) -> None:
-    """FastAPI dependency wrapping ``review_auth.check_review_request``.
-    Declared here so the endpoints can simply ``Depends(_require_review_token)``."""
-    review_auth.check_review_request(x_review_token)
-
-
 # ---------------------------------------------------------------------------
-# AUTH-2b — account login (session) + dual-accept admin gate.
+# AUTH-2d — account login (session) is the ONLY admin auth path.
 #
 # /auth/login verifies username+password (bcrypt) and starts a signed session.
-# require_admin authorizes the review surface when EITHER a valid session is
-# present OR the legacy X-Review-Token validates — so nothing breaks during the
-# migration. The legacy token path delegates to review_auth (its 503/403
-# semantics are preserved verbatim). _require_review_token above is kept intact
-# (retired only in 2d). None of this touches any verdict/scoring field.
+# require_admin authorizes the review surface ONLY when the signed session
+# carries an authenticated admin marker. The legacy X-Review-Token gate was
+# retired in AUTH-2d (review_auth.py deleted); there is no token fallback. A
+# request without a valid session is rejected with 401. None of this touches
+# any verdict/scoring field.
 # ---------------------------------------------------------------------------
 
 _SESSION_AUTH_KEY = "authenticated"
@@ -1251,28 +1240,16 @@ def _session_is_authenticated(request: Request) -> bool:
         return False
 
 
-def require_admin(
-    request: Request,
-    x_review_token: Optional[str] = Header(
-        default=None, alias=review_auth.REVIEW_TOKEN_HEADER,
-    ),
-) -> None:
-    """Dual-accept admin gate for the review surface.
+def require_admin(request: Request) -> None:
+    """Session-only admin gate for the review surface.
 
-    Authorizes when EITHER:
-      (a) the signed session cookie carries an authenticated admin marker, OR
-      (b) the legacy ``X-Review-Token`` validates via ``review_auth`` (whose
-          503-disabled / 503-misconfigured / 403-wrong semantics are preserved
-          exactly — we delegate, never reimplement or loosen them).
-
-    The session is checked first so an authenticated operator is never subjected
-    to the token gate's 503-when-disabled behavior. With no session, the token
-    path runs and raises precisely as it did before AUTH-2b.
+    Authorizes ONLY when the signed session cookie carries an authenticated
+    admin marker (set by /auth/login). With no valid session the request is
+    rejected with 401 — there is no token fallback (retired in AUTH-2d).
     """
     if _session_is_authenticated(request):
         return None
-    review_auth.check_review_request(x_review_token)
-    return None
+    raise HTTPException(status_code=401, detail="authentication required")
 
 
 class _LoginRequest(BaseModel):
@@ -1587,10 +1564,9 @@ def review_promote_result(
     """M40a — set or clear the human-reviewed badge signal on a stored
     ``analysis_results`` row.
 
-    Token-gated exactly like the other ``/review/*`` endpoints (same
-    503-when-disabled / 403-on-bad-token semantics via
-    ``_require_review_token``). Sets ONLY the M39a ``human_reviewed_at`` /
-    ``human_reviewed_by`` columns:
+    Session-gated exactly like the other ``/review/*`` endpoints (401 when
+    no authenticated session, via ``require_admin``). Sets ONLY the M39a
+    ``human_reviewed_at`` / ``human_reviewed_by`` columns:
 
     * ``promote=true``  → stamps them (reviewer defaults to "operator").
     * ``promote=false`` → clears both back to NULL (un-promote).
@@ -1659,9 +1635,7 @@ def review_audit_packet(
     verification-card. Never publishes. Never echoes the token.
 
     Gated identically to the rest of the review surface:
-        * 503 when ``REVIEW_API_ENABLED`` is unset.
-        * 503 when the env var is set but ``REVIEW_API_TOKEN`` is missing.
-        * 403 when ``X-Review-Token`` is missing / wrong.
+        * 401 when there is no authenticated session (via ``require_admin``).
         * 404 when the task does not exist.
     """
     task = get_review_task(task_id)

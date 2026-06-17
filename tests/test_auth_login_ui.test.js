@@ -32,11 +32,11 @@ assert.ok(
   /type="password"/.test(loginPassBlock[0]),
   "serverReviewLoginPass must be type=\"password\""
 );
-// Login panel + the legacy token box must BOTH be present (dual-accept live).
+// Login panel present; AUTH-2d: the legacy token box must be GONE.
 assert.ok(html.includes('id="serverReviewLoginBtn"'), "login button must exist");
 assert.ok(html.includes('id="serverReviewLogoutBtn"'), "logout button must exist");
-assert.ok(html.includes('id="serverReviewToken"'), "legacy token input must remain");
-assert.ok(html.includes('id="serverReviewTokenSaveBtn"'), "legacy token save btn must remain");
+assert.ok(!html.includes('id="serverReviewToken"'), "legacy token input must be removed");
+assert.ok(!html.includes('id="serverReviewTokenSaveBtn"'), "legacy token save btn must be removed");
 
 // --- vm sandbox harness (mirrors review_ui.test.js) --------------------------
 const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
@@ -131,8 +131,8 @@ function getHelpers(sandbox) {
 (function existingContractPreserved() {
   const h = getHelpers(createSandbox());
   for (const member of [
-    "formatErrorMessage", "formatStatusLabel", "disabledMessage",
-    "forbiddenMessage", "operatorToolsFlagSet", "applyOperatorToolsVisibility",
+    "formatErrorMessage", "formatStatusLabel", "loginRequiredMessage",
+    "operatorToolsFlagSet", "applyOperatorToolsVisibility",
   ]) {
     assert.ok(member in h, `existing helper "${member}" must be preserved`);
   }
@@ -214,14 +214,14 @@ async function authMeReflectsState() {
   assert.strictEqual(hNo.privilegedReady(), false);
 }
 
-// --- (4) token fallback works with no session -------------------------------
-function tokenFallback() {
-  // Session store seeded with a token, no /auth/me login performed.
+// --- (4) AUTH-2d: a legacy token no longer grants access -------------------
+function tokenNoLongerGrants() {
+  // Even with a leftover token in session storage, privilegedReady is false
+  // until an authenticated session exists (session-only since AUTH-2d).
   const sb = createSandbox({ session: { [TOKEN_STORAGE_KEY]: "legacy-token-xyz" } });
-  const h = getHelpers(sb);
   assert.strictEqual(
-    h.privilegedReady(), true,
-    "privilegedReady must be true when a legacy token is present (no session)"
+    getHelpers(sb).privilegedReady(), false,
+    "privilegedReady must be false for a token-only (no session) state"
   );
   // And false with neither token nor session.
   const sb2 = createSandbox();
@@ -280,7 +280,7 @@ async function main() {
   await successfulLogin();
   await logoutReverts();
   await authMeReflectsState();
-  tokenFallback();
+  tokenNoLongerGrants();
   await passwordNeverLeaks();
   await genericFailure();
   console.log("AUTH-2c login UI tests passed (7 cases + contract preservation).");

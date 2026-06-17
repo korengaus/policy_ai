@@ -25,9 +25,9 @@ const html = fs.readFileSync(htmlPath, "utf8");
 
 // 1. HTML structural checks ---------------------------------------------------
 const requiredIds = [
-  "serverReviewToken",
-  "serverReviewTokenSaveBtn",
-  "serverReviewTokenClearBtn",
+  // AUTH-2d: the legacy X-Review-Token paste box was removed; login is the
+  // only admin auth UI. The serverReviewLogin* ids are pinned by
+  // tests/test_auth_login_ui.test.js.
   "serverReviewStatusFilter",
   "serverReviewRefreshBtn",
   "serverReviewList",
@@ -50,12 +50,11 @@ for (const id of requiredIds) {
   );
 }
 
-// The X-Review-Token header alias must appear in the admin panel copy so the
-// reviewer knows which header is sent (the token value itself must NOT be
-// hardcoded anywhere — assert below).
+// AUTH-2d: the admin panel no longer references X-Review-Token (token gate
+// retired). The login form establishes a session cookie instead.
 assert.ok(
-  html.includes("X-Review-Token"),
-  "admin panel should reference the X-Review-Token header by name"
+  html.includes('id="serverReviewLoginBtn"'),
+  "admin panel should expose the account login button"
 );
 
 // M8.7 — internal/admin-only wording must be present in the reviewer
@@ -105,12 +104,11 @@ assert.ok(
   "server-review <details> summary must use the M8.7 internal-admin label"
 );
 
-// The disabled-API banner must surface the exact operator-facing message.
+// AUTH-2d: the login-required message replaces the retired disabled-API
+// banner copy. Pin its exact operator-facing text.
 assert.ok(
-  html.includes(
-    "리뷰 API가 비활성화되어 있습니다. 로컬/운영 환경에서 REVIEW_API_ENABLED 설정이 필요합니다."
-  ),
-  "admin panel should include the deterministic disabled-API message"
+  html.includes("관리자 로그인이 필요합니다. 먼저 로그인해 주세요."),
+  "admin panel should include the deterministic login-required message"
 );
 
 // The four documented review decision values must appear in the decision
@@ -158,29 +156,16 @@ assert.ok(
   "frontend must surface the deterministic 'no current result' message"
 );
 
-// Token storage must remain sessionStorage-only — the M8.2 bridge must
-// not introduce a second token store via localStorage.
-const reviewSection = html.slice(html.indexOf("serverReviewToken"));
-assert.ok(
-  !/localStorage[^\n]*(?:[Rr]eview|REVIEW)[^\n]*[Tt]oken/.test(reviewSection),
-  "review token must not be stored in localStorage"
-);
-
-// M8.7 — there must be exactly one X-Review-Token write-site in the
-// fetch helper. We can't easily count call sites textually, but we can
-// assert the helper does not also place the token in URLs, query
-// strings, request bodies, or alternative auth headers.
+// AUTH-2d: no review token is stored anywhere anymore. Still assert the UI
+// does not switch to an Authorization: Bearer header or put any token in a
+// URL query string (defence-in-depth against a future regression).
 assert.ok(
   !/[?&](?:token|review_token|x-review-token)=/i.test(html),
-  "token must never appear in a URL query string"
+  "no token may ever appear in a URL query string"
 );
 assert.ok(
   !/Authorization:\s*Bearer/i.test(html),
-  "reviewer fetch must not switch to an Authorization: Bearer header"
-);
-assert.ok(
-  !/"token"\s*:\s*[A-Za-z_\$]/.test(html.slice(serverReviewSectionStart)),
-  "reviewer JSON body must not carry a token field"
+  "reviewer fetch must not use an Authorization: Bearer header"
 );
 
 // M8.7 — published / corrected are reserved server-side. They must NOT
@@ -195,15 +180,8 @@ for (const reservedLabel of ["published:", "corrected:",
   );
 }
 
-// Token must NOT be hardcoded in committed source. Heuristic: the marker
-// "X-Review-Token" appears as a header alias only; common token-storage
-// patterns ("Bearer <token>", literal hex strings 32+ chars next to the alias)
-// are flagged here.
-const hexMatch = html.match(/X-Review-Token[^\n]*[0-9a-fA-F]{32,}/);
-assert.ok(
-  !hexMatch,
-  `index.html must not embed a literal token next to X-Review-Token; matched: ${hexMatch && hexMatch[0]}`
-);
+// No secret/token literal may be hardcoded in committed source (not keyed to
+// any X-Review-Token alias, which no longer exists).
 assert.ok(
   !/Bearer\s+[A-Za-z0-9._-]{20,}/.test(html),
   "index.html must not embed a Bearer token literal"
@@ -361,32 +339,20 @@ const sandbox = createSandbox();
 const helpers = sandbox.window.__serverReviewHelpers;
 
 assert.ok(helpers, "window.__serverReviewHelpers must be exposed for testing");
+// AUTH-2d: the 503-disabled / 403-token-forbidden mappings were retired with
+// the token gate. 401 (no session) now maps to a "log in first" message.
 assert.strictEqual(
-  helpers.disabledMessage,
-  "리뷰 API가 비활성화되어 있습니다. 로컬/운영 환경에서 REVIEW_API_ENABLED 설정이 필요합니다.",
-  "disabledMessage must match the documented operator-facing string"
-);
-
-assert.strictEqual(
-  helpers.formatErrorMessage(503),
-  helpers.disabledMessage,
-  "503 must map to the disabled-API message"
-);
-
-assert.strictEqual(
-  helpers.formatErrorMessage(403),
-  helpers.forbiddenMessage,
-  "403 must map to the forbidden message (no token detail leakage)"
-);
-
-// 403 message must NOT leak the configured token or hint at its value.
-assert.ok(
-  /토큰/.test(helpers.forbiddenMessage),
-  "forbidden message should mention the token in the user copy"
+  helpers.formatErrorMessage(401),
+  helpers.loginRequiredMessage,
+  "401 must map to the login-required message"
 );
 assert.ok(
-  !/[0-9a-fA-F]{16,}/.test(helpers.forbiddenMessage),
-  "forbidden message must not embed any hex token-like literal"
+  /로그인/.test(helpers.loginRequiredMessage),
+  "login-required message should tell the operator to log in"
+);
+assert.ok(
+  !/[0-9a-fA-F]{16,}/.test(helpers.loginRequiredMessage),
+  "login-required message must not embed any hex secret-like literal"
 );
 
 assert.strictEqual(helpers.formatErrorMessage(404).includes("찾을 수 없"), true);
@@ -501,11 +467,11 @@ assert.ok(
   "buildFromResultPayload must not expose a semantic label on the payload",
 );
 
-// 4. M8.7 — token cleared message exposed for tests ------------------------
+// 4. AUTH-2d — login-required message exposed for tests --------------------
 assert.strictEqual(
-  helpers.tokenClearedMessage,
-  "검수 토큰이 해제되었습니다. 서버 검수 작업을 보려면 다시 토큰을 적용해 주세요.",
-  "tokenClearedMessage must match the documented Korean copy",
+  helpers.loginRequiredMessage,
+  "관리자 로그인이 필요합니다. 먼저 로그인해 주세요.",
+  "loginRequiredMessage must match the documented Korean copy",
 );
 
 // 5. M8.7 — published / corrected absent from the UI status-label dict.
@@ -744,7 +710,7 @@ assert.strictEqual(
 );
 assert.strictEqual(
   helpers.auditPacketNoTokenMessage,
-  "검수 토큰이 없습니다. 먼저 토큰을 적용해 주세요.",
+  "관리자 로그인이 필요합니다. 먼저 로그인해 주세요.",
   "auditPacketNoTokenMessage must match the documented Korean copy",
 );
 assert.strictEqual(
@@ -767,12 +733,7 @@ assert.strictEqual(
   "복사할 감사 패킷이 없습니다. 먼저 '감사 패킷 보기'를 눌러 주세요.",
   "auditPacketNotLoadedMessage must match the documented Korean copy",
 );
-// Existing M8.1 messages still equal what M9.2 reuses on disabled / 403.
-assert.strictEqual(
-  helpers.disabledMessage,
-  "리뷰 API가 비활성화되어 있습니다. 로컬/운영 환경에서 REVIEW_API_ENABLED 설정이 필요합니다.",
-  "audit-packet UI reuses the documented disabled message",
-);
+// AUTH-2d: the disabled-API message was retired with the token gate.
 
 // --- 12e. Path template carries no token, no query string ------------------
 assert.strictEqual(
@@ -1115,11 +1076,12 @@ const seededOpSandbox = createSandbox({
   );
 }
 
-// --- 13g. Hide button clears operator flag + review token + state -------
+// --- 13g. Hide button clears operator flag + in-memory state ------------
+// AUTH-2d: there is no review token to clear anymore; hide only clears the
+// operator-mode visibility flag and resets in-memory review-side UI state.
 const hideSandbox = createSandbox({
   session: {
     policy_ai_operator_tools_visible: "true",
-    policy_ai_server_review_token: "test-session-token-from-prior-step",
   },
 });
 {
@@ -1132,25 +1094,16 @@ const hideSandbox = createSandbox({
     opEl.hidden, true,
     "hide handler must hide the operator-tools wrapper",
   );
-  // Flag + token both cleared from sessionStorage.
+  // Flag cleared from sessionStorage.
   assert.strictEqual(
     hideSandbox.__sessionStore.get("policy_ai_operator_tools_visible"),
     undefined,
     "hide must clear the operator-mode flag from sessionStorage",
   );
-  assert.strictEqual(
-    hideSandbox.__sessionStore.get("policy_ai_server_review_token"),
-    undefined,
-    "hide must clear the review session token from sessionStorage",
-  );
-  // Neither value moved to localStorage.
+  // Flag must not have moved to localStorage.
   assert.ok(
     !hideSandbox.__localStore.get("policy_ai_operator_tools_visible"),
     "operator-mode flag must never appear in localStorage",
-  );
-  assert.ok(
-    !hideSandbox.__localStore.get("policy_ai_server_review_token"),
-    "review token must never appear in localStorage",
   );
   // Hide must not fire any /review/* request.
   const reviewFetches = hideSandbox.__fetchCalls.filter(
@@ -1209,11 +1162,8 @@ for (const decision of ["approve", "reject", "needs_more_evidence", "comment"]) 
     `decision dropdown still requires value="${decision}"`,
   );
 }
-// Disabled / no-current-result / audit-packet messages unchanged.
-assert.strictEqual(
-  helpers.disabledMessage,
-  "리뷰 API가 비활성화되어 있습니다. 로컬/운영 환경에서 REVIEW_API_ENABLED 설정이 필요합니다.",
-);
+// No-current-result / audit-packet messages unchanged (AUTH-2d: the
+// disabled-API message was retired with the token gate).
 assert.strictEqual(
   helpers.noCurrentResultMessage,
   "등록할 분석 결과가 없습니다. 먼저 분석을 실행하거나 기록에서 결과를 선택하세요.",
@@ -1224,7 +1174,7 @@ assert.strictEqual(
 );
 assert.strictEqual(
   helpers.auditPacketNoTokenMessage,
-  "검수 토큰이 없습니다. 먼저 토큰을 적용해 주세요.",
+  "관리자 로그인이 필요합니다. 먼저 로그인해 주세요.",
 );
 
 console.log("server-review UI smoke tests passed");

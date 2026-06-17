@@ -1,8 +1,10 @@
-"""Phase 2 M8.0: review API tests (FastAPI TestClient + temp SQLite).
+"""Phase 2 M8.0 (AUTH-2d session model): review API tests (FastAPI
+TestClient + temp SQLite).
 
 Verifies:
-    * the review API is disabled by default,
-    * the safety gate enforces ``REVIEW_API_ENABLED`` + ``X-Review-Token``,
+    * the admin gate is session-only (AUTH-2d): no session → 401, invalid
+      session → 401, authenticated session → 200 (the legacy X-Review-Token
+      gate was retired),
     * task creation from a result payload is idempotent,
     * decision recording follows the documented status-transition matrix,
     * comment-only decisions do not change status,
@@ -36,7 +38,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
-TEST_TOKEN = "test-token-shouldnt-leak"
+TEST_TOKEN = "test-token-shouldnt-leak"  # vestigial; backend ignores it post-AUTH-2d
+ADMIN_USER = "admin"
+ADMIN_PASS = "review-api-test-pw-123"
+SESSION_COOKIE = "policy_ai_session"
 
 
 @contextmanager
@@ -126,6 +131,11 @@ class _ReviewAPIBase(unittest.TestCase):
         # in the substitute SQLite file before any write fires.
         postgres_storage.get_engine()
 
+        # AUTH-2d: admin auth is session-only. Seed one admin so tests can log
+        # in via /auth/login and drive the protected endpoints with the session
+        # cookie (no token header).
+        self._database.create_account(ADMIN_USER, ADMIN_PASS, role="admin")
+
     def tearDown(self) -> None:
         self._postgres_storage.reset_engine_for_tests()
         for key, value in self._env_snapshot.items():
@@ -138,58 +148,60 @@ class _ReviewAPIBase(unittest.TestCase):
         except Exception:
             pass
 
-    def _client(self):
+    def _client(self, *, login: bool = True):
+        """Return a TestClient. By default it is already authenticated via
+        /auth/login (session cookie set), so protected endpoints work with no
+        token header. Pass ``login=False`` for the unauthenticated cases."""
         from fastapi.testclient import TestClient
-        return TestClient(self._api_server.app)
+        client = TestClient(self._api_server.app)
+        if login:
+            resp = client.post(
+                "/auth/login",
+                json={"username": ADMIN_USER, "password": ADMIN_PASS},
+            )
+            assert resp.status_code == 200, resp.text
+        return client
 
     def _enabled_env(self):
-        return {
-            "REVIEW_API_ENABLED": "true",
-            "REVIEW_API_TOKEN": TEST_TOKEN,
-        }
+        # AUTH-2d: the review API no longer reads any token env var. Kept as an
+        # empty no-op so the existing ``with _env(**self._enabled_env()):``
+        # wrappers below stay valid; auth now comes from the session cookie that
+        # ``_client()`` establishes. Any X-Review-Token header in a call is
+        # simply ignored by the backend.
+        return {}
 
 
 # ---------------------------------------------------------------------------
-# Safety gate
+# Session-only admin gate (AUTH-2d)
 # ---------------------------------------------------------------------------
 
 
-class ReviewAPISafetyGateTests(_ReviewAPIBase):
-    def test_disabled_by_default_returns_503(self):
-        with _env(REVIEW_API_ENABLED=None, REVIEW_API_TOKEN=None):
-            with self._client() as client:
-                resp = client.get("/review/tasks")
-        self.assertEqual(resp.status_code, 503)
-        self.assertIn("disabled", resp.json().get("detail", "").lower())
+class ReviewAPISessionGateTests(_ReviewAPIBase):
+    def test_no_session_returns_401(self):
+        # The legacy token fallback is gone: an unauthenticated request to a
+        # protected endpoint is rejected with 401 (no token escape hatch).
+        with self._client(login=False) as client:
+            resp = client.get("/review/tasks")
+        self.assertEqual(resp.status_code, 401)
 
-    def test_enabled_without_token_returns_503(self):
-        # Operator turned on the flag but forgot to set a token.
-        with _env(REVIEW_API_ENABLED="true", REVIEW_API_TOKEN=None):
-            with self._client() as client:
-                resp = client.get("/review/tasks",
-                                  headers={"X-Review-Token": "anything"})
-        self.assertEqual(resp.status_code, 503)
-        self.assertIn("REVIEW_API_TOKEN", resp.json().get("detail", ""))
+    def test_invalid_session_cookie_returns_401(self):
+        with self._client(login=False) as client:
+            client.cookies.set(SESSION_COOKIE, "garbage.not-a-valid-session")
+            resp = client.get("/review/tasks")
+        self.assertEqual(resp.status_code, 401)
 
-    def test_missing_token_header_returns_403(self):
-        with _env(**self._enabled_env()):
-            with self._client() as client:
-                resp = client.get("/review/tasks")
-        self.assertEqual(resp.status_code, 403)
-        self.assertIn("X-Review-Token", resp.json().get("detail", ""))
+    def test_token_header_does_not_authenticate(self):
+        # A leftover X-Review-Token header must NOT grant access — the token
+        # gate was retired; only the session cookie authenticates.
+        with self._client(login=False) as client:
+            resp = client.get(
+                "/review/tasks", headers={"X-Review-Token": TEST_TOKEN},
+            )
+        self.assertEqual(resp.status_code, 401)
 
-    def test_wrong_token_returns_403(self):
-        with _env(**self._enabled_env()):
-            with self._client() as client:
-                resp = client.get("/review/tasks",
-                                  headers={"X-Review-Token": "wrong"})
-        self.assertEqual(resp.status_code, 403)
-
-    def test_correct_token_returns_200_with_empty_list(self):
-        with _env(**self._enabled_env()):
-            with self._client() as client:
-                resp = client.get("/review/tasks",
-                                  headers={"X-Review-Token": TEST_TOKEN})
+    def test_authenticated_session_returns_200_with_empty_list(self):
+        with self._client() as client:  # logged in via /auth/login
+            resp = client.get("/review/tasks")
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
         self.assertEqual(body["tasks"], [])
@@ -567,7 +579,9 @@ class CISafetyTests(_ReviewAPIBase):
         self.assertEqual(resp.status_code, 200)
 
     def test_review_modules_do_not_import_openai(self):
-        for module_name in ("review_workflow", "review_auth"):
+        # AUTH-2d: review_auth.py was deleted (token gate retired); only
+        # review_workflow remains in the review surface.
+        for module_name in ("review_workflow",):
             text = (ROOT / f"{module_name}.py").read_text(encoding="utf-8")
             for forbidden in ("import openai", "from openai"):
                 self.assertNotIn(forbidden, text)
@@ -602,15 +616,16 @@ class ReviewPromoteEndpointTests(_ReviewAPIBase):
         self.assertTrue(saved.get("id"), msg=str(saved))
         return int(saved["id"])
 
-    def test_promote_requires_token(self):
+    def test_promote_requires_session(self):
+        # AUTH-2d: promote is session-gated. No session (and no token escape
+        # hatch) → 401.
         result_id = self._seed_result()
-        with _env(**self._enabled_env()):
-            with self._client() as client:
-                resp = client.post(
-                    f"/review/results/{result_id}/promote",
-                    json={"promote": True},
-                )
-        self.assertEqual(resp.status_code, 403)
+        with self._client(login=False) as client:
+            resp = client.post(
+                f"/review/results/{result_id}/promote",
+                json={"promote": True},
+            )
+        self.assertEqual(resp.status_code, 401)
 
     def test_promote_unknown_id_returns_404(self):
         with _env(**self._enabled_env()):

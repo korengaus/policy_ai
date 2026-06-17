@@ -1,4 +1,7 @@
-"""AUTH-2b: login endpoint + session + dual-accept admin gate.
+"""AUTH-2b/2d: login endpoint + session-only admin gate.
+
+AUTH-2d retired the legacy X-Review-Token dual-accept path; the session is now
+the only way to satisfy require_admin (no session -> 401).
 
 Reuses the SQLite-as-PG substitute + TestClient pattern from
 tests/test_review_api.py. A test admin is seeded via database.create_account
@@ -144,50 +147,38 @@ class LoginTests(_AuthBase):
         self.assertNotIn(bad_pw, bad.text)
 
 
-class DualAcceptTests(_AuthBase):
-    def test_session_grants_protected_endpoint_without_token(self):
-        # Token gate DISABLED (setUp default) — only the session can authorize.
+class SessionGateTests(_AuthBase):
+    def test_session_grants_protected_endpoint(self):
+        # AUTH-2d: the session is the ONLY way to authorize.
         c = self._client()
         c.post("/auth/login", json={"username": ADMIN_USER, "password": ADMIN_PASS})
-        r = c.get("/review/tasks")  # no X-Review-Token at all
+        r = c.get("/review/tasks")  # no token header
         self.assertEqual(r.status_code, 200, msg=r.text)
 
-    def test_token_grants_protected_endpoint_without_session(self):
+    def test_no_session_returns_401(self):
         c = self._client()  # never logs in -> no session
-        with _env(REVIEW_API_ENABLED="true", REVIEW_API_TOKEN=TEST_TOKEN):
-            r = c.get("/review/tasks", headers={"X-Review-Token": TEST_TOKEN})
-        self.assertEqual(r.status_code, 200, msg=r.text)
+        r = c.get("/review/tasks")
+        self.assertEqual(r.status_code, 401)
 
-    def test_token_path_disabled_returns_503(self):
+    def test_token_header_does_not_authenticate(self):
+        # AUTH-2d: the legacy token path is gone — a leftover X-Review-Token
+        # header must NOT grant access.
         c = self._client()  # no session
-        with _env(REVIEW_API_ENABLED=None, REVIEW_API_TOKEN=None):
-            r = c.get("/review/tasks")  # no session, no token, gate disabled
-        self.assertEqual(r.status_code, 503)
-
-    def test_token_path_wrong_token_returns_403(self):
-        c = self._client()  # no session
-        with _env(REVIEW_API_ENABLED="true", REVIEW_API_TOKEN=TEST_TOKEN):
-            r = c.get("/review/tasks", headers={"X-Review-Token": "wrong"})
-        self.assertEqual(r.status_code, 403)
+        r = c.get("/review/tasks", headers={"X-Review-Token": TEST_TOKEN})
+        self.assertEqual(r.status_code, 401)
 
 
 class LogoutTests(_AuthBase):
-    def test_logout_clears_session_and_revokes_bypass(self):
+    def test_logout_clears_session_and_revokes_access(self):
         c = self._client()
         c.post("/auth/login", json={"username": ADMIN_USER, "password": ADMIN_PASS})
         self.assertTrue(c.get("/auth/me").json()["authenticated"])
-        # While logged in, the session bypasses the (disabled) token gate.
         self.assertEqual(c.get("/review/tasks").status_code, 200)
 
         c.post("/auth/logout")
         self.assertEqual(c.get("/auth/me").json(), {"authenticated": False})
-        # Session bypass is gone: with the token gate disabled the protected
-        # endpoint now falls through to the legacy token path -> 503.
-        self.assertEqual(c.get("/review/tasks").status_code, 503)
-        # ...but the token path still works after logout.
-        with _env(REVIEW_API_ENABLED="true", REVIEW_API_TOKEN=TEST_TOKEN):
-            r = c.get("/review/tasks", headers={"X-Review-Token": TEST_TOKEN})
-        self.assertEqual(r.status_code, 200, msg=r.text)
+        # AUTH-2d: with no token fallback, a post-logout request is rejected (401).
+        self.assertEqual(c.get("/review/tasks").status_code, 401)
 
 
 if __name__ == "__main__":

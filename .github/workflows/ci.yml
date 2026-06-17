@@ -51,10 +51,6 @@ jobs:
       OPENAI_API_KEY: ""
       SEMANTIC_MATCHING_ENABLED: "false"
       EMBEDDING_PROVIDER: "disabled"
-      # Review API stays disabled at the workflow level; individual test
-      # files toggle it locally via os.environ context managers when
-      # needed.
-      REVIEW_API_ENABLED: "false"
 
     steps:
       - name: Checkout
