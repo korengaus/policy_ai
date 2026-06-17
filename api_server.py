@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from config import describe_ai_config
+from config import cors_allowed_origins, describe_ai_config
 from database import (
     create_review_task,
     get_recent_results,
@@ -99,8 +99,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Policy AI API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=cors_allowed_origins(),
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

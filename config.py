@@ -445,6 +445,26 @@ def hot_topic_seed_queries() -> list[str]:
     return seeds or list(_DEFAULT_HOT_TOPIC_SEEDS)
 
 
+_DEFAULT_CORS_ALLOWED_ORIGINS = (
+    "https://policy-ai-q5ax.onrender.com",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+)
+
+
+def cors_allowed_origins() -> list[str]:
+    # Browser cross-origin allow-list for CORSMiddleware. Comma-separated env
+    # override lets origins be tuned without a code change; blank entries are
+    # dropped. Falls back to the default list (prod origin + localhost) so the
+    # allow-list is never empty — an empty list would block the live site's own
+    # browser calls.
+    raw = os.getenv("CORS_ALLOWED_ORIGINS")
+    if raw is None or not raw.strip():
+        return list(_DEFAULT_CORS_ALLOWED_ORIGINS)
+    origins = [part.strip() for part in raw.split(",") if part.strip()]
+    return origins or list(_DEFAULT_CORS_ALLOWED_ORIGINS)
+
+
 def hot_topic_titles_per_seed() -> int:
     return _env_int("HOT_TOPIC_TITLES_PER_SEED", 8)
 
