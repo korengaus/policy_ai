@@ -3,6 +3,8 @@ anthropic
 # AUTH-2a — bcrypt password hashing for the accounts login store (accounts.py).
 bcrypt==5.0.0
 beautifulsoup4
+# AUTH-2b — itsdangerous signs the Starlette SessionMiddleware cookie.
+itsdangerous==2.2.0
 fastapi
 feedparser
 ftfy

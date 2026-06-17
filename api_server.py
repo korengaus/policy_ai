@@ -6,15 +6,18 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.middleware.sessions import SessionMiddleware
 
-from config import cors_allowed_origins, describe_ai_config
+import accounts
+from config import cors_allowed_origins, describe_ai_config, session_secret_key
 from database import (
     create_review_task,
+    get_account_by_username,
     get_recent_results,
     get_result_by_id,
     get_result_id_by_url,
@@ -103,6 +106,18 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+# AUTH-2b — signed httponly session cookie for the operator login. secret_key
+# comes from config.session_secret_key() (SESSION_SECRET_KEY env; per-process
+# random fallback + WARNING when unset — never a hardcoded constant). https_only
+# is False for now (same-origin app served by this service); can harden once
+# the login UI ships in 2c.
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=session_secret_key(),
+    session_cookie="policy_ai_session",
+    same_site="lax",
+    https_only=False,
 )
 
 
@@ -1210,6 +1225,114 @@ def _require_review_token(
     review_auth.check_review_request(x_review_token)
 
 
+# ---------------------------------------------------------------------------
+# AUTH-2b — account login (session) + dual-accept admin gate.
+#
+# /auth/login verifies username+password (bcrypt) and starts a signed session.
+# require_admin authorizes the review surface when EITHER a valid session is
+# present OR the legacy X-Review-Token validates — so nothing breaks during the
+# migration. The legacy token path delegates to review_auth (its 503/403
+# semantics are preserved verbatim). _require_review_token above is kept intact
+# (retired only in 2d). None of this touches any verdict/scoring field.
+# ---------------------------------------------------------------------------
+
+_SESSION_AUTH_KEY = "authenticated"
+_SESSION_USERNAME_KEY = "username"
+_SESSION_ROLE_KEY = "role"
+
+
+def _session_is_authenticated(request: Request) -> bool:
+    """True iff the signed session carries the authenticated-admin marker.
+    Returns False (never raises) when the session is absent/unreadable."""
+    try:
+        return bool(request.session.get(_SESSION_AUTH_KEY))
+    except (AssertionError, AttributeError):
+        # SessionMiddleware not installed / no session scope — treat as anon.
+        return False
+
+
+def require_admin(
+    request: Request,
+    x_review_token: Optional[str] = Header(
+        default=None, alias=review_auth.REVIEW_TOKEN_HEADER,
+    ),
+) -> None:
+    """Dual-accept admin gate for the review surface.
+
+    Authorizes when EITHER:
+      (a) the signed session cookie carries an authenticated admin marker, OR
+      (b) the legacy ``X-Review-Token`` validates via ``review_auth`` (whose
+          503-disabled / 503-misconfigured / 403-wrong semantics are preserved
+          exactly — we delegate, never reimplement or loosen them).
+
+    The session is checked first so an authenticated operator is never subjected
+    to the token gate's 503-when-disabled behavior. With no session, the token
+    path runs and raises precisely as it did before AUTH-2b.
+    """
+    if _session_is_authenticated(request):
+        return None
+    review_auth.check_review_request(x_review_token)
+    return None
+
+
+class _LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/auth/login")
+def auth_login(body: _LoginRequest, request: Request) -> dict:
+    """Verify credentials and start an authenticated admin session.
+
+    On success: populate the session and return ``{ok: true, role}``. On ANY
+    failure (unknown username OR wrong password) return a GENERIC 401 with an
+    identical shape — never reveal which was wrong (no user enumeration) and
+    never echo the submitted password.
+    """
+    username = (body.username or "").strip()
+    account = None
+    if username:
+        try:
+            account = get_account_by_username(username)
+        except Exception:
+            logger.exception("auth_login: account lookup failed")
+            account = None
+    # verify_password returns False (never raises) on a missing/empty hash, so
+    # the unknown-user and wrong-password branches collapse to one generic 401.
+    stored_hash = (account or {}).get("password_hash") or ""
+    password_ok = accounts.verify_password(body.password or "", stored_hash)
+    if not account or not password_ok:
+        raise HTTPException(status_code=401, detail="invalid credentials")
+    role = account.get("role") or "admin"
+    request.session[_SESSION_AUTH_KEY] = True
+    request.session[_SESSION_USERNAME_KEY] = username
+    request.session[_SESSION_ROLE_KEY] = role
+    return {"ok": True, "role": role}
+
+
+@app.post("/auth/logout")
+def auth_logout(request: Request) -> dict:
+    """Clear the session (logout). Idempotent — safe to call when not logged in."""
+    try:
+        request.session.clear()
+    except (AssertionError, AttributeError):
+        pass
+    return {"ok": True}
+
+
+@app.get("/auth/me")
+def auth_me(request: Request) -> dict:
+    """Report session auth state (session-only; ignores the token header).
+    Read-only and secret-free — used by the 2c frontend to decide whether to
+    reveal admin tools."""
+    if _session_is_authenticated(request):
+        return {
+            "authenticated": True,
+            "role": request.session.get(_SESSION_ROLE_KEY) or "admin",
+        }
+    return {"authenticated": False}
+
+
 def _load_payload_for_review(
     *, result_id: Optional[str], job_id: Optional[str],
     explicit_payload: Optional[dict],
@@ -1251,7 +1374,7 @@ def review_list_tasks(
     status: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
-    _: None = Depends(_require_review_token),
+    _: None = Depends(require_admin),
 ) -> dict:
     """List review tasks (newest first). Optional ``status`` filter.
 
@@ -1279,7 +1402,7 @@ def review_list_tasks(
 @app.get("/review/tasks/{task_id}")
 def review_task_detail(
     task_id: str,
-    _: None = Depends(_require_review_token),
+    _: None = Depends(require_admin),
 ) -> dict:
     """Return a task plus all decisions recorded against it."""
     task = get_review_task(task_id)
@@ -1298,7 +1421,7 @@ def review_task_detail(
 @app.post("/review/tasks/from-result")
 def review_create_task_from_result(
     body: _ReviewTaskFromResultRequest,
-    _: None = Depends(_require_review_token),
+    _: None = Depends(require_admin),
 ) -> dict:
     """Create (or idempotently fetch) a review task from a result payload.
 
@@ -1379,7 +1502,7 @@ def review_create_task_from_result(
 def review_record_decision(
     task_id: str,
     body: _ReviewDecisionRequest,
-    _: None = Depends(_require_review_token),
+    _: None = Depends(require_admin),
 ) -> dict:
     """Append a decision and (when the decision changes status) update
     the task's status. Append-only — decisions cannot be deleted or
@@ -1459,7 +1582,7 @@ def review_record_decision(
 def review_promote_result(
     result_id: int,
     body: _PromoteReviewRequest,
-    _: None = Depends(_require_review_token),
+    _: None = Depends(require_admin),
 ) -> dict:
     """M40a — set or clear the human-reviewed badge signal on a stored
     ``analysis_results`` row.
@@ -1505,7 +1628,7 @@ def review_promote_result(
 @app.get("/review/tasks/{task_id}/decisions")
 def review_list_decisions(
     task_id: str,
-    _: None = Depends(_require_review_token),
+    _: None = Depends(require_admin),
 ) -> dict:
     task = get_review_task(task_id)
     if not task:
@@ -1524,7 +1647,7 @@ def review_list_decisions(
 @app.get("/review/tasks/{task_id}/audit-packet")
 def review_audit_packet(
     task_id: str,
-    _: None = Depends(_require_review_token),
+    _: None = Depends(require_admin),
 ) -> dict:
     """Phase 2 M9.1 — internal reviewer audit packet (read-only).
 

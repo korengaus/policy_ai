@@ -1,4 +1,9 @@
+import logging
 import os
+import secrets
+
+
+_log = logging.getLogger(__name__)
 
 
 QUERY = "전세대출"
@@ -450,6 +455,38 @@ _DEFAULT_CORS_ALLOWED_ORIGINS = (
     "http://localhost:8000",
     "http://127.0.0.1:8000",
 )
+
+
+# AUTH-2b — session cookie signing key. Read from SESSION_SECRET_KEY (preferred)
+# or SECRET_KEY. NEVER hardcoded. When neither env var is set, a per-process
+# random key is generated ONCE and a WARNING is logged: sessions become
+# ephemeral (invalidated on every restart) rather than relying on a known
+# constant — fails safe instead of fails open.
+_SESSION_SECRET_FALLBACK: "str | None" = None
+
+
+def session_secret_key() -> str:
+    """Return the signing key for the session cookie.
+
+    Prefers ``SESSION_SECRET_KEY``, then ``SECRET_KEY``. When neither is set,
+    returns a per-process random key generated once (cached for the lifetime
+    of the process so a single boot keeps consistent signatures) and logs a
+    WARNING. NEVER returns a hardcoded constant secret; the key, fallback or
+    not, is never logged or printed.
+    """
+    raw = (os.getenv("SESSION_SECRET_KEY") or os.getenv("SECRET_KEY") or "").strip()
+    if raw:
+        return raw
+    global _SESSION_SECRET_FALLBACK
+    if _SESSION_SECRET_FALLBACK is None:
+        _SESSION_SECRET_FALLBACK = secrets.token_urlsafe(64)
+        _log.warning(
+            "SESSION_SECRET_KEY is not set; using a per-process RANDOM key. "
+            "Sessions are insecure/ephemeral and will be invalidated on every "
+            "restart. Set SESSION_SECRET_KEY to a long random value in "
+            "production."
+        )
+    return _SESSION_SECRET_FALLBACK
 
 
 def cors_allowed_origins() -> list[str]:
