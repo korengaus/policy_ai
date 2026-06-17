@@ -938,7 +938,7 @@ assert.ok(
 //     session token, and any loaded review state
 //   * operator-mode visibility never uses localStorage
 //   * the disclaimer wording says "이 표시는 인증이 아닙니다" and
-//     names REVIEW_API_ENABLED + X-Review-Token as the real protection
+//     names session login (관리자 계정 로그인) as the real protection
 //
 // All assertions run against fresh sandboxes built via createSandbox()
 // so each scenario starts with a clean storage state.
@@ -966,8 +966,11 @@ const M94_REQUIRED_WORDING = [
   "내부 운영자 도구",
   "관리자 전용",
   "이 표시는 인증이 아니며",
-  "REVIEW_API_ENABLED",
-  "X-Review-Token",
+  // AUTH-2d/DOCS-CLEAN: the disclaimer now names session login (admin
+  // account) as the real protection, not the retired REVIEW_API_ENABLED +
+  // X-Review-Token gate. These phrases must appear in the reworded banner.
+  "세션",
+  "로그인",
   "운영자 도구 숨기기",
   "게시가 아님",
 ];

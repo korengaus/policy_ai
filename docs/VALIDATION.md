@@ -38,9 +38,8 @@ python tests/test_review_api.py
 python tests/test_review_workflow_smoke.py
 python tests/test_operator_preflight.py   # M8.5: operator preflight helper
 python tests/test_review_bundle.py        # M8.6: post-implementation review bundle helper
-python tests/test_review_api_exposure_smoke.py  # M8.8: no-token public-exposure smoke
-python tests/test_review_api_token_gate_smoke.py # M9.5: controlled token-gate smoke (mocked HTTP)
 python tests/test_review_audit_trail.py   # M9.0 + M9.1: decision audit trail + audit packet endpoint
+python tests/test_auth_login.py           # AUTH-2b/2d: session login + session-only admin gate
 python tests/test_review_ui_local_demo.py # M9.3: local reviewer UI activation dry-run helper
 python tests/test_source_registry.py     # M10.0: official source registry foundation
 npm test   # runs regression.test.js + localstorage_slim.test.js + review_ui.test.js (M8.1 + M8.2 + M8.7 + M9.0 + M9.2 + M9.4)
@@ -54,7 +53,8 @@ python scripts/run_operational_checks.py --profile quick
 ```
 
 For a focused reviewer-workflow smoke (M8.3, offline, no Render, no
-OpenAI, dummy in-process token only):
+OpenAI; AUTH-2d: authenticates via an ephemeral admin session login,
+not a token):
 
 ```
 python scripts/smoke_review_workflow.py --self-contained
@@ -70,27 +70,17 @@ node tests/review_ui.test.js
 
 This pins the admin-only wording (`관리자 전용`, `내부 검수`,
 `사람 검토 필요`, `검수 큐 등록`, `게시가 아님`), the no-`/review/*`
-auto-fetch on page initialization (even with a token already in
-`sessionStorage`), the token-clear lockout message, the absence of
-`published` / `corrected` UI labels, and the absence of any
-`/publish` / `/correct` endpoint reference. `npm test` already
-invokes this file, so `scripts/validate.py` covers it.
+auto-fetch on page initialization, the session login-required
+messaging, the absence of `published` / `corrected` UI labels, and the
+absence of any `/publish` / `/correct` endpoint reference. `npm test`
+already invokes this file, so `scripts/validate.py` covers it.
 
-For the M8.8 review API public-exposure smoke (offline unit tests,
-no network — the live form is run by the operator against a deployed
-base URL):
-
-```
-python tests/test_review_api_exposure_smoke.py
-python scripts/smoke_review_api_exposure.py --base-url http://127.0.0.1:8000 --expect-disabled
-python scripts/run_operational_checks.py --profile review-exposure --base-url https://policy-ai-q5ax.onrender.com
-```
-
-`scripts/validate.py` invokes `tests/test_review_api_exposure_smoke.py`
-as part of the standard offline suite. **`validate.py` does not call
-Render** — the live exposure smoke is intentionally only run via the
-`review-exposure` operational profile, not as part of `validate.py`
-or the `quick` profile.
+> AUTH-2d note: the legacy `X-Review-Token` public-exposure /
+> token-gate smokes (`smoke_review_api_exposure.py`,
+> `smoke_review_api_token_gate.py`) and their `review-exposure` /
+> `review-token-gate` profiles were removed with the token gate. Admin
+> auth is session-only; an unauthenticated `/review/*` request returns
+> **401**. There is no public-exposure smoke to run anymore.
 
 For the M9.0 reviewer decision audit trail and M9.1 internal reviewer
 audit packet (offline, no Render, no OpenAI — uses FastAPI TestClient
@@ -101,7 +91,6 @@ python tests/test_review_api.py
 python tests/test_review_workflow.py
 python tests/test_review_workflow_smoke.py
 python tests/test_review_audit_trail.py
-python tests/test_review_api_exposure_smoke.py
 node tests/review_ui.test.js
 python scripts/validate.py
 python scripts/run_operational_checks.py --profile review-local
@@ -116,8 +105,8 @@ These pin:
 - `audit_version=1` on top-level and per-row
 - `audit_record` shape on POST decision
 - no token / SDK-key literal anywhere in audit responses
-- reviewer_id is operator-supplied and is never the `X-Review-Token`
-  value
+- reviewer_id is operator-supplied free text and is never derived from
+  any auth credential / session
 - the decision-vocabulary contract (`approve` / `reject` /
   `needs_more_evidence` / `comment`) is unchanged
 - no UI affordance for `published` / `corrected` / publish actions
@@ -166,37 +155,22 @@ node tests/review_ui.test.js
 `step 13` of the reviewer-UI test file pins: the operator-tools
 wrapper exists and defaults to `hidden`; the disclaimer wording
 includes `내부 운영자 도구`, `관리자 전용`, `이 표시는 인증이 아니며`,
-`REVIEW_API_ENABLED`, `X-Review-Token`, `운영자 도구 숨기기`, and
-`게시가 아님`; `?operator_tools=1` reveals the panel + sets the
-sessionStorage flag + strips the URL param via
-`history.replaceState`; a pre-set sessionStorage flag reveals the
-panel without the URL flag; neither reveal path fires any
-`/review/*` request on init; the hide button clears the operator-mode
-flag, the review session token, and any loaded review state; neither
-the operator-mode flag nor the review token ever uses `localStorage`.
-`npm test` already invokes this file, so `scripts/validate.py`
-covers it.
+`세션`, `로그인` (AUTH-2d: session login is named as the real
+protection), `운영자 도구 숨기기`, and `게시가 아님`;
+`?operator_tools=1` reveals the panel + sets the sessionStorage flag +
+strips the URL param via `history.replaceState`; a pre-set
+sessionStorage flag reveals the panel without the URL flag; neither
+reveal path fires any `/review/*` request on init; the hide button
+clears the operator-mode flag and any loaded review state; the
+operator-mode flag never uses `localStorage`. `npm test` already
+invokes this file, so `scripts/validate.py` covers it.
 
 After deploy, the operator can visually confirm the reveal by
 visiting `https://policy-ai-q5ax.onrender.com/?operator_tools=1`
 (the reviewer/admin panels stay disabled-by-default for normal
-public visitors, and the review API itself remains 503-disabled
-until `REVIEW_API_ENABLED=true` is set in the Render dashboard).
-
-For the M9.5 controlled token-gate smoke (offline tests use mocked
-HTTP only — the live smoke is intentionally not part of validate /
-quick):
-
-```
-python tests/test_review_api_token_gate_smoke.py
-```
-
-Live token-gate runs are not part of `validate.py` or the `quick`
-operational profile. They are only safe to invoke when the operator
-has manually set `REVIEW_API_ENABLED=true` + `REVIEW_API_TOKEN` on
-the deploy AND has a matching `REVIEW_API_SMOKE_TOKEN` env var in
-their local PowerShell session. See `docs/REVIEW_WORKFLOW.md`
-§H'''''''''' for the operator runbook.
+public visitors; AUTH-2d: the review API is session-only, so an
+unauthenticated `/review/*` request returns **401** until the
+operator logs in via the on-site admin login).
 
 For the M10.0 official source registry foundation (offline; no
 network, no browser automation, no OpenAI):

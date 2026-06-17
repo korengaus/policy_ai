@@ -185,37 +185,55 @@ def _path_is_under_reports(p: Path) -> bool:
 
 def _powershell_commands(db_path: Path, token: str) -> List[str]:
     """The exact PowerShell snippet the operator pastes to start a
-    local demo server. The launcher points ``DATABASE_URL`` at the demo
-    SQLite-as-PG substitute (M12.0e-6b-3 retired the SQLite ``DB_PATH``
-    override; reviews are PG-only)."""
+    local demo server. AUTH-2d: admin auth is session login (no token);
+    the launcher points ``DATABASE_URL`` at the demo SQLite-as-PG
+    substitute before importing api_server. ``token`` is the demo's
+    display label only and is not used for auth."""
     serve_script = ROOT / "scripts" / "serve_review_ui_local_demo.py"
     return [
-        f'$env:REVIEW_API_ENABLED = "true"',
-        f'$env:REVIEW_API_TOKEN = "{token}"',
+        # Sign the session cookie deterministically across restarts (else
+        # sessions are ephemeral). Local-only placeholder — not a real secret.
+        '$env:SESSION_SECRET_KEY = "<long-random-string-local-only>"',
         # The launcher points DATABASE_URL at the demo substitute before
         # importing api_server. Operators do NOT have to touch policy_ai.db.
         f'python "{serve_script}" --db-path "{db_path}"',
     ]
 
 
+def _admin_seed_commands(db_path: Path) -> List[str]:
+    """PowerShell to seed a one-off local admin into the demo DB so the
+    operator can log in via the on-site admin login (AUTH-2d session auth).
+    Local-only creds — never a real secret."""
+    return [
+        '$env:USE_POSTGRES_WRITE = "true"',
+        f'$env:DATABASE_URL = "sqlite:///{db_path}"',
+        '$env:ADMIN_USERNAME = "demo-admin"',
+        '$env:ADMIN_PASSWORD = "<choose-a-local-only-password>"',
+        'python scripts\\create_admin.py',
+    ]
+
+
 def _runbook_lines(db_path: Path, token: str, *, url: str) -> List[str]:
     cmds = _powershell_commands(db_path, token)
+    seed = _admin_seed_commands(db_path)
     return [
         "Local reviewer UI demo runbook",
         "",
         "1. Demo DB prepared at:",
         f"     {db_path}",
         "",
-        "2. In PowerShell (from the repo root), start the local demo server:",
+        "2. Seed a one-off local admin into the demo DB (local-only creds):",
+        *(f"     {c}" for c in seed),
+        "",
+        "3. In PowerShell (from the repo root), start the local demo server:",
         *(f"     {c}" for c in cmds),
         "",
-        f"3. Open the local app:",
+        f"4. Open the local app:",
         f"     {url}",
         "",
-        "4. In the internal reviewer/admin panel:",
+        "5. In the internal reviewer/admin panel:",
         "     - Expand '내부 검수 도구 열기 (관리자 전용)'",
-        f"     - Paste the dummy token shown above ({token})",
-        "     - Click '토큰 적용'",
+        "     - Log in with the admin account from step 2 (관리자 로그인)",
         "     - Click '큐 새로고침'",
         "     - Select the seeded review task",
         "     - Click '감사 패킷 보기'",
@@ -223,9 +241,9 @@ def _runbook_lines(db_path: Path, token: str, *, url: str) -> List[str]:
         "",
         "Notes:",
         "  * The demo DB lives under reports/ and is gitignored. Do not commit it.",
-        "  * Render env is NOT modified by this helper. Review API on Render",
-        "    remains disabled by default; this dry-run is purely local.",
-        "  * The token shown is a local-only dummy label, not a real secret.",
+        "  * AUTH-2d: admin auth is session login (POST /auth/login); there is no",
+        "    review token. An unauthenticated /review/* request returns 401.",
+        "  * The admin creds above are local-only demo values, not real secrets.",
         "  * Stop the local server with Ctrl+C when finished.",
     ]
 
@@ -693,8 +711,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "After seeding, exercise GET /review/tasks, GET /review/tasks/{id}, "
             "and GET /review/tasks/{id}/audit-packet against the seeded DB via "
-            "FastAPI TestClient. Sets REVIEW_API_ENABLED / REVIEW_API_TOKEN "
-            "only for the duration of the verify block. No external network."
+            "FastAPI TestClient. AUTH-2d: seeds an ephemeral admin and logs in "
+            "via /auth/login (session cookie) for the verify block. No external "
+            "network."
         ),
     )
     parser.add_argument(

@@ -13,14 +13,15 @@ Hard contract:
       operator should run ``prepare_review_ui_local_demo.py`` first).
     * Never modifies Render env.
     * Never calls OpenAI / Render / external network.
-    * Reads REVIEW_API_ENABLED / REVIEW_API_TOKEN from the environment
-      so the operator's PowerShell ``$env:REVIEW_API_TOKEN=...`` works
-      as expected — but never prints either value.
+    * AUTH-2d: admin auth is session login (the legacy X-Review-Token gate
+      was removed). Seed a local admin with ``scripts/create_admin.py``
+      against the demo DB, then log in via the on-site admin login form.
+      Set ``SESSION_SECRET_KEY`` so sessions survive restarts.
 
-Usage (from the repo root, after running ``prepare_review_ui_local_demo.py``):
+Usage (from the repo root, after running ``prepare_review_ui_local_demo.py``
+and seeding a local admin via ``scripts/create_admin.py``):
 
-    $env:REVIEW_API_ENABLED = "true"
-    $env:REVIEW_API_TOKEN = "local-review-demo-token"
+    $env:SESSION_SECRET_KEY = "<long-random-string-local-only>"
     python scripts\\serve_review_ui_local_demo.py \\
         --db-path reports\\review_ui_local_demo.sqlite
 

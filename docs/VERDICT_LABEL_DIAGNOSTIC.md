@@ -386,8 +386,9 @@ a TTY; non-TTY callers without `--yes` are refused with exit 1.
 ### After enrollment
 
 Operators can review the enrolled rows via the existing reviewer
-workflow (M8.0+ API + UI, gated by `REVIEW_API_ENABLED` and the
-`X-Review-Token` header, never bypassed by this script). The
+workflow (M8.0+ API + UI, gated by an admin account session login —
+AUTH-2d: session-only via `POST /auth/login`, never bypassed by this
+script). The
 reviewer decision flow (M9.0+) records each decision with full audit
 metadata. Until a decision is recorded, the enrolled task stays
 `pending_review`.

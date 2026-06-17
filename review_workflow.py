@@ -94,7 +94,8 @@ AUDIT_SCHEMA_VERSION = 1
 #       from any shared review secret.
 #     * No code path here imports verdict / scoring / openai modules.
 #     * No code path here reads any shared review secret from the env;
-#       the gate lives in review_auth, not here.
+#       admin auth is the session gate in api_server (require_admin),
+#       not here (AUTH-2d: the legacy review_auth token gate was removed).
 
 # Decisions that move the task to a new status. Other decisions leave
 # status untouched (``comment`` is the only such case in M8.0).

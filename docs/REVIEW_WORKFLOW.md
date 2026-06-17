@@ -1,5 +1,19 @@
 # Server-Backed Reviewer Workflow (Phase 2 M8.0 + M8.1 + M8.2 + M8.3 + M8.7 + M8.8 + M9.0 + M9.1 + M9.2 + M9.3 + M9.4 + M9.5)
 
+> **⚠️ AUTH-2d update (current auth model).** This document predates the
+> AUTH-2d cutover and much of it still describes the **retired** shared-secret
+> token gate (`REVIEW_API_ENABLED` / `REVIEW_API_TOKEN` / the `X-Review-Token`
+> header, the 503/403 matrix, and the now-deleted
+> `smoke_review_api_exposure.py` / `smoke_review_api_token_gate.py` smokes +
+> their `review-exposure` / `review-token-gate` profiles). **None of that is
+> current.** Admin auth is now **session-only**: an operator logs in via
+> `POST /auth/login` (username + password, bcrypt-verified) which sets a signed
+> httponly session cookie; `require_admin` authorizes the `/review/*` surface
+> from that session and returns **401** when no valid session is present. There
+> is no token, no `REVIEW_API_ENABLED` env, and no token-gate smoke. The §A/§B/§C
+> summaries below reflect the session model; deeper milestone sections retain
+> their period-accurate narrative — read them through this correction.
+
 A backend-first foundation for the human-review layer. AI drafts and
 summarizes evidence; humans approve, reject, or request more evidence.
 **No publication path is enabled in M8.0, M8.1, M8.2, or M8.3** —
@@ -21,9 +35,9 @@ existing public-facing report are intentionally untouched.
 
 - Persist review tasks and reviewer decisions in SQLite alongside the
   existing `analysis_results` table.
-- Expose a small, **token-protected** API surface so a reviewer client
-  (frontend wiring is M8.1) can list tasks, view detail, create tasks
-  from an analysis result, and record decisions.
+- Expose a small, **session-protected** API surface (AUTH-2d: admin
+  login session) so a reviewer client can list tasks, view detail,
+  create tasks from an analysis result, and record decisions.
 - Keep verdict-side fields (`final_decision`, `policy_confidence`,
   `verification_card`) read-only from the review layer. The review
   endpoints never mutate analysis results.
@@ -35,48 +49,49 @@ existing public-facing report are intentionally untouched.
 | layer | status |
 | --- | --- |
 | Storage (SQLite) | ✓ `review_tasks` + `review_decisions` tables created idempotently by `init_db()` (M8.0) |
-| API endpoints | ✓ Five endpoints, all gated by `review_auth.require_review_token` (M8.0) |
-| Safety gate | ✓ `REVIEW_API_ENABLED` + `REVIEW_API_TOKEN` + `X-Review-Token` header (M8.0) |
-| Frontend wiring | ✓ Local/dev admin panel in `web/index.html` (M8.1, token-gated) |
-| Analysis → queue bridge | ✓ "검수 큐에 등록" button calls `POST /review/tasks/from-result` (M8.2, token-gated, idempotent) |
-| Offline operational smoke | ✓ `scripts/smoke_review_workflow.py --self-contained` + `--profile review-local` runner (M8.3, fully offline, dummy in-process token) |
+| API endpoints | ✓ Review endpoints, all gated by `api_server.require_admin` (AUTH-2d: session-only; was `review_auth.require_review_token` in M8.0) |
+| Auth gate | ✓ Admin account **session login** — `POST /auth/login` → signed cookie; no session → **401** (AUTH-2d; replaced the M8.0 token gate) |
+| Frontend wiring | ✓ Admin panel in `web/index.html` with an on-site login form (M8.1 + AUTH-2c, session-gated) |
+| Analysis → queue bridge | ✓ "검수 큐에 등록" button calls `POST /review/tasks/from-result` (M8.2, session-gated, idempotent) |
+| Offline operational smoke | ✓ `scripts/smoke_review_workflow.py --self-contained` + `--profile review-local` runner (M8.3, fully offline; AUTH-2d: ephemeral admin session login) |
 | Publication | **not implemented**; transitions into `published` / `corrected` are refused |
 | Verdict mutation | **disabled by contract**, pinned by `tests/test_review_api.py::VerdictIsolationTests` |
 | Storage | **Postgres** — the single source of truth (SQLite retired in M12.0e) |
 
-## C. Safety gate
+## C. Auth gate (AUTH-2d: session login)
 
-The review endpoints are off by default. Two env vars + a header are
-required:
+The `/review/*` endpoints require an authenticated **admin session**. The
+operator logs in once; the browser then carries a signed httponly session
+cookie automatically.
 
-| variable | purpose | default |
-| --- | --- | --- |
-| `REVIEW_API_ENABLED` | Master kill-switch | unset (= disabled, HTTP 503) |
-| `REVIEW_API_TOKEN` | Shared secret the reviewer client must present | unset (= 503 when enabled) |
-| `X-Review-Token` header | Sent on every request, must match the token | absent (= 403) |
+| step | mechanism |
+| --- | --- |
+| Account | `accounts` table (username + bcrypt `password_hash` + `role`); seeded once via `scripts/create_admin.py` reading `ADMIN_USERNAME` / `ADMIN_PASSWORD` from env |
+| Login | `POST /auth/login` (`{username, password}`) → bcrypt-verify → sets the `policy_ai_session` signed cookie; generic **401** on any failure (no user-vs-password distinction) |
+| Authorization | `require_admin` authorizes from the session cookie; **no session → 401** |
+| Logout / state | `POST /auth/logout` clears the session; `GET /auth/me` reports `{authenticated, role}` |
+| Cookie signing | `SESSION_SECRET_KEY` env (per-process random fallback + WARNING when unset — never a hardcoded secret) |
 
-Behavior table:
+Behavior:
 
-| `REVIEW_API_ENABLED` | `REVIEW_API_TOKEN` | header | result |
-| --- | --- | --- | --- |
-| unset / false | – | – | **503** disabled |
-| true | unset | any | **503** misconfigured |
-| true | set | missing | **403** |
-| true | set | wrong | **403** |
-| true | set | matches | request proceeds |
+| request | result |
+| --- | --- |
+| no session cookie | **401** authentication required |
+| invalid / expired session | **401** |
+| valid admin session | request proceeds |
 
 Important:
 
-- The token value is **never logged or printed** by `review_auth.py`.
-- Render keeps `REVIEW_API_ENABLED` unset by default. Activation is a
-  manual operator action via the Render dashboard, same pattern as the
-  semantic canary (M7.4).
-- This is **not** a real auth system. It's a fence until proper auth +
-  admin lands in a future milestone.
+- No password / hash / session value is logged or printed.
+- The legacy `REVIEW_API_ENABLED` / `REVIEW_API_TOKEN` / `X-Review-Token`
+  token gate was **removed in AUTH-2d**. There is no token to set on Render.
+- Public, unauthenticated card browsing is unaffected — only the `/review/*`
+  admin surface requires a session.
 
 ## D. Endpoints
 
-All endpoints require the safety gate (`X-Review-Token` header).
+All `/review/*` endpoints require an authenticated admin session (AUTH-2d;
+no session → 401).
 
 ### `GET /review/tasks`
 

@@ -124,15 +124,18 @@ class UnsafePathTests(unittest.TestCase):
 
 
 class PowershellCommandsTests(_DemoTestBase):
-    def test_powershell_commands_carry_dummy_token_and_db_path(self):
+    def test_powershell_commands_carry_session_start_and_db_path(self):
+        # AUTH-2d: the start snippet sets SESSION_SECRET_KEY (session login)
+        # instead of the retired REVIEW_API_ENABLED / REVIEW_API_TOKEN.
         target = self._new_demo_db()
         result = demo.prepare_demo(
             db_path=target, token="my-dummy-tag", reset=True,
         )
         self.assertTrue(result.passed, msg=result.errors)
         joined = " ".join(result.powershell_commands)
-        self.assertIn('$env:REVIEW_API_ENABLED = "true"', joined)
-        self.assertIn('$env:REVIEW_API_TOKEN = "my-dummy-tag"', joined)
+        self.assertIn("$env:SESSION_SECRET_KEY", joined)
+        self.assertNotIn("REVIEW_API_TOKEN", joined)
+        self.assertNotIn("REVIEW_API_ENABLED", joined)
         self.assertIn(str(target), joined)
         # The serve launcher is the path the operator should run.
         self.assertIn("serve_review_ui_local_demo.py", joined)
@@ -148,7 +151,9 @@ class PowershellCommandsTests(_DemoTestBase):
         self.assertIn("내부 검수 도구 열기 (관리자 전용)", text)
         self.assertIn("감사 패킷 보기", text)
         self.assertIn("감사 패킷 복사", text)
-        self.assertIn("토큰 적용", text)
+        # AUTH-2d: the runbook now instructs the admin session login instead
+        # of the retired "토큰 적용" token-apply step.
+        self.assertIn("관리자 로그인", text)
         self.assertIn("큐 새로고침", text)
 
 

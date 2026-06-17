@@ -40,10 +40,15 @@ decisions and never modifies Render env.
 | `render-baseline` | legacy smoke + semantic canary (no `expect-enabled`) | Yes | Indirectly via Render if semantic on | inspect current Render semantic state |
 | `render-canary` | semantic canary with `--expect-semantic-enabled --expect-provider openai --fail-on-semantic-unavailable` + legacy smoke | Yes | **Yes — Render will issue OpenAI requests** | monitor active semantic canary |
 | `historical` | historical builder dry-run + deterministic eval (if file exists) | No | No | check builder output / regenerate batch evaluation |
-| `review-local` (M8.3) | offline reviewer-workflow smoke — `scripts/smoke_review_workflow.py --self-contained` | No | No | exercise M8.0–M8.2 reviewer surface against a temp SQLite DB with a dummy in-process token |
-| `review-exposure` (M8.8) | no-token public-exposure smoke — `scripts/smoke_review_api_exposure.py --expect-disabled` | Yes | No | verify `/review/*` is disabled-or-token-gated on a deploy after reviewer/admin UI or review API changes |
-| `review-token-gate` (M9.5) | controlled token-gate smoke — `scripts/smoke_review_api_token_gate.py --token-env REVIEW_API_SMOKE_TOKEN` | Yes | No | verify the token gate works after the operator manually enables review API on Render; requires local `REVIEW_API_SMOKE_TOKEN` env var |
+| `review-local` (M8.3) | offline reviewer-workflow smoke — `scripts/smoke_review_workflow.py --self-contained` | No | No | exercise M8.0–M8.2 reviewer surface against a temp SQLite DB; AUTH-2d: authenticates via an ephemeral admin session login |
 | `full` | `validate` + `render-canary` + `historical` | Yes | Indirectly via Render | nightly / weekly comprehensive check |
+
+> AUTH-2d: the `review-exposure` (M8.8) and `review-token-gate` (M9.5)
+> profiles were removed together with the legacy `X-Review-Token` gate
+> (their `scripts/smoke_review_api_exposure.py` /
+> `scripts/smoke_review_api_token_gate.py` scripts were deleted). Admin
+> auth is now session-only — an unauthenticated `/review/*` request
+> returns **401**, so there is no token gate / public-exposure smoke to run.
 
 ## D. Common usage
 
@@ -92,13 +97,14 @@ Pass/warn/fail interpretation for `review-local`:
 
 | smoke result | runner status | meaning |
 | --- | --- | --- |
-| every sub-check `passed=true`, exit 0 | `pass` | M8.0–M8.2 + M9.0 + M9.1 review surface intact: disabled-by-default, token gate, from-result, idempotency, list/detail, every allowed decision, verdict isolation, the absent publication path, the M9.0 decision audit trail (transition + decision_source + audit_version + audit_record), **and the M9.1 internal reviewer audit-packet endpoint (`GET /review/tasks/{id}/audit-packet`) with its disabled / 404 / shape / safety-contract / token-leak checks** are all working. |
+| every sub-check `passed=true`, exit 0 | `pass` | M8.0–M8.2 + M9.0 + M9.1 review surface intact: the session gate (AUTH-2d: no session → 401, authenticated session → 200), from-result, idempotency, list/detail, every allowed decision, verdict isolation, the absent publication path, the M9.0 decision audit trail (transition + decision_source + audit_version + audit_record), **and the M9.1 internal reviewer audit-packet endpoint (`GET /review/tasks/{id}/audit-packet`) with its 401 / 404 / shape / safety-contract / no-secret-leak checks** are all working. |
 | any sub-check `passed=false`, exit 1 | `fail` | At least one reviewer-workflow contract regressed. The runner summary names the failing sub-check; inspect the smoke's JSON tail in the report. Do **not** roll forward until the failing sub-check is restored. |
 | CLI misuse (e.g. `--self-contained` missing), exit 2 | `fail` | Treat as a hard fail; the smoke did not run any contract check. |
 
 `review-local` is fully local/offline: it does **not** call OpenAI, does
-**not** call Render, does **not** require `REVIEW_API_TOKEN` from the
-operator, and does **not** modify Render env / `render.yaml`.
+**not** call Render, does **not** require any review token (AUTH-2d: the
+smoke authenticates via an ephemeral admin session login), and does
+**not** modify Render env / `render.yaml`.
 
 Full check (validate + canary + historical):
 
@@ -538,86 +544,14 @@ python scripts/run_operational_checks.py --profile quick
 so the `quick` profile covers it. None of these commands call
 OpenAI, hit Render, or modify any external state.
 
-## F''''. Review API public-exposure smoke profile (M8.8)
+## F''''. Review API public-exposure smoke (RETIRED — AUTH-2d)
 
-The `review-exposure` profile wraps `scripts/smoke_review_api_exposure.py`
-so the operator can run a no-token, no-secret public-exposure check
-against any deploy from the same single CLI used for the other
-profiles.
-
-### Exact command
-
-```
-python scripts/run_operational_checks.py --profile review-exposure \
-  --base-url https://policy-ai-q5ax.onrender.com
-```
-
-Internally this resolves to one step:
-
-```
-python scripts/smoke_review_api_exposure.py \
-  --base-url https://policy-ai-q5ax.onrender.com \
-  --expect-disabled \
-  --timeout-seconds 300
-```
-
-The smoke's `expect-disabled` mode matches current Render policy
-(review API disabled by default). The runner classifies any
-`public_access_detected=true` as a hard fail and surfaces a specific
-rollback hint in `next_actions` ahead of every other recommendation.
-
-### What this profile does NOT do
-
-- **Does not call OpenAI.** The smoke is pure stdlib `urllib` and
-  never touches OpenAI or any other external service.
-- **Does not require a `REVIEW_API_TOKEN`.** By design the smoke
-  cannot be tricked into sending one — the script doesn't even
-  accept a token flag.
-- **Does not modify Render env.** No `REVIEW_API_ENABLED` toggling.
-- **Does not run any other smoke.** This profile is intentionally
-  small so the operator can run it after frontend / review_* changes
-  without paying the canary's OpenAI / semantic cost.
-- **Is not part of `quick`.** `quick` stays offline + no-Render so
-  pre-commit checks remain fast and OpenAI-free. The exposure smoke
-  hits Render and belongs in the post-deploy profile family.
-
-### Metrics surfaced in the consolidated report
-
-The runner's `commands[i].metrics` block carries:
-
-| field | meaning |
-| --- | --- |
-| `public_access_detected` | `true` iff at least one endpoint returned 2xx without a token |
-| `disabled_count` | endpoints returning 503 with `disabled` body marker |
-| `token_required_count` | endpoints returning 403 |
-| `unexpected_count` | endpoints returning anything else (404 / 405 / 500 / network failure / 503 without `disabled` marker) |
-| `expectation_mismatch_count` | endpoints whose classification did not match the operator's `--expect-*` mode (still safe from public exposure) |
-| `expectation_mode` | `expect-disabled` / `expect-token-required` / `allow-disabled-or-token-required` |
-| `recommendation` | short human-readable next step (PASS / MISMATCH / FAIL …) |
-
-### When to run it
-
-After **any** deploy that touched:
-
-- `web/index.html` reviewer/admin UI (M8.1 / M8.2 / M8.7)
-- `review_auth.py`, `review_workflow.py`, or the `/review/*`
-  endpoints in `api_server.py` (M8.0)
-- environment variables that toggle `REVIEW_API_ENABLED` /
-  `REVIEW_API_TOKEN` on Render
-
-The smoke is fast (a handful of HTTP requests) and runs without any
-secret, so there's no operator-side cost to running it.
-
-### Validation
-
-```
-python tests/test_review_api_exposure_smoke.py
-python tests/test_operational_checks_runner.py
-python scripts/smoke_review_api_exposure.py --base-url http://127.0.0.1:8000 --expect-disabled  # local
-```
-
-The local form points at a running uvicorn that has `REVIEW_API_ENABLED`
-unset; both endpoints should return 503 and the smoke should pass.
+The `review-exposure` profile and `scripts/smoke_review_api_exposure.py`
+were removed when the legacy `X-Review-Token` gate was retired. Admin
+auth is now session-only: an unauthenticated `/review/*` request returns
+**401** (login via `POST /auth/login`). There is no public-exposure /
+token-gate smoke to run; the old "is `/review/*` publicly accessible?"
+question is now answered by the session gate itself.
 
 ## F''''''. Public/admin surface separation (M9.4)
 
@@ -627,49 +561,50 @@ matching `sessionStorage` flag. **This is UI visibility, not an
 operational runner profile** — no new command, no new operational
 check, no Render-side change.
 
-The exposure smoke (`review-exposure` profile, M8.8) still answers the
-"is the `/review/*` API publicly accessible?" question, and the M9.4
-visibility change does **not** affect that answer in either direction:
-the API was disabled-by-default before M9.4 and remains so after.
+The "is the `/review/*` API publicly accessible?" question is now
+answered by the session gate itself (AUTH-2d: `require_admin` returns
+**401** without an authenticated session), and the M9.4 visibility
+change does **not** affect that — the panels are visibility-only.
 
 If an operator wants to visually inspect the reveal flow against the
-Render deploy without touching env vars, the URL is:
+Render deploy, the URL is:
 
 ```
 https://policy-ai-q5ax.onrender.com/?operator_tools=1
 ```
 
-The reveal exposes the panels; the panels still surface
-"리뷰 API가 비활성화되어 있습니다…" when the operator clicks
-`큐 새로고침`, because Render keeps `REVIEW_API_ENABLED` unset.
-That is the expected, safe state.
+The reveal exposes the panels; the panels surface the login-required
+message until the operator logs in via the on-site admin login. That is
+the expected, safe state.
 
 ## F'''''. Local reviewer UI activation dry-run (M9.3)
 
 `scripts/prepare_review_ui_local_demo.py` + `scripts/serve_review_ui_local_demo.py`
 form a **local-only manual dry-run helper**, not an operational runner
-profile. They exist because Render keeps the review API disabled by
-default, so the operator cannot exercise the M9.2 audit-packet UI
-viewer against the public deploy without changing Render env — which
-is intentionally out of scope.
+profile. It lets the operator exercise the M9.2 audit-packet UI viewer
+against a local seeded DB. AUTH-2d: the helper's `--verify` mode
+authenticates via an ephemeral admin session login (no token).
 
 Exact commands:
 
 ```
 python scripts/prepare_review_ui_local_demo.py --reset
 python scripts/prepare_review_ui_local_demo.py --verify
-# Then in PowerShell, paste the runbook the helper printed:
-$env:REVIEW_API_ENABLED = "true"
-$env:REVIEW_API_TOKEN = "local-review-demo-token"
 python scripts\serve_review_ui_local_demo.py --db-path reports\review_ui_local_demo.sqlite
+# Then open the served page, reveal the operator panel (?operator_tools=1),
+# and log in with the admin account via the on-site login form.
 ```
+
+> Note: the helper's printed PowerShell runbook still references the old
+> `$env:REVIEW_API_TOKEN` flow; that printed text is pinned by
+> `tests/test_review_ui_local_demo.py` and is slated for a follow-up
+> update to the session-login wording (it has no functional effect —
+> `--verify` already uses session login).
 
 This is **not** added to any operational profile:
 
 - **Not in `quick`** — `quick` stays offline and never spawns a server.
 - **Not in `render-canary`** — the helper never hits Render.
-- **Not in `review-exposure`** — that profile probes Render's
-  `/review/*` surface; the local demo is a separate local-only flow.
 - **Not in `review-local`** — that profile already runs the offline
   reviewer-workflow smoke (`scripts/smoke_review_workflow.py`), which
   is the right tool for CI / unattended verification.
@@ -677,79 +612,12 @@ This is **not** added to any operational profile:
 See `docs/REVIEW_WORKFLOW.md` §H'''''''' for the visual-confirmation
 runbook the helper prints.
 
-## F'''''''. Controlled review API token-gate smoke (M9.5)
+## F'''''''. Controlled review API token-gate smoke (RETIRED — AUTH-2d)
 
-The `review-token-gate` profile wraps
-`scripts/smoke_review_api_token_gate.py`. **It is only safe to run
-when the operator has intentionally set `REVIEW_API_ENABLED=true` +
-`REVIEW_API_TOKEN` in the Render dashboard** and has matched that
-value to a local `REVIEW_API_SMOKE_TOKEN` env var. M9.5 itself does
-not change Render env.
-
-### Exact command
-
-```powershell
-$env:REVIEW_API_SMOKE_TOKEN = "<paste-locally-only>"
-python scripts/run_operational_checks.py --profile review-token-gate \
-  --base-url https://policy-ai-q5ax.onrender.com
-Remove-Item Env:\REVIEW_API_SMOKE_TOKEN
-```
-
-### What this profile does
-
-- Issues exactly **6** GET requests against `/review/tasks` and
-  `/review/tasks/<nonexistent>/{ ,decisions,audit-packet}`:
-  - 1× no-token (expect 403)
-  - 1× wrong-token (expect 403)
-  - 4× correct-token (expect 200 + three 404s after auth passes)
-- Classifies each response. Pass requires `token_required_count=2`,
-  `valid_token_read_ok=true`, `auth_passed_not_found_count=3`,
-  `public_access_detected=false`, `disabled_detected=false`,
-  `unexpected_count=0`.
-- Surfaces structured metrics under `commands[i].metrics`:
-  `public_access_detected`, `disabled_detected`, `token_gate_ok`,
-  `valid_token_read_ok`, `auth_passed_not_found_count`,
-  `token_required_count`, `disabled_count`, `unexpected_count`,
-  `recommendation`.
-
-### What this profile does NOT do
-
-- **Does not enable the review API.** Render env is not modified.
-- **Does not require a token via CLI.** The token is read only from
-  the local env var named by `--token-env` (default
-  `REVIEW_API_SMOKE_TOKEN`). Missing/empty env → exit 2 with a safe
-  PowerShell instruction; the token value never appears in stdout /
-  stderr / JSON / the runner's report / the command line.
-- **Does not call OpenAI.** Stdlib `urllib` only.
-- **Does not run from `quick` / `validate` / `review-exposure` /
-  `render-canary`.** Each of those keeps a different invariant; this
-  profile stands alone.
-- **`--skip-render` drops the step entirely** (so the runner can
-  no-op the profile in a harness).
-
-### `_next_actions` behavior
-
-- `public_access_detected=true` → leads with the same
-  "PUBLIC EXPOSURE" rollback hint as `review-exposure`.
-- `disabled_detected=true` → explains the review API isn't enabled
-  on this deploy and points to `review-exposure` as the right check
-  for that state. No public exposure was detected.
-- `token_rejected_valid_request` → explains the local
-  `REVIEW_API_SMOKE_TOKEN` doesn't match Render's
-  `REVIEW_API_TOKEN`. Reminds the operator not to paste either
-  value into chat or a committed file.
-- pass → "Safe to proceed with token-gated review API checks."
-
-### Validation
-
-```
-python tests/test_review_api_token_gate_smoke.py
-python tests/test_operational_checks_runner.py
-```
-
-The unit tests use mocked HTTP responses; no real Render call, no
-real token required. The live profile is intentionally **not** part
-of CI.
+The `review-token-gate` profile and `scripts/smoke_review_api_token_gate.py`
+were removed with the legacy `X-Review-Token` gate. Admin auth is
+session-only now (no `REVIEW_API_ENABLED` / `REVIEW_API_TOKEN` env, no
+token to probe); a request without an authenticated session returns 401.
 
 ## F''''''''. Official source registry (M10.0)
 
@@ -776,8 +644,6 @@ The registry does **not** belong in any of:
 
 - `quick` (already covered transitively via `validate.py`)
 - `render-canary` (no Render touch)
-- `review-exposure` / `review-token-gate` (the registry is not a
-  review-API check)
 - `post-commit` / `render-baseline` / `full`
 
 See `docs/SOURCE_REGISTRY.md` for the schema and the conservative

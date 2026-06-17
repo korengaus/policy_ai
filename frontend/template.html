@@ -155,11 +155,11 @@
       sessionStorage flag set.
 
       This is UI visibility only — NOT authentication. The real
-      protection of the review API remains ``REVIEW_API_ENABLED`` +
-      ``X-Review-Token`` server-side. Hiding does the right thing
-      (clears the operator-mode flag, the review session token, and
-      any loaded queue/detail/audit packet state) but it is not a
-      replacement for the server gate.
+      protection of the review API is the admin account session login
+      (AUTH-2d: session-only via ``/auth/login``; an unauthenticated
+      request returns 401). Hiding does the right thing (clears the
+      operator-mode flag and any loaded queue/detail/audit packet state)
+      but it is not a replacement for the server-side session gate.
     -->
     <div id="operatorTools" class="operator-tools" hidden>
       <aside class="operator-tools-banner" role="note" aria-label="내부 운영자 도구 알림">
@@ -167,8 +167,7 @@
           <strong>내부 운영자 도구 (관리자 전용)</strong>
           <span>
             내부 운영자 도구가 표시되어 있습니다. 이 표시는 인증이 아니며,
-            실제 보호는 <code>REVIEW_API_ENABLED</code>와
-            <code>X-Review-Token</code>으로 이루어집니다.
+            실제 보호는 관리자 계정 로그인(세션)으로 이루어집니다.
             여기서 발행되는 결과는 없습니다 (게시가 아님).
           </span>
         </div>
@@ -209,11 +208,11 @@
             <strong>이 도구는 내부 운영자용입니다.</strong>
             검수 큐 등록은 게시가 아니며, 기존 판정 결과(final_decision · policy_confidence · verification_card)를
             변경하지 않습니다. 화면에 보이는 것은 인증이 아니라 단순 표시이며, 실제 보호는 서버의
-            <code>REVIEW_API_ENABLED</code> 설정과 <code>X-Review-Token</code> 헤더로만 이루어집니다.
+            관리자 계정 로그인(세션)으로만 이루어집니다.
             여기서 발행되는 결과는 없습니다 (게시가 아님).
           </div>
           <div class="reader-note">
-            서버 백엔드의 리뷰 API에 연결된 내부 검수 도구입니다. 토큰을 보유한 운영자만 사용할 수 있으며,
+            서버 백엔드의 리뷰 API에 연결된 내부 검수 도구입니다. 로그인한 관리자만 사용할 수 있으며,
             검증 판정 로직과 공개 화면에는 영향을 주지 않습니다. 사람 검토가 필요한 AI 초안을 모아
             검수 큐에 등록하기 위한 내부 작업 영역이며, 이 화면에서 발행되는 결과는 없습니다.
           </div>

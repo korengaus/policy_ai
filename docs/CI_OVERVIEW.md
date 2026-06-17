@@ -66,7 +66,10 @@ for verifying a Render deploy without leaving the CI dashboard.
 | `OPENAI_API_KEY`           | `""` (empty) | No OpenAI calls in CI.                                           |
 | `SEMANTIC_MATCHING_ENABLED`| `"false"`    | Semantic matching off.                                           |
 | `EMBEDDING_PROVIDER`       | `"disabled"` | No embedding provider.                                           |
-| `REVIEW_API_ENABLED`       | `"false"`    | Review API stays disabled.                                       |
+
+> Note (AUTH-2d): `REVIEW_API_ENABLED` was removed from the CI env when the
+> legacy `X-Review-Token` gate was retired. Admin auth is now session-only
+> (login via `POST /auth/login`), so CI no longer sets any review-token env.
 
 ## How to debug a CI failure
 
