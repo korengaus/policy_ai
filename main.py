@@ -1364,6 +1364,7 @@ def _apply_news_item_phase_b(
             "title": news.get("title"),
             "original_url": original_url,
             "topic": topic,
+            "domain": domain,
             "claims": phase_a["claims"],
             "normalized_claims": phase_a["normalized_claims"],
             "source_queries": phase_a["source_queries"],
