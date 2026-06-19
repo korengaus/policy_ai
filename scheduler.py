@@ -29,6 +29,16 @@ DEFAULT_QUERIES = [
     "노인 돌봄",
     "장애인 지원",
     "아동수당",
+    # AGRI-LABOR-SEED — agriculture + labor expansion (program-level; tragedy/
+    # dispute-prone terms excluded, mirroring WELFARE-SEED)
+    "귀농 귀촌 지원",
+    "농산물 가격 안정",
+    "스마트팜 농업",
+    "농가 소득 지원",
+    "최저임금",
+    "청년 일자리",
+    "고용 안정 지원",
+    "근로자 권익",
 ]
 
 
