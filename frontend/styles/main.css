@@ -1171,8 +1171,17 @@
       overflow: hidden;
     }
 
-    /* HOMEPAGE-LAYOUT: .topic-card-summary removed from the card front (the
-       summary lives on the detail view); its rule is dropped as dead CSS. */
+    /* HOMEPAGE-TIERED: summary returns on TIER-1 (detailed) cards only; concise
+       TIER-2 cards omit it. Clamp keeps detailed cards tidy. */
+    .topic-card-summary {
+      color: var(--slate);
+      font-size: 13px;
+      line-height: 1.55;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
 
     .topic-card-meta {
       display: grid;

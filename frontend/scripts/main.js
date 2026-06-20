@@ -143,6 +143,14 @@
     const categoryTabsEl = document.getElementById("categoryTabs");
     const hotTopicsSortEl = document.getElementById("hotTopicsSort");
     const hotTopicsLoadMoreEl = document.getElementById("hotTopicsLoadMore");
+    // HOMEPAGE-TIERED: tier-1 collapse + tier-2 (concise "나머지 뉴스") elements.
+    // #domainSections is repurposed as the tier-2 card grid (was the retired
+    // per-domain browse-sections container).
+    const hotTopicsCollapseEl = document.getElementById("hotTopicsCollapse");
+    const tier2SectionEl = document.getElementById("tier2Section");
+    const tier2GridEl = document.getElementById("domainSections");
+    const tier2LoadMoreEl = document.getElementById("tier2LoadMore");
+    const tier2CollapseEl = document.getElementById("tier2Collapse");
 
     const metricResults = document.getElementById("metricResults");
     const metricAlert = document.getElementById("metricAlert");
@@ -157,21 +165,21 @@
     // (or the Korean fallback "기타-미분류"), or "전체" for no filter. Replaces
     // the old resultCategory()-based activeCategory tab filter.
     let activeDomain = "전체";
-    // DISPLAY-CATEGORY B-1: per-domain "더보기" expand state for the homepage
-    // domain sections (which domains are currently showing their full list).
-    const expandedDomains = new Set();
-    // HOTSORT Phase 2 — client-side sort + "더 보기" pagination for #hotTopics.
-    // No server-side view/engagement counter exists, so the sort uses ONLY
-    // existing honest signals: recency (server order = id DESC), risk
-    // (policy_alert_level), reviewed (human_reviewed_at). hotTopicsVisibleCount
-    // slices the filtered+sorted set; the category and sort handlers reset it.
-    let activeSort = "최신순";
-    // HOMEPAGE-LAYOUT: the band starts at HOT_TOPICS_INITIAL (concise, cards-
-    // first homepage) and each "더 보기" reveals +HOT_TOPICS_CHUNK more. Both
-    // 전체 and the specific-tab filtered view share this slice.
-    const HOT_TOPICS_INITIAL = 3;
-    const HOT_TOPICS_CHUNK = 9;
-    let hotTopicsVisibleCount = HOT_TOPICS_INITIAL;
+    // HOMEPAGE-TIERED: client-side sort over the ≤50-item ranked pool. No
+    // server-side view/engagement counter exists (honest signals only), so the
+    // default "뜨는순" is a composite proxy: 위험도(alert) → freshness → 신뢰도
+    // → recency tiebreak (stable sort preserves server id-DESC order).
+    let activeSort = "뜨는순";
+    // HOMEPAGE-TIERED: two tiers drawn from one ranked array.
+    //   TIER 1 (지금 뜨는 이슈, full cards): 6 → +6 → cap 12, 접기 → 6.
+    //   TIER 2 (나머지 뉴스, concise): ranks beyond TIER1_CAP; 12 → +12, 접기 → 12.
+    const TIER1_INITIAL = 6;
+    const TIER1_CAP = 12;
+    const TIER1_STEP = 6;
+    const TIER2_INITIAL = 12;
+    const TIER2_STEP = 12;
+    let tier1VisibleCount = TIER1_INITIAL;
+    let tier2VisibleCount = TIER2_INITIAL;
     let activeTopicKey = "";
     let selectedResultIndex = null;
     // M45: server-side recent analyses (incl. cron output) used to fill the
@@ -245,11 +253,6 @@
       "finance", "welfare", "agriculture", "labor", "health",
       "environment", "SMB", "realestate", "statistics", "기타-미분류",
     ];
-    // A domain earns its OWN homepage section only when its card count in the
-    // current feed reaches this many rows. Tunable: raise/lower to change how
-    // data-rich a domain must be before it gets a dedicated section. Tabs are
-    // unaffected — every present domain always gets a tab.
-    const SECTION_MIN_ROWS = 20;
     // Normalize a card's domain to a comparison key. Missing/empty domain falls
     // into the "기타-미분류" bucket so a card is NEVER dropped (removal-free).
     function cardDomainKey(card) {
@@ -1844,7 +1847,16 @@
     // so no created_at mapping is needed. Honest signals only (no view counter).
     function sortTopicCards(cards, sortKey) {
       const list = cards.slice();
-      if (sortKey === "위험도순") {
+      if (sortKey === "뜨는순") {
+        // HOMEPAGE-TIERED: composite "hotness" proxy (no real popularity field).
+        // 위험도(alert) desc → freshness(🔥) → 신뢰도(confidence) desc, with the
+        // stable sort preserving server id-DESC order as the recency tiebreak.
+        const score = (c) =>
+          (ALERT_RANK[c.alert] || 0) * 1000
+          + (c.freshness ? 100 : 0)
+          + (Number(c.confidence) || 0);
+        list.sort((a, b) => score(b) - score(a));
+      } else if (sortKey === "위험도순") {
         list.sort((a, b) => (ALERT_RANK[b.alert] || 0) - (ALERT_RANK[a.alert] || 0));
       } else if (sortKey === "검토됨 우선") {
         list.sort((a, b) => (b.humanReviewedAt ? 1 : 0) - (a.humanReviewedAt ? 1 : 0));
@@ -1853,23 +1865,52 @@
       return list;
     }
 
-    function updateHotTopicsLoadMore(total, shown) {
-      if (!hotTopicsLoadMoreEl) return;
-      if (total > shown) {
-        hotTopicsLoadMoreEl.hidden = false;
-        hotTopicsLoadMoreEl.textContent = `더 보기 (${shown}/${total})`;
-      } else {
-        hotTopicsLoadMoreEl.hidden = true;
+    // HOMEPAGE-TIERED: shared 더보기/접기 button state for a tier.
+    //   loadMore visible while shown < total; collapse visible while shown > initial.
+    function updateTierButtons(loadMoreEl, collapseEl, shown, total, initial) {
+      if (loadMoreEl) {
+        if (shown < total) {
+          loadMoreEl.hidden = false;
+          loadMoreEl.textContent = `더 보기 (${shown}/${total})`;
+        } else {
+          loadMoreEl.hidden = true;
+        }
+      }
+      if (collapseEl) {
+        collapseEl.hidden = !(shown > initial);
       }
     }
 
-    // DISPLAY-CATEGORY B-1: single source of truth for a topic card's markup,
-    // reused by #hotTopics and the per-domain sections so they stay identical.
-    function renderTopicCardHtml(card) {
+    // HOMEPAGE-TIERED: single card renderer with a full/concise branch.
+    //   opts.detailed=true  (TIER 1) → summary + reason + 4-tile meta
+    //                                  (신뢰도 + 공식출처 + 리뷰 + 근거품질).
+    //   opts.detailed=false (TIER 2) → concise (badges + title + 신뢰도 +
+    //                                  공식출처). All omitted fields still show
+    //                                  on the detail view (no data lost).
+    // 신뢰도 stays the FIRST .topic-card-meta div in both branches so the
+    // :first-child --verify accent + large number lands on it.
+    function renderTopicCardHtml(card, opts) {
+      const detailed = !!(opts && opts.detailed);
       const selected = (card.key && card.key === activeTopicKey)
         || (card.source === "current" && Number.isInteger(selectedResultIndex) && Number(card.index) === selectedResultIndex);
+      const quality = card.quality || {};
+      const detailBody = detailed
+        ? `
+          <div class="topic-card-summary">${escapeHtml(card.summary || "핵심 요약을 준비 중입니다.")}</div>
+          <div class="reader-note">${escapeHtml(card.reason || "확보된 근거를 바탕으로 위험도와 신뢰도를 산정했습니다.")}</div>
+          <div class="topic-card-meta">
+            <div><strong>신뢰도</strong><br>${escapeHtml(card.confidence)}</div>
+            <div><strong>공식 출처</strong><br>${escapeHtml(card.officialStatus)}</div>
+            <div><strong>리뷰</strong><br>${escapeHtml(card.reviewStatus)}</div>
+            <div><strong>근거 품질</strong><br>${escapeHtml(formatEvidenceSummaryLabel(quality))}</div>
+          </div>`
+        : `
+          <div class="topic-card-meta">
+            <div><strong>신뢰도</strong><br>${escapeHtml(card.confidence)}</div>
+            <div><strong>공식 출처</strong><br>${escapeHtml(card.officialStatus)}</div>
+          </div>`;
       return `
-        <article class="topic-card ${selected ? "selected" : ""}" data-topic-key="${escapeHtml(card.key)}" data-topic-source="${escapeHtml(card.source)}" data-topic-index="${escapeHtml(card.index)}" data-topic-record-id="${escapeHtml(card.recordId)}">
+        <article class="topic-card ${detailed ? "topic-card-detailed" : ""} ${selected ? "selected" : ""}" data-topic-key="${escapeHtml(card.key)}" data-topic-source="${escapeHtml(card.source)}" data-topic-index="${escapeHtml(card.index)}" data-topic-record-id="${escapeHtml(card.recordId)}">
           <div class="topic-card-top">
             <span class="badge ${alertClass(card.alert)}">${escapeHtml(formatAlert(card.alert))}</span>
             <span class="badge topic-badge">${escapeHtml(card.category)}</span>
@@ -1878,12 +1919,7 @@
             ${card.humanReviewedAt ? `<span class="review-status review-approved">${escapeHtml(HUMAN_REVIEWED_LABEL)}</span>` : ""}
           </div>
           <h3 class="topic-card-title">${escapeHtml(card.title)}</h3>
-          <!-- HOMEPAGE-LAYOUT: concise card front. Summary / 근거품질 / 리뷰 are
-               shown on the detail view; the card keeps 신뢰도 (hero) + 공식 출처. -->
-          <div class="topic-card-meta">
-            <div><strong>신뢰도</strong><br>${escapeHtml(card.confidence)}</div>
-            <div><strong>공식 출처</strong><br>${escapeHtml(card.officialStatus)}</div>
-          </div>
+          ${detailBody}
           <div class="topic-card-action">상세 보기</div>
         </article>
       `;
@@ -1909,67 +1945,52 @@
       }).join("");
     }
 
-    // DISPLAY-CATEGORY 2-B-fix2 (Option 1): domain sections are the BROWSE view,
-    // shown only on the 전체 tab — one section per data-rich domain (feed count
-    // >= SECTION_MIN_ROWS), each 4 cards + 더보기 toggle. On a specific tab the
-    // #hotTopics band itself filters to that domain (see renderHotTopics), so
-    // the sections region is suppressed to avoid showing the same cards twice.
-    function renderDomainSections(allCards) {
-      const sectionsEl = document.getElementById("domainSections");
-      if (!sectionsEl) return;
-      const byDomain = new Map();
-      (allCards || []).forEach((card) => {
-        const key = cardDomainKey(card);
-        if (!byDomain.has(key)) byDomain.set(key, []);
-        byDomain.get(key).push(card);
-      });
-      const renderOne = (d) => {
-        const cards = sortTopicCards(byDomain.get(d) || [], activeSort);
-        const expanded = expandedDomains.has(d);
-        const shown = expanded ? cards : cards.slice(0, 4);
-        const moreBtn = cards.length > 4
-          ? `<div class="domain-section-more-wrap"><button class="secondary domain-section-more" type="button" data-expand-domain="${escapeHtml(d)}">${expanded ? "접기" : `더보기 (${shown.length}/${cards.length})`}</button></div>`
-          : "";
-        return `
-          <section class="domain-section" data-domain-section="${escapeHtml(d)}">
-            <div class="section-heading"><div><h2>${escapeHtml(domainDisplayLabel(d))}</h2></div></div>
-            <div class="topic-card-grid">${shown.map(renderTopicCardHtml).join("")}</div>
-            ${moreBtn}
-          </section>
-        `;
-      };
-      // Browse view (data-rich domains) ONLY on 전체. On a specific tab the
-      // band carries the focused list, so render no sections here.
-      const domains = activeDomain === "전체"
-        ? DOMAIN_ORDER.filter((d) => (byDomain.get(d) || []).length >= SECTION_MIN_ROWS)
-        : [];
-      sectionsEl.innerHTML = domains.map(renderOne).join("");
-    }
-
+    // HOMEPAGE-TIERED: two-tier feed from ONE ranked pool. The active tab is a
+    // range filter (전체 = global; specific = that domain). Both tiers use the
+    // same sort (default 뜨는순) so ranking is consistent: tier-1 = global top,
+    // tier-2 = ranks beyond the tier-1 cut. Nothing disappears — an item that
+    // misses the tier-1 cut shows in tier-2 (and ranks high under its domain tab).
     function renderHotTopics(preferredResults) {
       if (!hotTopicsEl) return;
       const allCards = currentTopicCards(preferredResults);
-      // Tabs + sections are driven by the FULL feed.
       renderCategoryTabs(allCards);
-      renderDomainSections(allCards);
-      // DISPLAY-CATEGORY 2-B-fix2 (Option 1): the band narrows to the active
-      // domain. On 전체 it stays cross-domain (all cards = highlights across
-      // every domain); on a specific tab it filters to that domain so the whole
-      // page reflects the tab (and the duplicate browse section is suppressed).
-      // Removal-free: 전체 shows every card; null/unknown domain normalizes to
-      // 기타-미분류 (reachable via 전체 and the 기타 tab).
       const filtered = activeDomain === "전체"
         ? allCards
         : allCards.filter((card) => cardDomainKey(card) === activeDomain);
-      if (!filtered.length) {
-        hotTopicsEl.innerHTML = '<div class="empty-state">검색을 실행하면 검증 카드가 표시됩니다.</div>';
-        updateHotTopicsLoadMore(0, 0);
-        return;
+      const ranked = sortTopicCards(filtered, activeSort);
+
+      // TIER 1 — top-ranked, full-detail. Bounded by TIER1_CAP (12).
+      const tier1Total = Math.min(TIER1_CAP, ranked.length);
+      const tier1Shown = Math.min(tier1VisibleCount, tier1Total);
+      if (!ranked.length) {
+        hotTopicsEl.innerHTML = '<div class="empty-state">검색을 실행하거나 최근 분석을 불러오면 검증 카드가 표시됩니다.</div>';
+      } else {
+        hotTopicsEl.innerHTML = ranked
+          .slice(0, tier1Shown)
+          .map((card) => renderTopicCardHtml(card, { detailed: true }))
+          .join("");
       }
-      const sorted = sortTopicCards(filtered, activeSort);
-      const visible = sorted.slice(0, hotTopicsVisibleCount);
-      hotTopicsEl.innerHTML = visible.map(renderTopicCardHtml).join("");
-      updateHotTopicsLoadMore(sorted.length, visible.length);
+      updateTierButtons(hotTopicsLoadMoreEl, hotTopicsCollapseEl, tier1Shown, tier1Total, TIER1_INITIAL);
+
+      // TIER 2 — ranks beyond the tier-1 cut, concise. Hidden entirely when the
+      // pool has nothing past TIER1_CAP (small/live-search pools degrade cleanly).
+      const tier2Pool = ranked.slice(TIER1_CAP);
+      if (tier2SectionEl) {
+        if (!tier2Pool.length) {
+          tier2SectionEl.hidden = true;
+          if (tier2GridEl) tier2GridEl.innerHTML = "";
+        } else {
+          tier2SectionEl.hidden = false;
+          const tier2Shown = Math.min(tier2VisibleCount, tier2Pool.length);
+          if (tier2GridEl) {
+            tier2GridEl.innerHTML = tier2Pool
+              .slice(0, tier2Shown)
+              .map((card) => renderTopicCardHtml(card, { detailed: false }))
+              .join("");
+          }
+          updateTierButtons(tier2LoadMoreEl, tier2CollapseEl, tier2Shown, tier2Pool.length, TIER2_INITIAL);
+        }
+      }
     }
 
     // Phase 2 M3: project each full result down to only the fields the topic
@@ -5748,20 +5769,43 @@
         const tab = event.target.closest("[data-domain]");
         if (!tab) return;
         activeDomain = tab.dataset.domain || "전체";
-        hotTopicsVisibleCount = HOT_TOPICS_INITIAL;  // reset paging on filter change
+        // HOMEPAGE-TIERED: tab = range filter; reset BOTH tiers' paging.
+        tier1VisibleCount = TIER1_INITIAL;
+        tier2VisibleCount = TIER2_INITIAL;
         renderHotTopics();
       });
     }
     if (hotTopicsSortEl) {
       hotTopicsSortEl.addEventListener("change", () => {
-        activeSort = hotTopicsSortEl.value || "최신순";
-        hotTopicsVisibleCount = HOT_TOPICS_INITIAL;  // reset paging on sort change
+        activeSort = hotTopicsSortEl.value || "뜨는순";
+        tier1VisibleCount = TIER1_INITIAL;  // reset both tiers on sort change
+        tier2VisibleCount = TIER2_INITIAL;
         renderHotTopics();
       });
     }
+    // HOMEPAGE-TIERED: tier-1 더보기 (+6, capped at TIER1_CAP) / 접기 (→6).
     if (hotTopicsLoadMoreEl) {
       hotTopicsLoadMoreEl.addEventListener("click", () => {
-        hotTopicsVisibleCount += HOT_TOPICS_CHUNK;
+        tier1VisibleCount = Math.min(tier1VisibleCount + TIER1_STEP, TIER1_CAP);
+        renderHotTopics();
+      });
+    }
+    if (hotTopicsCollapseEl) {
+      hotTopicsCollapseEl.addEventListener("click", () => {
+        tier1VisibleCount = TIER1_INITIAL;
+        renderHotTopics();
+      });
+    }
+    // HOMEPAGE-TIERED: tier-2 더보기 (+12) / 접기 (→12).
+    if (tier2LoadMoreEl) {
+      tier2LoadMoreEl.addEventListener("click", () => {
+        tier2VisibleCount += TIER2_STEP;
+        renderHotTopics();
+      });
+    }
+    if (tier2CollapseEl) {
+      tier2CollapseEl.addEventListener("click", () => {
+        tier2VisibleCount = TIER2_INITIAL;
         renderHotTopics();
       });
     }
@@ -5808,22 +5852,11 @@
         openTopicCard(card);
       });
     }
-    // DISPLAY-CATEGORY B-1: domain sections reuse the topic-card markup, so the
-    // same open path applies; the "더보기" button toggles per-domain expansion.
-    const domainSectionsEl = document.getElementById("domainSections");
-    if (domainSectionsEl) {
-      domainSectionsEl.addEventListener("click", (event) => {
-        const moreBtn = event.target.closest("[data-expand-domain]");
-        if (moreBtn) {
-          const d = moreBtn.dataset.expandDomain;
-          if (expandedDomains.has(d)) {
-            expandedDomains.delete(d);
-          } else {
-            expandedDomains.add(d);
-          }
-          renderHotTopics();
-          return;
-        }
+    // HOMEPAGE-TIERED: tier-2 grid (repurposed #domainSections) reuses the
+    // topic-card markup, so the same card-open path applies. 더보기/접기 are
+    // separate buttons (wired above), so this delegation only opens cards.
+    if (tier2GridEl) {
+      tier2GridEl.addEventListener("click", (event) => {
         const card = event.target.closest("[data-topic-source]");
         if (!card) return;
         openTopicCard(card);

@@ -95,6 +95,7 @@
       </div>
       <div class="hot-topics-load-more-wrap">
         <button id="hotTopicsLoadMore" class="secondary hot-topics-load-more" type="button" hidden>더 보기</button>
+        <button id="hotTopicsCollapse" class="secondary hot-topics-load-more" type="button" hidden>접기</button>
       </div>
     </section>
 
@@ -109,6 +110,7 @@
       <div class="hot-topics-sort" aria-label="지금 뜨는 이슈 정렬">
         <label class="hot-topics-sort-label" for="hotTopicsSort">정렬</label>
         <select id="hotTopicsSort" class="hot-topics-sort-select">
+          <option value="뜨는순" selected>뜨는순</option>
           <option value="최신순">최신순</option>
           <option value="위험도순">위험도순</option>
           <option value="검토됨 우선">검토됨 우선</option>
@@ -116,10 +118,23 @@
       </div>
     </div>
 
-    <!-- DISPLAY-CATEGORY B-1: dynamic per-domain sections. Populated by
-         renderDomainSections() only for domains whose feed count reaches
-         SECTION_MIN_ROWS; otherwise left empty. -->
-    <div id="domainSections" class="domain-sections"></div>
+    <!-- HOMEPAGE-TIERED: TIER 2 "나머지 뉴스" — concise cards for items ranked
+         beyond the tier-1 cut. #domainSections (formerly the per-domain browse
+         container) is repurposed as the tier-2 card grid. The whole section is
+         hidden by renderHotTopics() when the pool has nothing past the cut. -->
+    <section id="tier2Section" class="news-home-section" hidden>
+      <div class="section-heading">
+        <div>
+          <h2>나머지 뉴스</h2>
+          <p>그 외 분석된 정책 뉴스입니다.</p>
+        </div>
+      </div>
+      <div id="domainSections" class="topic-card-grid"></div>
+      <div class="hot-topics-load-more-wrap">
+        <button id="tier2LoadMore" class="secondary hot-topics-load-more" type="button" hidden>더 보기</button>
+        <button id="tier2Collapse" class="secondary hot-topics-load-more" type="button" hidden>접기</button>
+      </div>
+    </section>
 
     <section id="selectedIssueIntro" class="selected-issue-intro">
       <h2>선택한 이슈 검증 리포트</h2>
