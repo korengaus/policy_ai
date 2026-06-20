@@ -1198,11 +1198,11 @@
       padding: 9px;
     }
 
-    /* Signature: the 신뢰도 (confidence) tile is the hero number of the card. */
+    /* Signature: the 신뢰도 (confidence) tile is the hero number of the card —
+       soft green tint + large number, no heavy green border (operator tweak). */
     .topic-card-meta div:first-child {
       background: var(--verify-soft);
-      border-color: var(--verify);
-      border-left: 3px solid var(--verify);
+      border-color: var(--line);
       color: var(--ink);
       font-size: 18px;
       font-weight: 700;
