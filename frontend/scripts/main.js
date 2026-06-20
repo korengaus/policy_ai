@@ -153,7 +153,13 @@
     let currentHistoryId = null;
     let currentReviewId = null;
     let currentReportContext = null;
-    let activeCategory = "전체";
+    // DISPLAY-CATEGORY B-1: active domain tab. Holds a raw English domain enum
+    // (or the Korean fallback "기타-미분류"), or "전체" for no filter. Replaces
+    // the old resultCategory()-based activeCategory tab filter.
+    let activeDomain = "전체";
+    // DISPLAY-CATEGORY B-1: per-domain "더보기" expand state for the homepage
+    // domain sections (which domains are currently showing their full list).
+    const expandedDomains = new Set();
     // HOTSORT Phase 2 — client-side sort + "더 보기" pagination for #hotTopics.
     // No server-side view/engagement counter exists, so the sort uses ONLY
     // existing honest signals: recency (server order = id DESC), risk
@@ -214,6 +220,42 @@
       "No immediate action beyond routine monitoring.": "즉각적인 대응보다는 일반 모니터링을 유지하세요.",
     };
     // ===== end pin-safe display label maps =====
+    // ===== DISPLAY-CATEGORY B-1 — domain category labels & section sizing =====
+    // Korean DISPLAY labels for the 10 backend domain enums. The raw English
+    // enum (and the Korean fallback "기타-미분류") stays the comparison key
+    // everywhere; this map is used ONLY at render time. Never compare against it.
+    const DOMAIN_LABELS_KO = {
+      finance: "금융",
+      welfare: "복지",
+      agriculture: "농업",
+      labor: "노동",
+      health: "보건",
+      environment: "환경",
+      SMB: "소상공인",
+      realestate: "부동산",
+      statistics: "통계",
+      "기타-미분류": "기타",
+    };
+    // Canonical tab/section order (matches domain_classifier.LABELS).
+    const DOMAIN_ORDER = [
+      "finance", "welfare", "agriculture", "labor", "health",
+      "environment", "SMB", "realestate", "statistics", "기타-미분류",
+    ];
+    // A domain earns its OWN homepage section only when its card count in the
+    // current feed reaches this many rows. Tunable: raise/lower to change how
+    // data-rich a domain must be before it gets a dedicated section. Tabs are
+    // unaffected — every present domain always gets a tab.
+    const SECTION_MIN_ROWS = 20;
+    // Normalize a card's domain to a comparison key. Missing/empty domain falls
+    // into the "기타-미분류" bucket so a card is NEVER dropped (removal-free).
+    function cardDomainKey(card) {
+      const d = card && card.domain;
+      return (typeof d === "string" && d) ? d : "기타-미분류";
+    }
+    function domainDisplayLabel(domainKey) {
+      return DOMAIN_LABELS_KO[domainKey] || DOMAIN_LABELS_KO["기타-미분류"];
+    }
+    // ===== end DISPLAY-CATEGORY B-1 =====
     // Deferred from M29-A1 (pin-sensitive): values contain regression-pinned
     // phrases (검증 완료 / 사람 검토 대기) and VERDICT_LABELS is mutated below.
     // Left in place to avoid byte-risk; revisit in a later pinned-cluster slice.
@@ -1469,7 +1511,7 @@
               <div><span class="label">정책 일치도</span><br>${escapeHtml(source.policy_alignment_score ?? "-")}</div>
               <div><span class="label">공식 근거 점수</span><br>${escapeHtml(source.official_evidence_score ?? "-")}</div>
               <div><span class="label">공식 실패 사유</span><br>${escapeHtml(formatDiagnosticText(source.official_body_failure_reason || "-"))}</div>
-              <div><span class="label">신뢰도 점수</span><br>${escapeHtml(source.reliability_score ?? "-")}</div>
+              <div><span class="label">신뢰도 점수</span><br>${source.reliability_score == null ? "-" : `${escapeHtml(source.reliability_score)}/5`}</div>
               <div><span class="label">신뢰도 등급</span><br>${escapeHtml(formatReliabilityLevel(source.reliability_level))}</div>
               <div><span class="label">검증 역할</span><br>${escapeHtml(formatVerificationRole(source.verification_role))}</div>
               <div><span class="label">도메인</span><br>${escapeHtml(domain || "URL 없음")}</div>
@@ -1750,6 +1792,9 @@
         title: publicInstitutionName(result?.title || record?.query || "검증 뉴스"),
         topic: exportTopicLabel(result, query),
         category: resultCategory(result, query),
+        // DISPLAY-CATEGORY B-1: raw backend domain enum (or null). Drives the
+        // domain tabs/sections; normalized via cardDomainKey() at filter time.
+        domain: result?.domain ?? record?.domain ?? null,
         alert: String(decision.policy_alert_level || record?.highest_alert || "WATCH").toUpperCase(),
         confidence: confidence.policy_confidence_score ?? record?.average_confidence ?? "-",
         officialStatus: officialStatusLabel(result),
@@ -1814,45 +1859,116 @@
       }
     }
 
+    // DISPLAY-CATEGORY B-1: single source of truth for a topic card's markup,
+    // reused by #hotTopics and the per-domain sections so they stay identical.
+    function renderTopicCardHtml(card) {
+      const quality = card.quality || {};
+      const selected = (card.key && card.key === activeTopicKey)
+        || (card.source === "current" && Number.isInteger(selectedResultIndex) && Number(card.index) === selectedResultIndex);
+      return `
+        <article class="topic-card ${selected ? "selected" : ""}" data-topic-key="${escapeHtml(card.key)}" data-topic-source="${escapeHtml(card.source)}" data-topic-index="${escapeHtml(card.index)}" data-topic-record-id="${escapeHtml(card.recordId)}">
+          <div class="topic-card-top">
+            <span class="badge ${alertClass(card.alert)}">${escapeHtml(formatAlert(card.alert))}</span>
+            <span class="badge topic-badge">${escapeHtml(card.category)}</span>
+            <span class="badge topic-badge">${escapeHtml(card.topic)}</span>
+            ${card.freshness ? `<span class="badge freshness-badge">🔥 ${escapeHtml(FRESHNESS_BADGE_LABEL)}</span>` : ""}
+            ${card.humanReviewedAt ? `<span class="review-status review-approved">${escapeHtml(HUMAN_REVIEWED_LABEL)}</span>` : ""}
+          </div>
+          <h3 class="topic-card-title">${escapeHtml(card.title)}</h3>
+          <div class="topic-card-summary">${escapeHtml(card.summary || "핵심 요약을 준비 중입니다.")}</div>
+          <div class="reader-note">${escapeHtml(card.reason || "확보된 근거를 바탕으로 위험도와 신뢰도를 산정했습니다.")}</div>
+          <div class="topic-card-meta">
+            <div><strong>신뢰도</strong><br>${escapeHtml(card.confidence)}</div>
+            <div><strong>공식 출처</strong><br>${escapeHtml(card.officialStatus)}</div>
+            <div><strong>리뷰</strong><br>${escapeHtml(card.reviewStatus)}</div>
+            <div><strong>근거 품질</strong><br>${escapeHtml(formatEvidenceSummaryLabel(quality))}</div>
+          </div>
+          <div class="topic-card-action">상세 보기</div>
+        </article>
+      `;
+    }
+
+    // DISPLAY-CATEGORY B-1: render the 전체 tab plus one tab per domain present
+    // in the feed (canonical order). Korean labels at display; the raw enum is
+    // kept in data-domain for comparison. Active selection is preserved; if the
+    // active domain is no longer present it falls back to 전체 so the feed never
+    // renders empty against a stale tab.
+    function renderCategoryTabs(allCards) {
+      if (!categoryTabsEl) return;
+      const present = new Set((allCards || []).map(cardDomainKey));
+      if (activeDomain !== "전체" && !present.has(activeDomain)) {
+        activeDomain = "전체";
+      }
+      const tabs = [["전체", "전체"]].concat(
+        DOMAIN_ORDER.filter((d) => present.has(d)).map((d) => [d, domainDisplayLabel(d)])
+      );
+      categoryTabsEl.innerHTML = tabs.map(([key, label]) => {
+        const active = key === activeDomain ? " active" : "";
+        return `<button class="category-tab${active}" type="button" data-domain="${escapeHtml(key)}">${escapeHtml(label)}</button>`;
+      }).join("");
+    }
+
+    // DISPLAY-CATEGORY 2-B-fix: domain sections are tied to the active tab.
+    //   activeDomain === "전체"  -> browse view: one section per data-rich domain
+    //     (feed count >= SECTION_MIN_ROWS), each 4 cards + 더보기 toggle.
+    //   activeDomain === <enum>  -> focused view: ONLY that domain as a single
+    //     section (full list via the SAME 4 + 더보기 toggle), shown regardless
+    //     of SECTION_MIN_ROWS so even a thin domain's tab reveals its list.
+    // The #hotTopics band above is unaffected (cross-domain highlights), so the
+    // focused list is never duplicated against a tab-filtered band.
+    function renderDomainSections(allCards) {
+      const sectionsEl = document.getElementById("domainSections");
+      if (!sectionsEl) return;
+      const byDomain = new Map();
+      (allCards || []).forEach((card) => {
+        const key = cardDomainKey(card);
+        if (!byDomain.has(key)) byDomain.set(key, []);
+        byDomain.get(key).push(card);
+      });
+      const renderOne = (d) => {
+        const cards = sortTopicCards(byDomain.get(d) || [], activeSort);
+        const expanded = expandedDomains.has(d);
+        const shown = expanded ? cards : cards.slice(0, 4);
+        const moreBtn = cards.length > 4
+          ? `<div class="domain-section-more-wrap"><button class="secondary domain-section-more" type="button" data-expand-domain="${escapeHtml(d)}">${expanded ? "접기" : `더보기 (${shown.length}/${cards.length})`}</button></div>`
+          : "";
+        return `
+          <section class="domain-section" data-domain-section="${escapeHtml(d)}">
+            <div class="section-heading"><div><h2>${escapeHtml(domainDisplayLabel(d))}</h2></div></div>
+            <div class="topic-card-grid">${shown.map(renderTopicCardHtml).join("")}</div>
+            ${moreBtn}
+          </section>
+        `;
+      };
+      let domains;
+      if (activeDomain === "전체") {
+        // Browse view — data-rich domains only.
+        domains = DOMAIN_ORDER.filter((d) => (byDomain.get(d) || []).length >= SECTION_MIN_ROWS);
+      } else {
+        // Focused view — only the active domain (shown even if thin). Empty
+        // when it has no cards; renderCategoryTabs already resets a stale tab.
+        domains = (byDomain.get(activeDomain) || []).length ? [activeDomain] : [];
+      }
+      sectionsEl.innerHTML = domains.map(renderOne).join("");
+    }
+
     function renderHotTopics(preferredResults) {
       if (!hotTopicsEl) return;
-      // Pipeline: filter (category) -> sort (activeSort) -> slice (visibleCount).
-      const filtered = currentTopicCards(preferredResults).filter((card) => {
-        return activeCategory === "전체" || card.category === activeCategory;
-      });
-      if (!filtered.length) {
+      const allCards = currentTopicCards(preferredResults);
+      // Tabs + sections are driven by the FULL feed. The active tab now scopes
+      // the SECTIONS region (see renderDomainSections); the #hotTopics band
+      // itself stays as cross-domain highlights, unaffected by the active tab,
+      // so a focused domain list is never duplicated here.
+      renderCategoryTabs(allCards);
+      renderDomainSections(allCards);
+      if (!allCards.length) {
         hotTopicsEl.innerHTML = '<div class="empty-state">검색을 실행하면 검증 카드가 표시됩니다.</div>';
         updateHotTopicsLoadMore(0, 0);
         return;
       }
-      const sorted = sortTopicCards(filtered, activeSort);
+      const sorted = sortTopicCards(allCards, activeSort);
       const visible = sorted.slice(0, hotTopicsVisibleCount);
-      hotTopicsEl.innerHTML = visible.map((card) => {
-        const quality = card.quality || {};
-        const selected = (card.key && card.key === activeTopicKey)
-          || (card.source === "current" && Number.isInteger(selectedResultIndex) && Number(card.index) === selectedResultIndex);
-        return `
-          <article class="topic-card ${selected ? "selected" : ""}" data-topic-key="${escapeHtml(card.key)}" data-topic-source="${escapeHtml(card.source)}" data-topic-index="${escapeHtml(card.index)}" data-topic-record-id="${escapeHtml(card.recordId)}">
-            <div class="topic-card-top">
-              <span class="badge ${alertClass(card.alert)}">${escapeHtml(formatAlert(card.alert))}</span>
-              <span class="badge topic-badge">${escapeHtml(card.category)}</span>
-              <span class="badge topic-badge">${escapeHtml(card.topic)}</span>
-              ${card.freshness ? `<span class="badge freshness-badge">🔥 ${escapeHtml(FRESHNESS_BADGE_LABEL)}</span>` : ""}
-              ${card.humanReviewedAt ? `<span class="review-status review-approved">${escapeHtml(HUMAN_REVIEWED_LABEL)}</span>` : ""}
-            </div>
-            <h3 class="topic-card-title">${escapeHtml(card.title)}</h3>
-            <div class="topic-card-summary">${escapeHtml(card.summary || "핵심 요약을 준비 중입니다.")}</div>
-            <div class="reader-note">${escapeHtml(card.reason || "확보된 근거를 바탕으로 위험도와 신뢰도를 산정했습니다.")}</div>
-            <div class="topic-card-meta">
-              <div><strong>신뢰도</strong><br>${escapeHtml(card.confidence)}</div>
-              <div><strong>공식 출처</strong><br>${escapeHtml(card.officialStatus)}</div>
-              <div><strong>리뷰</strong><br>${escapeHtml(card.reviewStatus)}</div>
-              <div><strong>근거 품질</strong><br>${escapeHtml(formatEvidenceSummaryLabel(quality))}</div>
-            </div>
-            <div class="topic-card-action">상세 보기</div>
-          </article>
-        `;
-      }).join("");
+      hotTopicsEl.innerHTML = visible.map(renderTopicCardHtml).join("");
       updateHotTopicsLoadMore(sorted.length, visible.length);
     }
 
@@ -2866,6 +2982,11 @@
         last_checked_at: safeRow.last_checked_at || "",
         review_status: safeRow.review_status || "",
         human_reviewed_at: safeRow.human_reviewed_at || null,
+        // DISPLAY-CATEGORY 2-A: carry the backend domain label (metadata
+        // only; never a verdict field) so history/server cards can drive the
+        // category tabs/sections. GET /history selects the whole row, so
+        // safeRow.domain is present; default null when absent.
+        domain: safeRow.domain ?? null,
       };
     }
 
@@ -4020,6 +4141,19 @@
         const sourceTrustScore = decision.source_trust_score ?? debugSummary.source_trust_score ?? sourceReliabilitySummary.average_reliability_score ?? "-";
         const userContext = buildReportUserContext(parts);
         const verificationDetails = [
+          // DISPLAY-CATEGORY ⑩: ② 최종점수 and ③ 초안 신뢰도 are demoted off the
+          // headline into the advanced collapsible. Values are PRESERVED, only
+          // relocated — the headline keeps a single number (① 신뢰도). On the
+          // public/history feed these can coincide with ① by construction.
+          renderCollapsibleSection(
+            "검증 점수 상세",
+            `<div class="evidence-snippet-grid">
+              <div><span class="label">최종 점수</span><br>${escapeHtml(finalScore)}</div>
+              <div><span class="label">초안 신뢰도</span><br>${escapeHtml(verification.verdict_confidence ?? "-")}</div>
+            </div>`,
+            false,
+            "최종 점수와 초안 신뢰도는 화면 상단의 신뢰도 점수를 보조하는 내부 참고 값입니다. 신뢰도 점수와 같을 수 있습니다."
+          ),
           renderCollapsibleSection(
             "핵심 주장과 정규화",
             `${renderClaimList(claims)}${renderNormalizedClaims(normalizedClaims)}`,
@@ -4083,8 +4217,8 @@
                 <a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a>
               </h2>
               <div class="headline-meta">
-                <span>최종 점수 ${escapeHtml(finalScore)}</span>
                 <span>신뢰도 ${escapeHtml(confidence.policy_confidence_score ?? "-")}</span>
+                <span>근거 강도 ${escapeHtml(formatEvidenceSummaryLabel(strength))}</span>
                 <span>영향도 ${escapeHtml(formatLevel(impact.impact_level))}</span>
                 <span>위험도 ${escapeHtml(formatLevel(confidence.risk_level))}</span>
               </div>
@@ -4161,10 +4295,8 @@
                   <span class="label">AI 초안 판정</span>
                   <strong>${escapeHtml(safeAiDraftVerdictForExport(result))}</strong>
                 </div>
-                <div class="summary-tile">
-                  <span class="label">초안 신뢰도</span>
-                  <strong>${escapeHtml(verification.verdict_confidence ?? "-")}</strong>
-                </div>
+                <!-- DISPLAY-CATEGORY ⑩: 초안 신뢰도 demoted into the
+                     "검증 점수 상세" advanced collapsible (value preserved). -->
                 <div class="summary-tile">
                   <span class="label">리뷰 상태</span>
                   <strong>${escapeHtml(formatReviewStatus(verification.review_status))}</strong>
@@ -5608,13 +5740,14 @@
       loadReviewQueueItem(item, `"${item.query || "검토 항목"}" 검토 큐 항목을 불러왔습니다.`);
     });
     if (categoryTabsEl) {
+      // DISPLAY-CATEGORY B-1: filter on the raw domain enum (data-domain), not
+      // the old resultCategory() heuristic. renderCategoryTabs re-renders the
+      // tab strip (incl. the .active state) on every renderHotTopics, so the
+      // handler only needs to set activeDomain and re-render.
       categoryTabsEl.addEventListener("click", (event) => {
-        const tab = event.target.closest("[data-category]");
+        const tab = event.target.closest("[data-domain]");
         if (!tab) return;
-        activeCategory = tab.dataset.category || "전체";
-        categoryTabsEl.querySelectorAll("[data-category]").forEach((item) => {
-          item.classList.toggle("active", item === tab);
-        });
+        activeDomain = tab.dataset.domain || "전체";
         hotTopicsVisibleCount = HOT_TOPICS_CHUNK;  // reset paging on filter change
         renderHotTopics();
       });
@@ -5632,42 +5765,68 @@
         renderHotTopics();
       });
     }
+    // DISPLAY-CATEGORY B-1: open a topic card's detail report. Extracted so the
+    // #hotTopics feed and the per-domain sections share one click path.
+    function openTopicCard(card) {
+      const source = card.dataset.topicSource;
+      const index = Number(card.dataset.topicIndex || 0);
+      activeTopicKey = card.dataset.topicKey || "";
+      selectedResultIndex = Number.isFinite(index) ? index : null;
+      if (source === "history") {
+        const record = safeReadLocalHistory().find((item) => item.id === card.dataset.topicRecordId);
+        if (record) {
+          loadHistoryRecord(record, `"${record.query || "검증 뉴스"}" 카드를 불러왔습니다.`, selectedResultIndex);
+          resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
+          return;
+        }
+      }
+      // M45: server hot-topic cards carry their result_id in
+      // data-topic-record-id; open the full row via the existing M39c
+      // server-result loader (same path the ?result_id= deep link uses).
+      if (source === "server") {
+        const resultId = Number(card.dataset.topicRecordId);
+        if (Number.isInteger(resultId) && resultId > 0) {
+          loadServerResultById(resultId);
+          resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
+          return;
+        }
+      }
+      if (Array.isArray(currentReportContext?.results) && currentReportContext.results[index]) {
+        renderResults(currentReportContext.results, selectedResultIndex);
+        resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
+        showStatus("상세 검증 리포트로 이동했습니다.", true);
+      } else {
+        renderSelectedIssueIntro([]);
+        resultsEl.innerHTML = '<div class="empty-state">이 카드에는 아직 상세 검증 데이터가 충분하지 않습니다. 검색을 실행하면 상세 리포트가 표시됩니다.</div>';
+        resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }
     if (hotTopicsEl) {
       hotTopicsEl.addEventListener("click", (event) => {
         const card = event.target.closest("[data-topic-source]");
         if (!card) return;
-        const source = card.dataset.topicSource;
-        const index = Number(card.dataset.topicIndex || 0);
-        activeTopicKey = card.dataset.topicKey || "";
-        selectedResultIndex = Number.isFinite(index) ? index : null;
-        if (source === "history") {
-          const record = safeReadLocalHistory().find((item) => item.id === card.dataset.topicRecordId);
-          if (record) {
-            loadHistoryRecord(record, `"${record.query || "검증 뉴스"}" 카드를 불러왔습니다.`, selectedResultIndex);
-            resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
-            return;
+        openTopicCard(card);
+      });
+    }
+    // DISPLAY-CATEGORY B-1: domain sections reuse the topic-card markup, so the
+    // same open path applies; the "더보기" button toggles per-domain expansion.
+    const domainSectionsEl = document.getElementById("domainSections");
+    if (domainSectionsEl) {
+      domainSectionsEl.addEventListener("click", (event) => {
+        const moreBtn = event.target.closest("[data-expand-domain]");
+        if (moreBtn) {
+          const d = moreBtn.dataset.expandDomain;
+          if (expandedDomains.has(d)) {
+            expandedDomains.delete(d);
+          } else {
+            expandedDomains.add(d);
           }
+          renderHotTopics();
+          return;
         }
-        // M45: server hot-topic cards carry their result_id in
-        // data-topic-record-id; open the full row via the existing M39c
-        // server-result loader (same path the ?result_id= deep link uses).
-        if (source === "server") {
-          const resultId = Number(card.dataset.topicRecordId);
-          if (Number.isInteger(resultId) && resultId > 0) {
-            loadServerResultById(resultId);
-            resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
-            return;
-          }
-        }
-        if (Array.isArray(currentReportContext?.results) && currentReportContext.results[index]) {
-          renderResults(currentReportContext.results, selectedResultIndex);
-          resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
-          showStatus("상세 검증 리포트로 이동했습니다.", true);
-        } else {
-          renderSelectedIssueIntro([]);
-          resultsEl.innerHTML = '<div class="empty-state">이 카드에는 아직 상세 검증 데이터가 충분하지 않습니다. 검색을 실행하면 상세 리포트가 표시됩니다.</div>';
-          resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
-        }
+        const card = event.target.closest("[data-topic-source]");
+        if (!card) return;
+        openTopicCard(card);
       });
     }
     // ---- Phase 2 M8.1: server-backed reviewer UI ---------------------------

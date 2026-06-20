@@ -835,6 +835,45 @@
       background: #dbeafe;
     }
 
+    /* DISPLAY-CATEGORY B-1 — brain-map entry placeholder (mirrors the
+       methodology link; inert until the news-graph page ships). */
+    .brain-map-link {
+      display: inline-flex;
+      align-items: center;
+      min-height: 36px;
+      border: 1px solid #bfdbfe;
+      border-radius: 999px;
+      background: #ffffff;
+      color: #1d4ed8;
+      padding: 8px 13px;
+      font-size: 13px;
+      font-weight: 900;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .brain-map-link:hover {
+      background: #dbeafe;
+    }
+
+    /* DISPLAY-CATEGORY B-1 — dynamic per-domain homepage sections. */
+    .domain-sections {
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+      margin: 24px 0 0;
+    }
+
+    .domain-section .section-heading {
+      margin-bottom: 12px;
+    }
+
+    .domain-section-more-wrap {
+      display: flex;
+      justify-content: center;
+      margin: 14px 0 0;
+    }
+
     .category-tabs {
       display: flex;
       gap: 8px;

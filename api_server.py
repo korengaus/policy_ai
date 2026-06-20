@@ -570,6 +570,10 @@ def _api_result_to_dict(api_result: dict) -> dict:
         "ai_status_reason": api_result.get("ai_status_reason") or "unknown",
         "ai_model": api_result.get("ai_model") or "",
         "ai_available": bool(api_result.get("ai_available")),
+        # DISPLAY-CATEGORY 2-A: forward the domain category label (metadata
+        # only; never a verdict field). Default None when absent so the live
+        # /analyze response shape carries domain just like /history rows do.
+        "domain": api_result.get("domain"),
     }
 
 

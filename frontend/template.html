@@ -29,15 +29,18 @@
         <div class="hero-actions">
           <div class="trust-pill">AI 초안 + 공식 출처 확인</div>
           <a class="methodology-link" href="#methodology">검증 기준 보기</a>
+          <!-- DISPLAY-CATEGORY B-1: brain-map entry placeholder. The 뉴스 연결망
+               (news connection graph) page is post-launch; this link only
+               reserves the slot and is inert for now (#placeholder). -->
+          <a class="brain-map-link" href="#placeholder">뉴스 연결망 보기</a>
         </div>
       </div>
+      <!-- DISPLAY-CATEGORY B-1: domain category tabs. Rendered by
+           renderCategoryTabs() from the current feed (raw domain enum in
+           data-domain, Korean label at display). The static 전체 tab is a
+           graceful default shown before JS runs. -->
       <div id="categoryTabs" class="category-tabs" aria-label="뉴스 카테고리">
-        <button class="category-tab active" type="button" data-category="전체">전체</button>
-        <button class="category-tab" type="button" data-category="금융">금융</button>
-        <button class="category-tab" type="button" data-category="부동산">부동산</button>
-        <button class="category-tab" type="button" data-category="정책">정책</button>
-        <button class="category-tab" type="button" data-category="소비자">소비자</button>
-        <button class="category-tab" type="button" data-category="사회">사회</button>
+        <button class="category-tab active" type="button" data-domain="전체">전체</button>
       </div>
       <div class="hot-topics-sort" aria-label="핫토픽 정렬">
         <label class="hot-topics-sort-label" for="hotTopicsSort">정렬</label>
@@ -120,6 +123,11 @@
         <button id="hotTopicsLoadMore" class="secondary hot-topics-load-more" type="button" hidden>더 보기</button>
       </div>
     </section>
+
+    <!-- DISPLAY-CATEGORY B-1: dynamic per-domain sections. Populated by
+         renderDomainSections() only for domains whose feed count reaches
+         SECTION_MIN_ROWS; otherwise left empty. -->
+    <div id="domainSections" class="domain-sections"></div>
 
     <section id="selectedIssueIntro" class="selected-issue-intro">
       <h2>선택한 이슈 검증 리포트</h2>
