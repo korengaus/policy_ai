@@ -1908,14 +1908,11 @@
       }).join("");
     }
 
-    // DISPLAY-CATEGORY 2-B-fix: domain sections are tied to the active tab.
-    //   activeDomain === "전체"  -> browse view: one section per data-rich domain
-    //     (feed count >= SECTION_MIN_ROWS), each 4 cards + 더보기 toggle.
-    //   activeDomain === <enum>  -> focused view: ONLY that domain as a single
-    //     section (full list via the SAME 4 + 더보기 toggle), shown regardless
-    //     of SECTION_MIN_ROWS so even a thin domain's tab reveals its list.
-    // The #hotTopics band above is unaffected (cross-domain highlights), so the
-    // focused list is never duplicated against a tab-filtered band.
+    // DISPLAY-CATEGORY 2-B-fix2 (Option 1): domain sections are the BROWSE view,
+    // shown only on the 전체 tab — one section per data-rich domain (feed count
+    // >= SECTION_MIN_ROWS), each 4 cards + 더보기 toggle. On a specific tab the
+    // #hotTopics band itself filters to that domain (see renderHotTopics), so
+    // the sections region is suppressed to avoid showing the same cards twice.
     function renderDomainSections(allCards) {
       const sectionsEl = document.getElementById("domainSections");
       if (!sectionsEl) return;
@@ -1940,33 +1937,35 @@
           </section>
         `;
       };
-      let domains;
-      if (activeDomain === "전체") {
-        // Browse view — data-rich domains only.
-        domains = DOMAIN_ORDER.filter((d) => (byDomain.get(d) || []).length >= SECTION_MIN_ROWS);
-      } else {
-        // Focused view — only the active domain (shown even if thin). Empty
-        // when it has no cards; renderCategoryTabs already resets a stale tab.
-        domains = (byDomain.get(activeDomain) || []).length ? [activeDomain] : [];
-      }
+      // Browse view (data-rich domains) ONLY on 전체. On a specific tab the
+      // band carries the focused list, so render no sections here.
+      const domains = activeDomain === "전체"
+        ? DOMAIN_ORDER.filter((d) => (byDomain.get(d) || []).length >= SECTION_MIN_ROWS)
+        : [];
       sectionsEl.innerHTML = domains.map(renderOne).join("");
     }
 
     function renderHotTopics(preferredResults) {
       if (!hotTopicsEl) return;
       const allCards = currentTopicCards(preferredResults);
-      // Tabs + sections are driven by the FULL feed. The active tab now scopes
-      // the SECTIONS region (see renderDomainSections); the #hotTopics band
-      // itself stays as cross-domain highlights, unaffected by the active tab,
-      // so a focused domain list is never duplicated here.
+      // Tabs + sections are driven by the FULL feed.
       renderCategoryTabs(allCards);
       renderDomainSections(allCards);
-      if (!allCards.length) {
+      // DISPLAY-CATEGORY 2-B-fix2 (Option 1): the band narrows to the active
+      // domain. On 전체 it stays cross-domain (all cards = highlights across
+      // every domain); on a specific tab it filters to that domain so the whole
+      // page reflects the tab (and the duplicate browse section is suppressed).
+      // Removal-free: 전체 shows every card; null/unknown domain normalizes to
+      // 기타-미분류 (reachable via 전체 and the 기타 tab).
+      const filtered = activeDomain === "전체"
+        ? allCards
+        : allCards.filter((card) => cardDomainKey(card) === activeDomain);
+      if (!filtered.length) {
         hotTopicsEl.innerHTML = '<div class="empty-state">검색을 실행하면 검증 카드가 표시됩니다.</div>';
         updateHotTopicsLoadMore(0, 0);
         return;
       }
-      const sorted = sortTopicCards(allCards, activeSort);
+      const sorted = sortTopicCards(filtered, activeSort);
       const visible = sorted.slice(0, hotTopicsVisibleCount);
       hotTopicsEl.innerHTML = visible.map(renderTopicCardHtml).join("");
       updateHotTopicsLoadMore(sorted.length, visible.length);
