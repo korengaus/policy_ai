@@ -166,8 +166,12 @@
     // (policy_alert_level), reviewed (human_reviewed_at). hotTopicsVisibleCount
     // slices the filtered+sorted set; the category and sort handlers reset it.
     let activeSort = "최신순";
+    // HOMEPAGE-LAYOUT: the band starts at HOT_TOPICS_INITIAL (concise, cards-
+    // first homepage) and each "더 보기" reveals +HOT_TOPICS_CHUNK more. Both
+    // 전체 and the specific-tab filtered view share this slice.
+    const HOT_TOPICS_INITIAL = 3;
     const HOT_TOPICS_CHUNK = 9;
-    let hotTopicsVisibleCount = HOT_TOPICS_CHUNK;
+    let hotTopicsVisibleCount = HOT_TOPICS_INITIAL;
     let activeTopicKey = "";
     let selectedResultIndex = null;
     // M45: server-side recent analyses (incl. cron output) used to fill the
@@ -1862,7 +1866,6 @@
     // DISPLAY-CATEGORY B-1: single source of truth for a topic card's markup,
     // reused by #hotTopics and the per-domain sections so they stay identical.
     function renderTopicCardHtml(card) {
-      const quality = card.quality || {};
       const selected = (card.key && card.key === activeTopicKey)
         || (card.source === "current" && Number.isInteger(selectedResultIndex) && Number(card.index) === selectedResultIndex);
       return `
@@ -1875,13 +1878,11 @@
             ${card.humanReviewedAt ? `<span class="review-status review-approved">${escapeHtml(HUMAN_REVIEWED_LABEL)}</span>` : ""}
           </div>
           <h3 class="topic-card-title">${escapeHtml(card.title)}</h3>
-          <div class="topic-card-summary">${escapeHtml(card.summary || "핵심 요약을 준비 중입니다.")}</div>
-          <div class="reader-note">${escapeHtml(card.reason || "확보된 근거를 바탕으로 위험도와 신뢰도를 산정했습니다.")}</div>
+          <!-- HOMEPAGE-LAYOUT: concise card front. Summary / 근거품질 / 리뷰 are
+               shown on the detail view; the card keeps 신뢰도 (hero) + 공식 출처. -->
           <div class="topic-card-meta">
             <div><strong>신뢰도</strong><br>${escapeHtml(card.confidence)}</div>
             <div><strong>공식 출처</strong><br>${escapeHtml(card.officialStatus)}</div>
-            <div><strong>리뷰</strong><br>${escapeHtml(card.reviewStatus)}</div>
-            <div><strong>근거 품질</strong><br>${escapeHtml(formatEvidenceSummaryLabel(quality))}</div>
           </div>
           <div class="topic-card-action">상세 보기</div>
         </article>
@@ -5747,14 +5748,14 @@
         const tab = event.target.closest("[data-domain]");
         if (!tab) return;
         activeDomain = tab.dataset.domain || "전체";
-        hotTopicsVisibleCount = HOT_TOPICS_CHUNK;  // reset paging on filter change
+        hotTopicsVisibleCount = HOT_TOPICS_INITIAL;  // reset paging on filter change
         renderHotTopics();
       });
     }
     if (hotTopicsSortEl) {
       hotTopicsSortEl.addEventListener("change", () => {
         activeSort = hotTopicsSortEl.value || "최신순";
-        hotTopicsVisibleCount = HOT_TOPICS_CHUNK;  // reset paging on sort change
+        hotTopicsVisibleCount = HOT_TOPICS_INITIAL;  // reset paging on sort change
         renderHotTopics();
       });
     }

@@ -101,6 +101,26 @@
       font-size: 15px;
     }
 
+    /* HOMEPAGE-LAYOUT: quiet header utility links (relocated from the removed
+       intro hero). Small text links, not buttons. */
+    .header-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      margin: 10px 0 0;
+    }
+
+    .header-link {
+      color: var(--brand-ink);
+      font-size: 13px;
+      font-weight: 600;
+      text-decoration: none;
+    }
+
+    .header-link:hover {
+      text-decoration: underline;
+    }
+
     .api-badge {
       display: inline-flex;
       align-items: center;
@@ -932,6 +952,26 @@
       margin: 14px 0 0;
     }
 
+    /* HOMEPAGE-LAYOUT: row holding the relocated domain tabs (left) + sort
+       (right), between the band and the domain sections. Wraps on narrow. */
+    .domain-controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 8px 0 16px;
+    }
+
+    .domain-controls .category-tabs {
+      margin: 0;
+      flex: 1 1 auto;
+    }
+
+    .domain-controls .hot-topics-sort {
+      margin: 0;
+    }
+
     .category-tabs {
       display: flex;
       gap: 8px;
@@ -1099,8 +1139,9 @@
     .topic-card {
       display: flex;
       flex-direction: column;
-      gap: 10px;
-      min-height: 230px;
+      gap: 12px;
+      /* HOMEPAGE-LAYOUT: card simplified (summary removed) — size to content
+         instead of the old min-height:230px so concise cards aren't empty. */
       border: 1px solid var(--line);
       border-radius: var(--radius);
       background: var(--paper);
@@ -1139,16 +1180,8 @@
       overflow: hidden;
     }
 
-    .topic-card-summary {
-      color: #475569;
-      font-size: 13px;
-      line-height: 1.55;
-      flex: 1;
-      display: -webkit-box;
-      -webkit-line-clamp: 3;
-      -webkit-box-orient: vertical;
-      overflow: hidden;
-    }
+    /* HOMEPAGE-LAYOUT: .topic-card-summary removed from the card front (the
+       summary lives on the detail view); its rule is dropped as dead CSS. */
 
     .topic-card-meta {
       display: grid;
@@ -2510,45 +2543,16 @@
       <div class="title-block">
         <h1 class="brand"><span class="logo-tick" aria-hidden="true">✓</span>tickedin</h1>
         <p class="subtitle">정책 뉴스를 공식 출처로 검증합니다</p>
+        <!-- HOMEPAGE-LAYOUT: quiet utility links relocated out of the removed
+             intro hero. Plain anchors (no JS): 검증 기준 보기 → #methodology,
+             뉴스 연결망 보기 → #placeholder (inert until the graph page ships). -->
+        <nav class="header-links" aria-label="바로가기">
+          <a class="header-link" href="#methodology">검증 기준 보기</a>
+          <a class="header-link" href="#placeholder">뉴스 연결망 보기</a>
+        </nav>
       </div>
       <div class="api-badge"><span class="api-dot"></span>검증 엔진 연결됨</div>
     </header>
-
-    <section class="public-hero">
-      <div class="public-hero-top">
-        <div>
-          <div class="public-eyebrow">Verified Policy News</div>
-          <h2>오늘의 정책 이슈를 검증된 근거 중심으로 읽어보세요</h2>
-          <p>
-            이 플랫폼은 금융, 부동산, 소비자 정책 뉴스의 핵심 주장을 추출하고 공식기관 후보,
-            근거 문장, 반박 가능성, 사람 검토 상태를 함께 보여주는 검증형 뉴스 서비스입니다.
-          </p>
-        </div>
-        <div class="hero-actions">
-          <div class="trust-pill">AI 초안 + 공식 출처 확인</div>
-          <a class="methodology-link" href="#methodology">검증 기준 보기</a>
-          <!-- DISPLAY-CATEGORY B-1: brain-map entry placeholder. The 뉴스 연결망
-               (news connection graph) page is post-launch; this link only
-               reserves the slot and is inert for now (#placeholder). -->
-          <a class="brain-map-link" href="#placeholder">뉴스 연결망 보기</a>
-        </div>
-      </div>
-      <!-- DISPLAY-CATEGORY B-1: domain category tabs. Rendered by
-           renderCategoryTabs() from the current feed (raw domain enum in
-           data-domain, Korean label at display). The static 전체 tab is a
-           graceful default shown before JS runs. -->
-      <div id="categoryTabs" class="category-tabs" aria-label="뉴스 카테고리">
-        <button class="category-tab active" type="button" data-domain="전체">전체</button>
-      </div>
-      <div class="hot-topics-sort" aria-label="핫토픽 정렬">
-        <label class="hot-topics-sort-label" for="hotTopicsSort">정렬</label>
-        <select id="hotTopicsSort" class="hot-topics-sort-select">
-          <option value="최신순">최신순</option>
-          <option value="위험도순">위험도순</option>
-          <option value="검토됨 우선">검토됨 우선</option>
-        </select>
-      </div>
-    </section>
 
     <section class="panel">
       <div class="controls">
@@ -2610,8 +2614,8 @@
     <section class="news-home-section">
       <div class="section-heading">
         <div>
-          <h2>핫토픽 검증 뉴스</h2>
-          <p>최근 분석 결과와 현재 검색 결과를 바탕으로 검증 카드가 생성됩니다.</p>
+          <h2>🔥 지금 뜨는 이슈</h2>
+          <p>전 분야에서 지금 가장 주목받는 정책 이슈입니다.</p>
         </div>
       </div>
       <div id="hotTopics" class="topic-card-grid">
@@ -2621,6 +2625,24 @@
         <button id="hotTopicsLoadMore" class="secondary hot-topics-load-more" type="button" hidden>더 보기</button>
       </div>
     </section>
+
+    <!-- HOMEPAGE-LAYOUT: domain category tabs + sort, relocated out of the
+         removed intro hero to sit between the band and the domain sections.
+         #categoryTabs / #hotTopicsSort are getElementById targets — must stay
+         in the DOM. Rendered by renderCategoryTabs() from the current feed. -->
+    <div class="domain-controls">
+      <div id="categoryTabs" class="category-tabs" aria-label="뉴스 카테고리">
+        <button class="category-tab active" type="button" data-domain="전체">전체</button>
+      </div>
+      <div class="hot-topics-sort" aria-label="지금 뜨는 이슈 정렬">
+        <label class="hot-topics-sort-label" for="hotTopicsSort">정렬</label>
+        <select id="hotTopicsSort" class="hot-topics-sort-select">
+          <option value="최신순">최신순</option>
+          <option value="위험도순">위험도순</option>
+          <option value="검토됨 우선">검토됨 우선</option>
+        </select>
+      </div>
+    </div>
 
     <!-- DISPLAY-CATEGORY B-1: dynamic per-domain sections. Populated by
          renderDomainSections() only for domains whose feed count reaches
@@ -3155,8 +3177,12 @@
     // (policy_alert_level), reviewed (human_reviewed_at). hotTopicsVisibleCount
     // slices the filtered+sorted set; the category and sort handlers reset it.
     let activeSort = "최신순";
+    // HOMEPAGE-LAYOUT: the band starts at HOT_TOPICS_INITIAL (concise, cards-
+    // first homepage) and each "더 보기" reveals +HOT_TOPICS_CHUNK more. Both
+    // 전체 and the specific-tab filtered view share this slice.
+    const HOT_TOPICS_INITIAL = 3;
     const HOT_TOPICS_CHUNK = 9;
-    let hotTopicsVisibleCount = HOT_TOPICS_CHUNK;
+    let hotTopicsVisibleCount = HOT_TOPICS_INITIAL;
     let activeTopicKey = "";
     let selectedResultIndex = null;
     // M45: server-side recent analyses (incl. cron output) used to fill the
@@ -4851,7 +4877,6 @@
     // DISPLAY-CATEGORY B-1: single source of truth for a topic card's markup,
     // reused by #hotTopics and the per-domain sections so they stay identical.
     function renderTopicCardHtml(card) {
-      const quality = card.quality || {};
       const selected = (card.key && card.key === activeTopicKey)
         || (card.source === "current" && Number.isInteger(selectedResultIndex) && Number(card.index) === selectedResultIndex);
       return `
@@ -4864,13 +4889,11 @@
             ${card.humanReviewedAt ? `<span class="review-status review-approved">${escapeHtml(HUMAN_REVIEWED_LABEL)}</span>` : ""}
           </div>
           <h3 class="topic-card-title">${escapeHtml(card.title)}</h3>
-          <div class="topic-card-summary">${escapeHtml(card.summary || "핵심 요약을 준비 중입니다.")}</div>
-          <div class="reader-note">${escapeHtml(card.reason || "확보된 근거를 바탕으로 위험도와 신뢰도를 산정했습니다.")}</div>
+          <!-- HOMEPAGE-LAYOUT: concise card front. Summary / 근거품질 / 리뷰 are
+               shown on the detail view; the card keeps 신뢰도 (hero) + 공식 출처. -->
           <div class="topic-card-meta">
             <div><strong>신뢰도</strong><br>${escapeHtml(card.confidence)}</div>
             <div><strong>공식 출처</strong><br>${escapeHtml(card.officialStatus)}</div>
-            <div><strong>리뷰</strong><br>${escapeHtml(card.reviewStatus)}</div>
-            <div><strong>근거 품질</strong><br>${escapeHtml(formatEvidenceSummaryLabel(quality))}</div>
           </div>
           <div class="topic-card-action">상세 보기</div>
         </article>
@@ -8736,14 +8759,14 @@
         const tab = event.target.closest("[data-domain]");
         if (!tab) return;
         activeDomain = tab.dataset.domain || "전체";
-        hotTopicsVisibleCount = HOT_TOPICS_CHUNK;  // reset paging on filter change
+        hotTopicsVisibleCount = HOT_TOPICS_INITIAL;  // reset paging on filter change
         renderHotTopics();
       });
     }
     if (hotTopicsSortEl) {
       hotTopicsSortEl.addEventListener("change", () => {
         activeSort = hotTopicsSortEl.value || "최신순";
-        hotTopicsVisibleCount = HOT_TOPICS_CHUNK;  // reset paging on sort change
+        hotTopicsVisibleCount = HOT_TOPICS_INITIAL;  // reset paging on sort change
         renderHotTopics();
       });
     }

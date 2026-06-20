@@ -92,6 +92,26 @@
       font-size: 15px;
     }
 
+    /* HOMEPAGE-LAYOUT: quiet header utility links (relocated from the removed
+       intro hero). Small text links, not buttons. */
+    .header-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      margin: 10px 0 0;
+    }
+
+    .header-link {
+      color: var(--brand-ink);
+      font-size: 13px;
+      font-weight: 600;
+      text-decoration: none;
+    }
+
+    .header-link:hover {
+      text-decoration: underline;
+    }
+
     .api-badge {
       display: inline-flex;
       align-items: center;
@@ -923,6 +943,26 @@
       margin: 14px 0 0;
     }
 
+    /* HOMEPAGE-LAYOUT: row holding the relocated domain tabs (left) + sort
+       (right), between the band and the domain sections. Wraps on narrow. */
+    .domain-controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 8px 0 16px;
+    }
+
+    .domain-controls .category-tabs {
+      margin: 0;
+      flex: 1 1 auto;
+    }
+
+    .domain-controls .hot-topics-sort {
+      margin: 0;
+    }
+
     .category-tabs {
       display: flex;
       gap: 8px;
@@ -1090,8 +1130,9 @@
     .topic-card {
       display: flex;
       flex-direction: column;
-      gap: 10px;
-      min-height: 230px;
+      gap: 12px;
+      /* HOMEPAGE-LAYOUT: card simplified (summary removed) — size to content
+         instead of the old min-height:230px so concise cards aren't empty. */
       border: 1px solid var(--line);
       border-radius: var(--radius);
       background: var(--paper);
@@ -1130,16 +1171,8 @@
       overflow: hidden;
     }
 
-    .topic-card-summary {
-      color: #475569;
-      font-size: 13px;
-      line-height: 1.55;
-      flex: 1;
-      display: -webkit-box;
-      -webkit-line-clamp: 3;
-      -webkit-box-orient: vertical;
-      overflow: hidden;
-    }
+    /* HOMEPAGE-LAYOUT: .topic-card-summary removed from the card front (the
+       summary lives on the detail view); its rule is dropped as dead CSS. */
 
     .topic-card-meta {
       display: grid;
