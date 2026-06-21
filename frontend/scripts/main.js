@@ -4149,12 +4149,22 @@
         // "검증 점수 상세" collapsible).
         const finalScore = decision.final_score ?? confidence.policy_confidence_score ?? "-";
         const userContext = buildReportUserContext(parts);
-        // DETAIL-FIX A: lead the top prose with a populated field. On server/cron
-        // cards final_decision.decision_summary is empty, so fall back to
-        // evidence_summary, then the human-readable claim (핵심 주장). Same chain
-        // already used for the intro line (~1766). Still renders nothing if all
-        // summary fields are empty (no empty box).
-        const leadSummary = decision.decision_summary || verification.evidence_summary || exportClaimText(result);
+        // SUMMARY-CONTENT-A: the top of the report leads with the news CONTENT
+        // (what the government announced), built from the claim sentences, then a
+        // smaller VERIFICATION note (how it was checked) below it.
+        //  - contentLead: join the first 2-3 claims. Prefer normalizedClaims
+        //    (each .claim_text); fall back to the claims string array. Empty → "".
+        //  - verifyNote: the existing verification/judgment line. When contentLead
+        //    exists we DROP the exportClaimText (claim #1) fallback so the second
+        //    line doesn't repeat the first claim; on sparse rows (no contentLead
+        //    AND no summary) we keep exportClaimText so something still shows.
+        const contentLeadClaims = (Array.isArray(normalizedClaims) && normalizedClaims.length)
+          ? normalizedClaims.slice(0, 3).map((claim) => claim && claim.claim_text).filter(Boolean)
+          : (Array.isArray(claims) ? claims : []).slice(0, 3).filter(Boolean);
+        const contentLead = contentLeadClaims.join(" ");
+        const verifyNote = contentLead
+          ? (decision.decision_summary || verification.evidence_summary || "")
+          : (decision.decision_summary || verification.evidence_summary || exportClaimText(result));
         const verificationDetails = [
           // DISPLAY-CATEGORY ⑩: ② 최종점수 and ③ 초안 신뢰도 are demoted off the
           // headline into the advanced collapsible. Values are PRESERVED, only
@@ -4237,11 +4247,12 @@
               <div class="ai-status-note">${escapeHtml(buildAiStatusDescriptor(getResultAiStatus(result).status).note)}</div>
             </div>
 
-            <!-- DETAIL-CLEANUP-V2 item 2 / DETAIL-FIX A: AI summary prose lead, large,
-                 FIRST content. Uses leadSummary (decision_summary || evidence_summary
-                 || claim_text) so it appears on server cards too. Conditional — if all
-                 summary fields are empty, render nothing (no empty box). -->
-            ${leadSummary ? `<div class="report-summary-lead">${escapeHtml(leadSummary)}</div>` : ""}
+            <!-- SUMMARY-CONTENT-A item 2: news CONTENT lead (what the news says),
+                 built from the first 2-3 claims — large/primary. Then a smaller
+                 VERIFICATION note (how it was verified). Each renders only if its
+                 value is truthy, so no empty box on sparse rows. -->
+            ${contentLead ? `<div class="report-summary-lead">${escapeHtml(contentLead)}</div>` : ""}
+            ${verifyNote ? `<div class="report-verify-note">${escapeHtml(verifyNote)}</div>` : ""}
 
             <!-- DETAIL-CLEANUP-V2 item 3: the single core indicator strip (shown once):
                  판정 단계 / 신뢰도 / 공식 출처 상태, directly under the summary. -->

@@ -500,6 +500,21 @@
       font-weight: 500;
     }
 
+    /* SUMMARY-CONTENT-A: secondary verification note under the content lead —
+       smaller and muted so the news content reads first, the "how we verified"
+       note second. */
+    .report-summary-lead + .report-verify-note {
+      margin-top: -8px;
+    }
+
+    .report-verify-note {
+      margin: 0 0 16px;
+      padding: 0 2px;
+      color: var(--slate);
+      font-size: 13.5px;
+      line-height: 1.6;
+    }
+
     /* DETAIL-CLEANUP-V2: the single core indicator strip (판정 단계 / 신뢰도 /
        공식 출처 상태) shown once, directly under the summary lead (item 3).
        Reuses .summary-tile for the three cells. */
