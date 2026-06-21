@@ -486,6 +486,30 @@
       line-height: 1.35;
     }
 
+    /* DETAIL-CLEANUP-V2: the AI summary prose lead — promoted to the top of the
+       detail view, large and readable (item 2 of the new order). */
+    .report-summary-lead {
+      margin: 14px 0 16px;
+      padding: 16px 18px;
+      border-left: 4px solid var(--brand);
+      border-radius: var(--radius-sm);
+      background: var(--paper);
+      color: var(--ink);
+      font-size: 17px;
+      line-height: 1.7;
+      font-weight: 500;
+    }
+
+    /* DETAIL-CLEANUP-V2: the single core indicator strip (판정 단계 / 신뢰도 /
+       공식 출처 상태) shown once, directly under the summary lead (item 3).
+       Reuses .summary-tile for the three cells. */
+    .core-indicator-strip {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin: 0 0 16px;
+    }
+
     .reviewer-dashboard {
       border: 1px solid #c7d2fe;
       border-radius: 12px;
@@ -2467,6 +2491,7 @@
       .selected-issue-meta,
       .detail-grid,
       .result-summary-grid,
+      .core-indicator-strip,
       .verification-summary-grid,
       .reviewer-dashboard-grid,
       .reviewer-action-controls,

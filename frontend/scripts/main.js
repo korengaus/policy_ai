@@ -1639,34 +1639,21 @@
       if (!selectedIssueIntroEl) return;
       const safeResults = Array.isArray(results) ? results : [];
       if (!safeResults.length) {
+        selectedIssueIntroEl.style.display = "";
         selectedIssueIntroEl.innerHTML = `
           <h2>선택한 이슈 검증 리포트</h2>
           <p>관심 있는 이슈의 상세 보기를 누르거나 검색어를 입력하면, 현재 확보 가능한 기사와 공식 자료를 기준으로 검증 리포트가 표시됩니다.</p>
         `;
         return;
       }
-      const metrics = computeMetrics(safeResults);
-      const index = Number.isInteger(selectedIndex) && safeResults[selectedIndex] ? selectedIndex : 0;
-      const result = safeResults[index] || {};
-      const confidence = result.policy_confidence || {};
-      const verification = result.verification_card || result || {};
-      const debug = verification.debug_summary || result.debug_summary || {};
-      const evidenceCount = Number(debug.evidence_matching_count || debug.direct_evidence_count || debug.evidence_candidates_count || 0);
-      const sourceCount = Number(debug.official_sources_count || debug.news_sources_count || (verification.source_candidates || result.source_candidates || []).length || 0);
-      const level = String(result.final_decision?.policy_alert_level || metrics.highest || "WATCH").toUpperCase();
-      const topic = exportTopicLabel(result, currentReportContext?.query || queryInput?.value || "");
-      selectedIssueIntroEl.innerHTML = `
-        <h2>이 이슈는 이렇게 검증되었습니다</h2>
-        <p><strong>${escapeHtml(publicInstitutionName(result.title || "선택한 이슈"))}</strong></p>
-        <p>${escapeHtml(selectedIssueExplanation(result, metrics))}</p>
-        <div class="selected-issue-meta">
-          <div>주제<strong>${escapeHtml(topic)}</strong><span class="reader-note">기사와 검색어를 함께 본 공개용 분류입니다.</span></div>
-          <div>위험/판정 단계<strong>${escapeHtml(formatAlert(level))}</strong><span class="reader-note">얼마나 조심해서 읽어야 하는지 보여줍니다.</span></div>
-          <div>평균 신뢰도<strong>${escapeHtml(confidence.policy_confidence_score ?? metrics.averageConfidence ?? "-")}</strong><span class="reader-note">수집된 근거 기준의 참고 점수입니다.</span></div>
-          <div>근거/검증처<strong>${escapeHtml(evidenceCount || sourceCount || "-")}</strong><span class="reader-note">확인에 사용된 주장·출처 수입니다.</span></div>
-          <div>공식 출처 상태<strong>${escapeHtml(officialStatusLabel(result))}</strong><span class="reader-note">관련 공식 자료가 확인됐는지 표시합니다.</span></div>
-        </div>
-      `;
+      // DETAIL-CLEANUP-V2: the former "이 이슈는 이렇게 검증되었습니다" 5-tile intro
+      // duplicated the AI summary prose (now the report's prose lead) plus the core
+      // indicator strip (판정 단계 / 신뢰도 / 공식 출처) and the alert/topic badges.
+      // The duplicated content is removed; #selectedIssueIntro is kept (getElementById
+      // target) but emptied and hidden so no empty box renders. 주제→badge,
+      // 판정 단계/신뢰도/공식 출처→core strip, prose→report-summary-lead.
+      selectedIssueIntroEl.innerHTML = "";
+      selectedIssueIntroEl.style.display = "none";
     }
 
     function clearCurrentReportContext() {
@@ -3762,11 +3749,10 @@
       const evidenceText = evidenceQualityExplanation(context.quality, context.strength);
       const contradictionText = contradictionExplanation(context.contradictionSummary);
       const confidenceScore = context.confidence?.policy_confidence_score ?? context.decision?.final_score ?? "-";
+      // DETAIL-CLEANUP-V2: header removed — this guide now lives inside a collapsed
+      // renderCollapsibleSection whose <summary> provides the title.
       return `
         <section class="reading-guide">
-          <div class="reading-guide-header">
-            <div class="reading-guide-title">이 리포트는 이렇게 읽으면 됩니다</div>
-          </div>
           <div class="reading-guide-grid">
             <div class="reading-guide-card">
               <strong>판정 단계</strong>
@@ -3810,7 +3796,10 @@
           </section>
         </div>
         <div class="user-explain">
-          <strong>근거 품질:</strong> ${escapeHtml(evidenceQualityExplanation(context.quality, context.strength))}
+          <!-- DETAIL-CLEANUP-V2: 영향도/위험도 relocated here from the removed
+               .headline-meta tiles so these fields stay visible on the page. -->
+          <strong>영향도:</strong> ${escapeHtml(formatLevel(context.impact?.impact_level))} · <strong>위험도:</strong> ${escapeHtml(formatLevel(context.confidence?.risk_level))}
+          <br><strong>근거 품질:</strong> ${escapeHtml(evidenceQualityExplanation(context.quality, context.strength))}
           <br><strong>공식 출처 확인:</strong> ${escapeHtml(officialVerificationExplanation(context.sourceReliabilitySummary, context.debugSummary))}
           <br><strong>반박/모순 확인:</strong> ${escapeHtml(contradictionExplanation(context.contradictionSummary))}
         </div>
@@ -4148,18 +4137,13 @@
         const title = escapeHtml(publicInstitutionName(result.title || "제목 없음"));
         const url = escapeHtml(safeUrl(result.original_url || "#"));
         const topic = exportTopicLabel(result, currentReportContext?.query || queryInput?.value || "");
-        const topSourceTitle = sourceReliabilitySummary.top_source_title
-          || verification.evidence_sources?.[0]?.title
-          || "공식 상세 근거 부족";
-        const topSourceUrl = sourceReliabilitySummary.top_source_url
-          || verification.evidence_sources?.[0]?.url
-          || "";
-        const topSourceHtml = topSourceUrl
-          ? `<a href="${escapeHtml(safeUrl(topSourceUrl))}" target="_blank" rel="noopener noreferrer">${escapeHtml(userFacingReportText(publicInstitutionName(topSourceTitle), "확인 필요"))}</a>`
-          : escapeHtml(userFacingReportText(publicInstitutionName(topSourceTitle), "확인 필요"));
-        const recommendedAction = recommendedActionForParts(parts);
+        // DETAIL-CLEANUP-V2: topSource*/recommendedAction/sourceTrustScore consts were
+        // consumed only by the removed duplicate .result-summary-grid (box 7). Those
+        // data still render elsewhere — 최고 신뢰 출처 in the "출처와 공식 근거"
+        // collapsible, 추천 다음 조치 in the 검증 결과 요약 카드, 경고 단계 in the
+        // alert badge + core indicator strip. finalScore is kept (used by the
+        // "검증 점수 상세" collapsible).
         const finalScore = decision.final_score ?? confidence.policy_confidence_score ?? "-";
-        const sourceTrustScore = decision.source_trust_score ?? debugSummary.source_trust_score ?? sourceReliabilitySummary.average_reliability_score ?? "-";
         const userContext = buildReportUserContext(parts);
         const verificationDetails = [
           // DISPLAY-CATEGORY ⑩: ② 최종점수 and ③ 초안 신뢰도 are demoted off the
@@ -4237,13 +4221,32 @@
               <h2 class="result-title">
                 <a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a>
               </h2>
-              <div class="headline-meta">
-                <span>신뢰도 ${escapeHtml(confidence.policy_confidence_score ?? "-")}</span>
-                <span>근거 강도 ${escapeHtml(formatEvidenceSummaryLabel(strength))}</span>
-                <span>영향도 ${escapeHtml(formatLevel(impact.impact_level))}</span>
-                <span>위험도 ${escapeHtml(formatLevel(confidence.risk_level))}</span>
-              </div>
+              <!-- DETAIL-CLEANUP-V2: .headline-meta tiles removed (pure duplicates):
+                   신뢰도→core strip, 근거 강도→"근거 요약" collapsible,
+                   영향도/위험도→영향 section (renderUserSummarySections). -->
               <div class="ai-status-note">${escapeHtml(buildAiStatusDescriptor(getResultAiStatus(result).status).note)}</div>
+            </div>
+
+            <!-- DETAIL-CLEANUP-V2 item 2: AI summary prose lead, large, FIRST content.
+                 Conditional — if decision_summary is empty, render nothing (this
+                 kills the old "요약 정보가 없습니다" empty box). Fallback never shown. -->
+            ${decision.decision_summary ? `<div class="report-summary-lead">${escapeHtml(decision.decision_summary)}</div>` : ""}
+
+            <!-- DETAIL-CLEANUP-V2 item 3: the single core indicator strip (shown once):
+                 판정 단계 / 신뢰도 / 공식 출처 상태, directly under the summary. -->
+            <div class="core-indicator-strip">
+              <div class="summary-tile">
+                <span class="label">판정 단계</span>
+                <strong>${escapeHtml(formatAlert(level))}</strong>
+              </div>
+              <div class="summary-tile">
+                <span class="label">신뢰도</span>
+                <strong>${escapeHtml(confidence.policy_confidence_score ?? "-")}</strong>
+              </div>
+              <div class="summary-tile">
+                <span class="label">공식 출처 상태</span>
+                <strong>${escapeHtml(officialStatusLabel(result))}</strong>
+              </div>
             </div>
 
             <div class="news-nav" aria-label="분석 섹션">
@@ -4254,57 +4257,22 @@
               <span>상세 보기</span>
             </div>
 
-            ${renderKeyTakeaways(userContext)}
-            ${renderReadingGuide(userContext)}
-            ${renderVerificationSummaryCard(result, userContext)}
-
-            <div class="result-summary-grid">
-              <div class="summary-tile">
-                <span class="label">경고 단계</span>
-                <strong>${escapeHtml(formatAlert(level))}</strong>
-                <div class="score-explain">${escapeHtml(scoreTrustDescription(finalScore))}</div>
-              </div>
-              <div class="summary-tile">
-                <span class="label">권장 조치</span>
-                <strong>${escapeHtml(recommendedAction)}</strong>
-                <div class="score-explain">정책 판단 전에 확인해야 할 다음 행동입니다.</div>
-              </div>
-              <div class="summary-tile">
-                <span class="label">최고 신뢰 출처</span>
-                <strong>${topSourceHtml}</strong>
-                <div class="score-explain">출처 신뢰 ${escapeHtml(sourceTrustScore)}점 · ${escapeHtml(scoreTrustDescription(sourceTrustScore))}</div>
-              </div>
-              <div class="summary-tile">
-                <span class="label">근거 품질</span>
-                <strong>${escapeHtml(formatEvidenceSummaryLabel(quality))}</strong>
-                <div class="score-explain">${escapeHtml(evidenceQualityExplanation(quality, strength))}</div>
-              </div>
-              <div class="summary-tile">
-                <span class="label">근거 강도</span>
-                <strong>${escapeHtml(formatEvidenceSummaryLabel(strength))}</strong>
-              </div>
-              <div class="summary-tile">
-                <span class="label">시장 신호</span>
-                <strong>${escapeHtml(formatSignal(decision.market_signal))}</strong>
-              </div>
-              <div class="summary-tile">
-                <span class="label">영향 방향</span>
-                <strong>${escapeHtml(formatDirection(impact.impact_direction))}</strong>
-              </div>
-              <div class="summary-tile">
-                <span class="label">반박/모순</span>
-                <strong>${escapeHtml(contradictionLabel(contradictionSummary))}</strong>
-                <div class="score-explain">${escapeHtml(contradictionExplanation(contradictionSummary))}</div>
-              </div>
-            </div>
-
-            <div class="decision-summary">${escapeHtml(decision.decision_summary || "요약 정보가 없습니다.")}</div>
+            <!-- DETAIL-CLEANUP-V2 item 4: single reasoning section. The former
+                 "핵심 요약" takeaway panel duplicated these same decisionReasonBullets
+                 and was removed — this is the one kept reasoning block. -->
             <section class="plain-section">
               <h4>왜 이렇게 판단했나요?</h4>
               ${renderBulletList(decisionReasonBullets(userContext, 3))}
             </section>
-            ${renderPublicSourceCards(result)}
+
+            ${renderVerificationSummaryCard(result, userContext)}
             ${renderUserSummarySections(userContext)}
+            ${renderPublicSourceCards(result)}
+
+            <!-- DETAIL-CLEANUP-V2 item 8: reading guide kept but moved into a collapsed
+                 section so it stays available without taking top space. Content
+                 unchanged; title supplied by the collapsible summary. -->
+            ${renderCollapsibleSection("이 리포트는 이렇게 읽으면 됩니다", renderReadingGuide(userContext), false, "처음 보는 분을 위한 안내입니다. 판정 단계·신뢰도·공식 출처·근거를 어떻게 읽으면 되는지 설명합니다.")}
 
             <section class="verification-card">
               <h3>AI 종합 검증 판단</h3>
