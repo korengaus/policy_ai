@@ -64,6 +64,21 @@
       font-weight: 800;
     }
 
+    /* LOGO-HOME — wordmark is a home link (href="/" → full reload to clean
+       state). Suppress default anchor underline/color so the wordmark looks
+       identical at rest; only a subtle opacity shift on hover signals it's
+       clickable. Scoped to .brand-home: tagline + header-links unaffected. */
+    .brand-home {
+      text-decoration: none;
+      color: inherit;
+      cursor: pointer;
+      display: inline-block;
+    }
+
+    .brand-home:hover {
+      opacity: 0.85;
+    }
+
     /* tickedin logo signature — the ✓ in verification green. */
     .brand {
       display: inline-flex;
@@ -1017,6 +1032,11 @@
     .hot-topics-load-more-wrap {
       display: flex;
       justify-content: center;
+      /* TIER-BTN-GAP — separate 더 보기 / 접기 so they don't read as one lump.
+         flex-wrap lets the same gap double as vertical spacing if the two
+         buttons stack on narrow screens (MOBILE-1b safe). Covers both tiers. */
+      flex-wrap: wrap;
+      gap: 10px;
       margin: 16px 0 0;
     }
 
