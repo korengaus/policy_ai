@@ -7190,6 +7190,30 @@
         : formatRecommendation(parts.decision.action_recommendation);
     }
 
+    // SUMMARY-CONTENT-B: display-time cleanup for ALREADY-STORED evidence_summary
+    // rows that still contain raw English concept keys (review_stage, etc.).
+    // New analyses are already clean from the backend CONCEPT_LABEL_KO fix; this
+    // mirrors that map so old rows display Korean too. Replaces ONLY the exact
+    // known keys (word-boundary) — never mangles other text. Display-only: stored
+    // data and exports of old rows are unchanged until reprocessed.
+    function cleanConceptKeysForDisplay(text) {
+      if (!text || typeof text !== "string") return text;
+      const labels = {
+        rental_loan: "전세대출",
+        mortgage_loan: "주택담보대출",
+        interest_rate: "금리",
+        regulation: "규제",
+        subsidy_support: "지원",
+        target_group: "지원대상",
+        implementation: "시행",
+        review_stage: "검토",
+      };
+      return text.replace(
+        /\b(rental_loan|mortgage_loan|interest_rate|regulation|subsidy_support|target_group|implementation|review_stage)\b/g,
+        (match) => labels[match] || match
+      );
+    }
+
     function renderResults(results, focusIndex = selectedResultIndex) {
       if (!results.length) {
         metricsEl.style.display = "none";
@@ -7259,9 +7283,9 @@
           ? normalizedClaims.slice(0, 3).map((claim) => claim && claim.claim_text).filter(Boolean)
           : (Array.isArray(claims) ? claims : []).slice(0, 3).filter(Boolean);
         const contentLead = contentLeadClaims.join(" ");
-        const verifyNote = contentLead
+        const verifyNote = cleanConceptKeysForDisplay(contentLead
           ? (decision.decision_summary || verification.evidence_summary || "")
-          : (decision.decision_summary || verification.evidence_summary || exportClaimText(result));
+          : (decision.decision_summary || verification.evidence_summary || exportClaimText(result)));
         const verificationDetails = [
           // DISPLAY-CATEGORY ⑩: ② 최종점수 and ③ 초안 신뢰도 are demoted off the
           // headline into the advanced collapsible. Values are PRESERVED, only
@@ -7308,7 +7332,7 @@
           ),
           renderCollapsibleSection(
             "근거 요약과 부족한 맥락",
-            `${renderEvidenceExtractionSummary(evidenceExtractionSummary)}${renderEvidenceSources(verification.evidence_sources)}<div class="evidence-source-meta">${escapeHtml(userFacingReportText(verification.evidence_summary, "-"))}</div><div class="evidence-source-meta"><strong>부족한 맥락:</strong> ${escapeHtml(buildSafeMissingContext(result))}</div><div class="evidence-source-meta">마지막 확인: ${escapeHtml(verification.last_checked_at || "-")}</div>`,
+            `${renderEvidenceExtractionSummary(evidenceExtractionSummary)}${renderEvidenceSources(verification.evidence_sources)}<div class="evidence-source-meta">${escapeHtml(userFacingReportText(cleanConceptKeysForDisplay(verification.evidence_summary), "-"))}</div><div class="evidence-source-meta"><strong>부족한 맥락:</strong> ${escapeHtml(buildSafeMissingContext(result))}</div><div class="evidence-source-meta">마지막 확인: ${escapeHtml(verification.last_checked_at || "-")}</div>`,
             false,
             "현재 리포트가 어떤 근거에 기대고 있으며, 추가 확인이 필요한 부분은 무엇인지 정리합니다."
           ),

@@ -8,6 +8,7 @@ from collections import Counter
 from korean_constants import (
     STOPWORDS_COMPARATOR as STOPWORDS,
     CONCEPT_SYNONYMS_COMPARATOR as CONCEPT_SYNONYMS,
+    CONCEPT_LABEL_KO,
 )
 
 from official_evidence_resolution import _is_strong_primary_document_match
@@ -154,6 +155,19 @@ def _detect_concepts(text: str) -> list[str]:
             detected.append(concept)
 
     return detected
+
+
+def _concept_labels_ko(concepts: list[str]) -> list[str]:
+    """Map internal concept keys to Korean DISPLAY labels for user-facing
+    summary text. Display-only — the concept keys themselves are never changed
+    and remain the canonical matching predicates. Unmapped keys fall back to the
+    key; order preserved, duplicate labels removed."""
+    labels: list[str] = []
+    for concept in concepts:
+        label = CONCEPT_LABEL_KO.get(concept, concept)
+        if label not in labels:
+            labels.append(label)
+    return labels
 
 
 def _find_conflict_signals(text: str) -> list[str]:
@@ -303,7 +317,7 @@ def _make_summary(
     if status == "official_support_found":
         return (
             f"\uc0c1\uc138 \uacf5\uc2dd\ubb38\uc11c\uc640 \ub274\uc2a4 \uc8fc\uc7a5\uc758 \uc758\ubbf8 \uac1c\ub150\uc774 "
-            f"{', '.join(semantic_matched_concepts)} \uc218\uc900\uc5d0\uc11c \ub9e4\uce6d\ub418\uc5b4 \uacf5\uc2dd \uadfc\uac70\uac00 \ube44\uad50\uc801 \uac15\ud569\ub2c8\ub2e4."
+            f"{', '.join(_concept_labels_ko(semantic_matched_concepts))} \uc218\uc900\uc5d0\uc11c \ub9e4\uce6d\ub418\uc5b4 \uacf5\uc2dd \uadfc\uac70\uac00 \ube44\uad50\uc801 \uac15\ud569\ub2c8\ub2e4."
         )
 
     if verification_level == "excluded_non_policy_page":
@@ -334,7 +348,7 @@ def _make_summary(
         return (
             f"공식 상세문서는 확보했지만 정책 키워드 또는 정책 대상 일치가 약합니다. "
             f"semantic score {semantic_support_score}점, keyword score {support_score}점이며 "
-            f"매칭 개념은 {', '.join(semantic_matched_concepts) or '없음'}입니다."
+            f"매칭 개념은 {', '.join(_concept_labels_ko(semantic_matched_concepts)) or '없음'}입니다."
         )
 
     if verification_level == "weak_official_match":

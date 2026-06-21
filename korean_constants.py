@@ -164,6 +164,25 @@ CONCEPT_SYNONYMS_COMPARATOR: Mapping[str, Tuple[str, ...]] = {
 }
 
 
+# SUMMARY-CONTENT-B: DISPLAY-ONLY Korean labels for the
+# CONCEPT_SYNONYMS_COMPARATOR keys. Used solely to render the user-facing
+# verification summary sentence in Korean (evidence_comparator._make_summary).
+# NOT used for matching, scoring, concept detection, or any logic — the English
+# keys remain the canonical predicate keys everywhere. Keys here mirror
+# CONCEPT_SYNONYMS_COMPARATOR exactly; values are short Korean display labels.
+# Unmapped keys fall back to the key itself at the call site.
+CONCEPT_LABEL_KO: Mapping[str, str] = {
+    "rental_loan": "전세대출",
+    "mortgage_loan": "주택담보대출",
+    "interest_rate": "금리",
+    "regulation": "규제",
+    "subsidy_support": "지원",
+    "target_group": "지원대상",
+    "implementation": "시행",
+    "review_stage": "검토",
+}
+
+
 # Source: official_source_body.py:95-103 (M11.2 audit)
 # Different key vocabulary entirely — this is NOT a copy of the
 # above; it maps to concept buckets specific to the official-body
