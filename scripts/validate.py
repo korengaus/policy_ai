@@ -45,6 +45,7 @@ def _commands() -> List[List[str]]:
     npm = _npm_executable()
     _assert_dual_write_disabled_for_determinism()
     _normalize_log_format_for_determinism()
+    _normalize_database_url_for_determinism()
     return [
         [python, "-m", "compileall", "api_server.py", "database.py", "job_manager.py",
          "source_crawler.py", "scripts/fetch_registry_source.py",
@@ -504,6 +505,106 @@ def _normalize_log_format_for_determinism() -> None:
     # Unconditionally clear so every child subprocess sees the same
     # baseline.
     os.environ.pop("LOG_FORMAT", None)
+
+
+def _normalize_database_url_for_determinism() -> None:
+    """VALIDATE-SPEEDUP — make local runs fast without weakening any check.
+
+    The DB-dependent tests (e.g. ``tests/test_postgres_storage.py``) reach
+    Postgres via ``postgres_storage.get_engine()`` → ``ensure_schema`` with no
+    ``connect_timeout``. When ``DATABASE_URL`` points at an unreachable host
+    (e.g. Render's *internal* URL on a contributor laptop) those connects block
+    for minutes each, so the suite stalls 10-20 min. CI is fast because
+    ``ci.yml`` sets ``DATABASE_URL=""`` → ``get_engine`` takes the fast
+    "DATABASE_URL not set" path.
+
+    This reproduces CI's offline mode LOCALLY *only when no DB is reachable*:
+    it clears ``DATABASE_URL`` for this process (inherited by every child
+    subprocess) so the DB tests still RUN — just in their offline mode — rather
+    than hanging. No check is removed; exit-code logic is unchanged.
+
+    Behaviour is conditional so DB-reachable runs and CI are untouched:
+      * ``VALIDATE_REQUIRE_DB`` truthy → never clear (the run MUST validate
+        against the real DB; if unreachable the DB tests fail/stall by intent).
+      * ``VALIDATE_SKIP_DB`` truthy → force offline without probing.
+      * empty ``DATABASE_URL`` → no-op (already CI behaviour).
+      * otherwise → a fast 3s socket probe: reachable → keep; unreachable (or
+        any parse/probe error) → clear for this run.
+
+    Separately, ``PGCONNECT_TIMEOUT`` is defaulted to 3s. Several DB tests set
+    their OWN deliberately-invalid URL (e.g. ``127.0.0.1:1``) expecting an
+    instant connection-refused; on Linux/CI that refuses immediately, but on
+    Windows the closed/filtered port makes libpq block on its (unbounded)
+    default connect timeout for ~2 min EACH — the real dominant cause of the
+    local stall. ``get_engine`` sets no ``connect_timeout``, so bounding it via
+    the libpq env var (honoured by psycopg) is the validate.py-only lever that
+    caps every connect at 3s. A reachable DB connects in well under 3s, so this
+    never weakens a real-DB run; ``setdefault`` respects an operator override.
+    """
+    # The real fix for the local stall: cap every psycopg connect at 3s so the
+    # invalid-URL tests fail fast on Windows too. Applies regardless of the
+    # DATABASE_URL branch below (those tests set their own URL).
+    os.environ.setdefault("PGCONNECT_TIMEOUT", "3")
+
+    url = os.environ.get("DATABASE_URL", "").strip()
+
+    if os.environ.get("VALIDATE_REQUIRE_DB", "").strip():
+        if not url:
+            print(
+                "[validate] VALIDATE_REQUIRE_DB set but DATABASE_URL is empty "
+                "-- DB tests will run offline anyway (no URL to validate against)."
+            )
+        else:
+            print(
+                "[validate] VALIDATE_REQUIRE_DB set -- DATABASE_URL left intact; "
+                "DB tests run against the real DB."
+            )
+        return
+
+    if os.environ.get("VALIDATE_SKIP_DB", "").strip():
+        os.environ["DATABASE_URL"] = ""
+        print("[validate] VALIDATE_SKIP_DB set -- DB tests run offline (same as CI).")
+        return
+
+    if not url:
+        # Already CI behaviour — nothing to probe or clear.
+        return
+
+    # Fast reachability probe. The whole thing is guarded so a malformed URL or
+    # any socket error is treated as "unreachable" and never raises out of here.
+    reachable = False
+    try:
+        import socket
+        from urllib.parse import urlsplit
+
+        # Strip a SQLAlchemy driver suffix (e.g. ``postgresql+psycopg://``) so
+        # urlsplit can parse host/port; the scheme value itself is unused.
+        probe_url = url
+        scheme_sep = probe_url.find("://")
+        if scheme_sep != -1:
+            scheme = probe_url[:scheme_sep]
+            if "+" in scheme:
+                probe_url = scheme.split("+", 1)[0] + probe_url[scheme_sep:]
+        parts = urlsplit(probe_url)
+        host = parts.hostname
+        port = parts.port or 5432
+        if host:
+            sock = socket.create_connection((host, port), timeout=3)
+            sock.close()
+            reachable = True
+    except Exception:  # noqa: BLE001 — any failure means "treat as unreachable".
+        reachable = False
+
+    if reachable:
+        print("[validate] DATABASE_URL reachable -- DB tests run against the real DB.")
+        return
+
+    os.environ["DATABASE_URL"] = ""
+    print(
+        "[validate] DATABASE_URL unreachable (3s probe) -- cleared for this run; "
+        "DB tests run offline (same as CI). Set VALIDATE_REQUIRE_DB=1 to force a "
+        "real-DB run."
+    )
 
 
 def _format_command(cmd: List[str]) -> str:
