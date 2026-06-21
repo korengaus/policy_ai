@@ -3055,6 +3055,10 @@
         maxNewsInput.value = record.max_news;
       }
       showStatus(message || "선택한 분석 기록을 불러왔습니다.", true);
+      // DETAIL-FIX B: scroll to the report TOP after the report has painted and
+      // the status/hot-topics layout has settled, so the user lands at the AI
+      // summary rather than mid-report (the old scroll fired pre-render).
+      resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
     }
 
     function deleteHistoryRecord(recordId) {
@@ -4145,6 +4149,12 @@
         // "검증 점수 상세" collapsible).
         const finalScore = decision.final_score ?? confidence.policy_confidence_score ?? "-";
         const userContext = buildReportUserContext(parts);
+        // DETAIL-FIX A: lead the top prose with a populated field. On server/cron
+        // cards final_decision.decision_summary is empty, so fall back to
+        // evidence_summary, then the human-readable claim (핵심 주장). Same chain
+        // already used for the intro line (~1766). Still renders nothing if all
+        // summary fields are empty (no empty box).
+        const leadSummary = decision.decision_summary || verification.evidence_summary || exportClaimText(result);
         const verificationDetails = [
           // DISPLAY-CATEGORY ⑩: ② 최종점수 and ③ 초안 신뢰도 are demoted off the
           // headline into the advanced collapsible. Values are PRESERVED, only
@@ -4227,10 +4237,11 @@
               <div class="ai-status-note">${escapeHtml(buildAiStatusDescriptor(getResultAiStatus(result).status).note)}</div>
             </div>
 
-            <!-- DETAIL-CLEANUP-V2 item 2: AI summary prose lead, large, FIRST content.
-                 Conditional — if decision_summary is empty, render nothing (this
-                 kills the old "요약 정보가 없습니다" empty box). Fallback never shown. -->
-            ${decision.decision_summary ? `<div class="report-summary-lead">${escapeHtml(decision.decision_summary)}</div>` : ""}
+            <!-- DETAIL-CLEANUP-V2 item 2 / DETAIL-FIX A: AI summary prose lead, large,
+                 FIRST content. Uses leadSummary (decision_summary || evidence_summary
+                 || claim_text) so it appears on server cards too. Conditional — if all
+                 summary fields are empty, render nothing (no empty box). -->
+            ${leadSummary ? `<div class="report-summary-lead">${escapeHtml(leadSummary)}</div>` : ""}
 
             <!-- DETAIL-CLEANUP-V2 item 3: the single core indicator strip (shown once):
                  판정 단계 / 신뢰도 / 공식 출처 상태, directly under the summary. -->
@@ -5787,8 +5798,9 @@
       if (source === "history") {
         const record = safeReadLocalHistory().find((item) => item.id === card.dataset.topicRecordId);
         if (record) {
+          // DETAIL-FIX B: loadHistoryRecord is async; it scrolls to the report top
+          // itself AFTER renderResults paints (scrolling here would fire pre-render).
           loadHistoryRecord(record, `"${record.query || "검증 뉴스"}" 카드를 불러왔습니다.`, selectedResultIndex);
-          resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
           return;
         }
       }
@@ -5798,8 +5810,9 @@
       if (source === "server") {
         const resultId = Number(card.dataset.topicRecordId);
         if (Number.isInteger(resultId) && resultId > 0) {
+          // DETAIL-FIX B: loadServerResultById is async; it scrolls to the report top
+          // itself AFTER renderResults paints (scrolling here would fire pre-render).
           loadServerResultById(resultId);
-          resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
           return;
         }
       }
@@ -7059,6 +7072,10 @@
         );
         renderResults(results);
         showStatus("저장된 검증 결과를 불러왔습니다.", true);
+        // DETAIL-FIX B: scroll to the report TOP after render (and after the
+        // hot-topics/status layout settles), so the user lands at the AI summary
+        // rather than mid-report (the old pre-render scroll landed wrong).
+        resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
       } catch (_) {
         hideStatus();
       } finally {
