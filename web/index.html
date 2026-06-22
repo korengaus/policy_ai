@@ -4993,7 +4993,6 @@
           <div class="topic-card-top">
             <span class="badge ${alertClass(card.alert)}">${escapeHtml(formatAlert(card.alert))}</span>
             <span class="badge topic-badge">${escapeHtml(domainDisplayLabel(cardDomainKey(card)))}</span>
-            <span class="badge topic-badge">${escapeHtml(card.topic)}</span>
             ${card.freshness ? `<span class="badge freshness-badge">🔥 ${escapeHtml(FRESHNESS_BADGE_LABEL)}</span>` : ""}
             ${card.humanReviewedAt ? `<span class="review-status review-approved">${escapeHtml(HUMAN_REVIEWED_LABEL)}</span>` : ""}
           </div>
