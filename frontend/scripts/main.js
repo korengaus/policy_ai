@@ -4350,6 +4350,9 @@
             <div class="source-link">
               <a class="source-button" href="${url}" target="_blank" rel="noopener noreferrer">원문 보기</a>
             </div>
+            <div class="report-error-link">
+              <a href="mailto:contact@tickedin.org?subject=${encodeURIComponent('[tickedin 오류신고] 분석 오류 제보')}">이 분석에 오류가 있나요? 신고하기</a>
+            </div>
           </article>
         `;
       }).join("");

@@ -2358,6 +2358,16 @@
       color: var(--muted);
     }
 
+    .report-error-link {
+      margin-top: 10px;
+      text-align: center;
+    }
+
+    .report-error-link a {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
     .history-header {
       display: flex;
       align-items: center;
