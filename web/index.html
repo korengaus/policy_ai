@@ -4892,6 +4892,39 @@
       return evidenceQualityExplanation(quality, debug.evidence_strength_summary || {});
     }
 
+    // NARRATIVE-3B: strip the repeated cautious wrapper from the CARD FACE summary
+    // ONLY. The detail view + export keep the cautious wording (they call
+    // exportClaimText directly, untouched). Matching is by EXACT fixed literals via
+    // startsWith/endsWith — never a greedy regex — so the distinctive per-article
+    // middle is never removed.
+    function stripCardFaceWrapper(text) {
+      if (!text) return "";
+      let out = String(text).trim();
+      const prefixes = ["기사 제목과 요약 기준으로는 ", "보도 내용은 "];
+      for (const p of prefixes) {
+        if (out.startsWith(p)) { out = out.slice(p.length); break; }
+      }
+      const suffixes = [
+        "라는 보도 내용은 기사 제목과 요약 기준으로 추가 확인이 필요합니다.",
+        "기사 제목과 요약 기준으로 추가 확인이 필요합니다.",
+        "추가 확인이 필요합니다.",
+      ];
+      for (const s of suffixes) {
+        if (out.endsWith(s)) { out = out.slice(0, out.length - s.length); break; }
+      }
+      return out.replace(/[\s,]+$/u, "").trim();
+    }
+
+    // Loose "essentially equal" check for hiding a card-face summary that, after
+    // stripping, collapses to the card title (already shown above it). Lowercase +
+    // drop whitespace and punctuation so "{title}" and "{title}." compare equal.
+    function normalizeForCompare(text) {
+      return String(text || "")
+        .toLowerCase()
+        .replace(/\s+/g, "")
+        .replace(/[.,!?。·…"'“”‘’()\[\]]/g, "");
+    }
+
     function topicCardFromResult(result, index, source = "current", record = null) {
       const query = record?.query || currentReportContext?.query || queryInput?.value || "";
       const confidence = result?.policy_confidence || {};
@@ -4901,13 +4934,21 @@
       const keyBase = source === "history"
         ? `${record?.id || record?.stable_history_key || "history"}:${index}`
         : `current:${index}:${result?.original_url || result?.title || ""}`;
+      // NARRATIVE-3B: card-face summary = wrapper-stripped per-article text, hidden
+      // when it collapses to the title (title-derived cards) to avoid duplicating
+      // the headline already shown above. Uses the SAME title string the card renders.
+      const cardTitle = publicInstitutionName(result?.title || record?.query || "검증 뉴스");
+      const strippedSummary = stripCardFaceWrapper(topSummaryLine(result));
+      const summaryNorm = normalizeForCompare(strippedSummary);
+      const summaryCollapsesToTitle =
+        summaryNorm.length > 0 && summaryNorm === normalizeForCompare(cardTitle);
       return {
         key: keyBase,
         source,
         index,
         recordId: record?.id || result?.result_id || "",
         humanReviewedAt: result?.human_reviewed_at || null,
-        title: publicInstitutionName(result?.title || record?.query || "검증 뉴스"),
+        title: cardTitle,
         topic: exportTopicLabel(result, query),
         category: resultCategory(result, query),
         // DISPLAY-CATEGORY B-1: raw backend domain enum (or null). Drives the
@@ -4918,7 +4959,7 @@
         officialStatus: officialStatusLabel(result),
         freshness: isFreshlyBroken(result),
         reviewStatus: formatReviewStatus(verification.review_status) || "AI 초안, 사람 검토 대기",
-        summary: topSummaryLine(result),
+        summary: summaryCollapsesToTitle ? "" : strippedSummary,
         reason: decision.decision_summary || evidenceQualityExplanation(debug.evidence_quality_summary || {}, debug.evidence_strength_summary || {}),
         quality: debug.evidence_quality_summary || verification.evidence_quality_summary || {},
       };
@@ -5020,7 +5061,7 @@
           </div>`;
       const detailBody = detailed
         ? `
-          <div class="topic-card-summary">${escapeHtml(card.summary || "핵심 요약을 준비 중입니다.")}</div>
+          ${card.summary ? `<div class="topic-card-summary">${escapeHtml(card.summary)}</div>` : ""}
           ${metaTiles}`
         : metaTiles;
       return `
