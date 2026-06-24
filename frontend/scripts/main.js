@@ -171,9 +171,9 @@
     // → recency tiebreak (stable sort preserves server id-DESC order).
     let activeSort = "뜨는순";
     // HOMEPAGE-TIERED: two tiers drawn from one ranked array.
-    //   TIER 1 (지금 뜨는 이슈, full cards): 6 → +6 → cap 12, 접기 → 6.
+    //   TIER 1 (지금 뜨는 이슈, full cards): 8 → +6 → cap 12, 접기 → 8.
     //   TIER 2 (나머지 뉴스, concise): ranks beyond TIER1_CAP; 12 → +12, 접기 → 12.
-    const TIER1_INITIAL = 6;
+    const TIER1_INITIAL = 8;
     const TIER1_CAP = 12;
     const TIER1_STEP = 6;
     const TIER2_INITIAL = 12;

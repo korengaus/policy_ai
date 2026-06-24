@@ -53,6 +53,11 @@
       max-width: 1320px;
       margin: 0 auto;
       padding: 24px 22px 36px;
+      /* HOME-UI-6: whole-page uniform zoom. Scopes to .page (which wraps every
+         visible section — header → footer) so the entire page shrinks together
+         at the operator's preferred density, with NO first-vs-below size jump.
+         Layers on top of the HOME-UI-3 rem base + HOME-UI-5 card/type scale. */
+      zoom: 0.8;
     }
 
     .topbar {
