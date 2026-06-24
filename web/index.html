@@ -3287,9 +3287,9 @@
     // → recency tiebreak (stable sort preserves server id-DESC order).
     let activeSort = "뜨는순";
     // HOMEPAGE-TIERED: two tiers drawn from one ranked array.
-    //   TIER 1 (지금 뜨는 이슈, full cards): 8 → +6 → cap 12, 접기 → 8.
+    //   TIER 1 (지금 뜨는 이슈, full cards): 4 → +6 → cap 12, 접기 → 4.
     //   TIER 2 (나머지 뉴스, concise): ranks beyond TIER1_CAP; 12 → +12, 접기 → 12.
-    const TIER1_INITIAL = 8;
+    const TIER1_INITIAL = 4;
     const TIER1_CAP = 12;
     const TIER1_STEP = 6;
     const TIER2_INITIAL = 12;
@@ -4997,21 +4997,25 @@
       const selected = (card.key && card.key === activeTopicKey)
         || (card.source === "current" && Number.isInteger(selectedResultIndex) && Number(card.index) === selectedResultIndex);
       const quality = card.quality || {};
-      const detailBody = detailed
-        ? `
-          <div class="topic-card-summary">${escapeHtml(card.summary || "핵심 요약을 준비 중입니다.")}</div>
-          <div class="reader-note">${escapeHtml(card.reason || "확보된 근거를 바탕으로 위험도와 신뢰도를 산정했습니다.")}</div>
+      // HOME-UI-7: the 4-tile meta block is shared by BOTH tiers so they can
+      // never drift. Tier-2 (concise) now shows the same 신뢰도/공식 출처/리뷰/
+      // 근거 품질 frame; thin cards fall back to honest neutral labels via the
+      // existing field defaults (no fabricated data). 신뢰도 stays :first-child
+      // (the --verify hero accent). Only the summary/reason paragraph remains
+      // gated to detailed=true.
+      const metaTiles = `
           <div class="topic-card-meta">
             <div><strong>신뢰도</strong><br>${escapeHtml(card.confidence)}</div>
             <div><strong>공식 출처</strong><br>${escapeHtml(card.officialStatus)}</div>
             <div><strong>리뷰</strong><br>${escapeHtml(card.reviewStatus)}</div>
             <div><strong>근거 품질</strong><br>${escapeHtml(formatEvidenceSummaryLabel(quality))}</div>
-          </div>`
-        : `
-          <div class="topic-card-meta">
-            <div><strong>신뢰도</strong><br>${escapeHtml(card.confidence)}</div>
-            <div><strong>공식 출처</strong><br>${escapeHtml(card.officialStatus)}</div>
           </div>`;
+      const detailBody = detailed
+        ? `
+          <div class="topic-card-summary">${escapeHtml(card.summary || "핵심 요약을 준비 중입니다.")}</div>
+          <div class="reader-note">${escapeHtml(card.reason || "확보된 근거를 바탕으로 위험도와 신뢰도를 산정했습니다.")}</div>
+          ${metaTiles}`
+        : metaTiles;
       return `
         <article class="topic-card ${detailed ? "topic-card-detailed" : ""} ${selected ? "selected" : ""}" data-topic-key="${escapeHtml(card.key)}" data-topic-source="${escapeHtml(card.source)}" data-topic-index="${escapeHtml(card.index)}" data-topic-record-id="${escapeHtml(card.recordId)}">
           <div class="topic-card-top">
