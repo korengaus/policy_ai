@@ -4879,7 +4879,15 @@
       const decision = result?.final_decision || {};
       const debug = verification.debug_summary || result?.debug_summary || {};
       const quality = debug.evidence_quality_summary || verification.evidence_quality_summary || result?.evidence_quality_summary || {};
-      const line = userFacingReportText(decision.decision_summary || verification.evidence_summary || exportClaimText(result) || "", "");
+      // NARRATIVE-2: card-face summary leads with the per-article claim
+      // (exportClaimText — already reviewer-safe, no new AI call) so hot-topic
+      // cards stop looking identical. The verdict-tier evidence_summary
+      // boilerplate falls to later in the chain; the evidenceQualityExplanation
+      // fallback below is now effectively unreachable for the card (exportClaimText
+      // always returns non-empty), so the repetitive tier text no longer surfaces
+      // on the card face. topSummaryLine feeds ONLY card.summary; the detail view
+      // renders its full summary via a separate path (contentLead), unaffected.
+      const line = userFacingReportText(exportClaimText(result) || decision.decision_summary || verification.evidence_summary || "", "");
       if (line) return String(line).slice(0, 115);
       return evidenceQualityExplanation(quality, debug.evidence_strength_summary || {});
     }
@@ -5013,7 +5021,6 @@
       const detailBody = detailed
         ? `
           <div class="topic-card-summary">${escapeHtml(card.summary || "핵심 요약을 준비 중입니다.")}</div>
-          <div class="reader-note">${escapeHtml(card.reason || "확보된 근거를 바탕으로 위험도와 신뢰도를 산정했습니다.")}</div>
           ${metaTiles}`
         : metaTiles;
       return `
