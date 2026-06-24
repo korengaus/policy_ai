@@ -84,15 +84,6 @@
       padding: 24px 22px 36px;
     }
 
-    /* HOME-UI-4: scoped first-screen density. zoom (not transform:scale) so the
-       layout reflows with no leftover whitespace below the shrunken block. Layers
-       on top of the HOME-UI-3 rem base; no max-width so it inherits .page's 1320px.
-       Wraps only header + search + metrics + the 지금 뜨는 이슈 hot-topic section;
-       category tabs and everything below stay at full size. */
-    .first-screen {
-      zoom: 0.8;
-    }
-
     .topbar {
       display: flex;
       justify-content: space-between;
@@ -917,7 +908,7 @@
 
     .public-eyebrow {
       color: var(--brand-ink);
-      font-size: 12px;
+      font-size: 0.923rem;
       font-weight: 700;
       letter-spacing: 0.02em;
       margin-bottom: 8px;
@@ -1052,7 +1043,7 @@
       background: var(--paper);
       color: var(--slate);
       padding: 7px 13px;
-      font-size: 13px;
+      font-size: 1rem;
       font-weight: 600;
     }
 
@@ -1072,7 +1063,7 @@
     }
 
     .hot-topics-sort-label {
-      font-size: 13px;
+      font-size: 1rem;
       font-weight: 900;
       color: #334155;
     }
@@ -1084,7 +1075,7 @@
       background: #fff;
       color: #334155;
       padding: 6px 10px;
-      font-size: 13px;
+      font-size: 1rem;
       font-weight: 800;
       cursor: pointer;
     }
@@ -1150,17 +1141,17 @@
     }
 
     .methodology-card h2 {
-      font-size: 22px;
+      font-size: 1.692rem;
     }
 
     .methodology-card h3 {
-      font-size: 16px;
+      font-size: 1.231rem;
     }
 
     .methodology-card p,
     .methodology-card li {
       color: #475569;
-      font-size: 14px;
+      font-size: 1.077rem;
       line-height: 1.65;
     }
 
@@ -1184,7 +1175,7 @@
     .methodology-definition strong {
       display: block;
       color: #0f172a;
-      font-size: 14px;
+      font-size: 1.077rem;
       line-height: 1.45;
     }
 
@@ -1192,7 +1183,7 @@
       display: block;
       margin-top: 6px;
       color: #475569;
-      font-size: 13px;
+      font-size: 1rem;
       line-height: 1.55;
     }
 
@@ -1203,7 +1194,10 @@
 
     .topic-card-grid {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      /* HOME-UI-5: responsive auto-fill — fits 4 cols (~310px each) at the
+         1320px container and self-steps-down to 3 → 2 → 1 as the viewport
+         narrows. The 820px media rule below pins a single column on mobile. */
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
       gap: 12px;
     }
 
@@ -1265,8 +1259,11 @@
 
     .topic-card-meta {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 7px;
+      /* HOME-UI-5: vertical stack (single column) so the card is narrow/tall —
+         a real card, not a wide 2-col panel. 신뢰도 stays :first-child (the
+         hero accent) per main.js order. Applies to tier-1 and tier-2 alike. */
+      grid-template-columns: 1fr;
+      gap: 8px;
       color: #475569;
       font-size: 0.923rem;
     }
@@ -2367,7 +2364,7 @@
       border-top: 1px solid #e5e7eb;
       text-align: center;
       color: var(--muted);
-      font-size: 13px;
+      font-size: 1rem;
       line-height: 1.7;
     }
 
@@ -2640,12 +2637,6 @@
 </head>
 <body>
   <div class="page">
-    <!-- HOME-UI-4: first-screen wrapper. Scopes a zoom (.first-screen{zoom})
-         to ONLY header + search + metrics + the 지금 뜨는 이슈 hot-topic
-         section, so the first screen renders denser without shrinking the
-         category tabs / 나머지 뉴스 / 검증 방법 / footer below it. Closes
-         right after the hot-topic </section>, before .domain-controls. -->
-    <div class="first-screen">
     <header class="topbar">
       <div class="title-block">
         <a class="brand-home" href="/" aria-label="tickedin 홈으로">
@@ -2734,7 +2725,6 @@
         <button id="hotTopicsCollapse" class="secondary hot-topics-load-more" type="button" hidden>접기</button>
       </div>
     </section>
-    </div><!-- /.first-screen (HOME-UI-4) -->
 
     <!-- HOMEPAGE-LAYOUT: domain category tabs + sort, relocated out of the
          removed intro hero to sit between the band and the domain sections.
