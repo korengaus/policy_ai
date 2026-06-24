@@ -31,6 +31,12 @@
 </head>
 <body>
   <div class="page">
+    <!-- HOME-UI-4: first-screen wrapper. Scopes a zoom (.first-screen{zoom})
+         to ONLY header + search + metrics + the 지금 뜨는 이슈 hot-topic
+         section, so the first screen renders denser without shrinking the
+         category tabs / 나머지 뉴스 / 검증 방법 / footer below it. Closes
+         right after the hot-topic </section>, before .domain-controls. -->
+    <div class="first-screen">
     <header class="topbar">
       <div class="title-block">
         <a class="brand-home" href="/" aria-label="tickedin 홈으로">
@@ -119,6 +125,7 @@
         <button id="hotTopicsCollapse" class="secondary hot-topics-load-more" type="button" hidden>접기</button>
       </div>
     </section>
+    </div><!-- /.first-screen (HOME-UI-4) -->
 
     <!-- HOMEPAGE-LAYOUT: domain category tabs + sort, relocated out of the
          removed intro hero to sit between the band and the domain sections.
