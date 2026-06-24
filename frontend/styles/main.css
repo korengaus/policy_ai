@@ -58,7 +58,7 @@
 
     .title-block h1 {
       margin: 0;
-      font-size: clamp(24px, 3.2vw, 32px);
+      font-size: clamp(21px, 2.8vw, 28px);
       line-height: 1.2;
       letter-spacing: -0.02em;
       font-weight: 800;
@@ -93,7 +93,7 @@
       justify-content: center;
       width: 1.05em;
       height: 1.05em;
-      border-radius: 50%;
+      border-radius: 0.26em;
       background: var(--verify);
       color: #ffffff;
       font-size: 0.78em;
@@ -104,7 +104,7 @@
     .subtitle {
       margin: 7px 0 0;
       color: var(--muted);
-      font-size: 15px;
+      font-size: 13px;
     }
 
     /* HOMEPAGE-LAYOUT: quiet header utility links (relocated from the removed
@@ -1073,7 +1073,7 @@
     .section-heading h2 {
       margin: 0;
       color: var(--ink);
-      font-size: 20px;
+      font-size: 17px;
       line-height: 1.25;
       font-weight: 700;
     }
@@ -1200,7 +1200,7 @@
     .topic-card-title {
       margin: 0;
       color: var(--ink);
-      font-size: 16px;
+      font-size: 14px;
       line-height: 1.45;
       font-weight: 750;
       display: -webkit-box;
@@ -1213,7 +1213,7 @@
        TIER-2 cards omit it. Clamp keeps detailed cards tidy. */
     .topic-card-summary {
       color: var(--slate);
-      font-size: 13px;
+      font-size: 12px;
       line-height: 1.55;
       display: -webkit-box;
       -webkit-line-clamp: 3;
@@ -1242,7 +1242,7 @@
       background: var(--verify-soft);
       border-color: var(--line);
       color: var(--ink);
-      font-size: 18px;
+      font-size: 16px;
       font-weight: 700;
       line-height: 1.2;
     }
