@@ -1746,8 +1746,21 @@
       const verification = result?.verification_card || result || {};
       const summary = verification.source_reliability_summary || {};
       const debug = verification.debug_summary || {};
-      if (summary.official_detail_available || Number(debug.official_body_matches || 0) > 0) {
+      // LABEL-HONESTY: "공식 근거 확인" requires GENUINE verification (a real
+      // primary-document match or a body-sentence match), not a relevance-passing
+      // fetched page (the IBK word-overlap pattern). The backend persists
+      // has_genuine_official_support; old rows lacking it fall back to a real
+      // body match (official_body_matches > 0). Score is untouched — display only.
+      const genuine = (typeof summary.has_genuine_official_support === "boolean")
+        ? summary.has_genuine_official_support
+        : (Number(debug.official_body_matches || 0) > 0);
+      if (genuine) {
         return "공식 근거 확인";
+      }
+      if (summary.official_detail_available || Number(debug.official_body_matches || 0) > 0) {
+        // Non-genuine but an official page was fetched/relevance-matched: honest,
+        // non-alarmist downgrade — related material exists, not a direct verification.
+        return "관련 공식자료 있음 (직접 검증 아님)";
       }
       if (Number(debug.official_body_candidates || summary.official_candidate_count || 0) > 0) {
         if (Number(debug.official_bodies_fetched || 0) > 0) {
@@ -3258,10 +3271,25 @@
           || classification === "weak_official_candidate_only"
           || classification === "no_usable_official_detail"
       );
-      const hasDirectSupport = classification === "strong_official_direct_support"
+      // LABEL-HONESTY: direct_support (and its emphatic "직접 뒷받침" message)
+      // must require GENUINE verification. The IBK word-overlap pattern stores
+      // official_direct_match_classification === "strong_official_direct_support"
+      // (from relevance>=60) AND official_detail_available, so BOTH the
+      // classification and the official_detail_available disjuncts leak — gate
+      // the whole predicate on genuine. Old rows lacking the boolean fall back to
+      // a real body match (matched = official_body_matches > 0). Non-genuine rows
+      // fall through to partial_support, not direct_support — honest, and the
+      // card's certainty-word stripping (hasDirectOfficialSupport) becomes more
+      // cautious for IBK-pattern rows (desired). Score/verdict untouched.
+      const genuine = (typeof summary.has_genuine_official_support === "boolean")
+        ? summary.has_genuine_official_support
+        : (matched > 0);
+      const hasDirectSupport = genuine && (
+        classification === "strong_official_direct_support"
         || directMatches > 0
         || matched > 0
-        || (summary.official_detail_available && directScore >= 55);
+        || (summary.official_detail_available && directScore >= 55)
+      );
       const hasPartialSupport = hasDirectSupport
         || classification === "medium_official_contextual_support"
         || contextualMatches > 0

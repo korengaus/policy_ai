@@ -9,6 +9,7 @@ from evidence_extraction_agent import (
 )
 from contradiction_agent import summarize_contradiction_checks
 from bias_framing_agent import summarize_bias_framing
+from official_evidence_resolution import extract_primary_document_match
 
 
 OFFICIAL_GOVERNMENT_TYPES = {
@@ -594,6 +595,23 @@ def build_verification_card(
     source_reliability_summary = _official_verification_summary(
         official_evidence_results,
         summarize_source_reliability(source_candidates or []),
+    )
+    # LABEL-HONESTY: persist a single DISPLAY-ONLY boolean stating whether this
+    # row has GENUINE official verification, so the frontend can gate the
+    # "공식 근거 확인" / "직접 뒷받침" labels honestly (PERF-4 dropped
+    # source_candidates from the slim /history payload, so the frontend can no
+    # longer see the primary-document marker itself). Uses the AUTHORITATIVE
+    # predicate extract_primary_document_match (marker + strong + score>=75) for
+    # the primary half, OR any official_body_match (a real body-sentence match)
+    # for the body half. Rides inside source_reliability_summary (already in the
+    # slim payload) — slim reader unchanged. Does NOT touch the score or any
+    # verdict field; only ADDS this key.
+    _official_body_match_count = sum(
+        1 for source in (source_candidates or []) if source.get("official_body_match")
+    )
+    source_reliability_summary["has_genuine_official_support"] = bool(
+        extract_primary_document_match(source_candidates or []) is not None
+        or _official_body_match_count > 0
     )
     if not official_sources and source_reliability_summary.get("official_detail_available"):
         official_sources = [
