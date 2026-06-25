@@ -50,7 +50,7 @@
     }
 
     .page {
-      max-width: 1320px;
+      max-width: 1480px;
       margin: 0 auto;
       padding: 24px 22px 36px;
       /* HOME-UI-6: whole-page uniform zoom. Scopes to .page (which wraps every
@@ -1173,7 +1173,7 @@
       /* HOME-UI-5: responsive auto-fill — fits 4 cols (~310px each) at the
          1320px container and self-steps-down to 3 → 2 → 1 as the viewport
          narrows. The 820px media rule below pins a single column on mobile. */
-      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
       gap: 12px;
     }
 

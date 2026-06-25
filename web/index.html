@@ -79,7 +79,7 @@
     }
 
     .page {
-      max-width: 1320px;
+      max-width: 1480px;
       margin: 0 auto;
       padding: 24px 22px 36px;
       /* HOME-UI-6: whole-page uniform zoom. Scopes to .page (which wraps every
@@ -1202,7 +1202,7 @@
       /* HOME-UI-5: responsive auto-fill — fits 4 cols (~310px each) at the
          1320px container and self-steps-down to 3 → 2 → 1 as the viewport
          narrows. The 820px media rule below pins a single column on mobile. */
-      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
       gap: 12px;
     }
 
@@ -3289,7 +3289,7 @@
     // HOMEPAGE-TIERED: two tiers drawn from one ranked array.
     //   TIER 1 (지금 뜨는 이슈, full cards): 4 → +6 → cap 12, 접기 → 4.
     //   TIER 2 (나머지 뉴스, concise): ranks beyond TIER1_CAP; 12 → +12, 접기 → 12.
-    const TIER1_INITIAL = 4;
+    const TIER1_INITIAL = 5;
     const TIER1_CAP = 12;
     const TIER1_STEP = 6;
     const TIER2_INITIAL = 12;

@@ -173,7 +173,7 @@
     // HOMEPAGE-TIERED: two tiers drawn from one ranked array.
     //   TIER 1 (지금 뜨는 이슈, full cards): 4 → +6 → cap 12, 접기 → 4.
     //   TIER 2 (나머지 뉴스, concise): ranks beyond TIER1_CAP; 12 → +12, 접기 → 12.
-    const TIER1_INITIAL = 4;
+    const TIER1_INITIAL = 5;
     const TIER1_CAP = 12;
     const TIER1_STEP = 6;
     const TIER2_INITIAL = 12;
