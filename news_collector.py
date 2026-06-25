@@ -118,6 +118,51 @@ OBITUARY_MARKERS = (
     "故",
 )
 
+# COLUMN-FILTER: opinion/column genre markers. A title containing any of these
+# is an opinion piece (칼럼/사설/기고/…), not fact reporting — it cannot be
+# true/false, carries the highest copyright (creative expression) and
+# defamation (named-person criticism) risk, and is rejected in
+# _reject_title_reason exactly like OBITUARY_MARKERS. The AMBIGUOUS tokens
+# (주장/분석/전망/진단/해설/인터뷰/기획/이슈) are DELIBERATELY excluded — they
+# appear in legitimate fact articles ("[기획] …", "[인터뷰] …", "기획예산실장")
+# and must pass through. Substring match on the normalized title.
+OPINION_MARKERS = (
+    "칼럼",
+    "사설",
+    "기고",
+    "시론",
+    "논단",
+    "논평",
+    "시평",
+    "기자수첩",
+    "데스크",
+    "오피니언",
+    "여적",
+    "발언대",
+    "왜냐면",
+    "직설",
+    "특별기고",
+    "독자기고",
+)
+
+# COLUMN-FILTER: bracket-author column tokens. 시선/시각/창/단상 are common
+# syllables mid-word (시각화, 창업, …), so — for PRECISION — they only count as
+# opinion when they sit INSIDE a bracket, e.g. "[OOO의 시선]", "【…의 창】".
+# (칼럼/시평/논단 are already caught by the substring list above; included here
+# is harmless.) Matches BOTH ASCII [] and fullwidth 【】 bracket forms, since
+# EVIDENCE-AUDIT saw "【김정태 칼럼】".
+_OPINION_BRACKET_TOKENS = ("칼럼", "시선", "시각", "창", "단상", "시평", "논단")
+_OPINION_BRACKET_RE = re.compile(r"[\[【][^\]】]*[\]】]")
+
+
+def _has_opinion_bracket(title: str) -> bool:
+    """True iff a bracketed segment of ``title`` contains an opinion token.
+    Bracket-scoped so 'mid-word' syllables like 창/시각 don't false-positive."""
+    for chunk in _OPINION_BRACKET_RE.findall(title or ""):
+        if any(tok in chunk for tok in _OPINION_BRACKET_TOKENS):
+            return True
+    return False
+
 NAVER_NEWS_ZONE_SELECTORS = [
     "div.group_news",
     "ul.list_news",
@@ -412,6 +457,12 @@ def _reject_title_reason(title: str, query: str = "") -> str | None:
     # lone "사망", which appears in legitimate policy/crime reporting.
     if any(marker in normalized for marker in OBITUARY_MARKERS):
         return "obituary_or_funeral_notice"
+    # COLUMN-FILTER: reject opinion/column pieces (칼럼/사설/기고/…) before they
+    # become verification cards — an opinion can't be true/false and carries the
+    # highest copyright/defamation risk. Same precedence tier + return-style as
+    # the obituary check above; uses the SAME normalized title.
+    if any(marker in normalized for marker in OPINION_MARKERS) or _has_opinion_bracket(normalized):
+        return "opinion_or_column"
     if _low_quality_phrase(normalized):
         return f"low quality phrase: {_low_quality_phrase(normalized)}"
     if _is_media_only_title(normalized):
