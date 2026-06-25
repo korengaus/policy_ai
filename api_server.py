@@ -18,7 +18,7 @@ from config import cors_allowed_origins, describe_ai_config, session_secret_key
 from database import (
     create_review_task,
     get_account_by_username,
-    get_recent_results,
+    get_recent_results_slim,
     get_result_by_id,
     get_result_id_by_url,
     get_review_task,
@@ -415,8 +415,12 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
 
 @app.get("/history", response_model=HistoryResponse)
 def history(limit: int = 20) -> HistoryResponse:
+    # PERF-2: the homepage card list only needs lightweight columns, so this
+    # uses the slim reader (heavy JSON body columns dropped) to cut the ~16MB
+    # response. The DETAIL view still fetches the full row via GET /history/{id}
+    # (get_result_by_id), which is unchanged.
     try:
-        results = get_recent_results(limit=limit)
+        results = get_recent_results_slim(limit=limit)
     except Exception:
         logger.exception("Failed to load analysis history")
         raise HTTPException(status_code=500, detail="failed to load history")

@@ -413,6 +413,47 @@ def get_recent_results(limit: int = 20):
     return []
 
 
+def get_recent_results_slim(limit: int = 20):
+    # PERF-2: slim list projection for GET /history — same PG-primary
+    # error handling as get_recent_results, but reads only the lightweight
+    # columns the homepage card list needs (the heavy JSON body columns are
+    # dropped to cut the ~16MB response). The whole-row reader above is left
+    # untouched for its existing callers; the DETAIL view still uses the
+    # whole-row get_result_by_id via GET /history/{id}.
+    safe_limit = max(1, min(int(limit or 20), 100))
+    try:
+        from postgres_storage import (
+            is_postgres_dual_write_enabled,
+            read_recent_analysis_results_slim,
+        )
+        pg_enabled = is_postgres_dual_write_enabled()
+    except Exception:
+        log.error(
+            "get_recent_results_slim failed to import postgres_storage",
+            exc_info=True,
+            extra={"function": "get_recent_results_slim"},
+        )
+        raise
+    if pg_enabled:
+        try:
+            pg_rows = read_recent_analysis_results_slim(safe_limit)
+        except Exception:
+            log.error(
+                "get_recent_results_slim PG read failed",
+                exc_info=True,
+                extra={
+                    "function": "get_recent_results_slim",
+                    "limit": safe_limit,
+                },
+            )
+            raise
+        if pg_rows is not None:
+            return pg_rows
+        # PG returned None — engine None despite dual-write enabled.
+        return []
+    return []
+
+
 def get_result_by_id(result_id: int):
     # M12.0c-minimal / M12.0d-1: PG primary; SQLite block unreachable
     # when dual-write enabled. PG-read errors now raise.

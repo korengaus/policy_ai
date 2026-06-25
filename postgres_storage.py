@@ -1364,6 +1364,68 @@ def read_recent_analysis_results(limit: int = 20) -> Optional[list]:
         ) from exc
 
 
+# PERF-2 — slim list projection. The homepage card list (GET /history)
+# only consumes lightweight scalars + a few small JSON columns
+# (debug_summary, source_reliability_summary) + the small claims array
+# (+ source_candidates, kept so the card summary text is byte-identical).
+# The heavy JSON columns (evidence_snippets / evidence_sources /
+# claim_evidence_map / contradiction_* / bias_framing_* / normalized_claims
+# / source_queries / missing_context / evidence_extraction_summary) blow the
+# response up to ~16MB for 50 rows; the card path never reads them, and the
+# DETAIL view re-fetches the full row via the unchanged GET /history/{id}.
+# This reader is ADDITIVE — read_recent_analysis_results stays whole-row for
+# its existing callers/tests. Same contract: None when engine unavailable,
+# [] when authoritative-zero, raise PostgresReadError on SQL/engine error.
+_SLIM_LIST_COLUMNS = (
+    "id", "query", "title", "original_url", "topic", "domain",
+    "policy_alert_level", "market_signal", "policy_confidence_score",
+    "verification_strength", "risk_level", "action_priority",
+    "impact_level", "impact_direction",
+    "market_sensitivity", "consumer_sensitivity", "business_sensitivity",
+    "claim_text", "verdict_label", "verdict_confidence",
+    "source_reliability_score", "source_reliability_reason", "evidence_summary",
+    "last_checked_at", "review_status", "created_at",
+    "human_reviewed_at", "human_reviewed_by",
+    "source_reliability_summary", "debug_summary", "claims", "source_candidates",
+)
+
+
+def read_recent_analysis_results_slim(limit: int = 20) -> Optional[list]:
+    """Like :func:`read_recent_analysis_results` but SELECTs only the
+    lightweight columns the homepage card list needs (see
+    ``_SLIM_LIST_COLUMNS``), dropping the heavy JSON body columns.
+
+    Identical semantics to the whole-row reader:
+
+    * None → engine not built (dual-write disabled / URL missing).
+    * ``[]`` → Postgres is authoritative and says zero rows.
+    * Raises :class:`PostgresReadError` on engine / SQL errors.
+
+    Limit is clamped to ``[1, 100]`` exactly like the whole-row reader so
+    the contract stays identical between paths.
+    """
+    engine = get_engine()
+    if engine is None:
+        return None
+    safe_limit = max(1, min(int(limit or 20), 100))
+    columns = [analysis_results_table.c[name] for name in _SLIM_LIST_COLUMNS]
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                sa.select(*columns)
+                .order_by(analysis_results_table.c.id.desc())
+                .limit(safe_limit)
+            ).all()
+        return [dict(row._mapping) for row in rows]
+    except SQLAlchemyError as exc:
+        log.error(
+            "read_recent_analysis_results_slim failed: %s", exc, exc_info=True,
+        )
+        raise PostgresReadError(
+            f"read_recent_analysis_results_slim failed: {exc}"
+        ) from exc
+
+
 # ---------------------------------------------------------------------------
 # Read helpers — M12.0c-2 (reviewer dashboard path; semantic updated in M12.0d-1).
 #
