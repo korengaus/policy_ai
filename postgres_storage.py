@@ -1364,10 +1364,15 @@ def read_recent_analysis_results(limit: int = 20) -> Optional[list]:
         ) from exc
 
 
-# PERF-2 — slim list projection. The homepage card list (GET /history)
+# PERF-2/PERF-4 — slim list projection. The homepage card list (GET /history)
 # only consumes lightweight scalars + a few small JSON columns
-# (debug_summary, source_reliability_summary) + the small claims array
-# (+ source_candidates, kept so the card summary text is byte-identical).
+# (debug_summary, source_reliability_summary) + the small claims array.
+# PERF-4: source_candidates was DROPPED here. PERF-2 had kept it on the
+# assumption the card derived hasDirectOfficialSupport from it, but PERF-3
+# measured it at ~94% of the payload (~1.2MB/row) and PERF-4 proved the card
+# never reads it — that boolean comes from buildOfficialEvidenceState, which
+# reads only source_reliability_summary + debug_summary (both still kept). So
+# dropping it is byte-identical for cards with zero frontend change.
 # The heavy JSON columns (evidence_snippets / evidence_sources /
 # claim_evidence_map / contradiction_* / bias_framing_* / normalized_claims
 # / source_queries / missing_context / evidence_extraction_summary) blow the
@@ -1386,7 +1391,7 @@ _SLIM_LIST_COLUMNS = (
     "source_reliability_score", "source_reliability_reason", "evidence_summary",
     "last_checked_at", "review_status", "created_at",
     "human_reviewed_at", "human_reviewed_by",
-    "source_reliability_summary", "debug_summary", "claims", "source_candidates",
+    "source_reliability_summary", "debug_summary", "claims",
 )
 
 
