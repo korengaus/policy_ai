@@ -1,4 +1,14 @@
-"""TOPICGATE Phase 1 — READ-ONLY topic/entity gate simulation.
+"""TOPICGATE Phase 1b — READ-ONLY topic/entity gate simulation (+ genuine-bypass).
+
+Phase 1 measured Variant A (material-entity gate) live and found ONE zero-loss
+violation: a genuine row (id=327, real primary marker score 89) whose TITLE surface
+shared no institution/specific term was wrongly flagged. Phase 1b adds the
+GENUINE-BYPASS anticipated by Phase 1's caveat: any row carrying a genuine signal
+(primary>=75 marker via extract_primary_document_match OR official_body_matches>0 —
+the SAME predicate as scripts/label_impact_probe.py, reused verbatim, NOT redefined)
+is NEVER flagged; the material-entity gate is skipped for it. The headline is
+"Variant A + genuine-bypass"; Variant B is kept for comparison. Re-simulates to
+prove ZERO genuine loss on the live corpus.
 
 Designs and SIMULATES a GENERAL material-entity/topic gate that would make the
 IBK-pattern SCORE honest by generalizing verification_card._official_topic_mismatch_reason
@@ -262,8 +272,9 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="topicgate_probe")
     parser.add_argument("--limit", type=int, default=200, help="rows to scan (latest N)")
     parser.add_argument("--examples", type=int, default=12, help="drop/keep examples to print per bucket")
-    parser.add_argument("--ids", type=str, default="394,258",
-                        help="comma-separated row ids to print in full (canonical IBK / KEEP)")
+    parser.add_argument("--ids", type=str, default="394,258,327,379,240",
+                        help="comma-separated row ids to print in full "
+                             "(394 IBK should FLAG; 258/327/379/240 genuine should stay KEPT)")
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
@@ -293,9 +304,10 @@ def main(argv=None) -> int:
     official_driven = 0          # score currently driven by an official detail doc
     genuine_total = 0
     # buckets keyed by variant -> list of records
-    newly_flagged = {"A": [], "B": []}     # would clamp (drop best_evidence)
+    newly_flagged = {"A": [], "B": []}     # would clamp (drop best_evidence) AFTER bypass
     kept = {"A": [], "B": []}              # stays usable (score preserved)
-    genuine_flagged = {"A": [], "B": []}   # SAFETY: genuine rows the gate would clamp (must be empty)
+    genuine_flagged = {"A": [], "B": []}   # SAFETY: genuine rows still flagged AFTER bypass (must be empty)
+    rescued = {"A": [], "B": []}           # genuine rows the raw gate WOULD flag but the bypass keeps
     focus_records = []
 
     for r in rows:
@@ -339,23 +351,40 @@ def main(argv=None) -> int:
         if r["id"] in focus_ids:
             focus_records.append({**rec, "decision": decision, "claim_text": claim_text[:200]})
 
+        # GENUINE-BYPASS (Phase 1b). Reuse the EXACT genuine predicate already
+        # computed above (strong_primary via _strong_primary OR official_body_matches>0
+        # — identical to scripts/label_impact_probe.py and the LABEL-HONESTY
+        # has_genuine_official_support boolean). A candidate carrying a genuine
+        # signal is NEVER flagged: the material-entity gate is skipped entirely so
+        # its score is preserved. This rescues rows like id=327 whose support is a
+        # real body/primary match but whose TITLE surface shares no institution or
+        # specific term. has_genuine_signal is just `genuine` — not redefined.
+        has_genuine_signal = genuine
+
         # Only rows whose score is currently driven by an official doc AND not
         # already mismatched can be NEWLY clamped by the gate. Others are out of
         # scope for the score-drop simulation (but genuine ones are still safety-checked).
         in_scope = used_official and not current_mismatch
         for variant in ("A", "B"):
-            would_flag = decision[f"variant_{variant}_mismatch"]
+            raw_mismatch = decision[f"variant_{variant}_mismatch"]
+            # Apply the bypass: genuine rows can never be flagged.
+            would_flag = raw_mismatch and not has_genuine_signal
             if not in_scope:
-                # safety: a genuine, currently-usable row the gate would flag is a loss
-                if genuine and would_flag and used_official:
+                # Post-bypass, a genuine usable row can never be flagged; this stays
+                # empty by construction. Kept as an explicit out-of-scope safety net.
+                if would_flag and genuine and used_official:
                     genuine_flagged[variant].append(rec)
                 continue
             if would_flag:
                 newly_flagged[variant].append(rec)
-                if genuine:
+                if genuine:  # must never happen after the bypass
                     genuine_flagged[variant].append(rec)
             else:
                 kept[variant].append(rec)
+                # Record genuine rows the RAW gate would have dropped but the
+                # bypass rescued (proves the bypass is doing real work, e.g. 327).
+                if genuine and raw_mismatch:
+                    rescued[variant].append(rec)
 
     # official_driven = in-scope rows (used_official & not current_mismatch),
     # counted once via the union of variant-A flagged+kept (every in-scope row
@@ -366,31 +395,44 @@ def main(argv=None) -> int:
         return f"{x/n*100:.1f}%" if n else "n/a"
 
     print("=" * 86)
-    print(f"TOPICGATE Phase 1 — material-entity gate simulation — scanned {n} rows")
+    print(f"TOPICGATE Phase 1b — material-entity gate + GENUINE-BYPASS — scanned {n} rows")
     print("=" * 86)
+    print("GENUINE-BYPASS: a row carrying a genuine signal (primary>=75 marker via")
+    print("extract_primary_document_match OR official_body_matches>0 — the SAME predicate as")
+    print("scripts/label_impact_probe.py) is NEVER flagged; the material-entity gate is skipped.")
+    print()
     print(f"genuine rows (primary>=75 OR body_matches>0):        {genuine_total} ({pct(genuine_total)})")
     print(f"score currently driven by an official detail doc:    {official_driven} ({pct(official_driven)})")
     print("  (in-scope = official_source_used_in_final_scoring/official_detail_available")
     print("   True AND NOT already official_mismatch — only these can be newly clamped)")
     print()
 
-    for variant, label in (("A", "VARIANT A — material entity OR specific term must overlap"),
-                           ("B", "VARIANT B — named INSTITUTION must overlap (stricter)")):
+    for variant, label in (("A", "VARIANT A + genuine-bypass — material entity OR specific term must overlap  [HEADLINE]"),
+                           ("B", "VARIANT B + genuine-bypass — named INSTITUTION must overlap (stricter, comparison)")):
         flagged = newly_flagged[variant]
         kept_v = kept[variant]
         gflag = genuine_flagged[variant]
+        resc = rescued[variant]
         gflag_inscope = [g for g in flagged if g["genuine"]]
         ibk = [g for g in flagged if not g["genuine"]]
         print("-" * 86)
         print(f"{label}")
         print("-" * 86)
         print(f"  in-scope rows:                 {len(flagged) + len(kept_v)}")
-        print(f"  NEWLY-FLAGGED (score -> <=20): {len(flagged)}")
+        print(f"  NEWLY-FLAGGED (score -> <=20): {len(flagged)}   <-- the honest-score-correction count")
         print(f"      of which GENUINE (FORBIDDEN, must be 0): {len(gflag_inscope)}")
         print(f"      of which non-genuine (IBK/off-topic, intended): {len(ibk)}")
         print(f"  KEPT (score preserved):        {len(kept_v)}")
-        print(f"  SAFETY — ANY genuine+usable row this variant would flag (incl. out-of-scope): {len(gflag)}")
+        print(f"  RESCUED BY BYPASS (genuine rows the raw gate would have flagged): {len(resc)}")
+        print(f"  SAFETY — ANY genuine row still flagged after bypass (incl. out-of-scope): {len(gflag)}")
         print()
+        if resc:
+            print(f"  --- RESCUED-BY-BYPASS genuine rows (raw gate said flag; bypass KEEPS them) ---")
+            for g in resc:
+                print(f"    id={g['id']} score={g['score']} [{g['genuine_how']}] sharedInst={g['shared_inst']} sharedSpec={g['shared_spec']}")
+                print(f"        ARTICLE: {g['title']}")
+                print(f"        DRIVING: {g['driving_doc']}")
+            print()
         if gflag:
             print(f"  *** ZERO-GENUINE-LOSS VIOLATION — variant {variant} would flag {len(gflag)} genuine row(s): ***")
             for g in gflag:
@@ -418,17 +460,24 @@ def main(argv=None) -> int:
 
     if focus_records:
         print("=" * 86)
-        print(f"FOCUS ROWS ({sorted(focus_ids)}) — canonical IBK (should FLAG) / KEEP (should stay)")
+        print(f"FOCUS ROWS ({sorted(focus_ids)}) — IBK 394 should FLAG; 258/327/379/240 genuine should be KEPT")
         print("=" * 86)
         for f in focus_records:
-            print(f"  id={f['id']} score={f['score']} vstrength={f['vstrength']} genuine={f['genuine']}({f['genuine_how']})")
+            raw_A = f["decision"]["variant_A_mismatch"]
+            # Post-bypass effective decision (the headline Variant A): a genuine
+            # row is never flagged regardless of raw_A.
+            effective_A_flag = raw_A and not f["genuine"]
+            verdict = "FLAG (score->~20)" if effective_A_flag else "KEPT (score preserved)"
+            via = " [RESCUED BY BYPASS]" if (raw_A and f["genuine"]) else ""
+            print(f"  id={f['id']} score={f['score']} vstrength={f['vstrength']} "
+                  f"genuine={f['genuine']}({f['genuine_how']})")
             print(f"      ARTICLE   : {f['title']}")
             print(f"      DRIVING   : {f['driving_doc']}")
             print(f"      claim_text: {f['claim_text']}")
             print(f"      sharedInst={f['shared_inst']} sharedSpec={f['shared_spec']}")
-            print(f"      variant_A_flag={f['decision']['variant_A_mismatch']} "
-                  f"variant_B_flag={f['decision']['variant_B_mismatch']} "
+            print(f"      raw_variant_A={raw_A} raw_variant_B={f['decision']['variant_B_mismatch']} "
                   f"current_mismatch={f['current_mismatch']}")
+            print(f"      => Variant A + bypass: {verdict}{via}")
             print()
 
     print("Interpretation:")
