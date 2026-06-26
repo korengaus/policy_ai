@@ -679,17 +679,36 @@ def build_verification_card(
     #       shares no entity.
     # TIMING: this MUST be computed before _official_verification_summary (which
     # invokes the topic gate) — historically it was computed AFTER, so the bypass
-    # would have been invisible to the gate. Predicate is unchanged and reused
-    # verbatim: AUTHORITATIVE extract_primary_document_match (marker + strong +
-    # score>=75) OR any official_body_match (a real body-sentence match). Does NOT
-    # touch the score or any verdict field directly; the score change for a
-    # NON-genuine off-topic row is delivered by the existing main.py:934 clamp.
-    _official_body_match_count = sum(
-        1 for source in (source_candidates or []) if source.get("official_body_match")
+    # would have been invisible to the gate.
+    # DESIGN-3B-1d: STRONG-ONLY. The second disjunct previously counted ANY
+    # official_body_match, but _resolve_source sets official_body_match=True for
+    # BOTH strong_official_direct_support AND medium_official_contextual_support
+    # (official_evidence_resolution.py:420). Medium = context-only overlap, which
+    # let OFF-TOPIC official docs attach "✓ 공식 근거 확인" (IBK-class gap; e.g.
+    # welfare claim ↔ 해양수산부 연안선박). Require STRONG classification so only a
+    # direct body-supported match counts. Disjunct 1 (extract_primary_document_match)
+    # already requires strong+>=75 — unchanged. Classification key is written
+    # directly on the candidate by _resolve_source (official_evidence_classification,
+    # with the same-value sibling official_direct_match_classification); read both
+    # the way extract_primary_document_match does. Tightening this ONE variable
+    # tightens all three consumers (the threaded has_genuine_signal bypass below,
+    # the stored has_genuine_official_support label/box). Does NOT touch verdict_label
+    # or any scorer/threshold; a now-unbypassed off-topic row is clamped only by the
+    # EXISTING main.py:934 gate clamp (measured: 1 row, inflated→honest). NEW-rows
+    # only; stored rows are not backfilled.
+    _strong_official_body_match_count = sum(
+        1
+        for source in (source_candidates or [])
+        if source.get("official_body_match")
+        and (
+            source.get("official_evidence_classification")
+            or source.get("official_direct_match_classification")
+        )
+        == "strong_official_direct_support"
     )
     _has_genuine_official_support = bool(
         extract_primary_document_match(source_candidates or []) is not None
-        or _official_body_match_count > 0
+        or _strong_official_body_match_count > 0
     )
     source_reliability_summary = _official_verification_summary(
         official_evidence_results,
