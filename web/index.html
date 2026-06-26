@@ -83,6 +83,9 @@
       font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', system-ui, sans-serif;
       background: var(--bg);
       color: var(--text);
+      /* DESIGN-3A4.5: clip the 1px the full-bleed 100vw header line can exceed the
+         document width by (viewport scrollbar) so no horizontal scrollbar appears. */
+      overflow-x: hidden;
       /* DESIGN-3A4: crispness safeguards (macOS smoothing + better kerning). The
          decisive Windows/Chrome crispness win is the zoom removal above. */
       -webkit-font-smoothing: antialiased;
@@ -91,7 +94,9 @@
     }
 
     .page {
-      max-width: 1480px;
+      /* DESIGN-3A4.5: narrowed 1480→1280 so content centers with side margins
+         like the mockup (margin:0 auto keeps it centered). */
+      max-width: 1280px;
       margin: 0 auto;
       padding: 24px 22px 36px;
       /* DESIGN-3A4: the former whole-page zoom:0.8 was REMOVED — fractional CSS
@@ -171,21 +176,21 @@
       gap: 12px;
       flex-wrap: wrap;
       position: relative;
-      /* DESIGN-3A4: top stays a normal inset rule; the BOTTOM is a strong near-black
-         FULL-BLEED line (the mockup's strongest divider), drawn screen-edge to
-         screen-edge by the ::after below, breaking out of .page's padding. */
-      margin: 4px 0 16px;
-      padding: 8px 0 12px;
-      border-top: 1px solid var(--rule);
+      /* DESIGN-3A4.5: the mockup's strong line sits ABOVE the tabs (between the
+         brand/search row and the tabs). It's a THIN (1px) near-black FULL-BLEED
+         rule drawn by the ::before below, breaking out of .page's padding. The
+         active-tab blue 2px underline stays separate, under each active tab. */
+      margin: 8px 0 14px;
+      padding: 12px 0 4px;
     }
-    .domain-tabs-row::after {
+    .domain-tabs-row::before {
       content: '';
       position: absolute;
-      bottom: -1px;
+      top: 0;
       left: 50%;
       transform: translateX(-50%);
       width: 100vw;
-      height: 2px;
+      height: 1px;
       background: var(--rule-strong);
     }
     .domain-tabs-row .category-tabs {
@@ -2779,9 +2784,10 @@
     /* DESIGN-3A: tablet — the 2-col home shell drops the aside BELOW the feed
        (single column). Separate query from the cards block: the aside stacks
        earlier than the card grid collapses.
-       DESIGN-3A4: bumped 1024→1180 because removing zoom made every element ×1.25,
-       so content crowds ~25% earlier. */
-    @media (max-width: 1180px) {
+       DESIGN-3A4: bumped 1024→1180 because removing zoom made every element ×1.25.
+       DESIGN-3A4.5: nudged 1180→1120 — with the 1280px container the aside should
+       hold 2-col a bit longer before stacking (content ~750px + 300px aside fits). */
+    @media (max-width: 1120px) {
       .home-shell {
         grid-template-columns: 1fr;
       }
