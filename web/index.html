@@ -146,7 +146,7 @@
       font-weight: 700;
     }
     .utility-brand-tag {
-      color: var(--brand-ink);
+      color: var(--brand);
       font-weight: 700;
       letter-spacing: -0.01em;
     }
@@ -221,13 +221,14 @@
       flex: 1 1 auto;
     }
     .grade-guide-link {
-      color: var(--brand-ink);
+      color: var(--brand);
       font-size: 0.923rem;
       font-weight: 650;
       text-decoration: none;
       white-space: nowrap;
     }
     .grade-guide-link:hover {
+      color: var(--brand-ink);
       text-decoration: underline;
     }
 
@@ -326,16 +327,24 @@
     }
     /* Mockup's primary search button is DARK/near-black — scoped to the header
        only, so the analyze button elsewhere keeps its brand-blue. */
+    /* DESIGN-3A5: 분석하기 = brand blue + white; hover darker blue. */
     .topbar .panel #analyzeBtn {
       font-size: 1.0rem;
-      background: var(--ink);
+      background: var(--brand);
+      color: #fff;
     }
     .topbar .panel #analyzeBtn:hover:not(:disabled) {
-      background: #1f2937;
+      background: var(--brand-ink);
     }
+    /* DESIGN-3A5: 최근 분석 불러오기 = near-black + white; hover slightly lighter. */
     .topbar .panel #historyBtn {
       font-size: 0.92rem;
       padding: 0 12px;
+      background: var(--ink);
+      color: #fff;
+    }
+    .topbar .panel #historyBtn:hover:not(:disabled) {
+      background: #1f2937;
     }
 
     .title-block h1 {
@@ -703,11 +712,12 @@
     }
 
     a {
-      color: var(--brand-ink);
+      color: var(--brand);
       text-decoration: none;
     }
 
     a:hover {
+      color: var(--brand-ink);
       text-decoration: underline;
     }
 
@@ -1115,7 +1125,7 @@
       border: 1px solid #dbeafe;
       border-radius: 999px;
       background: #f8fafc;
-      color: #1e40af;
+      color: var(--brand);
       padding: 7px 11px;
       font-size: 12px;
       font-weight: 900;
@@ -1152,7 +1162,7 @@
     }
 
     .public-eyebrow {
-      color: var(--brand-ink);
+      color: var(--brand);
       font-size: 0.923rem;
       font-weight: 700;
       letter-spacing: 0.02em;
@@ -1203,7 +1213,7 @@
       border: 1px solid var(--line);
       border-radius: 999px;
       background: var(--paper);
-      color: var(--brand-ink);
+      color: var(--brand);
       padding: 8px 13px;
       font-size: 13px;
       font-weight: 600;
@@ -1224,7 +1234,7 @@
       border: 1px solid var(--line);
       border-radius: 999px;
       background: var(--paper);
-      color: var(--brand-ink);
+      color: var(--brand);
       padding: 8px 13px;
       font-size: 13px;
       font-weight: 600;
@@ -1650,7 +1660,7 @@
 
     .source-support-badge.trace-context {
       background: #dbeafe;
-      color: #1d4ed8;
+      color: var(--brand);
     }
 
     .source-support-badge.trace-weak {
@@ -1721,7 +1731,7 @@
 
     .review-tools-details > summary {
       cursor: pointer;
-      color: #1d4ed8;
+      color: var(--brand);
       font-size: 18px;
       font-weight: 900;
       list-style: none;
@@ -1736,7 +1746,7 @@
       margin-left: 8px;
       border-radius: 999px;
       background: #eff6ff;
-      color: #1d4ed8;
+      color: var(--brand);
       padding: 4px 8px;
       font-size: 11px;
       font-weight: 900;
@@ -1962,11 +1972,11 @@
     }
 
     .server-review-list-row:hover {
-      border-color: #2563eb;
+      border-color: var(--brand);
     }
 
     .server-review-list-row.is-active {
-      border-color: #1d4ed8;
+      border-color: var(--brand);
       background: #eff6ff;
     }
 
@@ -2610,7 +2620,7 @@
       border: 1px solid #bfdbfe;
       border-radius: 8px;
       background: #eff6ff;
-      color: #1d4ed8;
+      color: var(--brand);
       padding: 8px 12px;
       font-size: 13px;
       font-weight: 800;
@@ -2778,7 +2788,7 @@
 
     .review-needs-more {
       background: #dbeafe;
-      color: #1d4ed8;
+      color: var(--brand);
     }
 
     .review-action.approve {
@@ -2790,7 +2800,7 @@
     }
 
     .review-action.needs-more {
-      background: #2563eb;
+      background: var(--brand);
     }
 
     .current-badge {
@@ -2798,7 +2808,7 @@
       align-items: center;
       border-radius: 999px;
       background: #dbeafe;
-      color: #1d4ed8;
+      color: var(--brand);
       padding: 4px 8px;
       font-size: 11px;
       font-weight: 900;
