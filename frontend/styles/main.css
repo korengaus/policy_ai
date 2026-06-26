@@ -83,7 +83,8 @@
       flex-wrap: wrap;
       padding: 5px 0 9px;
       margin-bottom: 10px;
-      border-bottom: 1px solid var(--rule);
+      /* DESIGN-3A4.6: subtle grey DOTTED rule below the utility bar (was solid). */
+      border-bottom: 1px dotted var(--rule);
       font-size: 0.95rem;
     }
     .utility-left {
@@ -142,22 +143,29 @@
       gap: 12px;
       flex-wrap: wrap;
       position: relative;
-      /* DESIGN-3A4.5: the mockup's strong line sits ABOVE the tabs (between the
-         brand/search row and the tabs). It's a THIN (1px) near-black FULL-BLEED
-         rule drawn by the ::before below, breaking out of .page's padding. The
-         active-tab blue 2px underline stays separate, under each active tab. */
+      /* DESIGN-3A4.6: the tabs are framed by TWO subtle GREY DOTTED full-bleed
+         rules (::before above, ::after below) — no solid dark line. Dotted is done
+         with a 1px dotted border on a 0-height pseudo (a background can't be
+         dotted). The active-tab blue 2px underline stays separate, under each
+         active tab. */
       margin: 8px 0 14px;
-      padding: 12px 0 4px;
+      padding: 10px 0 10px;
     }
-    .domain-tabs-row::before {
+    .domain-tabs-row::before,
+    .domain-tabs-row::after {
       content: '';
       position: absolute;
-      top: 0;
       left: 50%;
       transform: translateX(-50%);
       width: 100vw;
-      height: 1px;
-      background: var(--rule-strong);
+      height: 0;
+      border-top: 1px dotted var(--rule);
+    }
+    .domain-tabs-row::before {
+      top: 0;
+    }
+    .domain-tabs-row::after {
+      bottom: 0;
     }
     .domain-tabs-row .category-tabs {
       margin: 0;
@@ -211,7 +219,8 @@
       align-items: stretch;
       gap: 0;
       border: 1px solid var(--rule);
-      border-radius: var(--radius-sm);
+      /* DESIGN-3A4.6: square corners (was rounded) to match the mockup's search. */
+      border-radius: 0;
       padding: 0;
       overflow: hidden;
       background: var(--paper);
