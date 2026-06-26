@@ -81,11 +81,22 @@
       align-items: center;
       gap: 12px;
       flex-wrap: wrap;
+      position: relative;
       padding: 5px 0 9px;
       margin-bottom: 10px;
-      /* DESIGN-3A4.6: subtle grey DOTTED rule below the utility bar (was solid). */
-      border-bottom: 1px dotted var(--rule);
       font-size: 0.95rem;
+    }
+    /* DESIGN-3A4.7: grey DOTTED rule below the utility bar, now FULL-BLEED (100vw)
+       like the other header rules (was content-width). overflow-x:hidden safe. */
+    .utility-bar::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 100vw;
+      height: 0;
+      border-top: 1px dotted var(--rule);
     }
     .utility-left {
       display: flex;
@@ -143,29 +154,33 @@
       gap: 12px;
       flex-wrap: wrap;
       position: relative;
-      /* DESIGN-3A4.6: the tabs are framed by TWO subtle GREY DOTTED full-bleed
-         rules (::before above, ::after below) — no solid dark line. Dotted is done
-         with a 1px dotted border on a 0-height pseudo (a background can't be
-         dotted). The active-tab blue 2px underline stays separate, under each
-         active tab. */
+      /* DESIGN-3A4.7: ABOVE the tabs = a thin BLACK SOLID full-bleed line (the
+         divider directly under the brand/search row); AT the tab baseline = a grey
+         DOTTED full-bleed line that the blue active-tab underline sits on. Both
+         100vw (overflow-x:hidden keeps it scroll-safe). padding-bottom is 0 so the
+         tabs' bottom edge (the blue underline) coincides with the dotted ::after. */
       margin: 8px 0 14px;
-      padding: 10px 0 10px;
+      padding: 12px 0 0;
     }
-    .domain-tabs-row::before,
+    .domain-tabs-row::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 100vw;
+      height: 0;
+      border-top: 1px solid var(--rule-strong);
+    }
     .domain-tabs-row::after {
       content: '';
       position: absolute;
+      bottom: 0;
       left: 50%;
       transform: translateX(-50%);
       width: 100vw;
       height: 0;
       border-top: 1px dotted var(--rule);
-    }
-    .domain-tabs-row::before {
-      top: 0;
-    }
-    .domain-tabs-row::after {
-      bottom: 0;
     }
     .domain-tabs-row .category-tabs {
       margin: 0;
