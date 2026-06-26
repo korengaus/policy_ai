@@ -1971,7 +1971,6 @@
           </div>
           <h3 class="topic-card-title">${escapeHtml(card.title)}</h3>
           ${detailBody}
-          <div class="topic-card-action">상세 보기</div>
         </article>
       `;
     }
