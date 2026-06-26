@@ -176,6 +176,10 @@
     }
     .utility-report:hover {
       background: var(--brand-ink);
+      /* DESIGN-3A5b: keep the text white on hover. Without this, the base
+         a:hover (color: var(--brand-ink)) wins and the text matches the darkened
+         background — making "제보하기" invisible on hover. */
+      color: #fff;
     }
 
     /* DESIGN-3A: domain tabs row directly under the brand. The tabs sit left,
