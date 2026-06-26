@@ -2059,9 +2059,28 @@
       const hashtagRow = hashtags.length
         ? `<div class="topic-card-tags">${hashtags.map((t) => `<span class="topic-card-tag">#${escapeHtml(t)}</span>`).join("")}</div>`
         : "";
-      const genuineChip = card.hasGenuineOfficial
-        ? `<span class="card-genuine-chip">✓ 공식 근거 확인${card.officialDetailTitle ? ` · ${escapeHtml(card.officialDetailTitle)}` : ""}</span>`
-        : "";
+      // DESIGN-3B-1b: primary-source COMPARE BOX (Option A — single slim field).
+      // Genuine-only (card.hasGenuineOfficial); non-genuine cards render nothing
+      // (no faked cross-check). Uses the ONE available title (officialDetailTitle);
+      // slim carries no separate institution field, so we show the document title
+      // only. Avatar = first character of the title (typographic, NOT a logo).
+      const sourceBox = (() => {
+        if (!card.hasGenuineOfficial) return "";
+        const t = String(card.officialDetailTitle || "").trim();
+        const firstChar = t ? Array.from(t)[0] : "공";
+        const label = t
+          ? `대조한 1차 출처 · ${escapeHtml(t)}`
+          : "공식 문서 본문과 대조";
+        return `
+          <div class="card-source-box">
+            <div class="card-source-head">✓ 공식 근거 확인</div>
+            <div class="card-source-row">
+              <span class="card-source-avatar">${escapeHtml(firstChar)}</span>
+              <span class="card-source-label">${label}</span>
+              <span class="card-source-check">✓</span>
+            </div>
+          </div>`;
+      })();
       const confidenceInline = (card.confidence !== "-" && card.confidence !== null && card.confidence !== undefined)
         ? `<span class="card-confidence">신뢰도 ${escapeHtml(card.confidence)}</span>`
         : "";
@@ -2080,8 +2099,8 @@
             <span class="verdict-dot" style="background:${verdictDotColor(card.verdictLabel)}"></span>
             <span class="verdict-text">${escapeHtml(verdictLabelKo(card.verdictLabel))}</span>
             ${confidenceInline}
-            ${genuineChip}
           </div>
+          ${sourceBox}
         </article>
       `;
     }

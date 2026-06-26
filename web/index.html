@@ -1648,13 +1648,54 @@
       font-size: 0.8rem;
       font-weight: 600;
     }
-    .card-genuine-chip {
+    /* DESIGN-3B-1b: primary-source compare box (genuine cards only). Understated
+       editorial box — faint brand tint, single-line truncating source title, a
+       typographic letter-avatar (NOT a real logo). Replaces .card-genuine-chip. */
+    .card-source-box {
+      margin-top: 8px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: #f7faff;
+    }
+    .card-source-head {
       font-size: 0.77rem;
       font-weight: 700;
       color: var(--verify);
-      background: var(--verify-soft);
-      border-radius: 4px;
-      padding: 2px 8px;
+      margin-bottom: 5px;
+    }
+    .card-source-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+    .card-source-avatar {
+      flex: 0 0 auto;
+      width: 23px;
+      height: 23px;
+      border-radius: 5px;
+      background: var(--brand);
+      color: #fff;
+      font-size: 0.77rem;
+      font-weight: 800;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .card-source-label {
+      flex: 1 1 auto;
+      min-width: 0;
+      font-size: 0.8rem;
+      color: var(--slate);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .card-source-check {
+      flex: 0 0 auto;
+      color: var(--verify);
+      font-weight: 800;
     }
 
     .platform-tools {
@@ -5569,9 +5610,28 @@
       const hashtagRow = hashtags.length
         ? `<div class="topic-card-tags">${hashtags.map((t) => `<span class="topic-card-tag">#${escapeHtml(t)}</span>`).join("")}</div>`
         : "";
-      const genuineChip = card.hasGenuineOfficial
-        ? `<span class="card-genuine-chip">✓ 공식 근거 확인${card.officialDetailTitle ? ` · ${escapeHtml(card.officialDetailTitle)}` : ""}</span>`
-        : "";
+      // DESIGN-3B-1b: primary-source COMPARE BOX (Option A — single slim field).
+      // Genuine-only (card.hasGenuineOfficial); non-genuine cards render nothing
+      // (no faked cross-check). Uses the ONE available title (officialDetailTitle);
+      // slim carries no separate institution field, so we show the document title
+      // only. Avatar = first character of the title (typographic, NOT a logo).
+      const sourceBox = (() => {
+        if (!card.hasGenuineOfficial) return "";
+        const t = String(card.officialDetailTitle || "").trim();
+        const firstChar = t ? Array.from(t)[0] : "공";
+        const label = t
+          ? `대조한 1차 출처 · ${escapeHtml(t)}`
+          : "공식 문서 본문과 대조";
+        return `
+          <div class="card-source-box">
+            <div class="card-source-head">✓ 공식 근거 확인</div>
+            <div class="card-source-row">
+              <span class="card-source-avatar">${escapeHtml(firstChar)}</span>
+              <span class="card-source-label">${label}</span>
+              <span class="card-source-check">✓</span>
+            </div>
+          </div>`;
+      })();
       const confidenceInline = (card.confidence !== "-" && card.confidence !== null && card.confidence !== undefined)
         ? `<span class="card-confidence">신뢰도 ${escapeHtml(card.confidence)}</span>`
         : "";
@@ -5590,8 +5650,8 @@
             <span class="verdict-dot" style="background:${verdictDotColor(card.verdictLabel)}"></span>
             <span class="verdict-text">${escapeHtml(verdictLabelKo(card.verdictLabel))}</span>
             ${confidenceInline}
-            ${genuineChip}
           </div>
+          ${sourceBox}
         </article>
       `;
     }
