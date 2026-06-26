@@ -53,14 +53,49 @@
           <h1 class="brand"><img class="logo-tick" src="/web/assets/favicon-180.png" alt="" aria-hidden="true">tickedin</h1>
         </a>
         <p class="subtitle">정책 뉴스를 공식 출처로 검증합니다</p>
-        <!-- HOMEPAGE-LAYOUT: quiet utility links relocated out of the removed
-             intro hero. Plain anchors (no JS): 검증 기준 보기 → #methodology,
-             뉴스 연결망 보기 → #placeholder (inert until the graph page ships). -->
-        <nav class="header-links" aria-label="바로가기">
-          <a class="header-link" href="#methodology">검증 기준 보기</a>
-          <a class="header-link" href="#placeholder">뉴스 연결망 보기</a>
-        </nav>
       </div>
+      <!-- DESIGN-3A2: compact search relocated into the brand row (right side).
+           The whole section + every analyze id (#query/#maxNews/#analyzeBtn/
+           #historyBtn + status/progress/error) is moved VERBATIM and restyled
+           compact via CSS (scoped .topbar .panel). getElementById access is
+           position-independent (Phase 1) — no JS change. -->
+      <section class="panel">
+        <div class="controls">
+          <div>
+            <label for="query">검색어</label>
+            <input id="query" type="text" placeholder="주장·키워드로 검증 결과 검색" autocomplete="off" maxlength="200">
+          </div>
+          <div>
+            <label for="maxNews">뉴스 개수</label>
+            <input id="maxNews" type="number" min="1" max="10" value="1">
+          </div>
+          <button id="analyzeBtn" class="primary" type="button">분석하기</button>
+          <button id="historyBtn" class="secondary" type="button">최근 분석 불러오기</button>
+        </div>
+        <div id="statusLine" class="status-line"></div>
+        <!--
+          M15.0c — V2 async progress UI.
+          Hidden by default; shown only when requestPolicyAnalysisV2 is
+          active (RQ + SSE path). The legacy /jobs/analyze polling path
+          and the sync /analyze fallback do NOT touch this element.
+        -->
+        <div
+          id="v2ProgressWrap"
+          class="v2-progress-wrap"
+          role="status"
+          aria-live="polite"
+          hidden
+        >
+          <div class="v2-progress-track" role="progressbar"
+               aria-valuemin="0" aria-valuemax="100"
+               aria-label="분석 진행 상황">
+            <div id="v2ProgressBar" class="v2-progress-bar" style="width:0%"
+                 aria-valuenow="0"></div>
+          </div>
+          <div id="v2ProgressText" class="v2-progress-text"></div>
+        </div>
+        <div id="errorBox" class="error-box"></div>
+      </section>
     </header>
 
     <!-- DESIGN-3A: domain tabs relocated directly under the brand. #categoryTabs
@@ -74,44 +109,6 @@
       </div>
       <a class="grade-guide-link" href="#methodology">검증 등급 안내 →</a>
     </nav>
-
-    <section class="panel">
-      <div class="controls">
-        <div>
-          <label for="query">검색어</label>
-          <input id="query" type="text" placeholder="검색어를 입력하세요" autocomplete="off" maxlength="200">
-        </div>
-        <div>
-          <label for="maxNews">뉴스 개수</label>
-          <input id="maxNews" type="number" min="1" max="10" value="1">
-        </div>
-        <button id="analyzeBtn" class="primary" type="button">분석하기</button>
-        <button id="historyBtn" class="secondary" type="button">최근 분석 불러오기</button>
-      </div>
-      <div id="statusLine" class="status-line"></div>
-      <!--
-        M15.0c — V2 async progress UI.
-        Hidden by default; shown only when requestPolicyAnalysisV2 is
-        active (RQ + SSE path). The legacy /jobs/analyze polling path
-        and the sync /analyze fallback do NOT touch this element.
-      -->
-      <div
-        id="v2ProgressWrap"
-        class="v2-progress-wrap"
-        role="status"
-        aria-live="polite"
-        hidden
-      >
-        <div class="v2-progress-track" role="progressbar"
-             aria-valuemin="0" aria-valuemax="100"
-             aria-label="분석 진행 상황">
-          <div id="v2ProgressBar" class="v2-progress-bar" style="width:0%"
-               aria-valuenow="0"></div>
-        </div>
-        <div id="v2ProgressText" class="v2-progress-text"></div>
-      </div>
-      <div id="errorBox" class="error-box"></div>
-    </section>
 
     <section id="metrics" class="metrics">
       <div class="metric">

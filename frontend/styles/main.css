@@ -69,15 +69,15 @@
       align-items: center;
       gap: 12px;
       flex-wrap: wrap;
-      padding: 4px 0 8px;
+      padding: 5px 0 9px;
       margin-bottom: 10px;
       border-bottom: 1px solid var(--line);
-      font-size: 0.846rem;
+      font-size: 0.95rem;
     }
     .utility-left {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 12px;
       flex-wrap: wrap;
       color: var(--muted);
     }
@@ -89,12 +89,13 @@
     .utility-right {
       display: flex;
       align-items: center;
-      gap: 14px;
+      gap: 18px;
     }
     .utility-link {
       color: var(--slate);
       text-decoration: none;
       font-weight: 600;
+      font-size: 1rem;
     }
     .utility-link:hover {
       color: var(--brand-ink);
@@ -145,14 +146,67 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      gap: 14px;
+      gap: 18px;
+      flex-wrap: wrap;
       margin-bottom: 14px;
+    }
+
+    /* DESIGN-3A2: compact header search. The whole .panel was moved into .topbar
+       as the right flex child; these scoped overrides strip the card chrome
+       (border/shadow/radius/padding from the shared .panel rule below) so it
+       reads as an inline search, and reflow .controls from the 4-col grid into a
+       single compact flex row: [#query grows][#maxNews narrow][분석하기][최근분석].
+       Scoped to .topbar so the shared .panel/.metric/.result-card/.history-card
+       rule is untouched. All analyze ids unchanged — no JS change. */
+    .topbar .panel {
+      background: none;
+      border: none;
+      box-shadow: none;
+      border-radius: 0;
+      padding: 0;
+      margin: 0;
+      flex: 1 1 440px;
+      max-width: 620px;
+    }
+    .topbar .panel .controls {
+      display: flex;
+      grid-template-columns: none;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      gap: 8px;
+    }
+    .topbar .panel .controls > div:first-child {
+      flex: 1 1 200px;
+    }
+    .topbar .panel .controls > div:nth-child(2) {
+      flex: 0 0 76px;
+    }
+    .topbar .panel label {
+      font-size: 0.77rem;
+      font-weight: 600;
+      margin-bottom: 3px;
+      color: var(--muted);
+    }
+    .topbar .panel input {
+      min-height: 36px;
+      font-size: 1rem;
+    }
+    .topbar .panel button {
+      min-height: 36px;
+      padding: 0 14px;
+      font-size: 0.95rem;
+      white-space: nowrap;
+    }
+    .topbar .panel #historyBtn {
+      font-size: 0.85rem;
+      padding: 0 10px;
     }
 
     .title-block h1 {
       margin: 0;
-      font-size: clamp(1.615rem, 2.8vw, 2.154rem);
-      line-height: 1.2;
+      /* DESIGN-3A2: larger/heavier brand wordmark to match the mockup. */
+      font-size: clamp(2.0rem, 3.2vw, 2.6rem);
+      line-height: 1.15;
       letter-spacing: -0.02em;
       font-weight: 800;
     }
@@ -185,8 +239,12 @@
        corners, so no border-radius is applied. */
     .logo-tick {
       display: inline-block;
-      width: 1.15em;
-      height: 1.15em;
+      /* DESIGN-3A2: scales with the larger wordmark. NOTE: the check-mark color
+         is BAKED INTO the raster PNG (favicon-180.png) — it renders GREEN and
+         cannot be recolored via CSS. A BLUE logo asset must replace this file
+         (deferred; favicon + og-image are separate assets, also deferred). */
+      width: 1.25em;
+      height: 1.25em;
       object-fit: contain;
       vertical-align: middle;
     }
@@ -194,28 +252,12 @@
     .subtitle {
       margin: 7px 0 0;
       color: var(--muted);
-      font-size: 1rem;
+      font-size: 1.08rem;
     }
 
-    /* HOMEPAGE-LAYOUT: quiet header utility links (relocated from the removed
-       intro hero). Small text links, not buttons. */
-    .header-links {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 16px;
-      margin: 8px 0 0;
-    }
-
-    .header-link {
-      color: var(--brand-ink);
-      font-size: 1rem;
-      font-weight: 600;
-      text-decoration: none;
-    }
-
-    .header-link:hover {
-      text-decoration: underline;
-    }
+    /* DESIGN-3A2: nav.header-links ("검증 기준 보기 / 뉴스 연결망 보기") was removed
+       from the brand block (the 검증 기준 target is still linked as "검증 등급 안내 →"
+       in the tabs row). Its .header-link/.header-links rules were removed too. */
 
     .panel,
     .metric,
@@ -1088,27 +1130,35 @@
 
     .category-tabs {
       display: flex;
-      gap: 8px;
+      gap: 20px;
       flex-wrap: wrap;
       margin: 14px 0 0;
     }
 
+    /* DESIGN-3A2: underline-style tabs (Semafor/PolitiFact identity). Plain text,
+       no box; the active tab gets blue text + a 2px blue underline. The
+       .domain-tabs-row border-bottom (1px --line) is the thin baseline the tabs
+       sit on. Pure CSS on the existing renderCategoryTabs() classes. */
     .category-tab {
-      min-height: 34px;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      background: var(--paper);
+      border: none;
+      border-bottom: 2px solid transparent;
+      border-radius: 0;
+      background: none;
       color: var(--slate);
-      padding: 7px 13px;
-      font-size: 1rem;
+      padding: 8px 2px;
+      font-size: 1.08rem;
       font-weight: 600;
     }
 
-    .category-tab.active,
+    .category-tab.active {
+      color: var(--brand);
+      border-bottom-color: var(--brand);
+      background: none;
+    }
+
     .category-tab:hover:not(:disabled) {
-      border-color: var(--brand);
-      background: var(--brand);
-      color: #fff;
+      color: var(--ink);
+      background: none;
     }
 
     /* HOTSORT Phase 2 — #hotTopics sort control + "더 보기" button. */
