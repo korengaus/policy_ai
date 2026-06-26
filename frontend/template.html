@@ -31,6 +31,22 @@
 </head>
 <body>
   <div class="page">
+    <!-- DESIGN-3A: top utility bar. STATIC placeholders only — live date/counts
+         are wired in DESIGN-3B. About/Contact/News are inert (href="#") until
+         those pages/sections exist; 제보하기 mirrors the footer mailto pattern.
+         No JS is bound in this row. -->
+    <div class="utility-bar">
+      <div class="utility-left">
+        <span class="utility-brand-tag">2026 · 검증 인프라</span>
+        <span class="utility-counts">오늘 업데이트 —건 · 검증 진행 —건</span>
+      </div>
+      <nav class="utility-right" aria-label="사이트 메뉴">
+        <a class="utility-link" href="#">About</a>
+        <a class="utility-link" href="#">Contact</a>
+        <a class="utility-link" href="#">News</a>
+        <a class="utility-report" href="mailto:contact@tickedin.org">제보하기</a>
+      </nav>
+    </div>
     <header class="topbar">
       <div class="title-block">
         <a class="brand-home" href="/" aria-label="tickedin 홈으로">
@@ -46,6 +62,18 @@
         </nav>
       </div>
     </header>
+
+    <!-- DESIGN-3A: domain tabs relocated directly under the brand. #categoryTabs
+         keeps its exact id + seed button (renderCategoryTabs rebuilds it); JS
+         resolves it by id (position-independent — confirmed Phase 1). The
+         검증 등급 안내 link anchors to the existing #methodology section. The feed
+         SORT control (#hotTopicsSort) stays by the feed inside .home-main below. -->
+    <nav class="domain-tabs-row" aria-label="뉴스 카테고리 이동">
+      <div id="categoryTabs" class="category-tabs" aria-label="뉴스 카테고리">
+        <button class="category-tab active" type="button" data-domain="전체">전체</button>
+      </div>
+      <a class="grade-guide-link" href="#methodology">검증 등급 안내 →</a>
+    </nav>
 
     <section class="panel">
       <div class="controls">
@@ -104,58 +132,66 @@
       </div>
     </section>
 
-    <section class="news-home-section">
-      <div class="section-heading">
-        <div>
-          <h2>🔥 지금 뜨는 이슈</h2>
-          <p>전 분야에서 지금 가장 주목받는 정책 이슈입니다.</p>
+    <!-- DESIGN-3A: 2-column layout shell. .home-main wraps the existing feed
+         markup VERBATIM (ids unchanged, only re-indented for the new nesting);
+         .home-aside is an EMPTY placeholder filled in DESIGN-3B. The feed SORT
+         control (#hotTopicsSort, moved out of the dissolved .domain-controls)
+         now sits at the top of .home-main; #categoryTabs was relocated under the
+         brand above. #results / methodology / operator tools / footer stay
+         full-width OUTSIDE this shell. -->
+    <div class="home-shell">
+      <div class="home-main">
+        <div class="feed-sort-row">
+          <div class="hot-topics-sort" aria-label="지금 뜨는 이슈 정렬">
+            <label class="hot-topics-sort-label" for="hotTopicsSort">정렬</label>
+            <select id="hotTopicsSort" class="hot-topics-sort-select">
+              <option value="뜨는순" selected>뜨는순</option>
+              <option value="최신순">최신순</option>
+              <option value="위험도순">위험도순</option>
+              <option value="검토됨 우선">검토됨 우선</option>
+            </select>
+          </div>
         </div>
-      </div>
-      <div id="hotTopics" class="topic-card-grid">
-        <div class="empty-state">분석을 실행하거나 최근 분석을 불러오면 검증 뉴스 카드가 표시됩니다.</div>
-      </div>
-      <div class="hot-topics-load-more-wrap">
-        <button id="hotTopicsLoadMore" class="secondary hot-topics-load-more" type="button" hidden>더 보기</button>
-        <button id="hotTopicsCollapse" class="secondary hot-topics-load-more" type="button" hidden>접기</button>
-      </div>
-    </section>
 
-    <!-- HOMEPAGE-LAYOUT: domain category tabs + sort, relocated out of the
-         removed intro hero to sit between the band and the domain sections.
-         #categoryTabs / #hotTopicsSort are getElementById targets — must stay
-         in the DOM. Rendered by renderCategoryTabs() from the current feed. -->
-    <div class="domain-controls">
-      <div id="categoryTabs" class="category-tabs" aria-label="뉴스 카테고리">
-        <button class="category-tab active" type="button" data-domain="전체">전체</button>
+        <section class="news-home-section">
+          <div class="section-heading">
+            <div>
+              <h2>🔥 지금 뜨는 이슈</h2>
+              <p>전 분야에서 지금 가장 주목받는 정책 이슈입니다.</p>
+            </div>
+          </div>
+          <div id="hotTopics" class="topic-card-grid">
+            <div class="empty-state">분석을 실행하거나 최근 분석을 불러오면 검증 뉴스 카드가 표시됩니다.</div>
+          </div>
+          <div class="hot-topics-load-more-wrap">
+            <button id="hotTopicsLoadMore" class="secondary hot-topics-load-more" type="button" hidden>더 보기</button>
+            <button id="hotTopicsCollapse" class="secondary hot-topics-load-more" type="button" hidden>접기</button>
+          </div>
+        </section>
+
+        <!-- HOMEPAGE-TIERED: TIER 2 "나머지 뉴스" — concise cards for items ranked
+             beyond the tier-1 cut. #domainSections (formerly the per-domain browse
+             container) is repurposed as the tier-2 card grid. The whole section is
+             hidden by renderHotTopics() when the pool has nothing past the cut. -->
+        <section id="tier2Section" class="news-home-section" hidden>
+          <div class="section-heading">
+            <div>
+              <h2>나머지 뉴스</h2>
+              <p>그 외 분석된 정책 뉴스입니다.</p>
+            </div>
+          </div>
+          <div id="domainSections" class="topic-card-grid"></div>
+          <div class="hot-topics-load-more-wrap">
+            <button id="tier2LoadMore" class="secondary hot-topics-load-more" type="button" hidden>더 보기</button>
+            <button id="tier2Collapse" class="secondary hot-topics-load-more" type="button" hidden>접기</button>
+          </div>
+        </section>
       </div>
-      <div class="hot-topics-sort" aria-label="지금 뜨는 이슈 정렬">
-        <label class="hot-topics-sort-label" for="hotTopicsSort">정렬</label>
-        <select id="hotTopicsSort" class="hot-topics-sort-select">
-          <option value="뜨는순" selected>뜨는순</option>
-          <option value="최신순">최신순</option>
-          <option value="위험도순">위험도순</option>
-          <option value="검토됨 우선">검토됨 우선</option>
-        </select>
-      </div>
+
+      <aside class="home-aside" aria-label="검증 사이드바">
+        <!-- DESIGN-3B: sidebar content (ranking / weekly counts / legend / report) -->
+      </aside>
     </div>
-
-    <!-- HOMEPAGE-TIERED: TIER 2 "나머지 뉴스" — concise cards for items ranked
-         beyond the tier-1 cut. #domainSections (formerly the per-domain browse
-         container) is repurposed as the tier-2 card grid. The whole section is
-         hidden by renderHotTopics() when the pool has nothing past the cut. -->
-    <section id="tier2Section" class="news-home-section" hidden>
-      <div class="section-heading">
-        <div>
-          <h2>나머지 뉴스</h2>
-          <p>그 외 분석된 정책 뉴스입니다.</p>
-        </div>
-      </div>
-      <div id="domainSections" class="topic-card-grid"></div>
-      <div class="hot-topics-load-more-wrap">
-        <button id="tier2LoadMore" class="secondary hot-topics-load-more" type="button" hidden>더 보기</button>
-        <button id="tier2Collapse" class="secondary hot-topics-load-more" type="button" hidden>접기</button>
-      </div>
-    </section>
 
     <section id="selectedIssueIntro" class="selected-issue-intro">
       <h2>선택한 이슈 검증 리포트</h2>
