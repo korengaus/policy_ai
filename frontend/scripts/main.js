@@ -283,6 +283,28 @@
     VERDICT_LABELS.draft_needs_review = "사람 검토 대기";
     VERDICT_LABELS.draft_high_risk_review = "고위험 사람 검토 대기";
 
+    // DESIGN-3B-1: DISPLAY-ONLY verdict_label → color map for the card-face
+    // verdict dot. Pure presentation — does NOT change verdict_label, the verdict
+    // path, or any score. Unknown labels fall back to grey.
+    const VERDICT_DOT_COLORS = {
+      draft_verified: "var(--verify)",
+      draft_likely_true: "var(--verify)",
+      draft_needs_context: "var(--orange)",
+      draft_needs_official_confirmation: "var(--orange)",
+      draft_needs_review: "var(--orange)",
+      draft_high_risk_review: "var(--orange)",
+      draft_misleading: "var(--red)",
+      draft_disputed: "var(--red)",
+      draft_unverified: "var(--muted)",
+      draft_outdated: "var(--muted)",
+    };
+    function verdictDotColor(label) {
+      return VERDICT_DOT_COLORS[String(label || "")] || "var(--muted)";
+    }
+    function verdictLabelKo(label) {
+      return VERDICT_LABELS[String(label || "")] || "추가 검증 필요";
+    }
+
     // M29-A1: SOURCE_TYPE_LABELS is also pin-safe (kept in place this slice).
     const SOURCE_TYPE_LABELS = {
       official_government: "공식 정부기관",
@@ -1822,6 +1844,79 @@
         .replace(/[.,!?。·…"'“”‘’()\[\]]/g, "");
     }
 
+    // DESIGN-3B-1: card-face hashtags (DISPLAY-ONLY). Hybrid source: structured
+    // tokens (normalized_claims target/object/actor + matched_concepts) when the
+    // full result is in memory (fresh-search path); otherwise tokenize the slim
+    // text (title primarily, then claim_text/claims[0]) since the homepage feed
+    // reads the slim /history payload (no normalized_claims). Strict junk filter:
+    // drop anything with a digit (dates/money/numbers), money/percent marks,
+    // placeholders, single chars, and over-generic / grammatical tokens. Returns
+    // up to 4 clean noun tags; [] → the caller omits the hashtag row.
+    const HASHTAG_GENERIC = new Set([
+      "정부", "정책", "지원", "뉴스", "기사", "기관", "관련", "발표", "금융", "확대",
+      "강화", "추진", "검토", "운영", "계획", "방안", "사업", "제도", "관리", "대책",
+      "당국", "공식", "내용", "결과", "오늘", "이번", "해당", "전체", "주요", "상황",
+      "그리고", "그러나", "위해", "통해", "대해", "했다", "한다", "밝혔다", "전했다",
+      "있다", "없다", "된다", "됐다", "이라", "라는", "으로", "에서", "에게",
+    ]);
+    const HASHTAG_PLACEHOLDER = new Set(["unknown", "미상", "없음", "null", "none", "기타", "미분류", "na"]);
+
+    function _hashtagIsJunk(tok) {
+      const t = String(tok || "").trim().replace(/^#/, "");
+      if (t.length < 2) return true;
+      if (HASHTAG_PLACEHOLDER.has(t.toLowerCase())) return true;
+      if (/\d/.test(t)) return true;                 // any digit → dates/money/numbers out
+      if (/[원%]/.test(t)) return true;              // money / percent blobs out
+      if (!/[가-힣A-Za-z]/.test(t)) return true;     // must contain a letter
+      if (HASHTAG_GENERIC.has(t)) return true;
+      return false;
+    }
+
+    function deriveCardHashtags(result) {
+      const verification = (result && result.verification_card) || result || {};
+      const normalized = Array.isArray(result && result.normalized_claims)
+        ? result.normalized_claims
+        : (Array.isArray(verification.normalized_claims) ? verification.normalized_claims : []);
+      const candidates = Array.isArray(result && result.source_candidates)
+        ? result.source_candidates
+        : (Array.isArray(verification.source_candidates) ? verification.source_candidates : []);
+      let tokens = [];
+      // (1) structured tokens (present only when the FULL result is in memory)
+      for (const nc of normalized) {
+        if (nc && typeof nc === "object") {
+          for (const k of ["target", "object", "actor"]) {
+            const v = String(nc[k] || "").trim();
+            if (v) tokens.push(v);
+          }
+        }
+      }
+      for (const c of candidates) {
+        if (c && typeof c === "object" && Array.isArray(c.matched_concepts)) {
+          for (const m of c.matched_concepts) tokens.push(String(m));
+        }
+      }
+      // (2) slim-text fallback — the TITLE only. Titles are noun-dense headlines,
+      // so tokens stay clean (#공시가격 #서울 #아파트); a full claim sentence would
+      // leak josa-attached / verb tokens (#정부가, #발표했다) that can't be stripped
+      // safely without a morphological analyzer. Fewer-but-clean > more-but-junky.
+      if (!tokens.length) {
+        const text = String((result && result.title) || "");
+        tokens = text.match(/[가-힣]{2,}|[A-Za-z]{3,}/g) || [];
+      }
+      const seen = new Set();
+      const out = [];
+      for (let t of tokens) {
+        t = String(t).trim().replace(/\s+/g, "");
+        if (_hashtagIsJunk(t)) continue;
+        const key = t.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(t);
+        if (out.length >= 4) break;
+      }
+      return out;
+    }
+
     function topicCardFromResult(result, index, source = "current", record = null) {
       const query = record?.query || currentReportContext?.query || queryInput?.value || "";
       const confidence = result?.policy_confidence || {};
@@ -1839,6 +1934,14 @@
       const summaryNorm = normalizeForCompare(strippedSummary);
       const summaryCollapsesToTitle =
         summaryNorm.length > 0 && summaryNorm === normalizeForCompare(cardTitle);
+      // DESIGN-3B-1: card-face additions (all DISPLAY-ONLY, slim-backed). The
+      // genuine flag reuses the SAME predicate as officialStatusLabel (LABEL-HONESTY).
+      const reliability = verification.source_reliability_summary || result?.source_reliability_summary || {};
+      const hasGenuineOfficial = (typeof reliability.has_genuine_official_support === "boolean")
+        ? reliability.has_genuine_official_support
+        : (Number(debug.official_body_matches || 0) > 0);
+      const officialDetailTitle = publicInstitutionName(
+        reliability.top_official_detail_title || reliability.top_source_title || "");
       return {
         key: keyBase,
         source,
@@ -1859,6 +1962,10 @@
         summary: summaryCollapsesToTitle ? "" : strippedSummary,
         reason: decision.decision_summary || evidenceQualityExplanation(debug.evidence_quality_summary || {}, debug.evidence_strength_summary || {}),
         quality: debug.evidence_quality_summary || verification.evidence_quality_summary || {},
+        verdictLabel: verification.verdict_label || result?.verdict_label || "",
+        hasGenuineOfficial: hasGenuineOfficial,
+        officialDetailTitle: officialDetailTitle,
+        hashtags: deriveCardHashtags(result),
       };
     }
 
@@ -1942,35 +2049,39 @@
       const detailed = !!(opts && opts.detailed);
       const selected = (card.key && card.key === activeTopicKey)
         || (card.source === "current" && Number.isInteger(selectedResultIndex) && Number(card.index) === selectedResultIndex);
-      const quality = card.quality || {};
-      // HOME-UI-7: the 4-tile meta block is shared by BOTH tiers so they can
-      // never drift. Tier-2 (concise) now shows the same 신뢰도/공식 출처/리뷰/
-      // 근거 품질 frame; thin cards fall back to honest neutral labels via the
-      // existing field defaults (no fabricated data). 신뢰도 stays :first-child
-      // (the --verify hero accent). Only the summary/reason paragraph remains
-      // gated to detailed=true.
-      const metaTiles = `
-          <div class="topic-card-meta">
-            <div><strong>신뢰도</strong><br>${escapeHtml(card.confidence)}</div>
-            <div><strong>공식 출처</strong><br>${escapeHtml(card.officialStatus)}</div>
-            <div><strong>리뷰</strong><br>${escapeHtml(card.reviewStatus)}</div>
-            <div><strong>근거 품질</strong><br>${escapeHtml(formatEvidenceSummaryLabel(quality))}</div>
-          </div>`;
-      const detailBody = detailed
-        ? `
-          ${card.summary ? `<div class="topic-card-summary">${escapeHtml(card.summary)}</div>` : ""}
-          ${metaTiles}`
-        : metaTiles;
+      // DESIGN-3B-1: small editorial card. The 4 stacked sub-boxes (신뢰도/공식 출처/
+      // 리뷰/근거 품질) moved OFF the card face — they all render in the DETAIL view
+      // (core-indicator-strip + verification-card + advanced section). The card
+      // face now carries an at-a-glance COLORED VERDICT dot + label, editorial
+      // badges, a clamped summary, conditional filtered hashtags, and a conditional
+      // ✓ 공식 근거 chip (only when genuine). Tier-1 and tier-2 render identically.
+      const hashtags = Array.isArray(card.hashtags) ? card.hashtags : [];
+      const hashtagRow = hashtags.length
+        ? `<div class="topic-card-tags">${hashtags.map((t) => `<span class="topic-card-tag">#${escapeHtml(t)}</span>`).join("")}</div>`
+        : "";
+      const genuineChip = card.hasGenuineOfficial
+        ? `<span class="card-genuine-chip">✓ 공식 근거 확인${card.officialDetailTitle ? ` · ${escapeHtml(card.officialDetailTitle)}` : ""}</span>`
+        : "";
+      const confidenceInline = (card.confidence !== "-" && card.confidence !== null && card.confidence !== undefined)
+        ? `<span class="card-confidence">신뢰도 ${escapeHtml(card.confidence)}</span>`
+        : "";
       return `
-        <article class="topic-card ${detailed ? "topic-card-detailed" : ""} ${selected ? "selected" : ""}" data-topic-key="${escapeHtml(card.key)}" data-topic-source="${escapeHtml(card.source)}" data-topic-index="${escapeHtml(card.index)}" data-topic-record-id="${escapeHtml(card.recordId)}">
+        <article class="topic-card ${selected ? "selected" : ""}" data-topic-key="${escapeHtml(card.key)}" data-topic-source="${escapeHtml(card.source)}" data-topic-index="${escapeHtml(card.index)}" data-topic-record-id="${escapeHtml(card.recordId)}">
           <div class="topic-card-top">
-            <span class="badge ${alertClass(card.alert)}">${escapeHtml(formatAlert(card.alert))}</span>
-            <span class="badge topic-badge">${escapeHtml(domainDisplayLabel(cardDomainKey(card)))}</span>
-            ${card.freshness ? `<span class="badge freshness-badge">🔥 ${escapeHtml(FRESHNESS_BADGE_LABEL)}</span>` : ""}
+            <span class="card-domain">${escapeHtml(domainDisplayLabel(cardDomainKey(card)))}</span>
+            <span class="card-watch ${alertClass(card.alert)}">${escapeHtml(formatAlert(card.alert))}</span>
+            ${card.freshness ? `<span class="card-fresh">🔥 ${escapeHtml(FRESHNESS_BADGE_LABEL)}</span>` : ""}
             ${card.humanReviewedAt ? `<span class="review-status review-approved">${escapeHtml(HUMAN_REVIEWED_LABEL)}</span>` : ""}
           </div>
           <h3 class="topic-card-title">${escapeHtml(card.title)}</h3>
-          ${detailBody}
+          ${card.summary ? `<div class="topic-card-summary">${escapeHtml(card.summary)}</div>` : ""}
+          ${hashtagRow}
+          <div class="topic-card-verdict">
+            <span class="verdict-dot" style="background:${verdictDotColor(card.verdictLabel)}"></span>
+            <span class="verdict-text">${escapeHtml(verdictLabelKo(card.verdictLabel))}</span>
+            ${confidenceInline}
+            ${genuineChip}
+          </div>
         </article>
       `;
     }

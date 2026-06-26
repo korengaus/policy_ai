@@ -1552,6 +1552,77 @@
       color: var(--slate);
     }
 
+    /* DESIGN-3B-1: editorial small-card face. The .topic-card-meta rules above are
+       now unused (the 4 sub-boxes moved to the detail view) but kept harmless. */
+    .card-domain {
+      font-size: 0.77rem;
+      font-weight: 800;
+      letter-spacing: 0.01em;
+      color: var(--brand);
+    }
+    .card-watch {
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 0.01em;
+      padding: 2px 7px;
+      border-radius: 4px;
+    }
+    /* editorial WATCH tag — light tint + colored text per alert tier (overrides
+       the chunky solid .alert-* backgrounds in the card context). */
+    .card-watch.alert-watch  { background: #fff7ed; color: #c2410c; }
+    .card-watch.alert-high   { background: #fef2f2; color: #b91c1c; }
+    .card-watch.alert-medium { background: #eff6ff; color: var(--brand-ink); }
+    .card-watch.alert-low    { background: #f1f5f9; color: var(--slate); }
+    .card-fresh {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: #c2410c;
+    }
+    .topic-card-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .topic-card-tag {
+      font-size: 0.77rem;
+      font-weight: 600;
+      color: var(--brand-ink);
+      background: #eff6ff;
+      border-radius: 4px;
+      padding: 1px 7px;
+    }
+    .topic-card-verdict {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin-top: 2px;
+      font-size: 0.86rem;
+    }
+    .verdict-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      flex: 0 0 auto;
+    }
+    .verdict-text {
+      font-weight: 750;
+      color: var(--ink);
+    }
+    .card-confidence {
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+    .card-genuine-chip {
+      font-size: 0.77rem;
+      font-weight: 700;
+      color: var(--verify);
+      background: var(--verify-soft);
+      border-radius: 4px;
+      padding: 2px 8px;
+    }
+
     .platform-tools {
       margin-top: 18px;
     }
