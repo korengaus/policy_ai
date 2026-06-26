@@ -6,6 +6,7 @@
       --slate: #475569;          /* body text */
       --muted: #94a3b8;          /* captions / secondary */
       --line: #e2e8f0;           /* borders */
+      --rule: #d1d5db;           /* DESIGN-3A3: darker rule — HEADER dividers only */
       --paper: #ffffff;          /* card surface */
       --canvas: #f6f8fb;         /* page background */
       --brand: #1e5fd8;          /* tickedin blue (consolidates the 3 prior blues) */
@@ -71,7 +72,7 @@
       flex-wrap: wrap;
       padding: 5px 0 9px;
       margin-bottom: 10px;
-      border-bottom: 1px solid var(--line);
+      border-bottom: 1px solid var(--rule);
       font-size: 0.95rem;
     }
     .utility-left {
@@ -80,6 +81,12 @@
       gap: 12px;
       flex-wrap: wrap;
       color: var(--muted);
+    }
+    /* DESIGN-3A3: bold-emphasized count number (static "—" placeholder this step;
+       live values land in DESIGN-3B — the bold structure is already in place). */
+    .utility-count-num {
+      color: var(--ink);
+      font-weight: 700;
     }
     .utility-brand-tag {
       color: var(--brand-ink);
@@ -123,9 +130,11 @@
       justify-content: space-between;
       gap: 12px;
       flex-wrap: wrap;
+      /* DESIGN-3A3: frame the tabs in a defined band with a darker rule top+bottom. */
       margin: 4px 0 14px;
-      padding-bottom: 10px;
-      border-bottom: 1px solid var(--line);
+      padding: 8px 0 10px;
+      border-top: 1px solid var(--rule);
+      border-bottom: 1px solid var(--rule);
     }
     .domain-tabs-row .category-tabs {
       margin: 0;
@@ -168,12 +177,18 @@
       flex: 1 1 440px;
       max-width: 620px;
     }
+    /* DESIGN-3A3: the controls read as ONE defined search box (border + radius),
+       with all controls kept inline inside it. */
     .topbar .panel .controls {
       display: flex;
       grid-template-columns: none;
       flex-wrap: wrap;
       align-items: flex-end;
       gap: 8px;
+      border: 1px solid var(--rule);
+      border-radius: var(--radius-sm);
+      padding: 8px 10px;
+      background: var(--paper);
     }
     .topbar .panel .controls > div:first-child {
       flex: 1 1 200px;
@@ -187,18 +202,30 @@
       margin-bottom: 3px;
       color: var(--muted);
     }
+    /* DESIGN-3A3: soften the inner input border so the OUTER box dominates. */
     .topbar .panel input {
       min-height: 36px;
       font-size: 1rem;
+      border-color: var(--line);
     }
+    .topbar .panel input::placeholder {
+      color: var(--muted);
+    }
+    /* DESIGN-3A3: crisp compact button text (weight 700 reads sharper than 800
+       at the small zoomed size; explicit white, no letter-spacing). */
     .topbar .panel button {
-      min-height: 36px;
+      min-height: 38px;
       padding: 0 14px;
-      font-size: 0.95rem;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: 0;
       white-space: nowrap;
     }
+    .topbar .panel #analyzeBtn {
+      font-size: 1.0rem;
+    }
     .topbar .panel #historyBtn {
-      font-size: 0.85rem;
+      font-size: 0.92rem;
       padding: 0 10px;
     }
 
@@ -230,8 +257,18 @@
     .brand {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
       color: var(--ink);
+    }
+
+    /* DESIGN-3A3: Korean SERIF (Noto Serif KR) for HEADLINE text ONLY — the brand
+       wordmark, news card titles, and feed section titles. Scoped to these three
+       selectors so it never leaks into body, summaries, badges, tabs, buttons,
+       .history-title, or the detail report (all stay Pretendard sans). */
+    .brand,
+    .topic-card-title,
+    .section-heading h2 {
+      font-family: 'Noto Serif KR', 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', system-ui, serif;
     }
 
     /* HOME-UI-3: header mark is the literal favicon image (pixel-identical to
@@ -250,7 +287,7 @@
     }
 
     .subtitle {
-      margin: 7px 0 0;
+      margin: 8px 0 0;
       color: var(--muted);
       font-size: 1.08rem;
     }
