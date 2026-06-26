@@ -6,6 +6,15 @@ from source_reliability_agent import summarize_source_reliability
 from evidence_extraction_agent import (
     summarize_claim_evidence_quality,
     summarize_evidence_snippets,
+    # TOPICGATE Phase 2 — REUSE the existing R2 broad/generic-token set + tokenizer
+    # (do NOT invent a new generic list). _R2_BROAD_DOMAIN_TOKENS is the same set
+    # the R2 layer uses to encode "금융 BROAD vs 전세대출 specific"
+    # (evidence_extraction_agent.py:28); _r2_josa_strip / _r2_title_topic_tokens
+    # are its tokenizer helpers. Used ONLY to classify a shared term as generic vs
+    # material in the generalized topic gate below.
+    _R2_BROAD_DOMAIN_TOKENS,
+    _r2_josa_strip,
+    _r2_title_topic_tokens,
 )
 from contradiction_agent import summarize_contradiction_checks
 from bias_framing_agent import summarize_bias_framing
@@ -213,7 +222,59 @@ def _split_csv_like(value) -> set[str]:
     return {part.strip() for part in str(value or "").split(",") if part.strip()}
 
 
-def _official_topic_mismatch_reason(item: dict) -> str:
+# TOPICGATE Phase 2 — GENERIC policy-concept buckets of CONCEPT_SYNONYMS_RELEVANCE
+# (official_relevance.py / korean_constants.py). These are the broad buckets that
+# fire on almost every policy doc (지원/보조 ; 시행/신청 ; 검토/추진 ; 발표/공지) and
+# drove the off-topic IBK<->FSC match's concept score. A shared concept in ONLY
+# these buckets is NOT a material topic match. The remaining buckets (rental_loan,
+# mortgage_loan, interest_rate, regulation, target_group, financial_product_notice)
+# are MATERIAL. Mirrors the existing MATERIAL_OFFICIAL_CONCEPTS intent, generalized.
+_GENERIC_CONCEPT_KEYS = frozenset({
+    "subsidy_support",
+    "implementation",
+    "review_stage",
+    "official_statement",
+})
+
+
+def _has_material_overlap(item: dict, query_text: str, title_text: str) -> bool:
+    """True iff the doc shares the claim's named institution OR >=1 SPECIFIC
+    (non-generic) policy term — i.e. a MATERIAL topic match, not generic
+    word-overlap. Reuses fields already computed by official_relevance
+    (matched_query_terms / matched_concepts) plus the R2 broad-token set to
+    classify generic vs specific. Pure; never raises."""
+    # (1) Query terms the doc already shares (official_relevance computed these).
+    #     A shared term whose josa-stripped stem is NOT in the R2 broad set and is
+    #     >=2 chars is a SPECIFIC/material term (institution name, 가계부채, DSR, …).
+    for term in _split_csv_like(item.get("matched_query_terms")):
+        stem = _r2_josa_strip(str(term))
+        if len(stem) >= 2 and stem not in _R2_BROAD_DOMAIN_TOKENS:
+            return True
+    # (2) A shared policy concept outside the generic buckets is material.
+    concepts = _split_csv_like(item.get("matched_concepts"))
+    if concepts - _GENERIC_CONCEPT_KEYS:
+        return True
+    # (3) Robustness fallback (when matched_query_terms is empty/stale): shared
+    #     SPECIFIC tokens between the claim query surface and the doc TITLE via the
+    #     SAME R2 tokenizer (strips josa + broad tokens).
+    if _r2_title_topic_tokens(query_text) & _r2_title_topic_tokens(title_text):
+        return True
+    return False
+
+
+def _official_topic_mismatch_reason(item: dict, has_genuine_signal: bool = False) -> str:
+    # TOPICGATE Phase 2 — GENUINE-BYPASS (runs BEFORE any mismatch branch). A row
+    # carrying genuine official support (a strong primary-document match OR an
+    # official_body_match — the SAME predicate as
+    # source_reliability_summary["has_genuine_official_support"] /
+    # scripts/label_impact_probe.py) is NEVER topic-mismatched, so its score is
+    # preserved even when the doc TITLE shares no entity (e.g. id=327: real primary
+    # marker, no title overlap). has_genuine_signal is computed in
+    # build_verification_card BEFORE this gate runs and threaded in (the timing
+    # trap: the boolean was historically computed AFTER the summary).
+    if has_genuine_signal:
+        return ""
+
     query_text = " ".join(
         [
             str(item.get("search_query_used") or ""),
@@ -241,10 +302,21 @@ def _official_topic_mismatch_reason(item: dict) -> str:
     if query_has_housing_finance and not (concepts & MATERIAL_OFFICIAL_CONCEPTS):
         return "official document topic mismatch: missing material policy concepts"
 
+    # TOPICGATE Phase 2 — GENERAL material-entity branch (beneath the housing
+    # branches, which are unchanged). Fires ONLY for NON-housing queries (housing /
+    # housing-finance queries are fully handled above, so housing-covered fixtures
+    # stay byte-identical). A NON-genuine doc that shares NEITHER the claim's named
+    # institution NOR any specific (non-generic) policy term — only generic
+    # concepts (지원/금융/정책/확대) — is an off-topic word-overlap match -> mismatch
+    # -> official_mismatch True -> the EXISTING main.py:934 clamp lowers the score.
+    if not query_has_housing and not query_has_housing_finance:
+        if not _has_material_overlap(item, query_text, title_text):
+            return "official document topic mismatch: shares only generic concepts, no material entity or specific policy term"
+
     return ""
 
 
-def _is_usable_official_detail(item: dict) -> bool:
+def _is_usable_official_detail(item: dict, has_genuine_signal: bool = False) -> bool:
     if not (item.get("usable") or item.get("weakly_usable")):
         return False
     if item.get("should_exclude_from_verification"):
@@ -255,28 +327,32 @@ def _is_usable_official_detail(item: dict) -> bool:
         return False
     if not item.get("selected_document_url"):
         return False
-    return not _official_topic_mismatch_reason(item)
+    return not _official_topic_mismatch_reason(item, has_genuine_signal=has_genuine_signal)
 
 
 def _official_verification_summary(
     official_evidence_results: list[dict],
     fallback_summary: dict,
+    has_genuine_signal: bool = False,
 ) -> dict:
+    # TOPICGATE Phase 2 — has_genuine_signal is the row-level genuine-bypass flag
+    # (computed in build_verification_card BEFORE this runs). Threaded into every
+    # topic-gate call below so genuine rows are never topic-mismatched.
     results = official_evidence_results or []
-    usable = [item for item in results if _is_usable_official_detail(item)]
+    usable = [item for item in results if _is_usable_official_detail(item, has_genuine_signal)]
     mismatch_results = [
         item
         for item in results
         if item.get("should_exclude_from_verification")
         or item.get("evidence_grade") == "F"
         or item.get("document_type") in EXCLUDED_TOP_SOURCE_TYPES
-        or _official_topic_mismatch_reason(item)
+        or _official_topic_mismatch_reason(item, has_genuine_signal=has_genuine_signal)
         or (item.get("document_relevance_score") is not None and int(item.get("document_relevance_score") or 0) < 40)
     ]
     mismatch_reasons = []
     for item in mismatch_results[:4]:
         reason = (
-            _official_topic_mismatch_reason(item)
+            _official_topic_mismatch_reason(item, has_genuine_signal=has_genuine_signal)
             or item.get("error")
             or item.get("selected_document_reason")
             or item.get("document_type")
@@ -592,27 +668,35 @@ def build_verification_card(
         claim_list or [claim_text],
         evidence_snippets or [],
     )
-    source_reliability_summary = _official_verification_summary(
-        official_evidence_results,
-        summarize_source_reliability(source_candidates or []),
-    )
-    # LABEL-HONESTY: persist a single DISPLAY-ONLY boolean stating whether this
-    # row has GENUINE official verification, so the frontend can gate the
-    # "공식 근거 확인" / "직접 뒷받침" labels honestly (PERF-4 dropped
-    # source_candidates from the slim /history payload, so the frontend can no
-    # longer see the primary-document marker itself). Uses the AUTHORITATIVE
-    # predicate extract_primary_document_match (marker + strong + score>=75) for
-    # the primary half, OR any official_body_match (a real body-sentence match)
-    # for the body half. Rides inside source_reliability_summary (already in the
-    # slim payload) — slim reader unchanged. Does NOT touch the score or any
-    # verdict field; only ADDS this key.
+    # LABEL-HONESTY / TOPICGATE Phase 2: compute the GENUINE-support boolean ONCE,
+    # BEFORE the topic gate runs. It serves two roles:
+    #   (1) DISPLAY-ONLY label honesty (the original LABEL-HONESTY key, persisted in
+    #       source_reliability_summary so the frontend can gate the
+    #       "공식 근거 확인" / "직접 뒷받침" labels — PERF-4 dropped source_candidates
+    #       from the slim /history payload), and
+    #   (2) the TOPICGATE Phase 2 GENUINE-BYPASS: a genuine row is never
+    #       topic-mismatched, so its score is preserved even when the doc title
+    #       shares no entity.
+    # TIMING: this MUST be computed before _official_verification_summary (which
+    # invokes the topic gate) — historically it was computed AFTER, so the bypass
+    # would have been invisible to the gate. Predicate is unchanged and reused
+    # verbatim: AUTHORITATIVE extract_primary_document_match (marker + strong +
+    # score>=75) OR any official_body_match (a real body-sentence match). Does NOT
+    # touch the score or any verdict field directly; the score change for a
+    # NON-genuine off-topic row is delivered by the existing main.py:934 clamp.
     _official_body_match_count = sum(
         1 for source in (source_candidates or []) if source.get("official_body_match")
     )
-    source_reliability_summary["has_genuine_official_support"] = bool(
+    _has_genuine_official_support = bool(
         extract_primary_document_match(source_candidates or []) is not None
         or _official_body_match_count > 0
     )
+    source_reliability_summary = _official_verification_summary(
+        official_evidence_results,
+        summarize_source_reliability(source_candidates or []),
+        has_genuine_signal=_has_genuine_official_support,
+    )
+    source_reliability_summary["has_genuine_official_support"] = _has_genuine_official_support
     if not official_sources and source_reliability_summary.get("official_detail_available"):
         official_sources = [
             {
