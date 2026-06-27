@@ -220,7 +220,11 @@
     .domain-tabs-row::after {
       content: '';
       position: absolute;
-      bottom: 0;
+      /* DESIGN-PROGRESS-4: lift the dotted line 2px (was bottom:0) so its top
+         edge meets the active tab's blue underline bottom edge — the 2px came
+         from the row's padding-bottom (the text-centering pad). Absolute, so
+         row height + tab-text centering are untouched; only this line moves. */
+      bottom: 2px;
       left: 50%;
       transform: translateX(-50%);
       width: 100vw;
