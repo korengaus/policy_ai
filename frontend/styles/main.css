@@ -164,12 +164,19 @@
          100vw (overflow-x:hidden keeps it scroll-safe). padding-bottom is 0 so the
          tabs' bottom edge (the blue underline) coincides with the dotted ::after. */
       margin: 8px 0 14px;
-      padding: 12px 0 0;
+      /* DESIGN-PROGRESS-3: padding split 10/2 (sum kept at 12 so the row height —
+         and thus the dotted ::after at bottom:0 — does not move) re-centers the
+         tab labels in the band between the (now lowered) black ::before rule and
+         the grey dotted ::after. */
+      padding: 10px 0 2px;
     }
     .domain-tabs-row::before {
       content: '';
       position: absolute;
-      top: 0;
+      /* DESIGN-PROGRESS-3: black rule lowered 8px (was top:0) to open room under
+         the search box for the absolute progress overlay (thin bar + status text),
+         so the text sits above this rule instead of crossing into the tabs. */
+      top: 8px;
       left: 50%;
       transform: translateX(-50%);
       width: 100vw;
@@ -319,6 +326,13 @@
     }
     .topbar .panel #historyBtn:hover:not(:disabled) {
       background: #1f2937;
+    }
+
+    /* DESIGN-PROGRESS-3: nudge the brand down a touch to balance the lowered
+       black rule. transform (not margin) so it's purely visual — the .topbar
+       height, the search box (.controls), and both dotted rules do not move. */
+    .title-block {
+      transform: translateY(4px);
     }
 
     .title-block h1 {

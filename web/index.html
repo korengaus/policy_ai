@@ -198,12 +198,19 @@
          100vw (overflow-x:hidden keeps it scroll-safe). padding-bottom is 0 so the
          tabs' bottom edge (the blue underline) coincides with the dotted ::after. */
       margin: 8px 0 14px;
-      padding: 12px 0 0;
+      /* DESIGN-PROGRESS-3: padding split 10/2 (sum kept at 12 so the row height —
+         and thus the dotted ::after at bottom:0 — does not move) re-centers the
+         tab labels in the band between the (now lowered) black ::before rule and
+         the grey dotted ::after. */
+      padding: 10px 0 2px;
     }
     .domain-tabs-row::before {
       content: '';
       position: absolute;
-      top: 0;
+      /* DESIGN-PROGRESS-3: black rule lowered 8px (was top:0) to open room under
+         the search box for the absolute progress overlay (thin bar + status text),
+         so the text sits above this rule instead of crossing into the tabs. */
+      top: 8px;
       left: 50%;
       transform: translateX(-50%);
       width: 100vw;
@@ -353,6 +360,13 @@
     }
     .topbar .panel #historyBtn:hover:not(:disabled) {
       background: #1f2937;
+    }
+
+    /* DESIGN-PROGRESS-3: nudge the brand down a touch to balance the lowered
+       black rule. transform (not margin) so it's purely visual — the .topbar
+       height, the search box (.controls), and both dotted rules do not move. */
+    .title-block {
+      transform: translateY(4px);
     }
 
     .title-block h1 {
@@ -8967,7 +8981,7 @@
     const JOB_MAX_POLL_ATTEMPTS = 600;
 
     function describeJobStage(stage, percent) {
-      const label = ({
+      const mapped = ({
         queued: "대기열에 등록됨",
         running: "실행 시작",
         pipeline_started: "검증 파이프라인 실행 중",
@@ -8975,9 +8989,14 @@
         completed: "완료",
         failed: "실패",
         timeout: "시간 초과",
-      })[stage] || stage || "진행 중";
-      const pct = Number.isFinite(Number(percent)) ? Number(percent) : 0;
-      return `${label} (${pct}%)`;
+      })[stage];
+      const hasPct = Number.isFinite(Number(percent));
+      const pct = hasPct ? Number(percent) : 0;
+      if (!mapped) {
+        // Unmapped stage → generic Korean (never leak the raw English key).
+        return hasPct ? `검증 중 · ${pct}%` : "검증 중";
+      }
+      return `${mapped} (${pct}%)`;
     }
 
     // =====================================================================
@@ -9024,9 +9043,15 @@
     };
 
     function v2StageLabel(stage, percent) {
-      const label = V2_STAGE_LABELS_KO[stage] || stage || "진행 중";
-      const pct = Number.isFinite(Number(percent)) ? Number(percent) : 0;
-      return `${label} (${pct}%)`;
+      const hasPct = Number.isFinite(Number(percent));
+      const pct = hasPct ? Number(percent) : 0;
+      const mapped = V2_STAGE_LABELS_KO[stage];
+      if (!mapped) {
+        // Any unmapped/new backend stage → generic Korean. Never leak the raw
+        // English stage key (e.g. "news_item_parallel_started") to the UI.
+        return hasPct ? `검증 중 · ${pct}%` : "검증 중";
+      }
+      return `${mapped} (${pct}%)`;
     }
 
     function v2SetProgressVisible(visible) {

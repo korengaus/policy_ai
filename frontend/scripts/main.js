@@ -5394,7 +5394,7 @@
     const JOB_MAX_POLL_ATTEMPTS = 600;
 
     function describeJobStage(stage, percent) {
-      const label = ({
+      const mapped = ({
         queued: "대기열에 등록됨",
         running: "실행 시작",
         pipeline_started: "검증 파이프라인 실행 중",
@@ -5402,9 +5402,14 @@
         completed: "완료",
         failed: "실패",
         timeout: "시간 초과",
-      })[stage] || stage || "진행 중";
-      const pct = Number.isFinite(Number(percent)) ? Number(percent) : 0;
-      return `${label} (${pct}%)`;
+      })[stage];
+      const hasPct = Number.isFinite(Number(percent));
+      const pct = hasPct ? Number(percent) : 0;
+      if (!mapped) {
+        // Unmapped stage → generic Korean (never leak the raw English key).
+        return hasPct ? `검증 중 · ${pct}%` : "검증 중";
+      }
+      return `${mapped} (${pct}%)`;
     }
 
     // =====================================================================
@@ -5451,9 +5456,15 @@
     };
 
     function v2StageLabel(stage, percent) {
-      const label = V2_STAGE_LABELS_KO[stage] || stage || "진행 중";
-      const pct = Number.isFinite(Number(percent)) ? Number(percent) : 0;
-      return `${label} (${pct}%)`;
+      const hasPct = Number.isFinite(Number(percent));
+      const pct = hasPct ? Number(percent) : 0;
+      const mapped = V2_STAGE_LABELS_KO[stage];
+      if (!mapped) {
+        // Any unmapped/new backend stage → generic Korean. Never leak the raw
+        // English stage key (e.g. "news_item_parallel_started") to the UI.
+        return hasPct ? `검증 중 · ${pct}%` : "검증 중";
+      }
+      return `${mapped} (${pct}%)`;
     }
 
     function v2SetProgressVisible(visible) {
