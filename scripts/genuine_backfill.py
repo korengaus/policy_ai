@@ -267,21 +267,28 @@ def main(argv=None) -> int:
                 new_srs["has_genuine_official_support"] = target
                 pending.append((r["id"], json.dumps(new_srs, ensure_ascii=False)))
                 if len(pending) >= args.batch:
-                    with conn.begin():
-                        for rid, blob in pending:
-                            conn.execute(sa.text(
-                                "UPDATE analysis_results SET source_reliability_summary = :srs WHERE id = :id"
-                            ), {"srs": blob, "id": rid})
+                    # Phase 2b: rely on autobegin + explicit commit; do NOT call
+                    # conn.begin() — the SELECT above already autobegan a transaction
+                    # on this connection (and the Worker Shell's get_engine() fallback
+                    # connection may already be in one), so a nested begin() raised
+                    # InvalidRequestError. commit() on the open tx is the correct op;
+                    # the next execute() autobegins a fresh one (resumable per batch).
+                    for rid, blob in pending:
+                        conn.execute(sa.text(
+                            "UPDATE analysis_results SET source_reliability_summary = :srs WHERE id = :id"
+                        ), {"srs": blob, "id": rid})
+                    conn.commit()
                     updated += len(pending)
                     print(f"    ... committed batch, total updated={updated}")
                     pending = []
 
         if write_mode and pending:
-            with conn.begin():
-                for rid, blob in pending:
-                    conn.execute(sa.text(
-                        "UPDATE analysis_results SET source_reliability_summary = :srs WHERE id = :id"
-                    ), {"srs": blob, "id": rid})
+            # Phase 2b: same autobegin + explicit commit pattern (no nested begin()).
+            for rid, blob in pending:
+                conn.execute(sa.text(
+                    "UPDATE analysis_results SET source_reliability_summary = :srs WHERE id = :id"
+                ), {"srs": blob, "id": rid})
+            conn.commit()
             updated += len(pending)
             print(f"    ... committed final batch, total updated={updated}")
 
