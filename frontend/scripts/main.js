@@ -5459,13 +5459,9 @@
     function v2SetProgressVisible(visible) {
       const wrap = document.getElementById("v2ProgressWrap");
       if (!wrap) return;
-      if (visible) {
-        wrap.hidden = false;
-        wrap.style.display = "";
-      } else {
-        wrap.hidden = true;
-        wrap.style.display = "none";
-      }
+      // The slot is always laid out with a reserved height; toggling only the
+      // .is-active class fades the inner bar+text, so the header never reflows.
+      wrap.classList.toggle("is-active", !!visible);
     }
 
     function v2UpdateProgress(percent, label) {
@@ -5796,7 +5792,11 @@
         return await requestPolicyAnalysisV2({ query, maxNews }, onProgress);
       } catch (v2Error) {
         console.warn("V2 flow failed, falling back to legacy async:", v2Error);
-        v2ResetProgress();
+        // Keep the reserved slim slot visible with a generic label for the
+        // non-SSE fallback paths (legacy polling refines it per poll; sync
+        // keeps this label for its single blocking request).
+        v2SetProgressVisible(true);
+        v2UpdateProgress(0, "검증 중…");
       }
       try {
         return await requestPolicyAnalysisAsync({ query, maxNews }, onProgress);
@@ -5840,10 +5840,13 @@
       renderResults(results);
       renderHistory(safeReadLocalHistory());
       renderReviewQueue(safeReadReviewQueue());
+      // Terminal message lives in the reserved slim slot (not the legacy banner)
+      // so the header height stays identical between running and done — no jump.
+      v2SetProgressVisible(true);
       if (!results.length) {
-        showStatus("검증 가능한 결과를 찾지 못했습니다. 다른 검색어로 다시 시도해 주세요.", true);
+        v2UpdateProgress(100, "검증 가능한 결과를 찾지 못했습니다");
       } else {
-        showStatus("분석 완료", true);
+        v2UpdateProgress(100, "분석 완료");
       }
     }
 
@@ -5856,7 +5859,14 @@
       }
 
       hideError();
-      showStatus("관련 기사와 공식 자료를 수집하고 검증하는 중입니다...");
+      // DESIGN-PROGRESS: progress shows ONLY in the reserved slim-bar slot
+      // (#v2ProgressWrap), never the legacy #statusLine banner — the slot has a
+      // permanent reserved height, so activating it paints without growing the
+      // header. v2ResetProgress() here clears any prior run's terminal message.
+      hideStatus();
+      v2ResetProgress();
+      v2SetProgressVisible(true);
+      v2UpdateProgress(0, "검증 중…");
       setBusy(true);
       selectedResultIndex = null;
       activeTopicKey = "";
@@ -5865,24 +5875,27 @@
         const data = await requestPolicyAnalysis(
           { query, maxNews },
           (statusJson) => {
-            const label = describeJobStage(
-              statusJson?.current_stage,
-              statusJson?.progress_percent,
+            // The V2 (SSE) path updates the slim bar itself with real stage
+            // labels; its wrapper events carry a `kind` string — skip those so
+            // we don't clobber the real-stage label. The legacy polling path
+            // reports {current_stage, progress_percent}; reflect it coarsely in
+            // the same slot.
+            if (statusJson && typeof statusJson.kind === "string") return;
+            v2SetProgressVisible(true);
+            v2UpdateProgress(
+              Number(statusJson?.progress_percent) || 0,
+              describeJobStage(statusJson?.current_stage, statusJson?.progress_percent),
             );
-            showStatus(`검증 작업 진행 중 · ${label}`);
           }
         );
         const renderData = stabilizeAnalysisResponseForRender(data, query, maxNews);
         renderAnalysisResponse(query, maxNews, renderData);
       } catch (error) {
+        v2ResetProgress();
         showError(`분석 실패: ${error.message}`);
         hideStatus();
       } finally {
         setBusy(false);
-        // M15.0c: always hide the progress UI when the analyze run
-        // ends (success, failure, or fallback to sync). The V2 path
-        // shows it; the legacy + sync paths do not.
-        v2ResetProgress();
       }
     }
 

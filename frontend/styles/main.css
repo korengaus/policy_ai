@@ -476,44 +476,55 @@
     }
 
     /*
-     * M15.0c — V2 async progress UI.
-     * Slim progress bar + Korean stage label, shown only when the
-     * V2 (RQ + SSE) analyze path is active. Uses existing design
-     * tokens (--blue, --border, --muted) so it visually matches
-     * the rest of the page.
+     * DESIGN-PROGRESS — slim editorial progress slot.
+     * A thin brand-color bar + one muted status line, bound to the real
+     * V2 SSE stage feed. The slot keeps a permanent reserved height so it
+     * never grows .panel / the header: showing/hiding only fades the inner
+     * bar+text (.is-active), the box height is constant idle vs. active.
+     * Uses existing tokens (--brand, --line, --muted).
      */
     .v2-progress-wrap {
-      margin-top: 14px;
+      margin-top: 6px;
+      min-height: 26px;            /* reserved: 3px bar + gap + one 12px line */
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      justify-content: center;
+      gap: 5px;
     }
 
-    .v2-progress-wrap[hidden] {
-      display: none;
+    /* Idle: the slot stays laid out but its contents are invisible (no
+       layout change vs. active — only opacity differs). */
+    .v2-progress-track,
+    .v2-progress-text {
+      opacity: 0;
+      transition: opacity 0.2s ease-out;
+    }
+
+    .v2-progress-wrap.is-active .v2-progress-track,
+    .v2-progress-wrap.is-active .v2-progress-text {
+      opacity: 1;
     }
 
     .v2-progress-track {
       width: 100%;
-      height: 8px;
-      background: var(--surface-soft);
-      border: 1px solid var(--border);
-      border-radius: 999px;
+      height: 3px;
+      background: var(--line);
+      border-radius: 2px;
       overflow: hidden;
     }
 
     .v2-progress-bar {
       height: 100%;
       width: 0%;
-      background: linear-gradient(90deg, var(--blue), var(--blue-dark));
-      border-radius: 999px;
+      background: var(--brand);
+      border-radius: 2px;
       transition: width 0.3s ease-out;
     }
 
     .v2-progress-text {
       color: var(--muted);
-      font-size: 13px;
-      font-weight: 600;
+      font-size: 12px;
+      font-weight: 400;
     }
 
     .error-box {

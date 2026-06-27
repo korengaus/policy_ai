@@ -79,17 +79,18 @@
         </div>
         <div id="statusLine" class="status-line"></div>
         <!--
-          M15.0c — V2 async progress UI.
-          Hidden by default; shown only when requestPolicyAnalysisV2 is
-          active (RQ + SSE path). The legacy /jobs/analyze polling path
-          and the sync /analyze fallback do NOT touch this element.
+          DESIGN-PROGRESS — slim progress slot (thin bar + one status line).
+          Always laid out with a reserved height so toggling it paints WITHOUT
+          growing .panel / the header (the .is-active class only fades the inner
+          bar+text in/out). Driven by the real V2 SSE stage feed; the legacy
+          /jobs polling + sync /analyze fallbacks reuse the same slot with a
+          generic label. (Was the old M15.0c hidden-toggle UI.)
         -->
         <div
           id="v2ProgressWrap"
           class="v2-progress-wrap"
           role="status"
           aria-live="polite"
-          hidden
         >
           <div class="v2-progress-track" role="progressbar"
                aria-valuemin="0" aria-valuemax="100"
