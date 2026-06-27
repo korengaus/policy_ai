@@ -261,6 +261,10 @@
       margin: 0;
       flex: 1 1 440px;
       max-width: 620px;
+      /* DESIGN-PROGRESS-2: positioned ancestor for the absolute progress
+         overlay (#v2ProgressWrap), which is anchored at this column's bottom
+         edge so it consumes zero flow height — the search box stays centered. */
+      position: relative;
     }
     /* DESIGN-3A4: ONE integrated search bar (mockup option A). The four controls
        fill the single bordered box edge-to-edge (gap:0, borderless children) so
@@ -510,20 +514,26 @@
     }
 
     /*
-     * DESIGN-PROGRESS — slim editorial progress slot.
+     * DESIGN-PROGRESS-2 — slim editorial progress overlay.
      * A thin brand-color bar + one muted status line, bound to the real
-     * V2 SSE stage feed. The slot keeps a permanent reserved height so it
-     * never grows .panel / the header: showing/hiding only fades the inner
-     * bar+text (.is-active), the box height is constant idle vs. active.
+     * V2 SSE stage feed. Absolutely positioned just below the search box
+     * (.controls) so it consumes ZERO flow height: the search box stays
+     * vertically centered in the header (aligned with the brand), and
+     * showing/hiding the bar never grows .panel / shifts the header.
+     * Only the inner bar+text fade in/out (.is-active). pointer-events:none
+     * so the overlay never blocks clicks beneath it.
      * Uses existing tokens (--brand, --line, --muted).
      */
     .v2-progress-wrap {
-      margin-top: 6px;
-      min-height: 26px;            /* reserved: 3px bar + gap + one 12px line */
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      margin-top: 4px;
       display: flex;
       flex-direction: column;
-      justify-content: center;
       gap: 5px;
+      pointer-events: none;
     }
 
     /* Idle: the slot stays laid out but its contents are invisible (no
