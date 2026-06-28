@@ -419,6 +419,11 @@ def _official_verification_summary(
                 "official_mismatch_reasons": [],
                 "top_official_detail_url": fallback_summary.get("top_official_detail_url") or fallback_summary.get("top_source_url") or "",
                 "top_official_detail_title": fallback_summary.get("top_official_detail_title") or fallback_summary.get("top_source_title") or "",
+                # CARD-BOX-INST: provider-lane genuine match (정책브리핑/법제처/FSS) routes
+                # here, not through the crawler `if usable` branch — so the institution
+                # comes from the same genuine match's publisher, surfaced on
+                # fallback_summary. Absent → "" → frontend renders document-only.
+                "top_official_institution": fallback_summary.get("top_official_institution") or "",
                 "official_direct_match_classification": fallback_summary.get("official_direct_match_classification") or "medium_official_contextual_support",
                 "official_direct_match_score": fallback_summary.get("official_direct_match_score") or fallback_summary.get("top_source_reliability_score") or 0,
                 "official_direct_match_reason": fallback_summary.get("official_direct_match_reason") or "",

@@ -385,6 +385,11 @@ def summarize_source_reliability(source_candidates: list[dict]) -> dict:
         "official_mismatch_reasons": [] if official_body_matches else mismatch_reasons,
         "top_official_detail_url": top_official_body_match.get("official_detail_url") or top_official_body_match.get("url") or "",
         "top_official_detail_title": top_official_body_match.get("title") or "",
+        # CARD-BOX-INST: institution for the homepage source box, from the SAME
+        # genuine match as the title above (provider lane carries Korean publisher).
+        # publisher -> source_name -> "" (never fabricated). Read in the elif branch
+        # of _official_verification_summary. NEW-rows-only.
+        "top_official_institution": top_official_body_match.get("publisher") or top_official_body_match.get("source_name") or "",
         "official_direct_match_classification": top_official_body_match.get("official_evidence_classification") or top_official_body_match.get("official_direct_match_classification") or (
             "no_usable_official_detail" if not official_body_matches else ""
         ),
