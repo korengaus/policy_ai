@@ -520,11 +520,26 @@
     }
 
     .status-line {
+      /* HEADER-NUDGE v2: overlay (zero flow space), mirroring #v2ProgressWrap.
+         Absolutely anchored at the bottom edge of the search column
+         (.topbar .panel, position:relative — the same containing block the progress
+         overlay uses) so empty AND filled both consume zero flow height. The empty
+         home keeps its exact pre-HEADER-NUDGE layout (no added gap), and a message
+         just appears in the band between the search box and the divider without
+         moving the search box or the divider. showStatus/hideStatus still toggle
+         inline display:block/none + text (unchanged); with an absolute box neither
+         state shifts surrounding layout. pointer-events:none so the overlay never
+         blocks clicks beneath it (mirrors the progress overlay). */
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      margin-top: 4px;
       display: none;
-      margin-top: 14px;
       color: #334155;
       font-size: 14px;
       font-weight: 700;
+      pointer-events: none;
     }
 
     .status-line.success {
