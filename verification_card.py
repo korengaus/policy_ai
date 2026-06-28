@@ -389,6 +389,10 @@ def _official_verification_summary(
                 "official_mismatch_reasons": [],
                 "top_official_detail_url": top.get("selected_document_url") or top.get("search_url") or "",
                 "top_official_detail_title": top.get("document_title") or top.get("source_name") or "",
+                # CARD-BOX: short institution string for the homepage source box
+                # (NEW-rows-only). Same matched `top` object; source_name only (no
+                # publisher — that lives on source_candidates, dropped from slim).
+                "top_official_institution": top.get("source_name") or "",
                 "official_direct_match_classification": (
                     "strong_official_direct_support"
                     if top.get("evidence_grade") in {"A", "B"} and int(top.get("document_relevance_score") or 0) >= 60
