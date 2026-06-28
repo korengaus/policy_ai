@@ -9,6 +9,14 @@ from official_metadata import (
     name_implies_official,
     official_source_type_from_identity,
 )
+# DISPLAY-ALIGN: reuse the authoritative box-driver predicates so the displayed
+# top_official_body_match matches what made the card genuine (no re-implementation
+# of "strong"/"genuine"). No import cycle: official_evidence_resolution does not
+# import this module.
+from official_evidence_resolution import (
+    PRIMARY_DOCUMENT_STRONG_CLASSIFICATION,
+    extract_primary_document_match,
+)
 from structured_logging import get_logger
 
 
@@ -334,8 +342,24 @@ def summarize_source_reliability(source_candidates: list[dict]) -> dict:
         and source.get("official_body_match")
         and int(source.get("official_evidence_score") or source.get("official_final_direct_match_score") or source.get("official_body_match_score") or 0) >= 55
     ]
+    # DISPLAY-ALIGN: prefer the candidate that DRIVES the box (the same strong/primary
+    # match has_genuine_official_support trusts) so the shown institution+document come
+    # from the real press release — not a merely-eligible (>=55) candidate that happens
+    # to outscore it. A candidate is box-driving if its classification is
+    # strong_official_direct_support OR it is the one extract_primary_document_match
+    # picks (primary-marker strong+>=75). Fall back to the existing >=55 pick when no
+    # such candidate exists. Display-only: never affects box visibility/score/verdict.
+    _primary_match = extract_primary_document_match(candidates)
+    _primary_source_id = (_primary_match or {}).get("source_id") or ""
+    box_driving_matches = [
+        source
+        for source in official_body_matches
+        if (source.get("official_evidence_classification") or source.get("official_direct_match_classification"))
+        == PRIMARY_DOCUMENT_STRONG_CLASSIFICATION
+        or (_primary_source_id and source.get("source_id") == _primary_source_id)
+    ]
     top_official_body_match = max(
-        official_body_matches,
+        box_driving_matches or official_body_matches,
         key=lambda source: (
             int(source.get("official_evidence_score") or source.get("official_final_direct_match_score") or source.get("official_body_match_score") or 0),
             int(source.get("reliability_score") or 0),
