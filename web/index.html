@@ -9600,6 +9600,9 @@
         renderHistory(safeReadLocalHistory());
         return;
       }
+      // HISTORY-BACK: this history-list opener calls loadHistoryRecord directly
+      // (not via openTopicCard), so push the back-entry here too.
+      pushDetailHistoryState(window.scrollY || 0);
       loadHistoryRecord(record, `"${record.query || "분석 기록"}" 기록을 불러왔습니다.`);
     });
     reviewQueueEl.addEventListener("click", (event) => {
@@ -9675,9 +9678,50 @@
         renderHotTopics();
       });
     }
+    // HISTORY-BACK: minimal browser-history layer for the in-page detail view.
+    // The detail view is NOT a view-swap (the #hotTopics/#domainSections feed is
+    // never hidden); opening a detail just fills #results + scrolls to it. Without
+    // a history entry, the browser BACK button leaves the site. This layer pushes
+    // ONE entry when a detail opens (recording the pre-open scroll position) and,
+    // on popstate back, dismisses the detail (renderResults([]) -> #results empty
+    // state + feed re-render) and restores that scroll — keeping the user on the
+    // page. URL is left UNCHANGED (no result_id write) so the ?result_id= deep-link
+    // READ and the operator_tools replaceState are unaffected. State rides in
+    // history.state.tickedinDetail + a module variable (no storage, no libs).
+    let detailHistoryActive = false;
+    let detailReturnScrollY = 0;
+    function pushDetailHistoryState(scrollY) {
+      if (!window.history || !window.history.pushState) return;
+      const alreadyDetail = !!(window.history.state && window.history.state.tickedinDetail);
+      try {
+        if (alreadyDetail) {
+          // Card -> card without going back: keep the ORIGINAL pre-open scroll and
+          // refresh the single detail entry in place (double-push guard — never
+          // stack duplicate detail entries, so ONE back always returns home).
+          window.history.replaceState(
+            { tickedinDetail: true, scrollY: detailReturnScrollY },
+            "", window.location.href
+          );
+        } else {
+          detailReturnScrollY = (typeof scrollY === "number" && isFinite(scrollY))
+            ? scrollY : (window.scrollY || 0);
+          window.history.pushState(
+            { tickedinDetail: true, scrollY: detailReturnScrollY },
+            "", window.location.href
+          );
+        }
+        detailHistoryActive = true;
+      } catch (_) {
+        /* history unavailable — feature degrades, the card still opens */
+      }
+    }
     // DISPLAY-CATEGORY B-1: open a topic card's detail report. Extracted so the
     // #hotTopics feed and the per-domain sections share one click path.
     function openTopicCard(card) {
+      // HISTORY-BACK: push one history entry (with the pre-open scroll) at the
+      // shared card-click choke point so BACK returns here. Captured BEFORE any
+      // loader scrollIntoView fires. Covers all branches (history/server/in-memory).
+      pushDetailHistoryState(window.scrollY || 0);
       const source = card.dataset.topicSource;
       const index = Number(card.dataset.topicIndex || 0);
       activeTopicKey = card.dataset.topicKey || "";
@@ -10987,8 +11031,34 @@
     })();
     const requestedResultId = requestedResultIdFromUrl();
     if (requestedResultId) {
+      // HISTORY-BACK baseline guard: a deep-link detail is the tab's current entry,
+      // so pushing one detail entry on top leaves the load entry below as a "home
+      // base" to land on — BACK clears the detail and shows the feed instead of
+      // exiting to the previous site. (scrollY 0: a deep link loads at the top.)
+      pushDetailHistoryState(0);
       loadServerResultById(requestedResultId);
     }
+    // HISTORY-BACK: on BACK out of a pushed detail entry, dismiss the detail and
+    // restore the pre-open scroll instead of letting the browser leave the site.
+    // Keyed on the tickedinDetail flag; renderResults([]) is the existing clear
+    // primitive (resets #results to empty-state + re-renders the feed). Scroll is
+    // restored on the next frame (mirrors the detail loaders' post-render scroll
+    // timing) so it lands after the DOM settles, not pre-paint. Registered once.
+    window.addEventListener("popstate", (event) => {
+      const navState = event.state;
+      if (navState && navState.tickedinDetail) {
+        // Forward into the detail entry again; keep the flag so a later BACK still
+        // returns home. (Re-rendering the specific detail is out of scope.)
+        detailHistoryActive = true;
+        return;
+      }
+      if (!detailHistoryActive) return;  // not our transition — leave the page alone
+      detailHistoryActive = false;
+      renderResults([]);
+      const targetY = (navState && typeof navState.scrollY === "number")
+        ? navState.scrollY : detailReturnScrollY;
+      requestAnimationFrame(() => { window.scrollTo(0, targetY || 0); });
+    });
     // M9.4 — decide reviewer/admin visibility BEFORE binding the
     // server-review events, so the panel is in its final state when
     // ``serverReviewBindEvents`` runs (it doesn't auto-fetch anyway,
