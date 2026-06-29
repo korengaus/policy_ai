@@ -140,6 +140,8 @@
     const reviewFilterEl = document.getElementById("reviewFilter");
     const selectedIssueIntroEl = document.getElementById("selectedIssueIntro");
     const hotTopicsEl = document.getElementById("hotTopics");
+    // SIDEBAR-RANK: 인기 검증 랭킹 list container in the right sidebar (.home-aside).
+    const rankListEl = document.getElementById("rankList");
     const categoryTabsEl = document.getElementById("categoryTabs");
     const hotTopicsSortEl = document.getElementById("hotTopicsSort");
     const hotTopicsLoadMoreEl = document.getElementById("hotTopicsLoadMore");
@@ -2189,6 +2191,41 @@
           updateTierButtons(tier2LoadMoreEl, tier2CollapseEl, tier2Shown, tier2Pool.length, TIER2_INITIAL);
         }
       }
+
+      // SIDEBAR-RANK: keep the 인기 검증 랭킹 panel in sync with the feed's data
+      // lifecycle. Called here (rather than at the two renderHotTopics() call
+      // sites) so the sidebar always re-renders together with the feed —
+      // including the async post-fetch re-render that first fills the pool.
+      renderSidebarRanking();
+    }
+
+    // SIDEBAR-RANK: 인기 검증 랭킹 (1-10). Reuses the SAME loaded card pool and
+    // the SAME composite "hotness" sort as the feed, but always over the
+    // UNFILTERED, all-domain pool with the LITERAL "뜨는순" — so the panel stays
+    // all-domain top-10 and never empties / re-ranks when a category tab is
+    // clicked or the feed's sort is changed. Rows carry the same four
+    // data-topic-* attrs as feed cards, so the delegated listener below reuses
+    // openTopicCard verbatim (detail open + HISTORY-BACK keep working).
+    function renderSidebarRanking() {
+      if (!rankListEl) return;
+      const ranked = sortTopicCards(currentTopicCards(), "뜨는순").slice(0, 10);
+      if (!ranked.length) {
+        rankListEl.innerHTML = "";
+        return;
+      }
+      rankListEl.innerHTML = ranked.map((card, i) => `
+        <li class="rank-row" data-topic-key="${escapeHtml(card.key)}" data-topic-source="${escapeHtml(card.source)}" data-topic-index="${escapeHtml(card.index)}" data-topic-record-id="${escapeHtml(card.recordId)}">
+          <span class="rank-num">${i + 1}</span>
+          <div class="rank-body">
+            <span class="rank-domain">${escapeHtml(domainDisplayLabel(cardDomainKey(card)))}</span>
+            <span class="rank-title">${escapeHtml(card.title)}</span>
+            <span class="rank-verdict">
+              <span class="verdict-dot" style="background:${verdictDotColor(card.verdictLabel)}"></span>
+              <span class="rank-verdict-text">${escapeHtml(verdictLabelKo(card.verdictLabel))}</span>
+            </span>
+          </div>
+        </li>
+      `).join("");
     }
 
     // Phase 2 M3: project each full result down to only the fields the topic
@@ -6160,6 +6197,16 @@
     }
     if (hotTopicsEl) {
       hotTopicsEl.addEventListener("click", (event) => {
+        const card = event.target.closest("[data-topic-source]");
+        if (!card) return;
+        openTopicCard(card);
+      });
+    }
+    // SIDEBAR-RANK: the 인기 검증 랭킹 rows carry the same data-topic-* attrs as
+    // feed cards, so this delegated listener reuses openTopicCard verbatim — the
+    // same three open branches + pushDetailHistoryState (HISTORY-BACK) fire.
+    if (rankListEl) {
+      rankListEl.addEventListener("click", (event) => {
         const card = event.target.closest("[data-topic-source]");
         if (!card) return;
         openTopicCard(card);

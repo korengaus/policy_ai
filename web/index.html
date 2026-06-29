@@ -1430,6 +1430,98 @@
     .home-aside {
       min-width: 0;
     }
+
+    /* SIDEBAR-RANK: 인기 검증 랭킹 panel — card chrome reusing the shared tokens.
+       All NEW classes; the feed cards are untouched. At <=1120px the .home-shell
+       breakpoint drops .home-aside below the feed and this panel flows full-width
+       (no extra rule needed). */
+    .rank-panel {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--paper);
+      box-shadow: var(--shadow);
+      padding: 14px 16px;
+    }
+    .rank-panel-heading {
+      margin-bottom: 10px;
+    }
+    .rank-panel-heading h2 {
+      margin: 0;
+      color: var(--ink);
+      font-size: 1.231rem;
+      line-height: 1.25;
+      font-weight: 700;
+    }
+    .rank-panel-heading p {
+      margin: 3px 0 0;
+      color: var(--muted);
+      font-size: 0.86rem;
+      line-height: 1.4;
+    }
+    .rank-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .rank-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px 2px;
+      border-top: 1px solid var(--line);
+      cursor: pointer;
+    }
+    .rank-row:first-child {
+      border-top: none;
+    }
+    .rank-row:hover {
+      background: #f7faff;
+    }
+    .rank-num {
+      flex: 0 0 22px;
+      color: var(--brand);
+      font-size: 1.077rem;
+      font-weight: 800;
+      line-height: 1.4;
+      text-align: center;
+    }
+    .rank-body {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    /* mirrors the .card-domain look (small brand-colored domain tag). */
+    .rank-domain {
+      font-size: 0.77rem;
+      font-weight: 800;
+      letter-spacing: 0.01em;
+      color: var(--brand);
+    }
+    /* title clamped to 2 lines, mirroring .topic-card-title. */
+    .rank-title {
+      color: var(--ink);
+      font-size: 0.95rem;
+      line-height: 1.4;
+      font-weight: 600;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .rank-verdict {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.8rem;
+    }
+    .rank-verdict-text {
+      color: var(--slate);
+      font-weight: 600;
+    }
+
     /* DESIGN-3A: feed sort control row (moved out of the dissolved .domain-controls);
        sits at the top of .home-main, right-aligned above the cards. */
     .feed-sort-row {
@@ -3262,7 +3354,19 @@
       </div>
 
       <aside class="home-aside" aria-label="검증 사이드바">
-        <!-- DESIGN-3B: sidebar content (ranking / weekly counts / legend / report) -->
+        <!-- SIDEBAR-RANK: 인기 검증 랭킹 (1-10). #rankList is filled by
+             renderSidebarRanking() from the SAME loaded card pool as the feed
+             (sortTopicCards(currentTopicCards(),"뜨는순").slice(0,10)) — an honest
+             composite-hotness fallback (no view count). Stays all-domain top-10
+             and visible regardless of the active category tab or feed sort.
+             Later DESIGN-3B steps add weekly counts / legend / report-input. -->
+        <section class="rank-panel" aria-label="인기 검증 랭킹">
+          <div class="rank-panel-heading">
+            <h2>인기 검증 랭킹</h2>
+            <p>지금 주목 · 최근 검증 기준</p>
+          </div>
+          <ol id="rankList" class="rank-list"></ol>
+        </section>
       </aside>
     </div>
 
@@ -3754,6 +3858,8 @@
     const reviewFilterEl = document.getElementById("reviewFilter");
     const selectedIssueIntroEl = document.getElementById("selectedIssueIntro");
     const hotTopicsEl = document.getElementById("hotTopics");
+    // SIDEBAR-RANK: 인기 검증 랭킹 list container in the right sidebar (.home-aside).
+    const rankListEl = document.getElementById("rankList");
     const categoryTabsEl = document.getElementById("categoryTabs");
     const hotTopicsSortEl = document.getElementById("hotTopicsSort");
     const hotTopicsLoadMoreEl = document.getElementById("hotTopicsLoadMore");
@@ -5803,6 +5909,41 @@
           updateTierButtons(tier2LoadMoreEl, tier2CollapseEl, tier2Shown, tier2Pool.length, TIER2_INITIAL);
         }
       }
+
+      // SIDEBAR-RANK: keep the 인기 검증 랭킹 panel in sync with the feed's data
+      // lifecycle. Called here (rather than at the two renderHotTopics() call
+      // sites) so the sidebar always re-renders together with the feed —
+      // including the async post-fetch re-render that first fills the pool.
+      renderSidebarRanking();
+    }
+
+    // SIDEBAR-RANK: 인기 검증 랭킹 (1-10). Reuses the SAME loaded card pool and
+    // the SAME composite "hotness" sort as the feed, but always over the
+    // UNFILTERED, all-domain pool with the LITERAL "뜨는순" — so the panel stays
+    // all-domain top-10 and never empties / re-ranks when a category tab is
+    // clicked or the feed's sort is changed. Rows carry the same four
+    // data-topic-* attrs as feed cards, so the delegated listener below reuses
+    // openTopicCard verbatim (detail open + HISTORY-BACK keep working).
+    function renderSidebarRanking() {
+      if (!rankListEl) return;
+      const ranked = sortTopicCards(currentTopicCards(), "뜨는순").slice(0, 10);
+      if (!ranked.length) {
+        rankListEl.innerHTML = "";
+        return;
+      }
+      rankListEl.innerHTML = ranked.map((card, i) => `
+        <li class="rank-row" data-topic-key="${escapeHtml(card.key)}" data-topic-source="${escapeHtml(card.source)}" data-topic-index="${escapeHtml(card.index)}" data-topic-record-id="${escapeHtml(card.recordId)}">
+          <span class="rank-num">${i + 1}</span>
+          <div class="rank-body">
+            <span class="rank-domain">${escapeHtml(domainDisplayLabel(cardDomainKey(card)))}</span>
+            <span class="rank-title">${escapeHtml(card.title)}</span>
+            <span class="rank-verdict">
+              <span class="verdict-dot" style="background:${verdictDotColor(card.verdictLabel)}"></span>
+              <span class="rank-verdict-text">${escapeHtml(verdictLabelKo(card.verdictLabel))}</span>
+            </span>
+          </div>
+        </li>
+      `).join("");
     }
 
     // Phase 2 M3: project each full result down to only the fields the topic
@@ -9774,6 +9915,16 @@
     }
     if (hotTopicsEl) {
       hotTopicsEl.addEventListener("click", (event) => {
+        const card = event.target.closest("[data-topic-source]");
+        if (!card) return;
+        openTopicCard(card);
+      });
+    }
+    // SIDEBAR-RANK: the 인기 검증 랭킹 rows carry the same data-topic-* attrs as
+    // feed cards, so this delegated listener reuses openTopicCard verbatim — the
+    // same three open branches + pushDetailHistoryState (HISTORY-BACK) fire.
+    if (rankListEl) {
+      rankListEl.addEventListener("click", (event) => {
         const card = event.target.closest("[data-topic-source]");
         if (!card) return;
         openTopicCard(card);

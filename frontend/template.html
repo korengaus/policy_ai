@@ -192,7 +192,19 @@
       </div>
 
       <aside class="home-aside" aria-label="검증 사이드바">
-        <!-- DESIGN-3B: sidebar content (ranking / weekly counts / legend / report) -->
+        <!-- SIDEBAR-RANK: 인기 검증 랭킹 (1-10). #rankList is filled by
+             renderSidebarRanking() from the SAME loaded card pool as the feed
+             (sortTopicCards(currentTopicCards(),"뜨는순").slice(0,10)) — an honest
+             composite-hotness fallback (no view count). Stays all-domain top-10
+             and visible regardless of the active category tab or feed sort.
+             Later DESIGN-3B steps add weekly counts / legend / report-input. -->
+        <section class="rank-panel" aria-label="인기 검증 랭킹">
+          <div class="rank-panel-heading">
+            <h2>인기 검증 랭킹</h2>
+            <p>지금 주목 · 최근 검증 기준</p>
+          </div>
+          <ol id="rankList" class="rank-list"></ol>
+        </section>
       </aside>
     </div>
 
