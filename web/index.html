@@ -1728,38 +1728,57 @@
       padding-left: 20px;
     }
 
+    /* DESIGN-C1: the feed is a single-column newspaper-style divider list (was a
+       multi-column auto-fill grid of boxed cards). Cards stack full-width; a
+       hairline rule between them replaces the box chrome. Per-domain multi-column
+       section layouts are a later milestone (C-3). */
     .topic-card-grid {
       display: grid;
-      /* HOME-UI-5: responsive auto-fill — fits 4 cols (~310px each) at the
-         1320px container and self-steps-down to 3 → 2 → 1 as the viewport
-         narrows. The 820px media rule below pins a single column on mobile. */
-      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-      gap: 12px;
+      grid-template-columns: 1fr;
     }
 
+    /* DESIGN-C1: borderless editorial row — the box chrome (border / radius /
+       background / shadow) is removed in favour of a single hairline divider
+       between rows (reusing the existing --line token). Inner layout (flex
+       column + gap), padding, and cursor are kept; padding is retuned to full-
+       width rows (vertical only) so the divider runs edge-to-edge with no boxed
+       inset. The :last-child rule drops the trailing rule. */
     .topic-card {
       display: flex;
       flex-direction: column;
       gap: 10px;
-      /* HOMEPAGE-LAYOUT: card simplified (summary removed) — size to content
-         instead of the old min-height:230px so concise cards aren't empty. */
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: var(--paper);
-      box-shadow: var(--shadow);
-      padding: 14px;
+      border-bottom: 1px solid var(--line);
+      padding: 16px 0;
       cursor: pointer;
     }
 
-    .topic-card:hover {
-      border-color: var(--brand);
-      box-shadow: 0 14px 30px rgba(30, 95, 216, 0.11);
+    .topic-card:last-child {
+      border-bottom: none;
     }
 
+    /* DESIGN-C1: borderless hover cue (the box border/blue-shadow is gone) — a
+       very faint neutral row tint + a brand-colored title, kept subtle. The
+       negative-margin/padding pair lets the tint bleed slightly past the text
+       column without shifting the divider or the content. */
+    .topic-card:hover {
+      background: var(--surface-soft);
+      margin: 0 -12px;
+      padding: 16px 12px;
+    }
+
+    .topic-card:hover .topic-card-title {
+      color: var(--brand-ink);
+    }
+
+    /* DESIGN-C1: borderless open-card marker (replaces the box border+bg+shadow
+       that used to signal "this card is open"). A left accent bar + a faint
+       brand tint clearly identify the selected row without a box. padding-left
+       compensates for the 3px bar so the content does not shift. */
     .topic-card.selected {
-      border-color: var(--brand);
+      border-left: 3px solid var(--brand);
       background: #f7faff;
-      box-shadow: 0 0 0 2px rgba(30, 95, 216, 0.14), var(--shadow);
+      margin: 0 -12px;
+      padding: 16px 12px 16px 9px;
     }
 
     .topic-card-top {
@@ -1894,12 +1913,16 @@
     /* DESIGN-3B-1b: primary-source compare box (genuine cards only). Understated
        editorial box — faint brand tint, single-line truncating source title, a
        typographic letter-avatar (NOT a real logo). Replaces .card-genuine-chip. */
+    /* DESIGN-C1: the 1차 출처 block sat on the card's white bg; once that bg is
+       removed it reads against the page canvas (#f6f8fb), so the near-white
+       #f7faff tint would nearly vanish. Use a solid white fill so it stays a
+       distinct block on the canvas. */
     .card-source-box {
       margin-top: 8px;
       padding: 8px 10px;
       border: 1px solid var(--line);
       border-radius: var(--radius-sm);
-      background: #f7faff;
+      background: var(--paper);
     }
     /* CARD-BOX: compact blue PILL, rendered on the verdict band beside the
        verdict label (no longer a full-width green line). */
