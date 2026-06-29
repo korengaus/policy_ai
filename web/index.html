@@ -3319,6 +3319,102 @@
       color: var(--muted);
     }
 
+    /* DESIGN-C3c: 3-column footer expansion. Left-aligned zones layered over the
+       existing centered base; reuses --line/--muted/--ink/--brand + the header
+       .brand mark. Stacks at <=960px (rule in the shared breakpoint below). */
+    .footer-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 32px;
+      flex-wrap: wrap;
+      text-align: left;
+      margin-bottom: 22px;
+    }
+    .footer-brand-zone {
+      flex: 1 1 280px;
+      min-width: 0;
+    }
+    /* size only — font-family / color / inline-flex come from the shared .brand. */
+    .footer-brand {
+      font-size: 1.4rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+    .footer-desc {
+      margin: 10px 0 0;
+      max-width: 420px;
+      color: var(--muted);
+      font-size: 0.92rem;
+      line-height: 1.6;
+    }
+    .footer-links {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(120px, auto));
+      gap: 28px;
+    }
+    .footer-col {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .footer-col-head {
+      color: var(--ink);
+      font-size: 0.8rem;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+      margin-bottom: 2px;
+    }
+    .footer-col a {
+      color: var(--muted);
+      font-size: 0.92rem;
+      line-height: 1.3;
+      text-decoration: none;
+    }
+    .footer-col a:hover {
+      color: var(--brand-ink);
+    }
+    /* preserved operator/disclaimer lines — quiet, divided from the link zone. */
+    .footer-meta {
+      text-align: left;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.92rem;
+      line-height: 1.65;
+    }
+    .footer-meta p {
+      margin: 2px 0;
+    }
+    .footer-bottom {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      text-align: left;
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+    }
+    .footer-copy {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+    .footer-policy {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+    }
+    .footer-policy a {
+      color: var(--muted);
+      font-size: 0.86rem;
+      text-decoration: none;
+    }
+    .footer-policy a:hover {
+      color: var(--brand-ink);
+    }
+
     .report-error-link {
       margin-top: 10px;
       text-align: center;
@@ -3541,6 +3637,17 @@
          date+title on narrow screens instead of overflowing. */
       .corrections-row {
         flex-wrap: wrap;
+      }
+
+      /* DESIGN-C3c: footer stacks — brand block above, link columns reflow to a
+         2-up grid (then the brand-zone full width); bottom row stacks. */
+      .footer-top {
+        flex-direction: column;
+        gap: 22px;
+      }
+      .footer-links {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 20px;
       }
 
       .evidence-extraction-summary,
@@ -4265,11 +4372,59 @@
       </div>
     </section>
 
+    <!-- DESIGN-C3c: 3-column footer expansion. The four original lines (운영자 /
+         연락처 / © / the AI-draft disclaimer) are PRESERVED verbatim below in
+         .footer-meta + .footer-bottom. Real on-page targets are wired (#methodology,
+         #correctionsSection, mailto); pages that don't exist yet are href="#"
+         placeholders with a title="준비 중" hover (no visible label change). We do
+         NOT adopt the mockup's business-registration / real-name / verify@ fields.
+         Reuses existing tokens + the header brand mark (.logo-tick). -->
     <footer class="site-footer">
-      <p>운영자: tickedin 운영자</p>
-      <p>연락처: <a href="mailto:contact@tickedin.org">contact@tickedin.org</a></p>
-      <p>© 2026 tickedin</p>
-      <p>본 사이트의 분석은 AI가 자동 생성한 초안으로, 사실의 확정적 판단이 아닙니다. 정확성을 보증하지 않으며, 내용에 오류가 있을 경우 contact@tickedin.org로 알려주시면 검토 후 정정합니다.</p>
+      <div class="footer-top">
+        <div class="footer-brand-zone">
+          <div class="footer-brand brand"><img class="logo-tick" src="/web/assets/favicon-180.png" alt="" aria-hidden="true">tickedin</div>
+          <p class="footer-desc">tickedin은 공개된 1차 자료와 공식 출처를 기준으로 뉴스 속 주장을 검증하는 독립 팩트체크 인프라입니다.</p>
+        </div>
+        <nav class="footer-links" aria-label="푸터 링크">
+          <div class="footer-col">
+            <div class="footer-col-head">도메인</div>
+            <a href="#" title="준비 중">부동산</a>
+            <a href="#" title="준비 중">금융</a>
+            <a href="#" title="준비 중">복지</a>
+            <a href="#" title="준비 중">노동</a>
+          </div>
+          <div class="footer-col">
+            <div class="footer-col-head">검증</div>
+            <a href="#methodology">검증 방법론</a>
+            <a href="#correctionsSection">정정·업데이트</a>
+            <a href="#" title="준비 중">등급 안내</a>
+            <a href="#" title="준비 중">이의 제기</a>
+          </div>
+          <div class="footer-col">
+            <div class="footer-col-head">회사</div>
+            <a href="#" title="준비 중">About</a>
+            <a href="mailto:contact@tickedin.org">Contact</a>
+            <a href="#" title="준비 중">News</a>
+            <a href="#" title="준비 중">채용</a>
+          </div>
+        </nav>
+      </div>
+
+      <div class="footer-meta">
+        <p>운영자: tickedin 운영자</p>
+        <p>연락처: <a href="mailto:contact@tickedin.org">contact@tickedin.org</a></p>
+        <p>본 사이트의 분석은 AI가 자동 생성한 초안으로, 사실의 확정적 판단이 아닙니다. 정확성을 보증하지 않으며, 내용에 오류가 있을 경우 contact@tickedin.org로 알려주시면 검토 후 정정합니다.</p>
+      </div>
+
+      <div class="footer-bottom">
+        <p class="footer-copy">© 2026 tickedin. All rights reserved.</p>
+        <nav class="footer-policy" aria-label="정책 링크">
+          <a href="#" title="준비 중">개인정보처리방침</a>
+          <a href="#" title="준비 중">운영원칙</a>
+          <a href="#methodology">검증 방법론</a>
+          <a href="#" title="준비 중">청소년보호정책</a>
+        </nav>
+      </div>
     </footer>
   </div>
 
