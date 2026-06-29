@@ -2111,7 +2111,7 @@
         ? `<span class="card-confidence">신뢰도 ${escapeHtml(card.confidence)}</span>`
         : "";
       return `
-        <article class="topic-card ${selected ? "selected" : ""}" data-topic-key="${escapeHtml(card.key)}" data-topic-source="${escapeHtml(card.source)}" data-topic-index="${escapeHtml(card.index)}" data-topic-record-id="${escapeHtml(card.recordId)}">
+        <article class="topic-card ${opts && opts.hero ? "topic-card--hero " : ""}${selected ? "selected" : ""}" data-topic-key="${escapeHtml(card.key)}" data-topic-source="${escapeHtml(card.source)}" data-topic-index="${escapeHtml(card.index)}" data-topic-record-id="${escapeHtml(card.recordId)}">
           <div class="topic-card-top">
             <span class="card-domain">${escapeHtml(domainDisplayLabel(cardDomainKey(card)))}</span>
             <span class="card-watch ${alertClass(card.alert)}">${escapeHtml(formatAlert(card.alert))}</span>
@@ -2171,11 +2171,26 @@
       const tier1Shown = Math.min(tier1VisibleCount, tier1Total);
       if (!ranked.length) {
         hotTopicsEl.innerHTML = '<div class="empty-state">검색을 실행하거나 최근 분석을 불러오면 검증 카드가 표시됩니다.</div>';
-      } else {
-        hotTopicsEl.innerHTML = ranked
-          .slice(0, tier1Shown)
+      } else if (tier1Shown >= 2) {
+        // DESIGN-C2: editorial top band — card[0] is the hero (larger via the
+        // topic-card--hero modifier), card[1] sits beside it in a 2-column band;
+        // the remaining tier-1 cards continue single-column below. The band lives
+        // inside #hotTopics (same container, same delegated click listener), and
+        // consumes EXACTLY ranked[0]+[1] with the rest as slice(2, tier1Shown), so
+        // updateTierButtons counts stay correct: band(2) + below(tier1Shown-2).
+        const band = `<div class="feed-hero-band">`
+          + renderTopicCardHtml(ranked[0], { detailed: true, hero: true })
+          + renderTopicCardHtml(ranked[1], { detailed: true })
+          + `</div>`;
+        const below = ranked
+          .slice(2, tier1Shown)
           .map((card) => renderTopicCardHtml(card, { detailed: true }))
           .join("");
+        hotTopicsEl.innerHTML = band + below;
+      } else {
+        // DESIGN-C2: <2 fallback — a single tier-1 card renders as the hero alone
+        // (no secondary, no band wrapper needed).
+        hotTopicsEl.innerHTML = renderTopicCardHtml(ranked[0], { detailed: true, hero: true });
       }
       updateTierButtons(hotTopicsLoadMoreEl, hotTopicsCollapseEl, tier1Shown, tier1Total, TIER1_INITIAL);
 

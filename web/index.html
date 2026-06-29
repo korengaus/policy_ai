@@ -1790,6 +1790,52 @@
       padding: 16px 12px 16px 9px;
     }
 
+    /* DESIGN-C2: editorial top band — the hero (left, 1.6fr) + a secondary card
+       (right, 1fr) sit in a 2-column band at the top of #hotTopics. The band is a
+       single row inside the C-1 single-column .topic-card-grid and forms its own
+       2-col grid; the remaining cards flow single-column below it. Its own gap +
+       a bottom margin separate it from the below-list. Stacks to 1col at <=960px
+       (below). The two cards keep their own divider/padding from .topic-card. */
+    .feed-hero-band {
+      display: grid;
+      grid-template-columns: 1.6fr 1fr;
+      gap: 24px;
+      align-items: start;
+      margin-bottom: 4px;
+    }
+    /* The band's two cards drop their bottom divider (the band frames them);
+       the below-list rows keep theirs. */
+    .feed-hero-band > .topic-card {
+      border-bottom: none;
+    }
+
+    /* DESIGN-C2: hero = the SAME card rendered larger (no inner element changed).
+       Only type scale + spacing grow; every badge/tag/verdict/source block stays. */
+    .topic-card--hero {
+      gap: 14px;
+    }
+    .topic-card--hero .topic-card-title {
+      font-size: 1.6rem;
+      line-height: 1.3;
+      -webkit-line-clamp: 3;
+    }
+    .topic-card--hero .topic-card-summary {
+      font-size: 1.02rem;
+      line-height: 1.6;
+      -webkit-line-clamp: 4;
+    }
+    .topic-card--hero .card-source-box {
+      padding: 12px 14px;
+    }
+    .topic-card--hero .card-source-avatar {
+      width: 32px;
+      height: 32px;
+      font-size: 0.9rem;
+    }
+    .topic-card--hero .card-source-label {
+      font-size: 0.9rem;
+    }
+
     .topic-card-top {
       display: flex;
       flex-wrap: wrap;
@@ -3230,6 +3276,7 @@
       .controls,
       .metrics,
       .topic-card-grid,
+      .feed-hero-band,
       .public-source-grid,
       .selected-issue-meta,
       .detail-grid,
@@ -6040,7 +6087,7 @@
         ? `<span class="card-confidence">신뢰도 ${escapeHtml(card.confidence)}</span>`
         : "";
       return `
-        <article class="topic-card ${selected ? "selected" : ""}" data-topic-key="${escapeHtml(card.key)}" data-topic-source="${escapeHtml(card.source)}" data-topic-index="${escapeHtml(card.index)}" data-topic-record-id="${escapeHtml(card.recordId)}">
+        <article class="topic-card ${opts && opts.hero ? "topic-card--hero " : ""}${selected ? "selected" : ""}" data-topic-key="${escapeHtml(card.key)}" data-topic-source="${escapeHtml(card.source)}" data-topic-index="${escapeHtml(card.index)}" data-topic-record-id="${escapeHtml(card.recordId)}">
           <div class="topic-card-top">
             <span class="card-domain">${escapeHtml(domainDisplayLabel(cardDomainKey(card)))}</span>
             <span class="card-watch ${alertClass(card.alert)}">${escapeHtml(formatAlert(card.alert))}</span>
@@ -6100,11 +6147,26 @@
       const tier1Shown = Math.min(tier1VisibleCount, tier1Total);
       if (!ranked.length) {
         hotTopicsEl.innerHTML = '<div class="empty-state">검색을 실행하거나 최근 분석을 불러오면 검증 카드가 표시됩니다.</div>';
-      } else {
-        hotTopicsEl.innerHTML = ranked
-          .slice(0, tier1Shown)
+      } else if (tier1Shown >= 2) {
+        // DESIGN-C2: editorial top band — card[0] is the hero (larger via the
+        // topic-card--hero modifier), card[1] sits beside it in a 2-column band;
+        // the remaining tier-1 cards continue single-column below. The band lives
+        // inside #hotTopics (same container, same delegated click listener), and
+        // consumes EXACTLY ranked[0]+[1] with the rest as slice(2, tier1Shown), so
+        // updateTierButtons counts stay correct: band(2) + below(tier1Shown-2).
+        const band = `<div class="feed-hero-band">`
+          + renderTopicCardHtml(ranked[0], { detailed: true, hero: true })
+          + renderTopicCardHtml(ranked[1], { detailed: true })
+          + `</div>`;
+        const below = ranked
+          .slice(2, tier1Shown)
           .map((card) => renderTopicCardHtml(card, { detailed: true }))
           .join("");
+        hotTopicsEl.innerHTML = band + below;
+      } else {
+        // DESIGN-C2: <2 fallback — a single tier-1 card renders as the hero alone
+        // (no secondary, no band wrapper needed).
+        hotTopicsEl.innerHTML = renderTopicCardHtml(ranked[0], { detailed: true, hero: true });
       }
       updateTierButtons(hotTopicsLoadMoreEl, hotTopicsCollapseEl, tier1Shown, tier1Total, TIER1_INITIAL);
 
