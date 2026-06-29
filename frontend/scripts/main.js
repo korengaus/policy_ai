@@ -2174,34 +2174,38 @@
       const filtered = activeDomain === "전체"
         ? allCards
         : allCards.filter((card) => cardDomainKey(card) === activeDomain);
-      // DESIGN-C3h-1: split the per-tab feed into four parts.
+      // DESIGN-C3h-1c: per-tab feed (every tab, filtered by activeDomain):
       //   hero      = top-2 by 뜨는순 (the band)
-      //   오늘의 검증 = TODAY-verified cards, newest-first, ≤3 — SORT-INDEPENDENT
-      //   지금 인기   = the next-3 by 뜨는순 after the hero (hot[2..5])
-      //   remainder = hot[5..], the 1-col list — the ONLY part the sort dropdown reorders
-      // hero + 인기 + remainder are disjoint slices of the 뜨는순 array; 오늘의 검증 may
-      // overlap them (operator-approved). The 더 보기 paginator governs the remainder only.
+      //   오늘의 검증 = TODAY-verified, newest-first, ≤3 — SORT-INDEPENDENT (unchanged)
+      //   card row  = first 3 of the sort-controlled pool (no header)
+      //   list      = the rest of the pool, 1-col divider list + 더 보기
+      // FIX 최신순: the pool is derived from `filtered` (SERVER order = id-DESC = newest)
+      // MINUS the hero + today cards, THEN sorted by activeSort. "최신순" keeps input
+      // order → true newest-first (the prior bug pre-sorted the pool by 뜨는순, losing
+      // server order). The card row + the list are the SAME poolSorted array, chunked,
+      // so BOTH obey the dropdown. Today cards are excluded from the pool so the card
+      // row never duplicates the 오늘의 검증 row.
       const hot = sortTopicCards(filtered, "뜨는순");
-      const popular3 = hot.slice(2, 5);
       // KST "today" boundary (UTC+9): floor-to-day in KST, expressed back in UTC ms.
-      // created_at is ISO-8601 UTC. Computed once per render; no Intl/tz lib.
       const kstMidnightUtcMs =
         Math.floor((Date.now() + 9 * 3600e3) / 86400e3) * 86400e3 - 9 * 3600e3;
       const todayCards = filtered
         .filter((c) => c.createdAt && Date.parse(c.createdAt) >= kstMidnightUtcMs)
         .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
         .slice(0, 3);
-      const remainderSorted = sortTopicCards(hot.slice(5), activeSort);
-      const remainderTotal = Math.min(REMAINDER_CAP, remainderSorted.length);
-      const remainderShown = Math.min(tier1VisibleCount, remainderTotal);
+      const heroKeys = new Set(hot.slice(0, 2).map((c) => c.key));
+      const todayKeys = new Set(todayCards.map((c) => c.key));
+      const poolBase = filtered.filter((c) => !heroKeys.has(c.key) && !todayKeys.has(c.key));
+      const poolSorted = sortTopicCards(poolBase, activeSort);
+      const cardRow3 = poolSorted.slice(0, 3);
+      const listPool = poolSorted.slice(3);
+      const listTotal = Math.min(REMAINDER_CAP, listPool.length);
+      const listShown = Math.min(tier1VisibleCount, listTotal);
 
-      // A 3-col card row (reuses .latest-checks-row + the current card call verbatim).
-      // Gated on length → "있는 만큼만" (0 cards omits the header + row entirely).
-      const cardRow = (cards, heading, eyebrow) => cards.length
-        ? `<div class="latest-checks-head"><h2>${heading}</h2>`
-          + (eyebrow ? `<span class="latest-checks-eyebrow">${eyebrow}</span>` : "")
-          + `</div>`
-          + `<div class="latest-checks-row">`
+      // 3-col card row, reusing .latest-checks-row + the current card call verbatim.
+      // Gated on length → "있는 만큼만" (0 cards omits the row entirely).
+      const cardGrid = (cards) => cards.length
+        ? `<div class="latest-checks-row">`
           + cards.map((card) => renderTopicCardHtml(card, { detailed: true })).join("")
           + `</div>`
         : "";
@@ -2213,25 +2217,26 @@
           + renderTopicCardHtml(hot[0], { detailed: true, hero: true })
           + renderTopicCardHtml(hot[1], { detailed: true })
           + `</div>`;
-        const todayRow = cardRow(todayCards, "오늘의 검증", "LATEST CHECKS");
-        const popularRow = cardRow(popular3, "지금 인기");
-        const remainderList = remainderSorted
-          .slice(0, remainderShown)
+        // 오늘의 검증 keeps its header; the sort-controlled card row below has NO header.
+        const todayRow = todayCards.length
+          ? `<div class="latest-checks-head"><h2>오늘의 검증</h2><span class="latest-checks-eyebrow">LATEST CHECKS</span></div>`
+            + cardGrid(todayCards)
+          : "";
+        const cardsRow = cardGrid(cardRow3);
+        const listHtml = listPool
+          .slice(0, listShown)
           .map((card) => renderTopicCardHtml(card, { detailed: true }))
           .join("");
-        hotTopicsEl.innerHTML = band + todayRow + popularRow + remainderList;
+        hotTopicsEl.innerHTML = band + todayRow + cardsRow + listHtml;
       } else {
         // <2 fallback — a single card renders as the hero alone (no band/rows).
         hotTopicsEl.innerHTML = renderTopicCardHtml(hot[0], { detailed: true, hero: true });
       }
-      // 더 보기 now reflects the REMAINDER list only (hero + the two card rows are NOT
-      // counted). shown/total = remainder window.
-      updateTierButtons(hotTopicsLoadMoreEl, hotTopicsCollapseEl, remainderShown, remainderTotal, TIER1_INITIAL);
+      // 더 보기 reflects the LIST chunk only (hero + 오늘의 검증 + the card row are NOT counted).
+      updateTierButtons(hotTopicsLoadMoreEl, hotTopicsCollapseEl, listShown, listTotal, TIER1_INITIAL);
 
-      // TIER 2 — the remainder overflow beyond the visible-window cap. Under the
-      // default 뜨는순 sort this equals the old ranked.slice(12), so 나머지 뉴스 keeps
-      // its boundary; with another sort it follows the remainder's ordering.
-      const tier2Pool = remainderSorted.slice(REMAINDER_CAP);
+      // TIER 2 — the pool overflow beyond the card row (3) + the list-window cap.
+      const tier2Pool = poolSorted.slice(3 + REMAINDER_CAP);
       if (tier2SectionEl) {
         if (!tier2Pool.length) {
           tier2SectionEl.hidden = true;

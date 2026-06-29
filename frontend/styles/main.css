@@ -1430,6 +1430,17 @@
       border-color: var(--brand);
     }
 
+    /* DESIGN-C3h-1c: feed sort control relocated above the feed (out of the tab
+       row), right-aligned next to the sortable list it governs. */
+    .feed-sort-row {
+      display: flex;
+      justify-content: flex-end;
+      margin: 4px 0 8px;
+    }
+    .feed-sort-row .hot-topics-sort {
+      margin: 0;
+    }
+
     .hot-topics-load-more-wrap {
       display: flex;
       justify-content: center;
