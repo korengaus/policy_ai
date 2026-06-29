@@ -1435,12 +1435,15 @@
        All NEW classes; the feed cards are untouched. At <=1120px the .home-shell
        breakpoint drops .home-aside below the feed and this panel flows full-width
        (no extra rule needed). */
+    /* DESIGN-C1b: borderless ranking, consistent with the now-borderless feed.
+       The box chrome (border/radius/bg/shadow) is dropped; a single dark leading
+       rule sits above the heading (border-top on the panel — the heading is its
+       first child — reusing --rule-strong). Vertical-only padding lets the list
+       run full-width in the sidebar column; the .rank-row dividers (below) keep
+       the list legible without a box. */
     .rank-panel {
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: var(--paper);
-      box-shadow: var(--shadow);
-      padding: 14px 16px;
+      border-top: 1px solid var(--rule-strong);
+      padding: 12px 0 2px;
     }
     .rank-panel-heading {
       margin-bottom: 10px;
@@ -1477,7 +1480,9 @@
       border-top: none;
     }
     .rank-row:hover {
-      background: #f7faff;
+      /* DESIGN-C1b: parity with the feed hover — the panel's white bg is gone, so
+         a neutral --surface-soft tint stays visible against the page canvas. */
+      background: var(--surface-soft);
     }
     .rank-num {
       flex: 0 0 22px;
@@ -1527,15 +1532,19 @@
        consistent stack. New classes only; feed cards + .rank-panel untouched.
        At <=1120px the .home-shell breakpoint drops .home-aside below the feed and
        these flow full-width — no extra rule. */
+    /* DESIGN-C1b: softened to light flat grouped blocks (NOT borderless — they
+       must read as discrete blocks). The 1px var(--line) border is KEPT for that
+       discreteness; the heavy card shadow is dropped, the bg flattened to the
+       near-flat --surface-soft tint, the radius reduced, and the margin widened —
+       lighter than the old card box, consistent with the borderless feed/ranking. */
     .stat-panel,
     .legend-panel,
     .report-panel {
       border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: var(--paper);
-      box-shadow: var(--shadow);
+      border-radius: var(--radius-sm);
+      background: var(--surface-soft);
       padding: 14px 16px;
-      margin-top: 14px;
+      margin-top: 18px;
     }
 
     /* 이번 주 검증 현황 — three big numbers (conceptually like .metric-value). */
