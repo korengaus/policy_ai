@@ -104,8 +104,11 @@
          Side (22px) + bottom (36px) unchanged.
          DESIGN-C2d: trimmed 10px → 6px so the top band matches the ~9px bottom gap
          even more closely (the utility-bar's own 5px top padding sits inside its
-         box). Only padding-top changed; side/bottom unchanged. */
-      padding: 6px 22px 36px;
+         box). Only padding-top changed; side/bottom unchanged.
+         DESIGN-C3e FIX 2: trimmed 6px → 2px to lift the whole header/logo a touch
+         higher (operator request). Surgical top-spacing only — NOT the html
+         font-size / zoom master lever. Side (22px) + bottom (36px) unchanged. */
+      padding: 2px 22px 36px;
       /* DESIGN-3A4: the former whole-page zoom:0.8 was REMOVED — fractional CSS
          zoom rendered all text below 1.0 and caused site-wide sub-pixel blur.
          Without it, px+rem scale uniformly to ~125% and text is crisp. Do NOT
@@ -1440,6 +1443,28 @@
       margin: 16px 0 0;
     }
 
+    /* DESIGN-C3e FIX 4: unify all four 더 보기/접기 buttons — #hotTopicsLoadMore,
+       #hotTopicsCollapse, #tier2LoadMore, #tier2Collapse all share
+       .hot-topics-load-more — into ONE light bordered brand style, overriding the
+       heavy .secondary navy pill (and the base button min-height/weight). Centered,
+       content-width (the wrap centers them). Hover uses the existing brand wash
+       (rgba of --brand #1e5fd8, the same tint family as .card-source-head). */
+    .hot-topics-load-more {
+      min-height: 0;
+      background: var(--paper);
+      color: var(--brand);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      padding: 7px 16px;
+      font-size: 0.92rem;
+      font-weight: 600;
+    }
+    .hot-topics-load-more:hover:not(:disabled) {
+      background: rgba(30, 95, 216, 0.06);
+      color: var(--brand-ink);
+      border-color: var(--brand);
+    }
+
     /* DESIGN-3A: 2-column home body. LEFT = feed (.home-main); RIGHT = ~300px
        sidebar (.home-aside, empty placeholder until DESIGN-3B). minmax(0,1fr) on
        the content column keeps the inner .topic-card-grid from blowing the track
@@ -1511,6 +1536,12 @@
       /* DESIGN-C1b: parity with the feed hover — the panel's white bg is gone, so
          a neutral --surface-soft tint stays visible against the page canvas. */
       background: var(--surface-soft);
+    }
+    /* DESIGN-C3e FIX 3: the rank-row title turns brand-blue on hover, matching the
+       feed card titles (.topic-card:hover .topic-card-title → --brand-ink). Same
+       token; the row is already clickable + cursor:pointer. */
+    .rank-row:hover .rank-title {
+      color: var(--brand-ink);
     }
     .rank-num {
       flex: 0 0 22px;
@@ -2092,6 +2123,25 @@
        single-column rest below keeps its dividers. */
     .latest-checks-row > .topic-card {
       border-bottom: none;
+    }
+    /* DESIGN-C3e FIX 1: thin grey vertical rule BETWEEN the row cards (mirrors the
+       hero-band divider technique/token: border-left var(--line) + padding-left).
+       The `+ .topic-card` adjacency means only the 2nd/3rd cards get the rule — the
+       first card never has a left border, so 1–2 cards still look correct. Nulled
+       at <=960px (below) when the row stacks to one column. */
+    .latest-checks-row > .topic-card + .topic-card {
+      border-left: 1px solid var(--line);
+      padding-left: 12px;
+    }
+    /* mirror C-2d: neutralize the .topic-card:hover bleed inside the grid row so
+       the cards don't shift / the divider stays put; the 2nd/3rd re-assert their
+       12px divider padding on hover. (tint inherits from .topic-card:hover.) */
+    .latest-checks-row > .topic-card:hover {
+      margin: 0;
+      padding: 16px 0;
+    }
+    .latest-checks-row > .topic-card + .topic-card:hover {
+      padding-left: 12px;
     }
 
     .topic-card-top {
@@ -3652,6 +3702,13 @@
          secondary vertical rule (it would become a stray left border on the
          stacked secondary card). */
       .feed-hero-band > .topic-card:nth-child(2) {
+        border-left: none;
+        padding-left: 0;
+      }
+
+      /* DESIGN-C3e FIX 1: the 오늘의 검증 row is single-column here, so drop the
+         between-card vertical rule (it would be a stray left border on stacked cards). */
+      .latest-checks-row > .topic-card + .topic-card {
         border-left: none;
         padding-left: 0;
       }
