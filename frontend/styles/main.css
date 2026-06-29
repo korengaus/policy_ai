@@ -64,7 +64,11 @@
          like the mockup (margin:0 auto keeps it centered). */
       max-width: 1280px;
       margin: 0 auto;
-      padding: 24px 22px 36px;
+      /* DESIGN-C2b: top padding 24px → 10px so the empty band above the utility
+         bar matches the ~9px gap below it (utility-bar padding-bottom, down to the
+         dotted rule) — symmetric, raising the whole header toward the mockup line.
+         Side (22px) + bottom (36px) unchanged. */
+      padding: 10px 22px 36px;
       /* DESIGN-3A4: the former whole-page zoom:0.8 was REMOVED — fractional CSS
          zoom rendered all text below 1.0 and caused site-wide sub-pixel blur.
          Without it, px+rem scale uniformly to ~125% and text is crisp. Do NOT
@@ -261,19 +265,21 @@
       background: var(--paper);
     }
     /* 검색어 input cell grows; 뉴스개수 cell compact with a thin internal divider. */
+    /* DESIGN-C2b: cell vertical padding trimmed 4px → 2px (header tightening —
+       a modestly more compact search box; the input stays comfortably tappable). */
     .topbar .panel .controls > div:first-child {
       flex: 1 1 200px;
       display: flex;
       flex-direction: column;
       justify-content: center;
-      padding: 4px 12px;
+      padding: 2px 12px;
     }
     .topbar .panel .controls > div:nth-child(2) {
       flex: 0 0 72px;
       display: flex;
       flex-direction: column;
       justify-content: center;
-      padding: 4px 8px;
+      padding: 2px 8px;
       border-left: 1px solid var(--line);
     }
     /* De-emphasize the inline labels (the placeholder carries the cue); kept in
@@ -286,7 +292,8 @@
     }
     /* Borderless inner inputs — the outer box is the only frame. */
     .topbar .panel input {
-      min-height: 30px;
+      /* DESIGN-C2b: min-height 30px → 26px (modest search-box shrink). */
+      min-height: 26px;
       font-size: 1rem;
       border: none;
       border-radius: 0;
@@ -341,8 +348,10 @@
 
     .title-block h1 {
       margin: 0;
-      /* DESIGN-3A2: larger/heavier brand wordmark to match the mockup. */
-      font-size: clamp(2.0rem, 3.2vw, 2.6rem);
+      /* DESIGN-3A2: larger/heavier brand wordmark to match the mockup.
+         DESIGN-C2b: clamp max trimmed 2.6rem → 2.25rem so the brand reads a touch
+         smaller (header tightening), without changing the html master font-size. */
+      font-size: clamp(2.0rem, 3.2vw, 2.25rem);
       line-height: 1.15;
       letter-spacing: -0.02em;
       font-weight: 800;
@@ -1774,6 +1783,14 @@
     .feed-hero-band > .topic-card {
       border-bottom: none;
     }
+    /* DESIGN-C2b: thin grey newspaper rule between the hero (left) and the
+       secondary card (right). Reuses --rule (#9ca3af); the existing 24px gap +
+       this padding-left keep the secondary's text off the rule. Nulled at <=960px
+       (below) when the band stacks, so no stray border on the stacked card. */
+    .feed-hero-band > .topic-card:nth-child(2) {
+      border-left: 1px solid var(--rule);
+      padding-left: 24px;
+    }
 
     /* DESIGN-C2: hero = the SAME card rendered larger (no inner element changed).
        Only type scale + spacing grow; every badge/tag/verdict/source block stays. */
@@ -1781,12 +1798,16 @@
       gap: 14px;
     }
     .topic-card--hero .topic-card-title {
-      font-size: 1.6rem;
-      line-height: 1.3;
+      /* DESIGN-C2b: enlarged so the hero leads the page like the mockup (was
+         1.6rem ≈ 20.8px → 2.4rem ≈ 31px). Normal card titles stay 1.077rem so the
+         hierarchy gap widens. */
+      font-size: 2.4rem;
+      line-height: 1.2;
       -webkit-line-clamp: 3;
     }
     .topic-card--hero .topic-card-summary {
-      font-size: 1.02rem;
+      /* DESIGN-C2b: 1.02rem → 1.2rem to match the larger hero headline. */
+      font-size: 1.2rem;
       line-height: 1.6;
       -webkit-line-clamp: 4;
     }
@@ -3256,6 +3277,14 @@
       .verification-intro,
       .verification-grid {
         grid-template-columns: 1fr;
+      }
+
+      /* DESIGN-C2b: the band has stacked to one column here, so drop the hero|
+         secondary vertical rule (it would become a stray left border on the
+         stacked secondary card). */
+      .feed-hero-band > .topic-card:nth-child(2) {
+        border-left: none;
+        padding-left: 0;
       }
 
       .normalized-grid {
