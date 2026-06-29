@@ -187,6 +187,12 @@
     const TIER1_STEP = 6;
     const TIER2_INITIAL = 12;
     const TIER2_STEP = 12;
+    // DESIGN-C3h-1: the feed now pulls hero(2) + 인기(3) = 5 cards OUT of the hot
+    // ranking into their own band/rows, so the 1-col "remainder" list governs the
+    // 더 보기 paginator. REMAINDER_CAP = TIER1_CAP - 5 keeps the 나머지 뉴스 boundary
+    // exactly where it was (old ranked[12]) under the default 뜨는순 sort.
+    // tier1VisibleCount is reused as the remainder visible count (initial 5, +6, cap 7).
+    const REMAINDER_CAP = TIER1_CAP - 5;
     let tier1VisibleCount = TIER1_INITIAL;
     let tier2VisibleCount = TIER2_INITIAL;
     let activeTopicKey = "";
@@ -1981,6 +1987,10 @@
         officialDetailTitle: officialDetailTitle,
         officialDetailInstitution: officialDetailInstitution,
         hashtags: deriveCardHashtags(result),
+        // DESIGN-C3h-1: ISO-8601 UTC analysis timestamp (from the slim payload),
+        // used only for the client-side KST-"today" filter of the 오늘의 검증 row.
+        // Plain object field — does NOT change card HTML.
+        createdAt: result?.created_at ?? record?.created_at ?? record?.analyzed_at ?? null,
       };
     }
 
@@ -2164,56 +2174,64 @@
       const filtered = activeDomain === "전체"
         ? allCards
         : allCards.filter((card) => cardDomainKey(card) === activeDomain);
-      const ranked = sortTopicCards(filtered, activeSort);
+      // DESIGN-C3h-1: split the per-tab feed into four parts.
+      //   hero      = top-2 by 뜨는순 (the band)
+      //   오늘의 검증 = TODAY-verified cards, newest-first, ≤3 — SORT-INDEPENDENT
+      //   지금 인기   = the next-3 by 뜨는순 after the hero (hot[2..5])
+      //   remainder = hot[5..], the 1-col list — the ONLY part the sort dropdown reorders
+      // hero + 인기 + remainder are disjoint slices of the 뜨는순 array; 오늘의 검증 may
+      // overlap them (operator-approved). The 더 보기 paginator governs the remainder only.
+      const hot = sortTopicCards(filtered, "뜨는순");
+      const popular3 = hot.slice(2, 5);
+      // KST "today" boundary (UTC+9): floor-to-day in KST, expressed back in UTC ms.
+      // created_at is ISO-8601 UTC. Computed once per render; no Intl/tz lib.
+      const kstMidnightUtcMs =
+        Math.floor((Date.now() + 9 * 3600e3) / 86400e3) * 86400e3 - 9 * 3600e3;
+      const todayCards = filtered
+        .filter((c) => c.createdAt && Date.parse(c.createdAt) >= kstMidnightUtcMs)
+        .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+        .slice(0, 3);
+      const remainderSorted = sortTopicCards(hot.slice(5), activeSort);
+      const remainderTotal = Math.min(REMAINDER_CAP, remainderSorted.length);
+      const remainderShown = Math.min(tier1VisibleCount, remainderTotal);
 
-      // TIER 1 — top-ranked, full-detail. Bounded by TIER1_CAP (12).
-      const tier1Total = Math.min(TIER1_CAP, ranked.length);
-      const tier1Shown = Math.min(tier1VisibleCount, tier1Total);
-      if (!ranked.length) {
+      // A 3-col card row (reuses .latest-checks-row + the current card call verbatim).
+      // Gated on length → "있는 만큼만" (0 cards omits the header + row entirely).
+      const cardRow = (cards, heading, eyebrow) => cards.length
+        ? `<div class="latest-checks-head"><h2>${heading}</h2>`
+          + (eyebrow ? `<span class="latest-checks-eyebrow">${eyebrow}</span>` : "")
+          + `</div>`
+          + `<div class="latest-checks-row">`
+          + cards.map((card) => renderTopicCardHtml(card, { detailed: true })).join("")
+          + `</div>`
+        : "";
+
+      if (!hot.length) {
         hotTopicsEl.innerHTML = '<div class="empty-state">검색을 실행하거나 최근 분석을 불러오면 검증 카드가 표시됩니다.</div>';
-      } else if (tier1Shown >= 2) {
-        // DESIGN-C2: editorial top band — card[0] is the hero (larger via the
-        // topic-card--hero modifier), card[1] sits beside it in a 2-column band;
-        // the remaining tier-1 cards continue single-column below. The band lives
-        // inside #hotTopics (same container, same delegated click listener), and
-        // consumes EXACTLY ranked[0]+[1] with the rest as slice(2, tier1Shown), so
-        // updateTierButtons counts stay correct: band(2) + below(tier1Shown-2).
+      } else if (hot.length >= 2) {
         const band = `<div class="feed-hero-band">`
-          + renderTopicCardHtml(ranked[0], { detailed: true, hero: true })
-          + renderTopicCardHtml(ranked[1], { detailed: true })
+          + renderTopicCardHtml(hot[0], { detailed: true, hero: true })
+          + renderTopicCardHtml(hot[1], { detailed: true })
           + `</div>`;
-        // DESIGN-C3d (Option B): re-chunk the post-hero list — the first ≤3 cards
-        // form the "오늘의 검증" 3-col row, the rest continue single-column. Same
-        // indices/cards/total as the old slice(2, tier1Shown), same
-        // renderTopicCardHtml(card,{detailed:true}) call, so tier1Shown / 더 보기
-        // counts / tier-2 pool are untouched. The row+header render only when there
-        // is at least one card (honest "있는 만큼만"; the grid renders 1–3 cells, no
-        // placeholder padding).
-        const headEnd = Math.min(5, tier1Shown);
-        const headCards = ranked.slice(2, headEnd);
-        const restCards = ranked.slice(headEnd, tier1Shown);
-        const latestRow = headCards.length
-          ? `<div class="latest-checks-head">`
-            + `<h2>오늘의 검증</h2><span class="latest-checks-eyebrow">LATEST CHECKS</span>`
-            + `</div>`
-            + `<div class="latest-checks-row">`
-            + headCards.map((card) => renderTopicCardHtml(card, { detailed: true })).join("")
-            + `</div>`
-          : "";
-        const rest = restCards
+        const todayRow = cardRow(todayCards, "오늘의 검증", "LATEST CHECKS");
+        const popularRow = cardRow(popular3, "지금 인기");
+        const remainderList = remainderSorted
+          .slice(0, remainderShown)
           .map((card) => renderTopicCardHtml(card, { detailed: true }))
           .join("");
-        hotTopicsEl.innerHTML = band + latestRow + rest;
+        hotTopicsEl.innerHTML = band + todayRow + popularRow + remainderList;
       } else {
-        // DESIGN-C2: <2 fallback — a single tier-1 card renders as the hero alone
-        // (no secondary, no band wrapper needed).
-        hotTopicsEl.innerHTML = renderTopicCardHtml(ranked[0], { detailed: true, hero: true });
+        // <2 fallback — a single card renders as the hero alone (no band/rows).
+        hotTopicsEl.innerHTML = renderTopicCardHtml(hot[0], { detailed: true, hero: true });
       }
-      updateTierButtons(hotTopicsLoadMoreEl, hotTopicsCollapseEl, tier1Shown, tier1Total, TIER1_INITIAL);
+      // 더 보기 now reflects the REMAINDER list only (hero + the two card rows are NOT
+      // counted). shown/total = remainder window.
+      updateTierButtons(hotTopicsLoadMoreEl, hotTopicsCollapseEl, remainderShown, remainderTotal, TIER1_INITIAL);
 
-      // TIER 2 — ranks beyond the tier-1 cut, concise. Hidden entirely when the
-      // pool has nothing past TIER1_CAP (small/live-search pools degrade cleanly).
-      const tier2Pool = ranked.slice(TIER1_CAP);
+      // TIER 2 — the remainder overflow beyond the visible-window cap. Under the
+      // default 뜨는순 sort this equals the old ranked.slice(12), so 나머지 뉴스 keeps
+      // its boundary; with another sort it follows the remainder's ordering.
+      const tier2Pool = remainderSorted.slice(REMAINDER_CAP);
       if (tier2SectionEl) {
         if (!tier2Pool.length) {
           tier2SectionEl.hidden = true;
@@ -3309,6 +3327,10 @@
         // category tabs/sections. GET /history selects the whole row, so
         // safeRow.domain is present; default null when absent.
         domain: safeRow.domain ?? null,
+        // DESIGN-C3h-1: carry the analysis timestamp (ISO-8601 UTC; already in the
+        // slim /history payload) so the homepage can compute a client-side
+        // KST-"today" filter for the 오늘의 검증 row. Display-only; not a verdict field.
+        created_at: safeRow.created_at ?? null,
       };
     }
 
@@ -6156,10 +6178,11 @@
         renderHotTopics();
       });
     }
-    // HOMEPAGE-TIERED: tier-1 더보기 (+6, capped at TIER1_CAP) / 접기 (→6).
+    // DESIGN-C3h-1: 더보기 (+6) for the REMAINDER list, capped at REMAINDER_CAP
+    // (was TIER1_CAP — the remainder is what this paginator now governs) / 접기 (→initial).
     if (hotTopicsLoadMoreEl) {
       hotTopicsLoadMoreEl.addEventListener("click", () => {
-        tier1VisibleCount = Math.min(tier1VisibleCount + TIER1_STEP, TIER1_CAP);
+        tier1VisibleCount = Math.min(tier1VisibleCount + TIER1_STEP, REMAINDER_CAP);
         renderHotTopics();
       });
     }
