@@ -1468,10 +1468,21 @@
 
     /* DESIGN-C3h-1c: feed sort control relocated above the feed (out of the tab
        row), right-aligned next to the sortable list it governs. */
+    /* DESIGN-C3h-1e: seat the sort dropdown just above the grey rule that tops the
+       sorted card section, with a clear gap from the hero above — so it reads as
+       controlling the cards BELOW, not the hero. Big top margin (gap from hero),
+       no bottom margin; the adjacent feed section drops its top margin and the
+       card-row's first divider sits ~8px below the dropdown. */
     .feed-sort-row {
       display: flex;
       justify-content: flex-end;
-      margin: 4px 0 8px;
+      margin: 22px 0 0;
+    }
+    .feed-sort-row + .news-home-section {
+      margin-top: 0;
+    }
+    #hotTopics > .feed-sec-ruled:first-child {
+      margin-top: 8px;
     }
     .feed-sort-row .hot-topics-sort {
       margin: 0;
@@ -3490,9 +3501,13 @@
       flex: 1 1 280px;
       min-width: 0;
     }
-    /* size only — font-family / color / inline-flex come from the shared .brand. */
+    /* size only — font-family / color / inline-flex come from the shared .brand.
+       DESIGN-C3h-1e: enlarged 1.4rem → 1.9rem (~0.84× the header brand's 2.25rem
+       clamp-max) so the footer wordmark reads substantial — slightly smaller than
+       the header per footer convention. The .logo-tick mark is em-sized, so it
+       scales with the wordmark and stays aligned. */
     .footer-brand {
-      font-size: 1.4rem;
+      font-size: 1.9rem;
       font-weight: 800;
       letter-spacing: -0.02em;
     }
