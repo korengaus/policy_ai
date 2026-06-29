@@ -27,11 +27,13 @@
   <!-- VISUAL-REDESIGN: Pretendard (Korean-first web font) via CDN. -->
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-  <!-- DESIGN-3A3: Noto Serif KR for HEADLINE text only (brand wordmark, news
-       card titles, section titles). Body/UI stays Pretendard sans. -->
+  <!-- DESIGN-C3f: Nanum Myeongjo (명조 serif) for HEADLINE text only (brand
+       wordmark, hero/card titles, section + feed/sidebar headings). Replaces the
+       former Noto Serif KR load. Body/UI stays Pretendard sans. Weights 700;800
+       cover all heading weights in use. -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@600;700&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nanum+Myeongjo:wght@700;800&display=swap">
   <style>
     :root {
       /* VISUAL-REDESIGN "Verification Stamp" tokens — single source of truth.
@@ -436,14 +438,23 @@
       color: var(--ink);
     }
 
-    /* DESIGN-3A3: Korean SERIF (Noto Serif KR) for HEADLINE text ONLY — the brand
-       wordmark, news card titles, and feed section titles. Scoped to these three
-       selectors so it never leaks into body, summaries, badges, tabs, buttons,
-       .history-title, or the detail report (all stay Pretendard sans). */
+    /* DESIGN-3A3 / DESIGN-C3f: Korean SERIF (Nanum Myeongjo, 명조) for HEADLINE
+       text ONLY — the brand wordmark, hero/card titles, and ALL section/feed/
+       sidebar headings. Scoped to these selectors so it never leaks into body,
+       summaries, badges, tabs, buttons, eyebrows (LATEST CHECKS), grades,
+       .history-title, or the detail report (all stay Pretendard sans).
+       DESIGN-C3f: the newer C3 headings (.verify-how-head/.corrections-head/
+       .latest-checks-head h2 + the sidebar .rank-panel-heading h2) joined the
+       group so every heading matches. Fallback chain degrades gracefully to a
+       system Korean face then a generic serif if Nanum Myeongjo fails to load. */
     .brand,
     .topic-card-title,
-    .section-heading h2 {
-      font-family: 'Noto Serif KR', 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', system-ui, serif;
+    .section-heading h2,
+    .verify-how-head h2,
+    .corrections-head h2,
+    .latest-checks-head h2,
+    .rank-panel-heading h2 {
+      font-family: 'Nanum Myeongjo', 'Apple SD Gothic Neo', 'Pretendard', serif;
     }
 
     /* HOME-UI-3: header mark is the literal favicon image (pixel-identical to
