@@ -1663,6 +1663,72 @@
       margin: 10px 0;
     }
 
+    /* DESIGN-C3a: static "이렇게 검증합니다" 01/02/03 method strip. A quiet soft
+       panel (--surface-soft) sitting in the feed between the cards and "나머지 뉴스".
+       All existing tokens; no new color/font. 3 columns → 1 column at <=960px
+       (the shared breakpoint below adds .verify-how-steps to its 1fr group). */
+    .verify-how {
+      margin: 18px 0;
+      padding: 18px 20px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: var(--surface-soft);
+    }
+    .verify-how-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+    .verify-how-head h2 {
+      margin: 0;
+      color: var(--ink);
+      font-size: 1.231rem;
+      line-height: 1.25;
+      font-weight: 700;
+    }
+    .verify-how-link {
+      color: var(--muted);
+      font-size: 0.86rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .verify-how-link:hover {
+      color: var(--brand-ink);
+    }
+    .verify-how-steps {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+    .verify-how-step {
+      min-width: 0;
+    }
+    /* Large, light brand-blue accent number (reads as a section accent, not a
+       feed item) — consistent with the mockup's 01/02/03. */
+    .verify-how-num {
+      color: var(--brand);
+      font-size: 1.846rem;
+      font-weight: 400;
+      line-height: 1.1;
+      margin-bottom: 6px;
+    }
+    .verify-how-title {
+      margin: 0 0 4px;
+      color: var(--ink);
+      font-size: 1rem;
+      line-height: 1.35;
+      font-weight: 700;
+    }
+    .verify-how-desc {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.86rem;
+      line-height: 1.55;
+    }
+
     .section-heading {
       display: flex;
       align-items: flex-end;
@@ -3343,6 +3409,7 @@
       .metrics,
       .topic-card-grid,
       .feed-hero-band,
+      .verify-how-steps,
       .public-source-grid,
       .selected-issue-meta,
       .detail-grid,
@@ -3581,6 +3648,34 @@
           <div class="hot-topics-load-more-wrap">
             <button id="hotTopicsLoadMore" class="secondary hot-topics-load-more" type="button" hidden>더 보기</button>
             <button id="hotTopicsCollapse" class="secondary hot-topics-load-more" type="button" hidden>접기</button>
+          </div>
+        </section>
+
+        <!-- DESIGN-C3a: static "이렇게 검증합니다" 01/02/03 method strip — display-only,
+             no data, no JS. Sits between the feed and "나머지 뉴스". The right link is a
+             same-page jump to the existing long explainer section. Reuses existing
+             tokens (--surface-soft / --brand / --line / --muted / --radius-sm). -->
+        <section id="verifyHowSection" class="verify-how" aria-label="이렇게 검증합니다">
+          <div class="verify-how-head">
+            <h2>이렇게 검증합니다</h2>
+            <a class="verify-how-link" href="#methodology">검증 방법론 전체 →</a>
+          </div>
+          <div class="verify-how-steps">
+            <div class="verify-how-step">
+              <div class="verify-how-num">01</div>
+              <h3 class="verify-how-title">주장 수집·분류</h3>
+              <p class="verify-how-desc">온라인·제보·언론에서 확인이 필요한 주장을 모아 도메인별로 분류합니다.</p>
+            </div>
+            <div class="verify-how-step">
+              <div class="verify-how-num">02</div>
+              <h3 class="verify-how-title">1차·공식 출처 대조</h3>
+              <p class="verify-how-desc">정부·기관 원문과 공개 데이터를 직접 대조해 사실 여부를 확인합니다.</p>
+            </div>
+            <div class="verify-how-step">
+              <div class="verify-how-num">03</div>
+              <h3 class="verify-how-title">등급 판정·공개</h3>
+              <p class="verify-how-desc">근거 등급과 판정을 출처 링크와 함께 공개하고, 새 사실이 나오면 정정합니다.</p>
+            </div>
           </div>
         </section>
 
