@@ -317,12 +317,22 @@
       flex-wrap: nowrap;
       align-items: stretch;
       gap: 0;
-      border: 1px solid var(--rule);
-      /* DESIGN-3A4.6: square corners (was rounded) to match the mockup's search. */
-      border-radius: 0;
+      /* DESIGN-C3h-2e: soften the integrated search bar to the site's rounded-control
+         look (matching the sidebar 제보): border var(--rule) → var(--line), corners
+         0 → var(--radius-sm). overflow:hidden (below) clips the inner buttons
+         (#analyzeBtn/#historyBtn) to the rounded outer corners, so the whole segmented
+         bar reads soft + rounded without boxing each inner control. Intentionally
+         reverses the old DESIGN-3A4.6 square-header choice (operator decision). */
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
       padding: 0;
       overflow: hidden;
       background: var(--paper);
+    }
+    /* DESIGN-C3h-2e: subtle soft focus for the integrated bar (the inner inputs keep
+       outline:none by design) — a brand border on focus, matching the rounded look. */
+    .topbar .panel .controls:focus-within {
+      border-color: var(--brand);
     }
     /* 검색어 input cell grows; 뉴스개수 cell compact with a thin internal divider. */
     /* DESIGN-C2b: cell vertical padding trimmed 4px → 2px (header tightening —
