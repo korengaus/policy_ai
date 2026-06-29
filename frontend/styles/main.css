@@ -220,12 +220,14 @@
       flex: 0 0 auto;
     }
     .domain-tabs-row .hot-topics-sort-label {
-      font-size: 0.86rem;
+      font-size: 0.92rem;
     }
+    /* DESIGN-C3g: match the new base select style (button look + caret room);
+       no longer overrides font-size/padding down to the old compact values. */
     .domain-tabs-row .hot-topics-sort-select {
       min-height: 30px;
-      font-size: 0.86rem;
-      padding: 4px 8px;
+      font-size: 0.92rem;
+      padding: 6px 30px 6px 12px;
     }
     .grade-guide-link {
       color: var(--brand);
@@ -411,7 +413,6 @@
        .latest-checks-head h2 + the sidebar .rank-panel-heading h2) joined the
        group so every heading matches. Fallback chain degrades gracefully to a
        system Korean face then a generic serif if Nanum Myeongjo fails to load. */
-    .brand,
     .topic-card-title,
     .section-heading h2,
     .verify-how-head h2,
@@ -419,6 +420,12 @@
     .latest-checks-head h2,
     .rank-panel-heading h2 {
       font-family: 'Nanum Myeongjo', 'Apple SD Gothic Neo', 'Pretendard', serif;
+    }
+    /* DESIGN-C3g: the brand wordmark (+ the footer brand via the shared .brand
+       class) reverts to the prior Noto Serif KR; all the other headings above stay
+       Nanum Myeongjo. Same graceful fallback chain. */
+    .brand {
+      font-family: 'Noto Serif KR', 'Apple SD Gothic Neo', 'Pretendard', serif;
     }
 
     /* HOME-UI-3: header mark is the literal favicon image (pixel-identical to
@@ -1395,16 +1402,32 @@
       color: #334155;
     }
 
+    /* DESIGN-C3g: restyled to match the unified 더 보기 button (.hot-topics-load-more)
+       + DE-BLUR: the acute blur was font-weight 800 on the native <select> at a
+       small fractional px size; 800 → 600 removes it. appearance:none + a custom
+       caret (chevron tinted with the --muted value #94a3b8) so the control reads
+       like the button while staying a fully functional select. */
     .hot-topics-sort-select {
-      min-height: 34px;
-      border: 1px solid #cbd5e1;
-      border-radius: 8px;
-      background: #fff;
-      color: #334155;
-      padding: 6px 10px;
-      font-size: 1rem;
-      font-weight: 800;
+      min-height: 30px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background-color: var(--paper);
+      color: var(--brand);
+      padding: 6px 30px 6px 12px;
+      font-size: 0.92rem;
+      font-weight: 600;
       cursor: pointer;
+      appearance: none;
+      -webkit-appearance: none;
+      -moz-appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%2394a3b8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+      background-size: 12px;
+    }
+    .hot-topics-sort-select:hover {
+      background-color: rgba(30, 95, 216, 0.06);
+      border-color: var(--brand);
     }
 
     .hot-topics-load-more-wrap {
@@ -1519,9 +1542,10 @@
       color: var(--brand-ink);
     }
     .rank-num {
-      flex: 0 0 22px;
+      flex: 0 0 24px;
       color: var(--brand);
-      font-size: 1.077rem;
+      /* DESIGN-C3g: 1.077rem → 1.18rem (rank list nudged up toward the mockup). */
+      font-size: 1.18rem;
       font-weight: 800;
       line-height: 1.4;
       text-align: center;
@@ -1534,7 +1558,7 @@
     }
     /* mirrors the .card-domain look (small brand-colored domain tag). */
     .rank-domain {
-      font-size: 0.77rem;
+      font-size: 0.82rem;
       font-weight: 800;
       letter-spacing: 0.01em;
       color: var(--brand);
@@ -1542,7 +1566,7 @@
     /* title clamped to 2 lines, mirroring .topic-card-title. */
     .rank-title {
       color: var(--ink);
-      font-size: 0.95rem;
+      font-size: 1.02rem;
       line-height: 1.4;
       font-weight: 600;
       display: -webkit-box;
@@ -1554,7 +1578,7 @@
       display: flex;
       align-items: center;
       gap: 6px;
-      font-size: 0.8rem;
+      font-size: 0.85rem;
     }
     .rank-verdict-text {
       color: var(--slate);
@@ -2036,16 +2060,17 @@
       display: none;
     }
     .topic-card--hero .topic-card-title {
-      /* DESIGN-C2b: enlarged so the hero leads the page like the mockup (was
-         1.6rem ≈ 20.8px → 2.4rem ≈ 31px). Normal card titles stay 1.077rem so the
-         hierarchy gap widens. */
-      font-size: 2.4rem;
+      /* DESIGN-C2b → DESIGN-C3g: hero headline 2.4rem → 3.0rem so it clearly
+         dominates the column like the mockup. Hero-scoped; normal card titles stay
+         1.077rem. */
+      font-size: 3.0rem;
       line-height: 1.2;
       -webkit-line-clamp: 3;
     }
     .topic-card--hero .topic-card-summary {
-      /* DESIGN-C2b: 1.02rem → 1.2rem to match the larger hero headline. */
-      font-size: 1.2rem;
+      /* DESIGN-C2b → DESIGN-C3g: 1.2rem → 1.28rem small bump to match the larger
+         headline. */
+      font-size: 1.28rem;
       line-height: 1.6;
       -webkit-line-clamp: 4;
     }
