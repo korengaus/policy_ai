@@ -454,7 +454,8 @@
     .verify-how-head h2,
     .corrections-head h2,
     .latest-checks-head h2,
-    .rank-panel-heading h2 {
+    .rank-panel-heading h2,
+    .domain-section-title {
       font-family: 'Nanum Myeongjo', 'Apple SD Gothic Neo', 'Pretendard', serif;
     }
     /* DESIGN-C3g: the brand wordmark (+ the footer brand via the shared .brand
@@ -2171,6 +2172,58 @@
       font-size: 0.77rem;
       font-weight: 700;
       letter-spacing: 0.08em;
+    }
+
+    /* DESIGN-C3h-2: per-domain grouped section (전체 tab). A HEAVY near-black rule
+       (2px var(--rule-strong) — the existing strong-line token, clearly heavier than
+       the 1px var(--line) grey dividers) tops each section, like the mockup. Header =
+       serif title (in the Nanum Myeongjo group above) + muted subtitle, with a
+       "{label} 전체 →" link on the right (matches .grade-guide-link). The 3-col card
+       row reuses .latest-checks-row (collapses to 1 col at <=960px via that rule). */
+    .domain-section {
+      border-top: 2px solid var(--rule-strong);
+      margin-top: 28px;
+      padding-top: 16px;
+    }
+    .domain-section-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    .domain-section-titles {
+      min-width: 0;
+    }
+    .domain-section-title {
+      margin: 0;
+      color: var(--ink);
+      font-size: 1.5rem;
+      line-height: 1.25;
+      font-weight: 700;
+    }
+    .domain-section-sub {
+      margin: 2px 0 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.45;
+    }
+    /* matches the existing .grade-guide-link "→" link (brand, no border). */
+    .domain-section-all {
+      flex: 0 0 auto;
+      border: none;
+      background: none;
+      padding: 0;
+      color: var(--brand);
+      font-size: 0.923rem;
+      font-weight: 650;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    .domain-section-all:hover {
+      color: var(--brand-ink);
+      text-decoration: underline;
     }
     /* DESIGN-C3h-1d: grey horizontal divider between the feed's vertical sections
        (hero | 오늘의 검증 | card-row | list), newspaper-style. The 1px var(--line)
@@ -4062,10 +4115,18 @@
           </div>
         </section>
 
+        <!-- DESIGN-C3h-2: per-domain grouped sections — filled by renderDomainSections()
+             on the 전체 tab ONLY (one section per domain that has cards, top-3 by 뜨는순
+             with a heavy var(--rule-strong) rule). Emptied on single-domain tabs (where
+             나머지 뉴스 #tier2Section shows instead). Cards render via renderTopicCardHtml
+             verbatim; the .home-main card-open delegation covers them. -->
+        <div id="feedDomainSections"></div>
+
         <!-- HOMEPAGE-TIERED: TIER 2 "나머지 뉴스" — concise cards for items ranked
              beyond the tier-1 cut. #domainSections (formerly the per-domain browse
-             container) is repurposed as the tier-2 card grid. The whole section is
-             hidden by renderHotTopics() when the pool has nothing past the cut. -->
+             container) is repurposed as the tier-2 card grid. Hidden + emptied on the
+             전체 tab (replaced by the per-domain sections above); shown on single-domain
+             tabs by renderHotTopics(). -->
         <section id="tier2Section" class="news-home-section" hidden>
           <div class="section-heading">
             <div>
@@ -4757,6 +4818,8 @@
     // DESIGN-C3h-1d: top feed container (hero band + 오늘의 검증 row) — sits above the
     // static sort row, with the card-row + 1-col list rendering into #hotTopics below.
     const hotTopicsTopEl = document.getElementById("hotTopicsTop");
+    // DESIGN-C3h-2: per-domain grouped sections container (filled on the 전체 tab only).
+    const feedDomainSectionsEl = document.getElementById("feedDomainSections");
     // SIDEBAR-RANK: 인기 검증 랭킹 list container in the right sidebar (.home-aside).
     const rankListEl = document.getElementById("rankList");
     // SIDEBAR-RANK-B2: weekly-stats panel numbers + range; 제보 input/button.
@@ -4885,6 +4948,20 @@
       "finance", "welfare", "agriculture", "labor", "health",
       "environment", "SMB", "realestate", "statistics", "기타-미분류",
     ];
+    // DESIGN-C3h-2: static per-domain section subtitles (display-only UI copy; no
+    // per-card data). Keyed by the raw domain key (note "기타-미분류").
+    const DOMAIN_SUBTITLE = {
+      realestate: "주택·부동산 정책 뉴스 검증",
+      finance: "금융 정책·제도 뉴스 검증",
+      welfare: "복지 정책 뉴스 검증",
+      labor: "노동·고용 정책 뉴스 검증",
+      health: "보건·의료 정책 뉴스 검증",
+      environment: "환경·에너지 정책 뉴스 검증",
+      SMB: "소상공인 정책 뉴스 검증",
+      agriculture: "농업·농촌 정책 뉴스 검증",
+      statistics: "공식 통계·지표 검증",
+      "기타-미분류": "기타 정책 뉴스 검증",
+    };
     // Normalize a card's domain to a comparison key. Missing/empty domain falls
     // into the "기타-미분류" bucket so a card is NEVER dropped (removal-free).
     function cardDomainKey(card) {
@@ -6779,6 +6856,36 @@
       }).join("");
     }
 
+    // DESIGN-C3h-2: per-domain grouped sections for the 전체 tab. Groups the full
+    // all-domain card set by cardDomainKey, iterates DOMAIN_ORDER, and for each
+    // domain WITH cards emits a section: a heavy black rule (.domain-section, CSS)
+    // + a big serif header + a static subtitle + a "{label} 전체 →" tab-switch
+    // button + the domain's top-3 by 뜨는순 as a 3-col .latest-checks-row. Reuses
+    // renderTopicCardHtml + sortTopicCards verbatim (no card-render change). Returns
+    // an innerHTML string (""→ no sections). Duplicates with the top feed are
+    // allowed (top = 전체 인기/최신; sections = browse-by-category).
+    function renderDomainSections(cards) {
+      const list = Array.isArray(cards) ? cards : [];
+      return DOMAIN_ORDER.map((d) => {
+        const domainCards = list.filter((c) => cardDomainKey(c) === d);
+        if (!domainCards.length) return "";
+        const label = domainDisplayLabel(d);
+        const top3 = sortTopicCards(domainCards, "뜨는순").slice(0, 3);
+        return `<section class="domain-section">`
+          + `<div class="domain-section-head">`
+          + `<div class="domain-section-titles">`
+          + `<h2 class="domain-section-title">${escapeHtml(label)}</h2>`
+          + `<p class="domain-section-sub">${escapeHtml(DOMAIN_SUBTITLE[d] || "")}</p>`
+          + `</div>`
+          + `<button type="button" class="domain-section-all" data-domain="${escapeHtml(d)}">${escapeHtml(label)} 전체 →</button>`
+          + `</div>`
+          + `<div class="latest-checks-row">`
+          + top3.map((card) => renderTopicCardHtml(card, { detailed: true })).join("")
+          + `</div>`
+          + `</section>`;
+      }).join("");
+    }
+
     // HOMEPAGE-TIERED: two-tier feed from ONE ranked pool. The active tab is a
     // range filter (전체 = global; specific = that domain). Both tiers use the
     // same sort (default 뜨는순) so ranking is consistent: tier-1 = global top,
@@ -6869,22 +6976,36 @@
       // 더 보기 reflects the LIST chunk only (hero + 오늘의 검증 + the card row are NOT counted).
       updateTierButtons(hotTopicsLoadMoreEl, hotTopicsCollapseEl, listShown, listTotal, TIER1_INITIAL);
 
-      // TIER 2 — the pool overflow beyond the card row (3) + the list-window cap.
-      const tier2Pool = poolSorted.slice(3 + REMAINDER_CAP);
-      if (tier2SectionEl) {
-        if (!tier2Pool.length) {
-          tier2SectionEl.hidden = true;
-          if (tier2GridEl) tier2GridEl.innerHTML = "";
-        } else {
-          tier2SectionEl.hidden = false;
-          const tier2Shown = Math.min(tier2VisibleCount, tier2Pool.length);
-          if (tier2GridEl) {
-            tier2GridEl.innerHTML = tier2Pool
-              .slice(0, tier2Shown)
-              .map((card) => renderTopicCardHtml(card, { detailed: false }))
-              .join("");
+      // DESIGN-C3h-2: tab branch for what follows the card-row/list +
+      // 이렇게 검증합니다.
+      //   전체  → per-domain grouped sections (browse-by-category); the long
+      //           나머지 뉴스 (#tier2Section) is HIDDEN + EMPTIED (replaced by them).
+      //   domain → no domain sections (#feedDomainSections emptied); the existing
+      //           나머지 뉴스 block runs as before. Switching tabs always clears the
+      //           other container, so no stale content lingers.
+      if (activeDomain === "전체") {
+        if (feedDomainSectionsEl) feedDomainSectionsEl.innerHTML = renderDomainSections(allCards);
+        if (tier2SectionEl) tier2SectionEl.hidden = true;
+        if (tier2GridEl) tier2GridEl.innerHTML = "";
+      } else {
+        if (feedDomainSectionsEl) feedDomainSectionsEl.innerHTML = "";
+        // TIER 2 — the pool overflow beyond the card row (3) + the list-window cap.
+        const tier2Pool = poolSorted.slice(3 + REMAINDER_CAP);
+        if (tier2SectionEl) {
+          if (!tier2Pool.length) {
+            tier2SectionEl.hidden = true;
+            if (tier2GridEl) tier2GridEl.innerHTML = "";
+          } else {
+            tier2SectionEl.hidden = false;
+            const tier2Shown = Math.min(tier2VisibleCount, tier2Pool.length);
+            if (tier2GridEl) {
+              tier2GridEl.innerHTML = tier2Pool
+                .slice(0, tier2Shown)
+                .map((card) => renderTopicCardHtml(card, { detailed: false }))
+                .join("");
+            }
+            updateTierButtons(tier2LoadMoreEl, tier2CollapseEl, tier2Shown, tier2Pool.length, TIER2_INITIAL);
           }
-          updateTierButtons(tier2LoadMoreEl, tier2CollapseEl, tier2Shown, tier2Pool.length, TIER2_INITIAL);
         }
       }
 
@@ -10794,6 +10915,15 @@
       }
       loadReviewQueueItem(item, `"${item.query || "검토 항목"}" 검토 큐 항목을 불러왔습니다.`);
     });
+    // DESIGN-C3h-2: shared tab-switch — set the active domain, reset paging, re-render.
+    // renderCategoryTabs re-marks the active tab on every render, so this is all that's
+    // needed. Reused by the category tabs AND the "{label} 전체 →" section links.
+    function setActiveDomain(key) {
+      activeDomain = key || "전체";
+      tier1VisibleCount = TIER1_INITIAL;
+      tier2VisibleCount = TIER2_INITIAL;
+      renderHotTopics();
+    }
     if (categoryTabsEl) {
       // DISPLAY-CATEGORY B-1: filter on the raw domain enum (data-domain), not
       // the old resultCategory() heuristic. renderCategoryTabs re-renders the
@@ -10802,11 +10932,18 @@
       categoryTabsEl.addEventListener("click", (event) => {
         const tab = event.target.closest("[data-domain]");
         if (!tab) return;
-        activeDomain = tab.dataset.domain || "전체";
-        // HOMEPAGE-TIERED: tab = range filter; reset BOTH tiers' paging.
-        tier1VisibleCount = TIER1_INITIAL;
-        tier2VisibleCount = TIER2_INITIAL;
-        renderHotTopics();
+        setActiveDomain(tab.dataset.domain || "전체");
+      });
+    }
+    // DESIGN-C3h-2: the "{label} 전체 →" section links switch to that domain tab via
+    // the SAME setActiveDomain. They carry [data-domain] (not [data-topic-source]),
+    // so the .home-main card-open delegation ignores them and these never open a card.
+    if (feedDomainSectionsEl) {
+      feedDomainSectionsEl.addEventListener("click", (event) => {
+        const btn = event.target.closest("[data-domain]");
+        if (!btn) return;
+        setActiveDomain(btn.dataset.domain || "전체");
+        window.scrollTo({ top: 0, behavior: "smooth" });
       });
     }
     if (hotTopicsSortEl) {

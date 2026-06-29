@@ -206,10 +206,18 @@
           </div>
         </section>
 
+        <!-- DESIGN-C3h-2: per-domain grouped sections — filled by renderDomainSections()
+             on the 전체 tab ONLY (one section per domain that has cards, top-3 by 뜨는순
+             with a heavy var(--rule-strong) rule). Emptied on single-domain tabs (where
+             나머지 뉴스 #tier2Section shows instead). Cards render via renderTopicCardHtml
+             verbatim; the .home-main card-open delegation covers them. -->
+        <div id="feedDomainSections"></div>
+
         <!-- HOMEPAGE-TIERED: TIER 2 "나머지 뉴스" — concise cards for items ranked
              beyond the tier-1 cut. #domainSections (formerly the per-domain browse
-             container) is repurposed as the tier-2 card grid. The whole section is
-             hidden by renderHotTopics() when the pool has nothing past the cut. -->
+             container) is repurposed as the tier-2 card grid. Hidden + emptied on the
+             전체 tab (replaced by the per-domain sections above); shown on single-domain
+             tabs by renderHotTopics(). -->
         <section id="tier2Section" class="news-home-section" hidden>
           <div class="section-heading">
             <div>

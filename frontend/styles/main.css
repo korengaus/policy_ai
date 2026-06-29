@@ -418,7 +418,8 @@
     .verify-how-head h2,
     .corrections-head h2,
     .latest-checks-head h2,
-    .rank-panel-heading h2 {
+    .rank-panel-heading h2,
+    .domain-section-title {
       font-family: 'Nanum Myeongjo', 'Apple SD Gothic Neo', 'Pretendard', serif;
     }
     /* DESIGN-C3g: the brand wordmark (+ the footer brand via the shared .brand
@@ -2135,6 +2136,58 @@
       font-size: 0.77rem;
       font-weight: 700;
       letter-spacing: 0.08em;
+    }
+
+    /* DESIGN-C3h-2: per-domain grouped section (전체 tab). A HEAVY near-black rule
+       (2px var(--rule-strong) — the existing strong-line token, clearly heavier than
+       the 1px var(--line) grey dividers) tops each section, like the mockup. Header =
+       serif title (in the Nanum Myeongjo group above) + muted subtitle, with a
+       "{label} 전체 →" link on the right (matches .grade-guide-link). The 3-col card
+       row reuses .latest-checks-row (collapses to 1 col at <=960px via that rule). */
+    .domain-section {
+      border-top: 2px solid var(--rule-strong);
+      margin-top: 28px;
+      padding-top: 16px;
+    }
+    .domain-section-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    .domain-section-titles {
+      min-width: 0;
+    }
+    .domain-section-title {
+      margin: 0;
+      color: var(--ink);
+      font-size: 1.5rem;
+      line-height: 1.25;
+      font-weight: 700;
+    }
+    .domain-section-sub {
+      margin: 2px 0 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.45;
+    }
+    /* matches the existing .grade-guide-link "→" link (brand, no border). */
+    .domain-section-all {
+      flex: 0 0 auto;
+      border: none;
+      background: none;
+      padding: 0;
+      color: var(--brand);
+      font-size: 0.923rem;
+      font-weight: 650;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    .domain-section-all:hover {
+      color: var(--brand-ink);
+      text-decoration: underline;
     }
     /* DESIGN-C3h-1d: grey horizontal divider between the feed's vertical sections
        (hero | 오늘의 검증 | card-row | list), newspaper-style. The 1px var(--line)
