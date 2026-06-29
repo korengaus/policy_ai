@@ -2182,11 +2182,28 @@
           + renderTopicCardHtml(ranked[0], { detailed: true, hero: true })
           + renderTopicCardHtml(ranked[1], { detailed: true })
           + `</div>`;
-        const below = ranked
-          .slice(2, tier1Shown)
+        // DESIGN-C3d (Option B): re-chunk the post-hero list — the first ≤3 cards
+        // form the "오늘의 검증" 3-col row, the rest continue single-column. Same
+        // indices/cards/total as the old slice(2, tier1Shown), same
+        // renderTopicCardHtml(card,{detailed:true}) call, so tier1Shown / 더 보기
+        // counts / tier-2 pool are untouched. The row+header render only when there
+        // is at least one card (honest "있는 만큼만"; the grid renders 1–3 cells, no
+        // placeholder padding).
+        const headEnd = Math.min(5, tier1Shown);
+        const headCards = ranked.slice(2, headEnd);
+        const restCards = ranked.slice(headEnd, tier1Shown);
+        const latestRow = headCards.length
+          ? `<div class="latest-checks-head">`
+            + `<h2>오늘의 검증</h2><span class="latest-checks-eyebrow">LATEST CHECKS</span>`
+            + `</div>`
+            + `<div class="latest-checks-row">`
+            + headCards.map((card) => renderTopicCardHtml(card, { detailed: true })).join("")
+            + `</div>`
+          : "";
+        const rest = restCards
           .map((card) => renderTopicCardHtml(card, { detailed: true }))
           .join("");
-        hotTopicsEl.innerHTML = band + below;
+        hotTopicsEl.innerHTML = band + latestRow + rest;
       } else {
         // DESIGN-C2: <2 fallback — a single tier-1 card renders as the hero alone
         // (no secondary, no band wrapper needed).

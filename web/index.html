@@ -2055,6 +2055,45 @@
       font-size: 0.9rem;
     }
 
+    /* DESIGN-C3d: "오늘의 검증 / LATEST CHECKS" row — a re-chunk of the first ≤3
+       post-hero cards into a 3-col grid (the rest continue single-column below).
+       Header mirrors the existing section-heading pattern (left title + right
+       small-caps eyebrow); the grid reuses the card gap convention. All existing
+       tokens. Renders only when there is ≥1 card (gated in JS) and shows exactly
+       as many cells as cards (no placeholder padding). Collapses to 1 column at
+       <=960px (added to the shared breakpoint group below). */
+    .latest-checks-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin: 8px 0 4px;
+    }
+    .latest-checks-head h2 {
+      margin: 0;
+      color: var(--ink);
+      font-size: 1.308rem;
+      line-height: 1.25;
+      font-weight: 700;
+    }
+    .latest-checks-eyebrow {
+      color: var(--muted);
+      font-size: 0.77rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+    }
+    .latest-checks-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    /* the row cards drop their bottom divider (the row groups them); the
+       single-column rest below keeps its dividers. */
+    .latest-checks-row > .topic-card {
+      border-bottom: none;
+    }
+
     .topic-card-top {
       display: flex;
       flex-wrap: wrap;
@@ -3592,6 +3631,7 @@
       .metrics,
       .topic-card-grid,
       .feed-hero-band,
+      .latest-checks-row,
       .verify-how-steps,
       .public-source-grid,
       .selected-issue-meta,
@@ -6613,11 +6653,28 @@
           + renderTopicCardHtml(ranked[0], { detailed: true, hero: true })
           + renderTopicCardHtml(ranked[1], { detailed: true })
           + `</div>`;
-        const below = ranked
-          .slice(2, tier1Shown)
+        // DESIGN-C3d (Option B): re-chunk the post-hero list — the first ≤3 cards
+        // form the "오늘의 검증" 3-col row, the rest continue single-column. Same
+        // indices/cards/total as the old slice(2, tier1Shown), same
+        // renderTopicCardHtml(card,{detailed:true}) call, so tier1Shown / 더 보기
+        // counts / tier-2 pool are untouched. The row+header render only when there
+        // is at least one card (honest "있는 만큼만"; the grid renders 1–3 cells, no
+        // placeholder padding).
+        const headEnd = Math.min(5, tier1Shown);
+        const headCards = ranked.slice(2, headEnd);
+        const restCards = ranked.slice(headEnd, tier1Shown);
+        const latestRow = headCards.length
+          ? `<div class="latest-checks-head">`
+            + `<h2>오늘의 검증</h2><span class="latest-checks-eyebrow">LATEST CHECKS</span>`
+            + `</div>`
+            + `<div class="latest-checks-row">`
+            + headCards.map((card) => renderTopicCardHtml(card, { detailed: true })).join("")
+            + `</div>`
+          : "";
+        const rest = restCards
           .map((card) => renderTopicCardHtml(card, { detailed: true }))
           .join("");
-        hotTopicsEl.innerHTML = band + below;
+        hotTopicsEl.innerHTML = band + latestRow + rest;
       } else {
         // DESIGN-C2: <2 fallback — a single tier-1 card renders as the hero alone
         // (no secondary, no band wrapper needed).

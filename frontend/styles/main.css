@@ -2021,6 +2021,45 @@
       font-size: 0.9rem;
     }
 
+    /* DESIGN-C3d: "오늘의 검증 / LATEST CHECKS" row — a re-chunk of the first ≤3
+       post-hero cards into a 3-col grid (the rest continue single-column below).
+       Header mirrors the existing section-heading pattern (left title + right
+       small-caps eyebrow); the grid reuses the card gap convention. All existing
+       tokens. Renders only when there is ≥1 card (gated in JS) and shows exactly
+       as many cells as cards (no placeholder padding). Collapses to 1 column at
+       <=960px (added to the shared breakpoint group below). */
+    .latest-checks-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin: 8px 0 4px;
+    }
+    .latest-checks-head h2 {
+      margin: 0;
+      color: var(--ink);
+      font-size: 1.308rem;
+      line-height: 1.25;
+      font-weight: 700;
+    }
+    .latest-checks-eyebrow {
+      color: var(--muted);
+      font-size: 0.77rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+    }
+    .latest-checks-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    /* the row cards drop their bottom divider (the row groups them); the
+       single-column rest below keeps its dividers. */
+    .latest-checks-row > .topic-card {
+      border-bottom: none;
+    }
+
     .topic-card-top {
       display: flex;
       flex-wrap: wrap;
@@ -3558,6 +3597,7 @@
       .metrics,
       .topic-card-grid,
       .feed-hero-band,
+      .latest-checks-row,
       .verify-how-steps,
       .public-source-grid,
       .selected-issue-meta,
