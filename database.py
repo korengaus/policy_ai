@@ -454,6 +454,41 @@ def get_recent_results_slim(limit: int = 20):
     return []
 
 
+def get_weekly_verification_stats(cutoff_iso: str):
+    # SIDEBAR-RANK-B2: read-only weekly counts for the homepage sidebar's
+    # "이번 주 검증 현황" panel. PG-primary, mirroring get_recent_results_slim's
+    # error/None handling. Returns {"total": int, "official": int}; an empty
+    # dict {"total": 0, "official": 0} when PG is authoritative but engine-None.
+    try:
+        from postgres_storage import (
+            is_postgres_dual_write_enabled,
+            read_weekly_verification_stats,
+        )
+        pg_enabled = is_postgres_dual_write_enabled()
+    except Exception:
+        log.error(
+            "get_weekly_verification_stats failed to import postgres_storage",
+            exc_info=True,
+            extra={"function": "get_weekly_verification_stats"},
+        )
+        raise
+    if pg_enabled:
+        try:
+            pg_stats = read_weekly_verification_stats(cutoff_iso)
+        except Exception:
+            log.error(
+                "get_weekly_verification_stats PG read failed",
+                exc_info=True,
+                extra={"function": "get_weekly_verification_stats"},
+            )
+            raise
+        if pg_stats is not None:
+            return pg_stats
+        # PG returned None — engine None despite dual-write enabled.
+        return {"total": 0, "official": 0}
+    return {"total": 0, "official": 0}
+
+
 def get_result_by_id(result_id: int):
     # M12.0c-minimal / M12.0d-1: PG primary; SQLite block unreachable
     # when dual-write enabled. PG-read errors now raise.

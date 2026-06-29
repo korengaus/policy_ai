@@ -1431,6 +1431,77 @@ def read_recent_analysis_results_slim(limit: int = 20) -> Optional[list]:
         ) from exc
 
 
+def read_weekly_verification_stats(cutoff_iso: str) -> Optional[dict]:
+    """SIDEBAR-RANK-B2 — read-only weekly counts for the homepage sidebar's
+    "이번 주 검증 현황" panel. No write, no verdict path, no schema change.
+
+    Counts analysis_results rows with ``created_at >= cutoff_iso`` (created_at is
+    stored as ISO-8601 TEXT, so a lexicographic ``>=`` is a correct time window).
+
+    Returns ``{"total": int, "official": int}`` where ``official`` reuses the
+    PERSISTED ``source_reliability_summary["has_genuine_official_support"]``
+    boolean (NOT a re-derived predicate), with the SAME old-row fallback the
+    frontend uses (``debug_summary.official_body_matches > 0``). The boolean
+    lives inside the source_reliability_summary JSON text, so it is parsed in
+    Python — no Postgres-only ``::jsonb`` cast (keeps the SQLite test path
+    portable). The week's row volume is small (~100s), so a window SELECT +
+    Python count is cheap.
+
+    Contract mirrors the slim reader: ``None`` → engine not built; a dict
+    (possibly zeroed) when Postgres is authoritative; raises on SQL error.
+    """
+    engine = get_engine()
+    if engine is None:
+        return None
+    t = analysis_results_table.c
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                sa.select(
+                    t.source_reliability_summary,
+                    t.debug_summary,
+                ).where(t.created_at >= cutoff_iso)
+            ).all()
+    except SQLAlchemyError as exc:
+        log.error(
+            "read_weekly_verification_stats failed: %s", exc, exc_info=True,
+        )
+        raise PostgresReadError(
+            f"read_weekly_verification_stats failed: {exc}"
+        ) from exc
+
+    total = len(rows)
+    official = 0
+    for row in rows:
+        summary = _safe_json_obj(row[0])
+        genuine = summary.get("has_genuine_official_support")
+        if not isinstance(genuine, bool):
+            # Old-row fallback (mirrors officialStatusLabel in main.js): a real
+            # body-sentence match. Reads debug_summary.official_body_matches > 0.
+            debug = _safe_json_obj(row[1])
+            try:
+                genuine = int(debug.get("official_body_matches") or 0) > 0
+            except (TypeError, ValueError):
+                genuine = False
+        if genuine:
+            official += 1
+    return {"total": total, "official": official}
+
+
+def _safe_json_obj(value) -> dict:
+    """Parse a JSON-text column into a dict; return {} on null/blank/non-dict
+    or malformed JSON. Used by the read-only weekly-stats counter."""
+    if isinstance(value, dict):
+        return value
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 # ---------------------------------------------------------------------------
 # Read helpers — M12.0c-2 (reviewer dashboard path; semantic updated in M12.0d-1).
 #

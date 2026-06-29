@@ -1488,6 +1488,103 @@
       font-weight: 600;
     }
 
+    /* SIDEBAR-RANK-B2: the three sidebar panels below the ranking. All reuse the
+       .rank-panel card chrome (shared tokens) so the four panels read as a
+       consistent stack. New classes only; feed cards + .rank-panel untouched.
+       At <=1120px the .home-shell breakpoint drops .home-aside below the feed and
+       these flow full-width — no extra rule. */
+    .stat-panel,
+    .legend-panel,
+    .report-panel {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--paper);
+      box-shadow: var(--shadow);
+      padding: 14px 16px;
+      margin-top: 14px;
+    }
+
+    /* 이번 주 검증 현황 — three big numbers (conceptually like .metric-value). */
+    .stat-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .stat-cell {
+      text-align: center;
+      min-width: 0;
+    }
+    .stat-num {
+      color: var(--ink);
+      font-size: 1.692rem;
+      font-weight: 900;
+      line-height: 1.1;
+    }
+    .stat-label {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 700;
+    }
+
+    /* 검증 등급 — static legend; dots reuse .verdict-dot, colored inline. */
+    .legend-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .legend-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 9px;
+    }
+    .legend-row .verdict-dot {
+      margin-top: 5px;
+    }
+    .legend-body {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .legend-label {
+      color: var(--ink);
+      font-size: 0.95rem;
+      font-weight: 700;
+    }
+    .legend-desc {
+      color: var(--slate);
+      font-size: 0.8rem;
+      line-height: 1.4;
+    }
+
+    /* 제보 input — compact, reusing the base input/button tokens. */
+    .report-input-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    .report-input {
+      flex: 1 1 auto;
+      min-width: 0;
+      min-height: 36px;
+      font-size: 0.95rem;
+    }
+    .report-btn {
+      flex: 0 0 auto;
+      min-height: 36px;
+      padding: 8px 14px;
+      white-space: nowrap;
+    }
+    .report-contact-note {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 0.8rem;
+    }
+
     /* DESIGN-3A: feed sort control row (moved out of the dissolved .domain-controls);
        sits at the top of .home-main, right-aligned above the cards. */
     .feed-sort-row {

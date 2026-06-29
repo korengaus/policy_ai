@@ -205,6 +205,88 @@
           </div>
           <ol id="rankList" class="rank-list"></ol>
         </section>
+
+        <!-- SIDEBAR-RANK-B2: 이번 주 검증 현황 — REAL rolling-7-day counts from the
+             read-only GET /stats (renderWeeklyStats fills #statTotal/#statOfficial/
+             #statDraft + #statRange). Shows "–" until the fetch resolves and on
+             failure (fail-quiet). No hardcoded numbers. -->
+        <section class="stat-panel" aria-label="이번 주 검증 현황">
+          <div class="rank-panel-heading">
+            <h2>이번 주 검증 현황</h2>
+            <p id="statRange">최근 7일</p>
+          </div>
+          <div class="stat-row">
+            <div class="stat-cell">
+              <div id="statTotal" class="stat-num">–</div>
+              <div class="stat-label">총검증</div>
+            </div>
+            <div class="stat-cell">
+              <div id="statOfficial" class="stat-num">–</div>
+              <div class="stat-label">공식확인</div>
+            </div>
+            <div class="stat-cell">
+              <div id="statDraft" class="stat-num">–</div>
+              <div class="stat-label">AI 초안</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- SIDEBAR-RANK-B2: 검증 등급 — STATIC legend. Labels + dot colors mirror
+             the real card labels (officialStatusLabel / verdictDotColor) so the
+             legend matches the cards. The 2nd row "공식자료 참고" == the renamed
+             non-genuine card label. No data. -->
+        <section class="legend-panel" aria-label="검증 등급 안내">
+          <div class="rank-panel-heading">
+            <h2>검증 등급</h2>
+          </div>
+          <ul class="legend-list">
+            <li class="legend-row">
+              <span class="verdict-dot" style="background:var(--verify)"></span>
+              <div class="legend-body">
+                <span class="legend-label">공식 근거 확인</span>
+                <span class="legend-desc">1차·공식 출처 본문과 직접 대조 확인</span>
+              </div>
+            </li>
+            <li class="legend-row">
+              <span class="verdict-dot" style="background:var(--brand)"></span>
+              <div class="legend-body">
+                <span class="legend-label">공식자료 참고</span>
+                <span class="legend-desc">관련 공식자료를 참고함 (직접 검증은 아님)</span>
+              </div>
+            </li>
+            <li class="legend-row">
+              <span class="verdict-dot" style="background:var(--orange)"></span>
+              <div class="legend-body">
+                <span class="legend-label">검증 중</span>
+                <span class="legend-desc">확인 진행 중</span>
+              </div>
+            </li>
+            <li class="legend-row">
+              <span class="verdict-dot" style="background:var(--muted)"></span>
+              <div class="legend-body">
+                <span class="legend-label">AI 초안</span>
+                <span class="legend-desc">자동 생성·사람 검토 전, 최종 아님</span>
+              </div>
+            </li>
+          </ul>
+        </section>
+
+        <!-- SIDEBAR-RANK-B2: 제보 input. The 의뢰하기 button opens a mailto to the
+             REAL contact address (contact@tickedin.org — same as the footer /
+             per-analysis error-report path), prefilled with the typed text. NO
+             backend write, NO live-analysis trigger. Newsletter panel intentionally
+             NOT built (PIPA + backend, deferred). -->
+        <section class="report-panel" aria-label="사실 확인 제보">
+          <div class="rank-panel-heading">
+            <h2>이 주장, 사실일까요?</h2>
+            <p>확인이 필요한 주장이나 뉴스 링크를 보내주세요. 검증 대기열에 등록됩니다.</p>
+          </div>
+          <div class="report-input-row">
+            <input id="reportClaimInput" class="report-input" type="text" placeholder="주장 또는 링크 입력" autocomplete="off" maxlength="500">
+            <button id="reportClaimBtn" class="report-btn primary" type="button">의뢰하기</button>
+          </div>
+          <div class="report-contact-note">제보 contact@tickedin.org</div>
+        </section>
       </aside>
     </div>
 

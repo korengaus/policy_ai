@@ -142,6 +142,13 @@
     const hotTopicsEl = document.getElementById("hotTopics");
     // SIDEBAR-RANK: 인기 검증 랭킹 list container in the right sidebar (.home-aside).
     const rankListEl = document.getElementById("rankList");
+    // SIDEBAR-RANK-B2: weekly-stats panel numbers + range; 제보 input/button.
+    const statTotalEl = document.getElementById("statTotal");
+    const statOfficialEl = document.getElementById("statOfficial");
+    const statDraftEl = document.getElementById("statDraft");
+    const statRangeEl = document.getElementById("statRange");
+    const reportClaimInputEl = document.getElementById("reportClaimInput");
+    const reportClaimBtnEl = document.getElementById("reportClaimBtn");
     const categoryTabsEl = document.getElementById("categoryTabs");
     const hotTopicsSortEl = document.getElementById("hotTopicsSort");
     const hotTopicsLoadMoreEl = document.getElementById("hotTopicsLoadMore");
@@ -1784,7 +1791,7 @@
       if (summary.official_detail_available || Number(debug.official_body_matches || 0) > 0) {
         // Non-genuine but an official page was fetched/relevance-matched: honest,
         // non-alarmist downgrade — related material exists, not a direct verification.
-        return "관련 공식자료 있음 (직접 검증 아님)";
+        return "공식자료 참고";
       }
       if (Number(debug.official_body_candidates || summary.official_candidate_count || 0) > 0) {
         if (Number(debug.official_bodies_fetched || 0) > 0) {
@@ -2226,6 +2233,33 @@
           </div>
         </li>
       `).join("");
+    }
+
+    // SIDEBAR-RANK-B2: 이번 주 검증 현황 — fetch the read-only GET /stats once and
+    // fill the three numbers + the MM.DD–MM.DD range. REAL counts only (no
+    // hardcoded numbers). Fail-quiet: on any error the panel keeps its "–"
+    // placeholders and never throws. No write, no live-analysis trigger.
+    async function renderWeeklyStats() {
+      if (!statTotalEl && !statOfficialEl && !statDraftEl) return;
+      try {
+        const response = await fetch(`${API_BASE}/stats`);
+        if (!response.ok) return;
+        const body = await response.json();
+        if (!body || body.status !== "ok") return;
+        if (statTotalEl) statTotalEl.textContent = String(body.total ?? "–");
+        if (statOfficialEl) statOfficialEl.textContent = String(body.official ?? "–");
+        if (statDraftEl) statDraftEl.textContent = String(body.draft ?? "–");
+        if (statRangeEl && body.range_start && body.range_end) {
+          // ISO YYYY-MM-DD → MM.DD; fall back to the raw strings if malformed.
+          const mmdd = (iso) => {
+            const m = String(iso).match(/^\d{4}-(\d{2})-(\d{2})/);
+            return m ? `${m[1]}.${m[2]}` : String(iso);
+          };
+          statRangeEl.textContent = `${mmdd(body.range_start)}–${mmdd(body.range_end)}`;
+        }
+      } catch (_) {
+        // fail-quiet — leave the "–" placeholders.
+      }
     }
 
     // Phase 2 M3: project each full result down to only the fields the topic
@@ -6212,6 +6246,18 @@
         openTopicCard(card);
       });
     }
+    // SIDEBAR-RANK-B2: 제보 — open a mailto to the REAL contact address with the
+    // typed claim/link as the body (mirrors the per-analysis error-report mailto).
+    // NO backend write, NO live-analysis trigger. Empty input still opens a blank
+    // draft (graceful). location.href triggers the mail client without navigating.
+    if (reportClaimBtnEl) {
+      reportClaimBtnEl.addEventListener("click", () => {
+        const text = (reportClaimInputEl && reportClaimInputEl.value || "").trim();
+        const subject = encodeURIComponent("[tickedin 제보] 사실 확인 요청");
+        const body = encodeURIComponent(text);
+        window.location.href = `mailto:contact@tickedin.org?subject=${subject}&body=${body}`;
+      });
+    }
     // HOMEPAGE-TIERED: tier-2 grid (repurposed #domainSections) reuses the
     // topic-card markup, so the same card-open path applies. 더보기/접기 are
     // separate buttons (wired above), so this delegation only opens cards.
@@ -7465,6 +7511,9 @@
     renderHistory(safeReadLocalHistory());
     renderReviewQueue(safeReadReviewQueue());
     renderHotTopics();
+    // SIDEBAR-RANK-B2: fire-and-forget the read-only weekly-stats fetch (fills
+    // the 이번 주 검증 현황 numbers; fail-quiet, never blocks init).
+    renderWeeklyStats();
     // M45: asynchronously fill the hot-topic area from the server (GET
     // /history, cron output included). Fire-and-forget so it never blocks
     // synchronous init and never touches renderHistory()/localStorage. A

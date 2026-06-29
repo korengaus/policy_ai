@@ -1522,6 +1522,103 @@
       font-weight: 600;
     }
 
+    /* SIDEBAR-RANK-B2: the three sidebar panels below the ranking. All reuse the
+       .rank-panel card chrome (shared tokens) so the four panels read as a
+       consistent stack. New classes only; feed cards + .rank-panel untouched.
+       At <=1120px the .home-shell breakpoint drops .home-aside below the feed and
+       these flow full-width — no extra rule. */
+    .stat-panel,
+    .legend-panel,
+    .report-panel {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--paper);
+      box-shadow: var(--shadow);
+      padding: 14px 16px;
+      margin-top: 14px;
+    }
+
+    /* 이번 주 검증 현황 — three big numbers (conceptually like .metric-value). */
+    .stat-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .stat-cell {
+      text-align: center;
+      min-width: 0;
+    }
+    .stat-num {
+      color: var(--ink);
+      font-size: 1.692rem;
+      font-weight: 900;
+      line-height: 1.1;
+    }
+    .stat-label {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 700;
+    }
+
+    /* 검증 등급 — static legend; dots reuse .verdict-dot, colored inline. */
+    .legend-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .legend-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 9px;
+    }
+    .legend-row .verdict-dot {
+      margin-top: 5px;
+    }
+    .legend-body {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .legend-label {
+      color: var(--ink);
+      font-size: 0.95rem;
+      font-weight: 700;
+    }
+    .legend-desc {
+      color: var(--slate);
+      font-size: 0.8rem;
+      line-height: 1.4;
+    }
+
+    /* 제보 input — compact, reusing the base input/button tokens. */
+    .report-input-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    .report-input {
+      flex: 1 1 auto;
+      min-width: 0;
+      min-height: 36px;
+      font-size: 0.95rem;
+    }
+    .report-btn {
+      flex: 0 0 auto;
+      min-height: 36px;
+      padding: 8px 14px;
+      white-space: nowrap;
+    }
+    .report-contact-note {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 0.8rem;
+    }
+
     /* DESIGN-3A: feed sort control row (moved out of the dissolved .domain-controls);
        sits at the top of .home-main, right-aligned above the cards. */
     .feed-sort-row {
@@ -3367,6 +3464,88 @@
           </div>
           <ol id="rankList" class="rank-list"></ol>
         </section>
+
+        <!-- SIDEBAR-RANK-B2: 이번 주 검증 현황 — REAL rolling-7-day counts from the
+             read-only GET /stats (renderWeeklyStats fills #statTotal/#statOfficial/
+             #statDraft + #statRange). Shows "–" until the fetch resolves and on
+             failure (fail-quiet). No hardcoded numbers. -->
+        <section class="stat-panel" aria-label="이번 주 검증 현황">
+          <div class="rank-panel-heading">
+            <h2>이번 주 검증 현황</h2>
+            <p id="statRange">최근 7일</p>
+          </div>
+          <div class="stat-row">
+            <div class="stat-cell">
+              <div id="statTotal" class="stat-num">–</div>
+              <div class="stat-label">총검증</div>
+            </div>
+            <div class="stat-cell">
+              <div id="statOfficial" class="stat-num">–</div>
+              <div class="stat-label">공식확인</div>
+            </div>
+            <div class="stat-cell">
+              <div id="statDraft" class="stat-num">–</div>
+              <div class="stat-label">AI 초안</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- SIDEBAR-RANK-B2: 검증 등급 — STATIC legend. Labels + dot colors mirror
+             the real card labels (officialStatusLabel / verdictDotColor) so the
+             legend matches the cards. The 2nd row "공식자료 참고" == the renamed
+             non-genuine card label. No data. -->
+        <section class="legend-panel" aria-label="검증 등급 안내">
+          <div class="rank-panel-heading">
+            <h2>검증 등급</h2>
+          </div>
+          <ul class="legend-list">
+            <li class="legend-row">
+              <span class="verdict-dot" style="background:var(--verify)"></span>
+              <div class="legend-body">
+                <span class="legend-label">공식 근거 확인</span>
+                <span class="legend-desc">1차·공식 출처 본문과 직접 대조 확인</span>
+              </div>
+            </li>
+            <li class="legend-row">
+              <span class="verdict-dot" style="background:var(--brand)"></span>
+              <div class="legend-body">
+                <span class="legend-label">공식자료 참고</span>
+                <span class="legend-desc">관련 공식자료를 참고함 (직접 검증은 아님)</span>
+              </div>
+            </li>
+            <li class="legend-row">
+              <span class="verdict-dot" style="background:var(--orange)"></span>
+              <div class="legend-body">
+                <span class="legend-label">검증 중</span>
+                <span class="legend-desc">확인 진행 중</span>
+              </div>
+            </li>
+            <li class="legend-row">
+              <span class="verdict-dot" style="background:var(--muted)"></span>
+              <div class="legend-body">
+                <span class="legend-label">AI 초안</span>
+                <span class="legend-desc">자동 생성·사람 검토 전, 최종 아님</span>
+              </div>
+            </li>
+          </ul>
+        </section>
+
+        <!-- SIDEBAR-RANK-B2: 제보 input. The 의뢰하기 button opens a mailto to the
+             REAL contact address (contact@tickedin.org — same as the footer /
+             per-analysis error-report path), prefilled with the typed text. NO
+             backend write, NO live-analysis trigger. Newsletter panel intentionally
+             NOT built (PIPA + backend, deferred). -->
+        <section class="report-panel" aria-label="사실 확인 제보">
+          <div class="rank-panel-heading">
+            <h2>이 주장, 사실일까요?</h2>
+            <p>확인이 필요한 주장이나 뉴스 링크를 보내주세요. 검증 대기열에 등록됩니다.</p>
+          </div>
+          <div class="report-input-row">
+            <input id="reportClaimInput" class="report-input" type="text" placeholder="주장 또는 링크 입력" autocomplete="off" maxlength="500">
+            <button id="reportClaimBtn" class="report-btn primary" type="button">의뢰하기</button>
+          </div>
+          <div class="report-contact-note">제보 contact@tickedin.org</div>
+        </section>
       </aside>
     </div>
 
@@ -3860,6 +4039,13 @@
     const hotTopicsEl = document.getElementById("hotTopics");
     // SIDEBAR-RANK: 인기 검증 랭킹 list container in the right sidebar (.home-aside).
     const rankListEl = document.getElementById("rankList");
+    // SIDEBAR-RANK-B2: weekly-stats panel numbers + range; 제보 input/button.
+    const statTotalEl = document.getElementById("statTotal");
+    const statOfficialEl = document.getElementById("statOfficial");
+    const statDraftEl = document.getElementById("statDraft");
+    const statRangeEl = document.getElementById("statRange");
+    const reportClaimInputEl = document.getElementById("reportClaimInput");
+    const reportClaimBtnEl = document.getElementById("reportClaimBtn");
     const categoryTabsEl = document.getElementById("categoryTabs");
     const hotTopicsSortEl = document.getElementById("hotTopicsSort");
     const hotTopicsLoadMoreEl = document.getElementById("hotTopicsLoadMore");
@@ -5502,7 +5688,7 @@
       if (summary.official_detail_available || Number(debug.official_body_matches || 0) > 0) {
         // Non-genuine but an official page was fetched/relevance-matched: honest,
         // non-alarmist downgrade — related material exists, not a direct verification.
-        return "관련 공식자료 있음 (직접 검증 아님)";
+        return "공식자료 참고";
       }
       if (Number(debug.official_body_candidates || summary.official_candidate_count || 0) > 0) {
         if (Number(debug.official_bodies_fetched || 0) > 0) {
@@ -5944,6 +6130,33 @@
           </div>
         </li>
       `).join("");
+    }
+
+    // SIDEBAR-RANK-B2: 이번 주 검증 현황 — fetch the read-only GET /stats once and
+    // fill the three numbers + the MM.DD–MM.DD range. REAL counts only (no
+    // hardcoded numbers). Fail-quiet: on any error the panel keeps its "–"
+    // placeholders and never throws. No write, no live-analysis trigger.
+    async function renderWeeklyStats() {
+      if (!statTotalEl && !statOfficialEl && !statDraftEl) return;
+      try {
+        const response = await fetch(`${API_BASE}/stats`);
+        if (!response.ok) return;
+        const body = await response.json();
+        if (!body || body.status !== "ok") return;
+        if (statTotalEl) statTotalEl.textContent = String(body.total ?? "–");
+        if (statOfficialEl) statOfficialEl.textContent = String(body.official ?? "–");
+        if (statDraftEl) statDraftEl.textContent = String(body.draft ?? "–");
+        if (statRangeEl && body.range_start && body.range_end) {
+          // ISO YYYY-MM-DD → MM.DD; fall back to the raw strings if malformed.
+          const mmdd = (iso) => {
+            const m = String(iso).match(/^\d{4}-(\d{2})-(\d{2})/);
+            return m ? `${m[1]}.${m[2]}` : String(iso);
+          };
+          statRangeEl.textContent = `${mmdd(body.range_start)}–${mmdd(body.range_end)}`;
+        }
+      } catch (_) {
+        // fail-quiet — leave the "–" placeholders.
+      }
     }
 
     // Phase 2 M3: project each full result down to only the fields the topic
@@ -9930,6 +10143,18 @@
         openTopicCard(card);
       });
     }
+    // SIDEBAR-RANK-B2: 제보 — open a mailto to the REAL contact address with the
+    // typed claim/link as the body (mirrors the per-analysis error-report mailto).
+    // NO backend write, NO live-analysis trigger. Empty input still opens a blank
+    // draft (graceful). location.href triggers the mail client without navigating.
+    if (reportClaimBtnEl) {
+      reportClaimBtnEl.addEventListener("click", () => {
+        const text = (reportClaimInputEl && reportClaimInputEl.value || "").trim();
+        const subject = encodeURIComponent("[tickedin 제보] 사실 확인 요청");
+        const body = encodeURIComponent(text);
+        window.location.href = `mailto:contact@tickedin.org?subject=${subject}&body=${body}`;
+      });
+    }
     // HOMEPAGE-TIERED: tier-2 grid (repurposed #domainSections) reuses the
     // topic-card markup, so the same card-open path applies. 더보기/접기 are
     // separate buttons (wired above), so this delegation only opens cards.
@@ -11183,6 +11408,9 @@
     renderHistory(safeReadLocalHistory());
     renderReviewQueue(safeReadReviewQueue());
     renderHotTopics();
+    // SIDEBAR-RANK-B2: fire-and-forget the read-only weekly-stats fetch (fills
+    // the 이번 주 검증 현황 numbers; fail-quiet, never blocks init).
+    renderWeeklyStats();
     // M45: asynchronously fill the hot-topic area from the server (GET
     // /history, cron output included). Fire-and-forget so it never blocks
     // synchronous init and never touches renderHistory()/localStorage. A

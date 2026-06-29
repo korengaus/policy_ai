@@ -3,7 +3,7 @@ import json
 import logging
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
@@ -20,6 +20,7 @@ from database import (
     get_account_by_username,
     get_recent_results_slim,
     get_result_by_id,
+    get_weekly_verification_stats,
     get_result_id_by_url,
     get_review_task,
     list_review_decisions,
@@ -426,6 +427,45 @@ def history(limit: int = 20) -> HistoryResponse:
         raise HTTPException(status_code=500, detail="failed to load history")
 
     return HistoryResponse(status="ok", count=len(results), results=results)
+
+
+class StatsResponse(BaseModel):
+    status: str
+    total: int
+    official: int
+    draft: int
+    range_start: str
+    range_end: str
+
+
+@app.get("/stats", response_model=StatsResponse)
+def stats() -> StatsResponse:
+    # SIDEBAR-RANK-B2: read-only weekly counts for the homepage sidebar's
+    # "이번 주 검증 현황" panel. READ-ONLY — no write, no verdict path, no schema
+    # change. Rolling 7-day window over created_at (ISO-8601 TEXT, lexicographic
+    # >=). total = COUNT(created_at >= cutoff); official = of those, the
+    # has_genuine_official_support count (persisted boolean + official_body_matches
+    # old-row fallback, parsed in Python — see read_weekly_verification_stats);
+    # draft = total - official (the AI-draft remainder).
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=7)
+    cutoff_iso = cutoff.isoformat()
+    try:
+        counts = get_weekly_verification_stats(cutoff_iso)
+    except Exception:
+        logger.exception("Failed to compute weekly stats")
+        raise HTTPException(status_code=500, detail="failed to compute stats")
+    total = int(counts.get("total", 0))
+    official = int(counts.get("official", 0))
+    draft = max(0, total - official)
+    return StatsResponse(
+        status="ok",
+        total=total,
+        official=official,
+        draft=draft,
+        range_start=cutoff.date().isoformat(),
+        range_end=now.date().isoformat(),
+    )
 
 
 class JobCreateRequest(BaseModel):
