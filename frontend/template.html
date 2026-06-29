@@ -113,7 +113,20 @@
       <div id="categoryTabs" class="category-tabs" aria-label="뉴스 카테고리">
         <button class="category-tab active" type="button" data-domain="전체">전체</button>
       </div>
+      <!-- DESIGN-C2c: the feed SORT control moved here (right side of the tabs row,
+           beside the grade-guide link) so it no longer pushes the hero down. The id
+           #hotTopicsSort + its options are unchanged; the change handler reads it by
+           id, so the relocation is position-independent. -->
       <a class="grade-guide-link" href="#methodology">검증 등급 안내 →</a>
+      <div class="hot-topics-sort" aria-label="피드 정렬">
+        <label class="hot-topics-sort-label" for="hotTopicsSort">정렬</label>
+        <select id="hotTopicsSort" class="hot-topics-sort-select">
+          <option value="뜨는순" selected>뜨는순</option>
+          <option value="최신순">최신순</option>
+          <option value="위험도순">위험도순</option>
+          <option value="검토됨 우선">검토됨 우선</option>
+        </select>
+      </div>
     </nav>
 
     <section id="metrics" class="metrics">
@@ -144,25 +157,12 @@
          full-width OUTSIDE this shell. -->
     <div class="home-shell">
       <div class="home-main">
-        <div class="feed-sort-row">
-          <div class="hot-topics-sort" aria-label="지금 뜨는 이슈 정렬">
-            <label class="hot-topics-sort-label" for="hotTopicsSort">정렬</label>
-            <select id="hotTopicsSort" class="hot-topics-sort-select">
-              <option value="뜨는순" selected>뜨는순</option>
-              <option value="최신순">최신순</option>
-              <option value="위험도순">위험도순</option>
-              <option value="검토됨 우선">검토됨 우선</option>
-            </select>
-          </div>
-        </div>
-
+        <!-- DESIGN-C2c: the "🔥 지금 뜨는 이슈" .section-heading + subline were removed
+             so the hero begins right below the category tabs (mockup). The hero's
+             own "<domain> · 오늘의 검증" eyebrow (rendered in renderTopicCardHtml when
+             opts.hero) is the lead-in now. The feed SORT control moved up to the
+             .domain-tabs-row. #hotTopics + the load-more wrap stay. -->
         <section class="news-home-section">
-          <div class="section-heading">
-            <div>
-              <h2>🔥 지금 뜨는 이슈</h2>
-              <p>전 분야에서 지금 가장 주목받는 정책 이슈입니다.</p>
-            </div>
-          </div>
           <div id="hotTopics" class="topic-card-grid">
             <div class="empty-state">분석을 실행하거나 최근 분석을 불러오면 검증 뉴스 카드가 표시됩니다.</div>
           </div>

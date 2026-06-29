@@ -2112,7 +2112,7 @@
         : "";
       return `
         <article class="topic-card ${opts && opts.hero ? "topic-card--hero " : ""}${selected ? "selected" : ""}" data-topic-key="${escapeHtml(card.key)}" data-topic-source="${escapeHtml(card.source)}" data-topic-index="${escapeHtml(card.index)}" data-topic-record-id="${escapeHtml(card.recordId)}">
-          <div class="topic-card-top">
+          ${opts && opts.hero ? `<div class="hero-today-label">${escapeHtml(domainDisplayLabel(cardDomainKey(card)))} · 오늘의 검증</div>` : ""}<div class="topic-card-top">
             <span class="card-domain">${escapeHtml(domainDisplayLabel(cardDomainKey(card)))}</span>
             <span class="card-watch ${alertClass(card.alert)}">${escapeHtml(formatAlert(card.alert))}</span>
             ${card.freshness ? `<span class="card-fresh">🔥 ${escapeHtml(FRESHNESS_BADGE_LABEL)}</span>` : ""}
