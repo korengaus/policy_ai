@@ -1430,6 +1430,16 @@
       background-color: rgba(30, 95, 216, 0.06);
       border-color: var(--brand);
     }
+    /* DESIGN-C3h-2c: replace the heavy native focus outline (a thick black box on
+       the appearance:none select) with a subtle brand ring. Scoped to this select
+       only — other inputs (제보, search) keep their normal focus. Accessible: a
+       visible but soft indicator, not outline:none alone. */
+    .hot-topics-sort-select:focus,
+    .hot-topics-sort-select:focus-visible {
+      outline: none;
+      border-color: var(--brand);
+      box-shadow: 0 0 0 2px rgba(30, 95, 216, 0.25);
+    }
 
     /* DESIGN-C3h-1c: feed sort control relocated above the feed (out of the tab
        row), right-aligned next to the sortable list it governs. */
@@ -2073,7 +2083,10 @@
     /* DESIGN-C2c: the hero's small "<domain> · 오늘의 검증" editorial eyebrow above
        the headline (the lead-in that replaced the removed "지금 뜨는 이슈" heading). */
     .topic-card--hero .hero-today-label {
-      color: var(--brand);
+      /* DESIGN-C3h-2c: --brand → --brand-ink (one step darker blue, the "eyebrows"
+         token) for a touch more contrast on white; still clearly secondary to the
+         title. */
+      color: var(--brand-ink);
       font-size: 0.86rem;
       font-weight: 700;
       letter-spacing: 0.01em;
@@ -2309,7 +2322,9 @@
       font-size: 0.77rem;
       font-weight: 800;
       letter-spacing: 0.01em;
-      color: var(--brand);
+      /* DESIGN-C3h-2c: --brand → --brand-ink for a touch more contrast on white
+         (even with the hero eyebrow). */
+      color: var(--brand-ink);
     }
     .card-watch {
       font-size: 0.72rem;
@@ -2361,7 +2376,9 @@
       color: var(--ink);
     }
     .card-confidence {
-      color: var(--muted);
+      /* DESIGN-C3h-2c: --muted → --slate (one step darker grey) so 신뢰도 NN reads
+         comfortably on white; still lighter than the --ink verdict label beside it. */
+      color: var(--slate);
       font-size: 0.8rem;
       font-weight: 600;
     }
