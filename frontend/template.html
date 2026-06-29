@@ -149,11 +149,14 @@
          full-width OUTSIDE this shell. -->
     <div class="home-shell">
       <div class="home-main">
-        <!-- DESIGN-C3h-1c: feed SORT control, relocated here from the tab row to sit
-             just above the feed it controls (the sortable card-row + list chunks
-             below). Kept as a PERSISTENT static node (#hotTopicsSort id unchanged) so
-             its existing change-listener stays bound — it is NOT re-emitted inside the
-             JS-rebuilt #hotTopics. Right-aligned via .feed-sort-row. -->
+        <!-- DESIGN-C3h-1d: hero band + 오늘의 검증 row render into #hotTopicsTop, so the
+             static .feed-sort-row (#hotTopicsSort) sits DIRECTLY between the 오늘의 검증
+             row and the sortable card-row/list (which render into #hotTopics below).
+             The dropdown node is never destroyed → its change-listener stays bound. -->
+        <div id="hotTopicsTop"></div>
+        <!-- DESIGN-C3h-1c: feed SORT control — PERSISTENT static node (#hotTopicsSort id
+             unchanged) so its existing change-listener stays bound; it is NOT re-emitted
+             inside the JS-rebuilt feed. Right-aligned via .feed-sort-row. -->
         <div class="feed-sort-row">
           <div class="hot-topics-sort" aria-label="피드 정렬">
             <label class="hot-topics-sort-label" for="hotTopicsSort">정렬</label>

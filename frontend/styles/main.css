@@ -2125,6 +2125,18 @@
       font-weight: 700;
       letter-spacing: 0.08em;
     }
+    /* DESIGN-C3h-1d: grey horizontal divider between the feed's vertical sections
+       (hero | 오늘의 검증 | card-row | list), newspaper-style. The 1px var(--line)
+       rule is the SAME token as the card-list / hero-band dividers. The wrapper is
+       emitted ONLY with its section (renderHotTopics gates on length), so an empty
+       오늘의 검증 / card-row leaves no orphan rule. The hero band is never wrapped, so
+       it has no rule above it. */
+    .feed-sec-ruled {
+      border-top: 1px solid var(--line);
+      margin-top: 16px;
+      padding-top: 10px;
+    }
+
     .latest-checks-row {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2297,6 +2309,14 @@
       border: 1px solid var(--line);
       border-radius: var(--radius-sm);
       background: var(--paper);
+    }
+    /* DESIGN-C3h-1d: in the full-width 1-col LIST cards the source box would span
+       the whole card and the long document title never hit the .card-source-label
+       ellipsis. Cap its width so the existing truncation engages. Scoped to
+       .feed-list > .topic-card (the 1-col list) — the hero / 3-col card-row / today
+       boxes (in #hotTopicsTop or .latest-checks-row) are unaffected. */
+    .feed-list > .topic-card .card-source-box {
+      max-width: 360px;
     }
     /* CARD-BOX: compact blue PILL, rendered on the verdict band beside the
        verdict label (no longer a full-width green line). */

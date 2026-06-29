@@ -140,6 +140,9 @@
     const reviewFilterEl = document.getElementById("reviewFilter");
     const selectedIssueIntroEl = document.getElementById("selectedIssueIntro");
     const hotTopicsEl = document.getElementById("hotTopics");
+    // DESIGN-C3h-1d: top feed container (hero band + 오늘의 검증 row) — sits above the
+    // static sort row, with the card-row + 1-col list rendering into #hotTopics below.
+    const hotTopicsTopEl = document.getElementById("hotTopicsTop");
     // SIDEBAR-RANK: 인기 검증 랭킹 list container in the right sidebar (.home-aside).
     const rankListEl = document.getElementById("rankList");
     // SIDEBAR-RANK-B2: weekly-stats panel numbers + range; 제보 input/button.
@@ -2210,27 +2213,44 @@
           + `</div>`
         : "";
 
+      // DESIGN-C3h-1d: hero band + 오늘의 검증 render into #hotTopicsTop (above the
+      // static sort row); the card-row + 1-col list render into #hotTopics (below it).
+      // Grey 1px var(--line) dividers come from .feed-sec-ruled wrappers, emitted ONLY
+      // with their section so no orphan rule shows when a section is empty. The list is
+      // wrapped in .feed-list so the Fix-2 max-width selector targets only list cards.
       if (!hot.length) {
+        hotTopicsTopEl.innerHTML = "";
         hotTopicsEl.innerHTML = '<div class="empty-state">검색을 실행하거나 최근 분석을 불러오면 검증 카드가 표시됩니다.</div>';
       } else if (hot.length >= 2) {
         const band = `<div class="feed-hero-band">`
           + renderTopicCardHtml(hot[0], { detailed: true, hero: true })
           + renderTopicCardHtml(hot[1], { detailed: true })
           + `</div>`;
-        // 오늘의 검증 keeps its header; the sort-controlled card row below has NO header.
+        // 오늘의 검증 — own header, ruled (grey divider above it; gated on today count).
         const todayRow = todayCards.length
-          ? `<div class="latest-checks-head"><h2>오늘의 검증</h2><span class="latest-checks-eyebrow">LATEST CHECKS</span></div>`
+          ? `<div class="feed-sec-ruled">`
+            + `<div class="latest-checks-head"><h2>오늘의 검증</h2><span class="latest-checks-eyebrow">LATEST CHECKS</span></div>`
             + cardGrid(todayCards)
+            + `</div>`
           : "";
-        const cardsRow = cardGrid(cardRow3);
+        hotTopicsTopEl.innerHTML = band + todayRow;
+
+        // first-3 card row (no header) + the 1-col list, each ruled + gated.
+        const cardsRow = cardRow3.length
+          ? `<div class="feed-sec-ruled">` + cardGrid(cardRow3) + `</div>`
+          : "";
         const listHtml = listPool
           .slice(0, listShown)
           .map((card) => renderTopicCardHtml(card, { detailed: true }))
           .join("");
-        hotTopicsEl.innerHTML = band + todayRow + cardsRow + listHtml;
+        const listSection = listHtml
+          ? `<div class="feed-sec-ruled feed-list">` + listHtml + `</div>`
+          : "";
+        hotTopicsEl.innerHTML = cardsRow + listSection;
       } else {
-        // <2 fallback — a single card renders as the hero alone (no band/rows).
-        hotTopicsEl.innerHTML = renderTopicCardHtml(hot[0], { detailed: true, hero: true });
+        // <2 fallback — a single card renders as the hero alone (no rows/list).
+        hotTopicsTopEl.innerHTML = renderTopicCardHtml(hot[0], { detailed: true, hero: true });
+        hotTopicsEl.innerHTML = "";
       }
       // 더 보기 reflects the LIST chunk only (hero + 오늘의 검증 + the card row are NOT counted).
       updateTierButtons(hotTopicsLoadMoreEl, hotTopicsCollapseEl, listShown, listTotal, TIER1_INITIAL);
@@ -6289,8 +6309,14 @@
         resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
       }
     }
-    if (hotTopicsEl) {
-      hotTopicsEl.addEventListener("click", (event) => {
+    // DESIGN-C3h-1d: the card-open delegation is bound to .home-main (the shared
+    // ancestor of #hotTopicsTop AND #hotTopics) so it catches clicks on the hero +
+    // 오늘의 검증 cards (now in #hotTopicsTop) as well as the card-row + list (in
+    // #hotTopics). Same closest("[data-topic-source]") → openTopicCard pattern;
+    // openTopicCard / pushDetailHistoryState (HISTORY-BACK) are unchanged.
+    const homeMainEl = hotTopicsEl && hotTopicsEl.closest(".home-main");
+    if (homeMainEl) {
+      homeMainEl.addEventListener("click", (event) => {
         const card = event.target.closest("[data-topic-source]");
         if (!card) return;
         openTopicCard(card);
@@ -6318,16 +6344,11 @@
         window.location.href = `mailto:contact@tickedin.org?subject=${subject}&body=${body}`;
       });
     }
-    // HOMEPAGE-TIERED: tier-2 grid (repurposed #domainSections) reuses the
-    // topic-card markup, so the same card-open path applies. 더보기/접기 are
-    // separate buttons (wired above), so this delegation only opens cards.
-    if (tier2GridEl) {
-      tier2GridEl.addEventListener("click", (event) => {
-        const card = event.target.closest("[data-topic-source]");
-        if (!card) return;
-        openTopicCard(card);
-      });
-    }
+    // DESIGN-C3h-1d: the dedicated #domainSections (tier-2) click listener was
+    // REMOVED — #domainSections lives inside .home-main, so the relocated .home-main
+    // delegation above now opens tier-2 cards too (same closest()/openTopicCard path).
+    // Keeping both would double-fire openTopicCard (double HISTORY-BACK entry).
+    // 더보기/접기 are separate buttons, wired elsewhere.
     // ---- Phase 2 M8.1: server-backed reviewer UI ---------------------------
     // Wires the FastAPI /review/* endpoints to the admin panel. Auth is the
     // signed session cookie (AUTH-2d: session-only; the legacy X-Review-Token
