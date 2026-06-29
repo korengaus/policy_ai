@@ -303,6 +303,17 @@
                 <span class="legend-desc">확인 진행 중</span>
               </div>
             </li>
+            <!-- DESIGN-C3h-2f: the red verdict tier (draft_disputed 상충 + draft_misleading
+                 오해, both var(--red) on the card) was missing from the legend. Honest,
+                 conservative copy — a "needs human review" state, NOT a definitive
+                 falsehood. Same inline-style dot mechanism as the rows above. -->
+            <li class="legend-row">
+              <span class="verdict-dot" style="background:var(--red)"></span>
+              <div class="legend-body">
+                <span class="legend-label">상충·오해 가능성</span>
+                <span class="legend-desc">상충되거나 오해를 부를 수 있는 근거가 있어 사람 검토가 필요한 상태</span>
+              </div>
+            </li>
             <li class="legend-row">
               <span class="verdict-dot" style="background:var(--muted)"></span>
               <div class="legend-body">

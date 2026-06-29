@@ -2363,7 +2363,7 @@
             <span class="rank-title">${escapeHtml(card.title)}</span>
             <span class="rank-verdict">
               <span class="verdict-dot" style="background:${verdictDotColor(card.verdictLabel)}"></span>
-              <span class="rank-verdict-text">${escapeHtml(verdictLabelKo(card.verdictLabel))}</span>
+              <span class="rank-verdict-text">판정 ${escapeHtml(verdictLabelKo(card.verdictLabel))}</span>
             </span>
           </div>
         </li>
