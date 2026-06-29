@@ -1654,13 +1654,16 @@
        discreteness; the heavy card shadow is dropped, the bg flattened to the
        near-flat --surface-soft tint, the radius reduced, and the margin widened —
        lighter than the old card box, consistent with the borderless feed/ranking. */
+    /* DESIGN-C3h-2b: un-boxed — the sidebar is now a clean borderless vertical
+       stack (인기 검증 랭킹 / 이번 주 검증 현황 / 검증 등급 / 제보), each separated by the
+       SAME thin black rule as .rank-panel (1px var(--rule-strong)). Removed the
+       box (border + radius + background); vertical-only padding flush-aligns the
+       content with the ranking panel above. */
     .stat-panel,
     .legend-panel,
     .report-panel {
-      border: 1px solid var(--line);
-      border-radius: var(--radius-sm);
-      background: var(--surface-soft);
-      padding: 14px 16px;
+      border-top: 1px solid var(--rule-strong);
+      padding: 12px 0 2px;
       margin-top: 18px;
     }
 
@@ -2181,7 +2184,9 @@
        "{label} 전체 →" link on the right (matches .grade-guide-link). The 3-col card
        row reuses .latest-checks-row (collapses to 1 col at <=960px via that rule). */
     .domain-section {
-      border-top: 2px solid var(--rule-strong);
+      /* DESIGN-C3h-2b: thinned 2px → 1px var(--rule-strong) to match the thin
+         sidebar/ranking rule (2px read too thick). */
+      border-top: 1px solid var(--rule-strong);
       margin-top: 28px;
       padding-top: 16px;
     }
