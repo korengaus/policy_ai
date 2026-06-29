@@ -2103,18 +2103,9 @@
     .topic-card--hero {
       gap: 14px;
     }
-    /* DESIGN-C2c: the hero's small "<domain> · 오늘의 검증" editorial eyebrow above
-       the headline (the lead-in that replaced the removed "지금 뜨는 이슈" heading). */
-    .topic-card--hero .hero-today-label {
-      /* DESIGN-C3h-2c: --brand → --brand-ink (one step darker blue, the "eyebrows"
-         token) for a touch more contrast on white; still clearly secondary to the
-         title. */
-      color: var(--brand-ink);
-      font-size: 0.86rem;
-      font-weight: 700;
-      letter-spacing: 0.01em;
-      margin-bottom: 2px;
-    }
+    /* DESIGN-C3h-3: the always-on hero "<domain> · 오늘의 검증" eyebrow (.hero-today-label)
+       was REMOVED — it was a fixed hero label, not a real today signal. Real today
+       cards now carry the per-card .card-today-badge instead. */
     /* DESIGN-C2c: the domain now leads the headline via the eyebrow above, so hide
        the redundant .card-domain badge ON THE HERO ONLY. The alert badge
        (.card-watch), freshness, review badge, and all other elements stay. */
@@ -2366,6 +2357,22 @@
       font-size: 0.72rem;
       font-weight: 700;
       color: #c2410c;
+    }
+    /* DESIGN-C3h-3: "오늘 검증" recency badge — shown on any card verified today
+       (created_at >= KST-midnight). A brand-tinted pill, deliberately DISTINCT from
+       the green official/verdict pills and the orange 🔥 article-freshness marker, so
+       it reads as "we verified this today," not as a verdict. Reuses brand tokens. */
+    .card-today-badge {
+      display: inline-flex;
+      align-items: center;
+      background: rgba(30, 95, 216, 0.08);
+      color: var(--brand-ink);
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      padding: 2px 8px;
+      line-height: 1.4;
     }
     .topic-card-tags {
       display: flex;

@@ -338,6 +338,17 @@
     function verdictLabelKo(label) {
       return VERDICT_LABELS[String(label || "")] || "추가 검증 필요";
     }
+    // DESIGN-C3h-3: a card is "verified today" iff its analysis created_at is on or
+    // after KST (UTC+9) midnight. This is the EXACT rule the former 오늘의 검증 row
+    // used; now the single source of truth for the per-card "오늘 검증" recency badge
+    // (a freshness marker — NOT a verdict). Display-only; created_at is in the slim
+    // payload already.
+    function isTodayCard(card) {
+      if (!card || !card.createdAt) return false;
+      const kstMidnightUtcMs =
+        Math.floor((Date.now() + 9 * 3600e3) / 86400e3) * 86400e3 - 9 * 3600e3;
+      return Date.parse(card.createdAt) >= kstMidnightUtcMs;
+    }
 
     // M29-A1: SOURCE_TYPE_LABELS is also pin-safe (kept in place this slice).
     const SOURCE_TYPE_LABELS = {
@@ -2141,9 +2152,10 @@
         : "";
       return `
         <article class="topic-card ${opts && opts.hero ? "topic-card--hero " : ""}${selected ? "selected" : ""}" data-topic-key="${escapeHtml(card.key)}" data-topic-source="${escapeHtml(card.source)}" data-topic-index="${escapeHtml(card.index)}" data-topic-record-id="${escapeHtml(card.recordId)}">
-          ${opts && opts.hero ? `<div class="hero-today-label">${escapeHtml(domainDisplayLabel(cardDomainKey(card)))} · 오늘의 검증</div>` : ""}<div class="topic-card-top">
+          <div class="topic-card-top">
             <span class="card-domain">${escapeHtml(domainDisplayLabel(cardDomainKey(card)))}</span>
             <span class="card-watch ${alertClass(card.alert)}">${escapeHtml(formatAlert(card.alert))}</span>
+            ${isTodayCard(card) ? `<span class="card-today-badge">오늘 검증</span>` : ""}
             ${card.freshness ? `<span class="card-fresh">🔥 ${escapeHtml(FRESHNESS_BADGE_LABEL)}</span>` : ""}
             ${card.humanReviewedAt ? `<span class="review-status review-approved">${escapeHtml(HUMAN_REVIEWED_LABEL)}</span>` : ""}
           </div>
@@ -2235,16 +2247,11 @@
       // so BOTH obey the dropdown. Today cards are excluded from the pool so the card
       // row never duplicates the 오늘의 검증 row.
       const hot = sortTopicCards(filtered, "뜨는순");
-      // KST "today" boundary (UTC+9): floor-to-day in KST, expressed back in UTC ms.
-      const kstMidnightUtcMs =
-        Math.floor((Date.now() + 9 * 3600e3) / 86400e3) * 86400e3 - 9 * 3600e3;
-      const todayCards = filtered
-        .filter((c) => c.createdAt && Date.parse(c.createdAt) >= kstMidnightUtcMs)
-        .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
-        .slice(0, 3);
+      // DESIGN-C3h-3: the dedicated 오늘의 검증 row was removed — today cards now flow
+      // into the normal sorted feed carrying the per-card "오늘 검증" badge (isTodayCard).
+      // So the pool excludes ONLY the hero cards (no longer the today cards).
       const heroKeys = new Set(hot.slice(0, 2).map((c) => c.key));
-      const todayKeys = new Set(todayCards.map((c) => c.key));
-      const poolBase = filtered.filter((c) => !heroKeys.has(c.key) && !todayKeys.has(c.key));
+      const poolBase = filtered.filter((c) => !heroKeys.has(c.key));
       const poolSorted = sortTopicCards(poolBase, activeSort);
       const cardRow3 = poolSorted.slice(0, 3);
       const listPool = poolSorted.slice(3);
@@ -2272,14 +2279,9 @@
           + renderTopicCardHtml(hot[0], { detailed: true, hero: true })
           + renderTopicCardHtml(hot[1], { detailed: true })
           + `</div>`;
-        // 오늘의 검증 — own header, ruled (grey divider above it; gated on today count).
-        const todayRow = todayCards.length
-          ? `<div class="feed-sec-ruled">`
-            + `<div class="latest-checks-head"><h2>오늘의 검증</h2><span class="latest-checks-eyebrow">LATEST CHECKS</span></div>`
-            + cardGrid(todayCards)
-            + `</div>`
-          : "";
-        hotTopicsTopEl.innerHTML = band + todayRow;
+        // DESIGN-C3h-3: #hotTopicsTop holds ONLY the hero band now (the 오늘의 검증 row
+        // was removed; today cards flow into the feed below carrying the per-card badge).
+        hotTopicsTopEl.innerHTML = band;
 
         // first-3 card row (no header) + the 1-col list, each ruled + gated.
         const cardsRow = cardRow3.length
