@@ -101,8 +101,11 @@
       /* DESIGN-C2b: top padding 24px → 10px so the empty band above the utility
          bar matches the ~9px gap below it (utility-bar padding-bottom, down to the
          dotted rule) — symmetric, raising the whole header toward the mockup line.
-         Side (22px) + bottom (36px) unchanged. */
-      padding: 10px 22px 36px;
+         Side (22px) + bottom (36px) unchanged.
+         DESIGN-C2d: trimmed 10px → 6px so the top band matches the ~9px bottom gap
+         even more closely (the utility-bar's own 5px top padding sits inside its
+         box). Only padding-top changed; side/bottom unchanged. */
+      padding: 6px 22px 36px;
       /* DESIGN-3A4: the former whole-page zoom:0.8 was REMOVED — fractional CSS
          zoom rendered all text below 1.0 and caused site-wide sub-pixel blur.
          Without it, px+rem scale uniformly to ~125% and text is crisp. Do NOT
@@ -1836,6 +1839,20 @@
        sidebar .rank-row dividers and the feed card dividers — consistent light grey. */
     .feed-hero-band > .topic-card:nth-child(2) {
       border-left: 1px solid var(--line);
+      padding-left: 24px;
+    }
+    /* DESIGN-C2d: stop the band cards shifting on hover. The C-1 hover bleed
+       (margin:0 -12px + padding:16px 12px) collided with the 2nd cell's border-left
+       + padding-left:24px, moving the card and the vertical rule. Higher-specificity
+       than .topic-card:hover, so it wins for margin/padding here and neutralizes the
+       bleed — the tint (background from .topic-card:hover) and the divider stay, and
+       the normal single-column feed hover is untouched. The 2nd cell re-asserts its
+       24px divider padding (the general rule below zeroes left padding). */
+    .feed-hero-band > .topic-card:hover {
+      margin: 0;
+      padding: 16px 0;
+    }
+    .feed-hero-band > .topic-card:nth-child(2):hover {
       padding-left: 24px;
     }
 
