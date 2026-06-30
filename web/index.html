@@ -466,12 +466,15 @@
     .latest-checks-head h2,
     .rank-panel-heading h2,
     .domain-section-title,
-    /* DESIGN-DETAIL-4: the detail reader headings join the serif group so the
-       detail reads like the same site as home/methodology. */
+    /* DESIGN-DETAIL-4 / -4b: the detail reader headings join the serif group so the
+       detail reads like the same site as home/methodology. -4b adds the page title
+       (.result-title) and the 상세 검증 정보 sub-heading (.news-section-title). */
+    .result-title,
     .verdict-reasoning h3,
     .plain-section h4,
     .public-source-section h3,
-    .verification-card h3 {
+    .verification-card h3,
+    .news-section-title {
       font-family: 'Nanum Myeongjo', 'Apple SD Gothic Neo', 'Pretendard', serif;
     }
     /* DESIGN-C3g: the brand wordmark (+ the footer brand via the shared .brand
@@ -723,22 +726,24 @@
       margin-top: 16px;
     }
 
+    /* DESIGN-DETAIL-4b FIX 4: relocated to the bottom of the detail and restyled as a
+       compact, quiet utility bar (was a big tinted #eff6ff panel at the top). Flat,
+       thin top rule, C3 tokens — a secondary utility reads visually quiet. The JS sets
+       display:flex inline when shown; the default stays none. */
     .report-actions {
       display: none;
       align-items: center;
       justify-content: space-between;
       gap: 12px;
-      border: 1px solid #dbeafe;
-      border-radius: 10px;
-      background: #eff6ff;
-      margin: 16px 0 0;
-      padding: 12px;
+      border-top: 1px solid var(--line);
+      margin: 24px 0 0;
+      padding: 14px 0 0;
     }
 
     .report-actions-title {
-      color: #1e3a8a;
-      font-size: 14px;
-      font-weight: 900;
+      color: var(--slate);
+      font-size: 0.86rem;
+      font-weight: 700;
     }
 
     .report-actions-buttons {
@@ -749,27 +754,20 @@
 
     .report-copy,
     .report-download {
-      min-height: 34px;
-      border-radius: 8px;
-      padding: 8px 12px;
-      font-size: 13px;
-      font-weight: 900;
+      min-height: 30px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: var(--paper);
+      color: var(--slate);
+      padding: 6px 11px;
+      font-size: 0.8rem;
+      font-weight: 700;
     }
 
-    .report-copy {
-      background: var(--blue);
-    }
-
-    .report-copy:hover:not(:disabled) {
-      background: var(--blue-dark);
-    }
-
-    .report-download {
-      background: #0f766e;
-    }
-
+    .report-copy:hover:not(:disabled),
     .report-download:hover:not(:disabled) {
-      background: #115e59;
+      border-color: var(--brand);
+      color: var(--brand-ink);
     }
 
     .result-card {
@@ -828,11 +826,26 @@
       line-height: 1.4;
     }
 
+    /* DESIGN-DETAIL-4b FIX 2: the detail's AI-status label is flat text (no pill).
+       Matches the home's small label scale; the status class tints only the TEXT.
+       The two-class selectors override the solid-bg .ai-status-* rules above. */
+    .ai-status-tag {
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 0.01em;
+    }
+    .ai-status-tag.ai-status-active { background: transparent; color: #15803d; }
+    .ai-status-tag.ai-status-inactive { background: transparent; color: var(--slate); }
+    .ai-status-tag.ai-status-error { background: transparent; color: #b45309; }
+
+    /* DESIGN-DETAIL-4b FIX 1: the detail page title matches the HOME section-title
+       serif scale (.domain-section-title = 1.5rem / 1.25 / 700, --ink). */
     .result-title {
       margin: 0 0 14px;
-      font-size: 19px;
-      line-height: 1.38;
-      font-weight: 750;
+      color: var(--ink);
+      font-size: 1.5rem;
+      line-height: 1.3;
+      font-weight: 700;
     }
 
     a {
@@ -880,8 +893,8 @@
     /* DESIGN-DETAIL-4: the news content lead now reads as a flat pull-quote — a
        left rule only, no heavy box (dropped the radius + paper fill). */
     .report-summary-lead {
-      margin: 14px 0 16px;
-      padding: 4px 0 4px 16px;
+      margin: 16px 0;
+      padding: 6px 0 6px 18px;
       border-left: 3px solid var(--brand);
       color: var(--ink);
       font-size: 17px;
@@ -952,20 +965,25 @@
     }
 
     .verdict-reasoning {
-      margin-top: 16px;
+      margin-top: 20px;
     }
 
+    /* DESIGN-DETAIL-4b FIX 1: primary detail section heading — clearly larger than
+       the 영향 sub-headings, on the home serif scale (just under the 1.5rem page title). */
     .verdict-reasoning h3 {
-      margin: 0 0 8px;
+      margin: 0 0 10px;
       color: var(--ink);
-      font-size: 17px;
+      font-size: 1.25rem;
+      line-height: 1.3;
+      font-weight: 700;
     }
 
+    /* FIX 1: reader body matches the home card summary (--slate, 0.923rem, ~1.6). */
     .verdict-reasoning ul {
       margin: 0;
       padding-left: 18px;
       color: var(--slate);
-      font-size: 14px;
+      font-size: 0.923rem;
       line-height: 1.65;
     }
 
@@ -1227,22 +1245,24 @@
 
     /* DESIGN-DETAIL-4 STEP 4: 영향 sections un-boxed into flat columns separated by
        a thin top rule (was a #fff box). */
+    /* DESIGN-DETAIL-4b FIX 1: more breathing room between major sections (home rhythm). */
     .plain-section-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 16px 20px;
-      margin: 18px 0;
+      gap: 18px 22px;
+      margin: 24px 0;
     }
 
     .plain-section {
       border-top: 1px solid var(--line);
-      padding: 13px 0 0;
+      padding: 14px 0 0;
     }
 
+    /* FIX 1: the 영향 sub-headings — serif, smaller than the primary section headings. */
     .plain-section h4 {
       margin: 0 0 8px;
       color: var(--ink);
-      font-size: 15px;
+      font-size: 1.05rem;
       font-weight: 700;
     }
 
@@ -1250,8 +1270,8 @@
       margin: 0;
       padding-left: 18px;
       color: var(--slate);
-      font-size: 13px;
-      line-height: 1.58;
+      font-size: 0.923rem;
+      line-height: 1.6;
     }
 
     /* DESIGN-DETAIL-4 STEP 4: the supplementary explain line is now a thin-rule note
@@ -1306,11 +1326,13 @@
       font-weight: 900;
     }
 
+    /* DESIGN-DETAIL-4b FIX 1: 상세 검증 정보 sub-heading — serif, secondary scale,
+       token color (was 17px/900 sans #111827). */
     .news-section-title {
-      margin: 18px 0 8px;
-      color: #111827;
-      font-size: 17px;
-      font-weight: 900;
+      margin: 20px 0 8px;
+      color: var(--ink);
+      font-size: 1.05rem;
+      font-weight: 700;
     }
 
     .reader-note {
@@ -2653,15 +2675,17 @@
        flat section with a thin top rule; inner source cards stay lightly bordered. */
     .public-source-section {
       border-top: 1px solid var(--line);
-      margin: 18px 0;
-      padding: 16px 0 0;
+      margin: 24px 0;
+      padding: 20px 0 0;
     }
 
+    /* DESIGN-DETAIL-4b FIX 1: primary section heading on the home serif scale. */
     .public-source-section h3 {
       margin: 0;
       color: var(--ink);
-      font-size: 17px;
-      line-height: 1.35;
+      font-size: 1.25rem;
+      line-height: 1.3;
+      font-weight: 700;
     }
 
     .public-source-grid {
@@ -2692,7 +2716,7 @@
     }
 
     .public-source-meta {
-      color: #475569;
+      color: var(--slate);
       font-size: 12px;
       line-height: 1.5;
       margin-top: 7px;
@@ -3407,15 +3431,18 @@
     /* DESIGN-DETAIL-4 STEP 4: the AI 종합 검증 판단 residual card un-boxed to a flat
        section with a thin top rule (was a bordered paper box). */
     .verification-card {
-      margin: 18px 0;
+      margin: 24px 0;
       border-top: 1px solid var(--line);
-      padding: 16px 0 0;
+      padding: 20px 0 0;
     }
 
+    /* DESIGN-DETAIL-4b FIX 1: primary section heading on the home serif scale. */
     .verification-card h3 {
       margin: 0 0 10px;
       color: var(--ink);
-      font-size: 17px;
+      font-size: 1.25rem;
+      line-height: 1.3;
+      font-weight: 700;
     }
 
     /* DESIGN-DETAIL-4 STEP 3c: the 초안 판정 tile was removed (now in the top verdict
@@ -3426,6 +3453,19 @@
       flex-wrap: wrap;
       gap: 10px;
       margin-bottom: 12px;
+    }
+
+    /* DESIGN-DETAIL-4b FIX 3: the lone 리뷰 상태 tile is a flat label:value (no box,
+       no paper fill), consistent with the top verdict indicators. */
+    .verification-intro .summary-tile {
+      border: 0;
+      background: transparent;
+      border-radius: 0;
+      padding: 0;
+      min-height: 0;
+    }
+    .verification-intro .summary-tile strong {
+      color: var(--ink);
     }
 
     .collapsible-section {
@@ -4735,6 +4775,15 @@
       <p>관심 있는 이슈의 상세 보기를 누르거나 검색어를 입력하면 검증 리포트가 표시됩니다.</p>
     </section>
 
+    <section id="results" class="results">
+      <div class="empty-state">분석을 실행하면 결과가 여기에 표시됩니다.</div>
+    </section>
+
+    <!-- DESIGN-DETAIL-4b FIX 4: the share/export utility (#reportActions) was moved
+         out of the reader's lead down to the END of the detail, near 원문 보기/신고하기
+         (rendered inside #results). A secondary utility belongs at the bottom. The id
+         is unchanged, so setCurrentReportContext (display toggle) + the copy/download
+         handlers (bound by button id) keep working position-independently. -->
     <section id="reportActions" class="report-actions">
       <div>
         <div class="report-actions-title">공유용 검증 리포트</div>
@@ -4745,10 +4794,6 @@
         <button id="downloadReportBtn" class="report-download" type="button">리포트 다운로드</button>
         <button id="downloadMarkdownBtn" class="report-download" type="button">Markdown 다운로드</button>
       </div>
-    </section>
-
-    <section id="results" class="results">
-      <div class="empty-state">분석을 실행하면 결과가 여기에 표시됩니다.</div>
     </section>
 
     </div><!-- /#detailScreen (DESIGN-DETAIL-3 detail view) -->
@@ -5613,7 +5658,11 @@
       const info = getResultAiStatus(result);
       const desc = buildAiStatusDescriptor(info.status);
       const title = info.reason ? `${desc.label} (${info.reason})` : desc.label;
-      return `<span class="badge ai-status-badge ${desc.className}" title="${escapeHtml(title)}">${escapeHtml(desc.label)}</span>`;
+      // DESIGN-DETAIL-4b FIX 2: detail-only AI-status label — flat muted text (.ai-status-tag)
+      // instead of a dark filled pill (.badge). The status class still tints the TEXT
+      // (green/grey/amber) but carries no background, matching the home's quiet
+      // treatment of technical notes. Same label text.
+      return `<span class="ai-status-tag ${desc.className}" title="${escapeHtml(title)}">${escapeHtml(desc.label)}</span>`;
     }
 
     // ===== C4 — Display formatters =====
@@ -9605,10 +9654,15 @@
         return `
           <article class="result-card">
             <div class="headline-card">
+              <!-- DESIGN-DETAIL-4b FIX 2: the detail's top labels reuse the HOME card
+                   label classes so they read as the SAME flat, text-only, background-
+                   free family — NOT filled pills. .card-watch = the home's tier-tinted
+                   warning tag; .card-domain = the home's quiet brand-tinted domain
+                   text. Same text, same classes as renderTopicCardHtml. -->
               <div class="platform-kicker">
-                <span class="badge ${alertClass(level)}">${escapeHtml(formatAlert(level))}</span>
-                <span class="badge topic-badge">${escapeHtml(topic)}</span>
-                <span class="badge topic-badge">검증 뉴스</span>
+                <span class="card-watch ${alertClass(level)}">${escapeHtml(formatAlert(level))}</span>
+                <span class="card-domain">${escapeHtml(topic)}</span>
+                <span class="card-domain">검증 뉴스</span>
                 ${renderAiStatusBadge(result)}
               </div>
               <h2 class="result-title">

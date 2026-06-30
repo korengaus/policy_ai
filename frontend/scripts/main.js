@@ -703,7 +703,11 @@
       const info = getResultAiStatus(result);
       const desc = buildAiStatusDescriptor(info.status);
       const title = info.reason ? `${desc.label} (${info.reason})` : desc.label;
-      return `<span class="badge ai-status-badge ${desc.className}" title="${escapeHtml(title)}">${escapeHtml(desc.label)}</span>`;
+      // DESIGN-DETAIL-4b FIX 2: detail-only AI-status label — flat muted text (.ai-status-tag)
+      // instead of a dark filled pill (.badge). The status class still tints the TEXT
+      // (green/grey/amber) but carries no background, matching the home's quiet
+      // treatment of technical notes. Same label text.
+      return `<span class="ai-status-tag ${desc.className}" title="${escapeHtml(title)}">${escapeHtml(desc.label)}</span>`;
     }
 
     // ===== C4 — Display formatters =====
@@ -4695,10 +4699,15 @@
         return `
           <article class="result-card">
             <div class="headline-card">
+              <!-- DESIGN-DETAIL-4b FIX 2: the detail's top labels reuse the HOME card
+                   label classes so they read as the SAME flat, text-only, background-
+                   free family — NOT filled pills. .card-watch = the home's tier-tinted
+                   warning tag; .card-domain = the home's quiet brand-tinted domain
+                   text. Same text, same classes as renderTopicCardHtml. -->
               <div class="platform-kicker">
-                <span class="badge ${alertClass(level)}">${escapeHtml(formatAlert(level))}</span>
-                <span class="badge topic-badge">${escapeHtml(topic)}</span>
-                <span class="badge topic-badge">검증 뉴스</span>
+                <span class="card-watch ${alertClass(level)}">${escapeHtml(formatAlert(level))}</span>
+                <span class="card-domain">${escapeHtml(topic)}</span>
+                <span class="card-domain">검증 뉴스</span>
                 ${renderAiStatusBadge(result)}
               </div>
               <h2 class="result-title">

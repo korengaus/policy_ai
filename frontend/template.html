@@ -637,6 +637,15 @@
       <p>관심 있는 이슈의 상세 보기를 누르거나 검색어를 입력하면 검증 리포트가 표시됩니다.</p>
     </section>
 
+    <section id="results" class="results">
+      <div class="empty-state">분석을 실행하면 결과가 여기에 표시됩니다.</div>
+    </section>
+
+    <!-- DESIGN-DETAIL-4b FIX 4: the share/export utility (#reportActions) was moved
+         out of the reader's lead down to the END of the detail, near 원문 보기/신고하기
+         (rendered inside #results). A secondary utility belongs at the bottom. The id
+         is unchanged, so setCurrentReportContext (display toggle) + the copy/download
+         handlers (bound by button id) keep working position-independently. -->
     <section id="reportActions" class="report-actions">
       <div>
         <div class="report-actions-title">공유용 검증 리포트</div>
@@ -647,10 +656,6 @@
         <button id="downloadReportBtn" class="report-download" type="button">리포트 다운로드</button>
         <button id="downloadMarkdownBtn" class="report-download" type="button">Markdown 다운로드</button>
       </div>
-    </section>
-
-    <section id="results" class="results">
-      <div class="empty-state">분석을 실행하면 결과가 여기에 표시됩니다.</div>
     </section>
 
     </div><!-- /#detailScreen (DESIGN-DETAIL-3 detail view) -->
