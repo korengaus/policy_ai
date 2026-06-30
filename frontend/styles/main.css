@@ -3458,6 +3458,17 @@
       padding: 12px;
     }
 
+    /* DESIGN-DETAIL-5a: the 8 advanced sub-sections are collapsibles NESTED inside
+       "고급 검증 정보 보기"; give their summary titles the serif secondary scale to
+       match the rest of the detail. Top-level collapsibles (the reader-view reading
+       guide) are NOT nested, so they are unaffected. */
+    .collapsible-section .collapsible-section > summary {
+      font-family: 'Nanum Myeongjo', 'Apple SD Gothic Neo', 'Pretendard', serif;
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--ink);
+    }
+
     .verification-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3485,10 +3496,59 @@
       margin-top: 6px;
     }
 
+    /* DESIGN-DETAIL-5a: shared advanced definition-list language. Replaces the
+       repeat(4,1fr) tile grids in the advanced sub-sections with compact key:value
+       rows separated by thin --line rules (--slate labels / --ink values), C3 tokens,
+       0.923rem body. Empty cells are dropped upstream by advDefList(). */
+    .adv-deflist {
+      margin: 8px 0 0;
+      border-top: 1px solid var(--line);
+    }
+    .adv-row {
+      display: grid;
+      grid-template-columns: minmax(6.5rem, 30%) 1fr;
+      gap: 14px;
+      padding: 7px 0;
+      border-bottom: 1px solid var(--line);
+      font-size: 0.923rem;
+      line-height: 1.5;
+    }
+    .adv-label {
+      margin: 0;
+      color: var(--slate);
+      font-weight: 700;
+    }
+    .adv-value {
+      margin: 0;
+      color: var(--ink);
+      overflow-wrap: anywhere;
+    }
+    .adv-empty {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+    /* One-line collapsed per-claim row (반박·모순 / 프레이밍·편향). */
+    .adv-claim-line {
+      color: var(--ink);
+      font-weight: 700;
+      font-size: 0.923rem;
+      line-height: 1.5;
+      padding: 3px 0;
+    }
+    .adv-check-item + .adv-check-item {
+      border-top: 1px solid var(--line);
+    }
+    /* Pipeline-debug step status as small TEXT (not a pill), tinted by state. */
+    .adv-status { font-weight: 700; }
+    .adv-status.debug-ok { color: #166534; }
+    .adv-status.debug-partial { color: #92400e; }
+    .adv-status.debug-missing { color: #991b1b; }
+
     .evidence-source {
-      border: 1px solid #e5e7eb;
-      border-radius: 8px;
-      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: var(--paper);
       padding: 9px;
     }
 
@@ -3519,9 +3579,9 @@
     }
 
     .normalized-claim {
-      border: 1px solid #e5e7eb;
-      border-radius: 8px;
-      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: var(--paper);
       padding: 10px;
     }
 
@@ -3591,9 +3651,9 @@
     }
 
     .evidence-snippet {
-      border: 1px solid #e5e7eb;
-      border-radius: 8px;
-      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: var(--paper);
       padding: 10px;
     }
 
@@ -3630,17 +3690,18 @@
       margin-top: 5px;
     }
 
+    /* DESIGN-DETAIL-5a: de-boxed (was a #d1d5db debug box) — flat on the collapsible
+       body, content carried by the definition lists. */
     .pipeline-debug {
-      border: 1px solid #d1d5db;
-      border-radius: 10px;
-      background: #ffffff;
-      margin: 10px 0 14px;
-      padding: 12px;
+      margin: 4px 0 0;
     }
 
     .pipeline-debug-title {
-      font-weight: 900;
-      margin-bottom: 8px;
+      color: var(--ink);
+      font-size: 1.05rem;
+      font-weight: 700;
+      margin-bottom: 4px;
+      font-family: 'Nanum Myeongjo', 'Apple SD Gothic Neo', 'Pretendard', serif;
     }
 
     .pipeline-debug-grid {

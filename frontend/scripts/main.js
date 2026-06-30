@@ -977,6 +977,34 @@
     }
 
     // ===== C5 — Pipeline-section renderers =====
+    // DESIGN-DETAIL-5a: shared advanced presentation primitive. The advanced
+    // sub-sections used repeat(4,1fr) tile grids full of "-" cells; this renders a
+    // compact key:value definition list and HIDES empty cells. A value that is
+    // null/undefined/blank/"-"/"—" is the ABSENCE of a datum, so dropping its row
+    // loses no data; any cell WITH a value is always shown. If every pair is empty,
+    // one muted "정보 없음" line. Pairs: [label, value, opts?]; opts.html === true
+    // means value is trusted HTML (e.g. an <a> link) and is not re-escaped.
+    // Callers whose formatter emits a Korean placeholder for empty input
+    // (e.g. formatClaimStatus(undefined) → "자료 부족") guard at the call site with
+    // `raw ? format(raw) : ""` so the placeholder never becomes a kept row.
+    function advIsEmptyDisplay(value) {
+      if (value === null || value === undefined) return true;
+      const s = String(value).trim();
+      return s === "" || s === "-" || s === "—";
+    }
+    function advDefList(pairs) {
+      const rows = (Array.isArray(pairs) ? pairs : []).filter((pair) => pair && !advIsEmptyDisplay(pair[1]));
+      if (!rows.length) {
+        return '<div class="adv-empty">정보 없음</div>';
+      }
+      return `<dl class="adv-deflist">${rows.map(([label, value, opts]) => `
+        <div class="adv-row">
+          <dt class="adv-label">${escapeHtml(label)}</dt>
+          <dd class="adv-value">${opts && opts.html ? value : escapeHtml(value)}</dd>
+        </div>
+      `).join("")}</dl>`;
+    }
+
     function renderEvidenceSources(sources) {
       const list = Array.isArray(sources) ? sources : [];
       if (!list.length) {
@@ -1059,21 +1087,25 @@
         return '<div class="evidence-source-meta">표시할 정규화된 주장이 없습니다.</div>';
       }
 
+      // DESIGN-DETAIL-5a: each normalized claim is a populated-only definition list.
+      // Empty 주체/행동/대상/수치/시점/지역/객체 cells (raw "-"/blank) drop out; the
+      // formatter fields (상태/주장 유형/불확실성) are guarded so an empty raw value
+      // is NOT rendered as a "자료 부족" placeholder row. Every populated field stays.
       return `<div class="normalized-claims">${list.map((claim) => `
         <div class="normalized-claim">
           <div class="normalized-claim-text">${escapeHtml(limitClaimSentences(cleanArticleTextForPolicyAnalysis(claim.claim_text) || "정책 주장 확인 필요", 2, 220))}</div>
-          <div class="normalized-grid">
-            <div><span class="label">주체</span><br>${escapeHtml(claim.actor || "-")}</div>
-            <div><span class="label">행동</span><br>${escapeHtml(claim.action || "-")}</div>
-            <div><span class="label">대상</span><br>${escapeHtml(claim.target || "-")}</div>
-            <div><span class="label">수치</span><br>${escapeHtml(claim.quantity || "-")}</div>
-            <div><span class="label">시점</span><br>${escapeHtml(claim.date_or_time || "-")}</div>
-            <div><span class="label">지역</span><br>${escapeHtml(claim.location || "-")}</div>
-            <div><span class="label">상태</span><br>${escapeHtml(formatClaimStatus(claim.status))}</div>
-            <div><span class="label">주장 유형</span><br>${escapeHtml(formatClaimType(claim.claim_type))}</div>
-            <div><span class="label">불확실성</span><br>${escapeHtml(formatUncertainty(claim.uncertainty_level))}</div>
-            <div><span class="label">객체</span><br>${escapeHtml(claim.object || "-")}</div>
-          </div>
+          ${advDefList([
+            ["주체", claim.actor],
+            ["행동", claim.action],
+            ["대상", claim.target],
+            ["수치", claim.quantity],
+            ["시점", claim.date_or_time],
+            ["지역", claim.location],
+            ["상태", claim.status ? formatClaimStatus(claim.status) : ""],
+            ["주장 유형", claim.claim_type ? formatClaimType(claim.claim_type) : ""],
+            ["불확실성", claim.uncertainty_level ? formatUncertainty(claim.uncertainty_level) : ""],
+            ["객체", claim.object],
+          ])}
         </div>
       `).join("")}</div>`;
     }
@@ -1190,34 +1222,17 @@
     function renderEvidenceExtractionSummary(summary) {
       const data = summary || {};
       const quality = data.evidence_quality_summary || {};
-      return `
-        <div class="evidence-extraction-summary">
-          <div class="evidence-extraction-tile">
-            <span class="label">근거 문장 수</span><br>${escapeHtml(data.evidence_snippet_count ?? 0)}
-          </div>
-          <div class="evidence-extraction-tile">
-            <span class="label">직접 근거 수</span><br>${escapeHtml(data.direct_support_count ?? 0)}
-          </div>
-          <div class="evidence-extraction-tile">
-            <span class="label">공식 참조 수</span><br>${escapeHtml(data.official_reference_count ?? 0)}
-          </div>
-          <div class="evidence-extraction-tile">
-            <span class="label">근거 부족 수</span><br>${escapeHtml(data.insufficient_evidence_count ?? 0)}
-          </div>
-          <div class="evidence-extraction-tile">
-            <span class="label">품질 strong</span><br>${escapeHtml(data.total_strong_evidence ?? quality.strong ?? 0)}
-          </div>
-          <div class="evidence-extraction-tile">
-            <span class="label">품질 medium</span><br>${escapeHtml(data.total_medium_evidence ?? quality.medium ?? 0)}
-          </div>
-          <div class="evidence-extraction-tile">
-            <span class="label">품질 weak</span><br>${escapeHtml(data.total_weak_evidence ?? quality.weak ?? 0)}
-          </div>
-          <div class="evidence-extraction-tile">
-            <span class="label">평균 품질</span><br>${escapeHtml(data.average_evidence_quality_score ?? quality.average_evidence_quality_score ?? 0)}
-          </div>
-        </div>
-      `;
+      // DESIGN-DETAIL-5a: 8 count tiles → definition list (counts incl. 0 kept).
+      return advDefList([
+        ["근거 문장 수", data.evidence_snippet_count ?? 0],
+        ["직접 근거 수", data.direct_support_count ?? 0],
+        ["공식 참조 수", data.official_reference_count ?? 0],
+        ["근거 부족 수", data.insufficient_evidence_count ?? 0],
+        ["품질 strong", data.total_strong_evidence ?? quality.strong ?? 0],
+        ["품질 medium", data.total_medium_evidence ?? quality.medium ?? 0],
+        ["품질 weak", data.total_weak_evidence ?? quality.weak ?? 0],
+        ["평균 품질", data.average_evidence_quality_score ?? quality.average_evidence_quality_score ?? 0],
+      ]);
     }
 
     function formatContradictionStatus(value) {
@@ -1248,28 +1263,16 @@
       const data = summary || {};
       const possibleCount = Number(data.possible_contradiction_count || 0)
         + Number(data.confirmed_contradiction_count || data.likely_contradiction_count || 0);
-      return `
-        <div class="evidence-extraction-summary">
-          <div class="evidence-extraction-tile">
-            <span class="label">검사한 주장</span><br>${escapeHtml(data.total_claims_checked ?? 0)}
-          </div>
-          <div class="evidence-extraction-tile">
-            <span class="label">반박 가능성</span><br>${escapeHtml(possibleCount)}
-          </div>
-          <div class="evidence-extraction-tile">
-            <span class="label">공식 확인 필요</span><br>${escapeHtml(data.needs_official_confirmation_count ?? 0)}
-          </div>
-          <div class="evidence-extraction-tile">
-            <span class="label">전체 모순 위험도</span><br>${escapeHtml(formatContradictionRisk(data.overall_contradiction_risk))}
-          </div>
-          <div class="evidence-extraction-tile">
-            <span class="label">후보/매칭</span><br>${escapeHtml(data.contradiction_candidates_searched ?? 0)} / ${escapeHtml(data.contradiction_candidates_matched ?? 0)}
-          </div>
-          <div class="evidence-extraction-tile">
-            <span class="label">판정 근거</span><br>${escapeHtml(formatDiagnosticText(data.contradiction_verdict_source || "-"))}
-          </div>
-        </div>
-      `;
+      // DESIGN-DETAIL-5a: counts (incl. 0) are values and stay; only an empty
+      // 판정 근거/위험도 collapses out.
+      return advDefList([
+        ["검사한 주장", data.total_claims_checked ?? 0],
+        ["반박 가능성", possibleCount],
+        ["공식 확인 필요", data.needs_official_confirmation_count ?? 0],
+        ["전체 모순 위험도", data.overall_contradiction_risk ? formatContradictionRisk(data.overall_contradiction_risk) : ""],
+        ["후보/매칭", `${data.contradiction_candidates_searched ?? 0} / ${data.contradiction_candidates_matched ?? 0}`],
+        ["판정 근거", formatDiagnosticText(data.contradiction_verdict_source || "-")],
+      ]);
     }
 
     function renderContradictionChecks(claims, contradictionChecks) {
@@ -1279,38 +1282,59 @@
         return '<div class="evidence-source-meta">표시할 반박/모순 검사 결과가 없습니다.</div>';
       }
 
+      // DESIGN-DETAIL-5a: collapse each claim to a one-line "claim #n — 검사 상태".
+      // Expand to the full populated-only detail ONLY when there is an actual
+      // 모순 점수, a conflict, or a missing-evidence warning — the common
+      // "반박 근거 없음" rows stay one line. No data dropped: a claim with detail
+      // shows all of it; a claim without shows the status it has.
       return `<div class="evidence-snippet-list">${claimList.map((claim, index) => {
         const check = checks.find((item) => Number(item.claim_index) === index) || {};
         const conflicts = Array.isArray(check.conflicting_evidence) ? check.conflicting_evidence : [];
+        const statusLabel = formatContradictionStatus(check.contradiction_status);
+        const hasScore = !advIsEmptyDisplay(check.contradiction_score);
+        const expand = hasScore || conflicts.length > 0 || !!check.missing_evidence_warning;
+        const headLine = `<div class="adv-claim-line">claim #${index + 1} — ${escapeHtml(statusLabel)}</div>`;
+        if (!expand) {
+          return `<div class="adv-check-item">${headLine}</div>`;
+        }
+        const claimText = escapeHtml(limitClaimSentences(cleanArticleTextForPolicyAnalysis(claim || check.claim_text) || "정책 주장 확인 필요", 2, 220));
+        const detail = advDefList([
+          ["모순 점수", check.contradiction_score],
+          ["사람 검토", check.needs_human_review ? "필요" : "불필요"],
+          ["확인 시각", check.checked_at],
+        ]);
+        const reason = advIsEmptyDisplay(check.contradiction_reason)
+          ? ""
+          : `<div class="evidence-snippet-text">${escapeHtml(formatDiagnosticText(check.contradiction_reason))}</div>`;
+        const warning = check.missing_evidence_warning
+          ? `<div class="evidence-source-meta">${escapeHtml(formatDiagnosticText(check.missing_evidence_warning))}</div>`
+          : "";
+        const conflictBlock = conflicts.length ? `
+          <div class="source-list">
+            ${conflicts.map((conflict) => {
+              const conflictUrl = escapeHtml(safeUrl(conflict.source_url || ""));
+              const conflictTitle = escapeHtml(userFacingReportText(conflict.source_title || "충돌 후보", "충돌 후보"));
+              const conflictHtml = conflict.source_url
+                ? `<a href="${conflictUrl}" target="_blank" rel="noopener noreferrer">${conflictTitle}</a>`
+                : conflictTitle;
+              return `
+                <div class="evidence-source">
+                  <div class="evidence-source-title">${conflictHtml}</div>
+                  ${advDefList([
+                    ["유형", conflict.conflict_type ? formatTechnicalLabel(conflict.conflict_type) : ""],
+                    ["신뢰도", conflict.confidence ? formatTechnicalLabel(conflict.confidence) : ""],
+                  ])}
+                  <div class="evidence-snippet-text">${escapeHtml(conflict.evidence_text || "-")}</div>
+                </div>
+              `;
+            }).join("")}
+          </div>
+        ` : "";
         return `
           <div class="evidence-snippet">
-            <div class="normalized-claim-text">claim #${index + 1}: ${escapeHtml(limitClaimSentences(cleanArticleTextForPolicyAnalysis(claim || check.claim_text) || "정책 주장 확인 필요", 2, 220))}</div>
-            <div class="evidence-snippet-grid">
-              <div><span class="label">검사 상태</span><br>${escapeHtml(formatContradictionStatus(check.contradiction_status))}</div>
-              <div><span class="label">모순 점수</span><br>${escapeHtml(check.contradiction_score ?? "-")}</div>
-              <div><span class="label">사람 검토</span><br>${check.needs_human_review ? "필요" : "불필요"}</div>
-              <div><span class="label">확인 시각</span><br>${escapeHtml(check.checked_at || "-")}</div>
-            </div>
-            <div class="evidence-snippet-text">${escapeHtml(formatDiagnosticText(check.contradiction_reason || "-"))}</div>
-            ${check.missing_evidence_warning ? `<div class="evidence-source-meta">${escapeHtml(formatDiagnosticText(check.missing_evidence_warning))}</div>` : ""}
-            ${conflicts.length ? `
-              <div class="source-list">
-                ${conflicts.map((conflict) => {
-                  const conflictUrl = escapeHtml(safeUrl(conflict.source_url || ""));
-                  const conflictTitle = escapeHtml(userFacingReportText(conflict.source_title || "충돌 후보", "충돌 후보"));
-                  const conflictHtml = conflict.source_url
-                    ? `<a href="${conflictUrl}" target="_blank" rel="noopener noreferrer">${conflictTitle}</a>`
-                    : conflictTitle;
-                  return `
-                    <div class="evidence-source">
-                      <div class="evidence-source-title">${conflictHtml}</div>
-                       <div class="evidence-source-meta">유형: ${escapeHtml(formatTechnicalLabel(conflict.conflict_type || "-"))} · 신뢰도: ${escapeHtml(formatTechnicalLabel(conflict.confidence || "-"))}</div>
-                      <div class="evidence-snippet-text">${escapeHtml(conflict.evidence_text || "-")}</div>
-                    </div>
-                  `;
-                }).join("")}
-              </div>
-            ` : ""}
+            ${headLine}
+            <div class="normalized-claim-text">${claimText}</div>
+            ${detail}${reason}${warning}${conflictBlock}
           </div>
         `;
       }).join("")}</div>`;
@@ -1341,22 +1365,13 @@
 
     function renderBiasFramingSummary(summary) {
       const data = summary || {};
-      return `
-        <div class="evidence-extraction-summary">
-          <div class="evidence-extraction-tile">
-            <span class="label">프레이밍 위험 수</span><br>${escapeHtml(data.high_framing_count ?? 0)}
-          </div>
-          <div class="evidence-extraction-tile">
-            <span class="label">감정 표현 수</span><br>${escapeHtml(data.emotional_language_count ?? 0)}
-          </div>
-          <div class="evidence-extraction-tile">
-            <span class="label">불확실 표현 수</span><br>${escapeHtml(data.uncertainty_language_count ?? 0)}
-          </div>
-          <div class="evidence-extraction-tile">
-            <span class="label">편집자 검토 필요</span><br>${Number(data.editor_review_needed_count || 0) > 0 ? "필요" : "낮음"}
-          </div>
-        </div>
-      `;
+      // DESIGN-DETAIL-5a: counts (incl. 0) kept as a definition list.
+      return advDefList([
+        ["프레이밍 위험 수", data.high_framing_count ?? 0],
+        ["감정 표현 수", data.emotional_language_count ?? 0],
+        ["불확실 표현 수", data.uncertainty_language_count ?? 0],
+        ["편집자 검토 필요", Number(data.editor_review_needed_count || 0) > 0 ? "필요" : "낮음"],
+      ]);
     }
 
     function renderBiasFramingAnalysis(claims, biasFramingAnalysis) {
@@ -1366,22 +1381,43 @@
         return '<div class="evidence-source-meta">표시할 프레이밍/편향 검사 결과가 없습니다.</div>';
       }
 
+      // DESIGN-DETAIL-5a: collapse each claim to a one-line "프레이밍 수준 · 편향 방향".
+      // Expand to the full populated-only detail ONLY when framing > 낮음 OR any flag/
+      // term exists (감정/자극/불확실 표현, 핵심 용어, 편집자 검토). Low-signal claims
+      // stay one line. No data dropped — populated fields all show when expanded.
       return `<div class="evidence-snippet-list">${claimList.map((claim, index) => {
         const analysis = analyses.find((item) => Number(item.claim_index) === index) || {};
+        const elevated = ["medium", "high"].includes(String(analysis.framing_level || "").toLowerCase());
+        const sensational = formatList(analysis.sensational_phrases);
+        const uncertainty = formatList(analysis.uncertainty_language);
+        const loaded = formatList(analysis.loaded_terms);
+        const hasFlags = !advIsEmptyDisplay(sensational) || !advIsEmptyDisplay(uncertainty)
+          || !advIsEmptyDisplay(loaded) || !!analysis.emotional_language_detected || !!analysis.needs_editor_review;
+        const framingLabel = analysis.framing_level ? formatFramingLevel(analysis.framing_level) : "낮음";
+        const biasLabel = analysis.bias_direction ? formatBiasDirection(analysis.bias_direction) : "중립";
+        const headLine = `<div class="adv-claim-line">claim #${index + 1} — 프레이밍 ${escapeHtml(framingLabel)} · 편향 ${escapeHtml(biasLabel)}</div>`;
+        if (!elevated && !hasFlags) {
+          return `<div class="adv-check-item">${headLine}</div>`;
+        }
+        const claimText = escapeHtml(limitClaimSentences(cleanArticleTextForPolicyAnalysis(claim || analysis.claim_text) || "정책 주장 확인 필요", 2, 220));
+        const detail = advDefList([
+          ["프레이밍 수준", analysis.framing_level ? formatFramingLevel(analysis.framing_level) : ""],
+          ["프레이밍 점수", analysis.framing_score],
+          ["편향 방향", analysis.bias_direction ? formatBiasDirection(analysis.bias_direction) : ""],
+          ["편집자 검토", analysis.needs_editor_review ? "필요" : "낮음"],
+          ["감정 표현", analysis.emotional_language_detected ? "감지됨" : "낮음"],
+          ["자극 표현", sensational],
+          ["불확실 표현", uncertainty],
+          ["추출된 핵심 용어", loaded],
+        ]);
+        const reason = advIsEmptyDisplay(analysis.framing_reason)
+          ? ""
+          : `<div class="evidence-snippet-text">${escapeHtml(formatDiagnosticText(analysis.framing_reason))}</div>`;
         return `
           <div class="evidence-snippet">
-            <div class="normalized-claim-text">claim #${index + 1}: ${escapeHtml(limitClaimSentences(cleanArticleTextForPolicyAnalysis(claim || analysis.claim_text) || "정책 주장 확인 필요", 2, 220))}</div>
-            <div class="evidence-snippet-grid">
-              <div><span class="label">프레이밍 수준</span><br>${escapeHtml(formatFramingLevel(analysis.framing_level))}</div>
-              <div><span class="label">프레이밍 점수</span><br>${escapeHtml(analysis.framing_score ?? "-")}</div>
-              <div><span class="label">편향 방향</span><br>${escapeHtml(formatBiasDirection(analysis.bias_direction))}</div>
-              <div><span class="label">편집자 검토</span><br>${analysis.needs_editor_review ? "필요" : "낮음"}</div>
-              <div><span class="label">감정 표현</span><br>${analysis.emotional_language_detected ? "감지됨" : "낮음"}</div>
-              <div><span class="label">자극 표현</span><br>${escapeHtml(formatList(analysis.sensational_phrases))}</div>
-              <div><span class="label">불확실 표현</span><br>${escapeHtml(formatList(analysis.uncertainty_language))}</div>
-              <div><span class="label">추출된 핵심 용어</span><br>${escapeHtml(formatList(analysis.loaded_terms))}</div>
-            </div>
-            <div class="evidence-snippet-text">${escapeHtml(formatDiagnosticText(analysis.framing_reason || "-"))}</div>
+            ${headLine}
+            <div class="normalized-claim-text">${claimText}</div>
+            ${detail}${reason}
           </div>
         `;
       }).join("")}</div>`;
@@ -1416,83 +1452,50 @@
       const zeroReasons = Array.isArray(data.evidence_zero_reasons) && data.evidence_zero_reasons.length
         ? data.evidence_zero_reasons.join(", ")
         : "없음";
+      // DESIGN-DETAIL-5a: the off-brand debug box is restyled to the C3 definition-
+      // list language. Step status is small TEXT (.adv-status, tinted ok/partial/
+      // missing) — not pills. Each former metric tile's sub-meta is folded into its
+      // value with " · " so every field is kept. The trailing diagnostic run-on
+      // becomes a labeled definition list (each 사유 on its own row, empties hidden).
+      const stepRow = (label, ok, count) => {
+        const state = debugState(ok, count);
+        return [label, `<span class="adv-status ${state.className}">${escapeHtml(state.label)}</span> · 개수 ${escapeHtml(count ?? "-")}`, { html: true }];
+      };
       return `
         <div class="pipeline-debug">
           <div class="pipeline-debug-title">검수자용 검증 단계 요약</div>
           <div class="reader-note">검수자가 분석 단계별 작동 여부와 공식 근거 확보 상태를 빠르게 확인하는 요약입니다.</div>
-          <div class="pipeline-debug-grid">
-            ${renderDebugBadge("입력 수집", data.intake_ok, data.intake_ok ? 1 : 0)}
-            ${renderDebugBadge("주장 추출", data.claim_extraction_ok, data.claims_count)}
-            ${renderDebugBadge("주장 정규화", data.claim_normalization_ok, data.normalized_claims_count)}
-            ${renderDebugBadge("출처 탐색", data.source_retrieval_ok, data.evidence_candidates_count)}
-            ${renderDebugBadge("근거 매칭", data.evidence_matching_ok, data.matched_evidence_count ?? data.direct_evidence_count)}
-            ${renderDebugBadge("반박/모순 검사", data.contradiction_check_ok, data.contradiction_checks_count)}
-            ${renderDebugBadge("프레이밍/편향 검사", data.bias_framing_ok, data.framing_flags_count)}
-            <div class="evidence-extraction-tile">
-              <span class="label">사람 검토</span><br>
-              <span class="debug-status ${data.needs_human_review ? "debug-partial" : "debug-ok"}">
-                ${data.needs_human_review ? "필요" : "불필요"}
-              </span>
-              <div class="evidence-source-meta">초안 상태: ${escapeHtml(formatVerdict(data.overall_verdict || "-"))}</div>
-            </div>
-          </div>
-          <div class="pipeline-debug-grid">
-            <div class="evidence-extraction-tile">
-              <span class="label">출처 구성</span><br>
-              공식 ${escapeHtml(data.official_sources_count ?? 0)} · 뉴스 ${escapeHtml(data.news_sources_count ?? 0)}
-            </div>
-            <div class="evidence-extraction-tile">
-              <span class="label">근거 강도</span><br>
-              강함 ${escapeHtml(strength.strong ?? 0)} · 보통 ${escapeHtml(strength.medium ?? 0)} · 약함 ${escapeHtml(strength.weak ?? 0)}
-            </div>
-            <div class="evidence-extraction-tile">
-              <span class="label">근거 품질</span><br>
-              강함 ${escapeHtml(quality.strong ?? data.total_strong_evidence ?? 0)} · 보통 ${escapeHtml(quality.medium ?? data.total_medium_evidence ?? 0)} · 약함 ${escapeHtml(quality.weak ?? data.total_weak_evidence ?? 0)}
-              <div class="evidence-source-meta">평균 ${escapeHtml(quality.average_evidence_quality_score ?? data.average_evidence_quality_score ?? 0)}</div>
-            </div>
-            <div class="evidence-extraction-tile">
-              <span class="label">공식 본문 확인</span><br>
-              후보 ${escapeHtml(data.official_body_candidates ?? 0)} · 수집 ${escapeHtml(data.official_bodies_fetched ?? 0)} · 직접 매칭 ${escapeHtml(data.official_body_matches ?? 0)}
-            </div>
-            <div class="evidence-extraction-tile">
-              <span class="label">공식 검증 상태</span><br>
-              상세 ${escapeHtml(data.official_detail_pages_fetched_count ?? 0)} · 성공 ${escapeHtml(data.official_body_success_count ?? 0)} · 실패 ${escapeHtml(data.official_body_fail_count ?? 0)}
-              <div class="evidence-source-meta">최종 점수 반영 ${Boolean(data.official_source_used_in_final_scoring) ? "예" : "아니오"}</div>
-            </div>
-            <div class="evidence-extraction-tile">
-              <span class="label">공식 직접 매칭</span><br>
-              ${escapeHtml(officialDirectMatchLabel(data))}
-              <div class="evidence-source-meta">점수 ${escapeHtml(data.official_direct_match_score ?? 0)}</div>
-            </div>
-            <div class="evidence-extraction-tile">
-              <span class="label">공식 해소 결과</span><br>
-              직접 ${escapeHtml(data.official_resolution_direct_matches ?? 0)} · 맥락 ${escapeHtml(data.official_resolution_contextual_matches ?? 0)} · 약함 ${escapeHtml(data.official_resolution_weak_candidates ?? 0)}
-              <div class="evidence-source-meta">최고 ${escapeHtml(data.official_resolution_top_score ?? 0)}</div>
-            </div>
-            <div class="evidence-extraction-tile">
-              <span class="label">반박/모순 검토</span><br>
-              후보 ${escapeHtml(data.contradiction_candidates_searched ?? 0)} · 매칭 ${escapeHtml(data.contradiction_candidates_matched ?? 0)}
-              <div class="evidence-source-meta">확인된 모순 ${escapeHtml(data.confirmed_contradictions ?? 0)} · 가능성 ${escapeHtml(data.possible_contradictions ?? 0)}</div>
-            </div>
-            <div class="evidence-extraction-tile">
-              <span class="label">사람 검토 반영</span><br>
-              ${escapeHtml(formatDiagnosticText(data.human_review_feedback || "없음"))}
-              <div class="evidence-source-meta">승인 보정 ${Boolean(data.approved_boost) ? "예" : "아니오"} · 반려 감점 ${Boolean(data.rejected_penalty) ? "예" : "아니오"}</div>
-            </div>
-            <div class="evidence-extraction-tile">
-              <span class="label">분석 입력 상태</span><br>
-              ${escapeHtml(formatDiagnosticText(newsCacheState))} · ${escapeHtml(formatDiagnosticText(analysisCacheState))}
-            </div>
-          </div>
-          <div class="evidence-source-meta">
-            선택된 주요 출처: ${escapeHtml(userFacingReportText(publicInstitutionName(data.selected_primary_source || "-"), "-"))}
-            · 공식 상세문서: ${escapeHtml(userFacingReportText(publicInstitutionName(data.top_official_detail_title || "-"), "-"))}
-            · 공식 출처 제외/불일치 사유: ${escapeHtml(formatDiagnosticText(formatList(data.official_mismatch_reasons)))}
-            · 공식 직접 매칭 사유: ${escapeHtml(formatDiagnosticText(data.official_direct_match_reason || "-"))}
-            · 공식 본문 실패 사유: ${escapeHtml(userFacingReportText(formatReasonCounts(data.official_body_failures || {}), "없음"))}
-            · 근거 없음 사유: ${escapeHtml(formatDiagnosticText(zeroReasons))}
-            · 누락 단계: ${escapeHtml(formatDiagnosticText(missing))}
-          </div>
+          ${advDefList([
+            stepRow("입력 수집", data.intake_ok, data.intake_ok ? 1 : 0),
+            stepRow("주장 추출", data.claim_extraction_ok, data.claims_count),
+            stepRow("주장 정규화", data.claim_normalization_ok, data.normalized_claims_count),
+            stepRow("출처 탐색", data.source_retrieval_ok, data.evidence_candidates_count),
+            stepRow("근거 매칭", data.evidence_matching_ok, data.matched_evidence_count ?? data.direct_evidence_count),
+            stepRow("반박/모순 검사", data.contradiction_check_ok, data.contradiction_checks_count),
+            stepRow("프레이밍/편향 검사", data.bias_framing_ok, data.framing_flags_count),
+            ["사람 검토", `<span class="adv-status ${data.needs_human_review ? "debug-partial" : "debug-ok"}">${data.needs_human_review ? "필요" : "불필요"}</span> · 초안 상태: ${escapeHtml(formatVerdict(data.overall_verdict || "-"))}`, { html: true }],
+          ])}
+          ${advDefList([
+            ["출처 구성", `공식 ${data.official_sources_count ?? 0} · 뉴스 ${data.news_sources_count ?? 0}`],
+            ["근거 강도", `강함 ${strength.strong ?? 0} · 보통 ${strength.medium ?? 0} · 약함 ${strength.weak ?? 0}`],
+            ["근거 품질", `강함 ${quality.strong ?? data.total_strong_evidence ?? 0} · 보통 ${quality.medium ?? data.total_medium_evidence ?? 0} · 약함 ${quality.weak ?? data.total_weak_evidence ?? 0} · 평균 ${quality.average_evidence_quality_score ?? data.average_evidence_quality_score ?? 0}`],
+            ["공식 본문 확인", `후보 ${data.official_body_candidates ?? 0} · 수집 ${data.official_bodies_fetched ?? 0} · 직접 매칭 ${data.official_body_matches ?? 0}`],
+            ["공식 검증 상태", `상세 ${data.official_detail_pages_fetched_count ?? 0} · 성공 ${data.official_body_success_count ?? 0} · 실패 ${data.official_body_fail_count ?? 0} · 최종 점수 반영 ${Boolean(data.official_source_used_in_final_scoring) ? "예" : "아니오"}`],
+            ["공식 직접 매칭", `${officialDirectMatchLabel(data)} · 점수 ${data.official_direct_match_score ?? 0}`],
+            ["공식 해소 결과", `직접 ${data.official_resolution_direct_matches ?? 0} · 맥락 ${data.official_resolution_contextual_matches ?? 0} · 약함 ${data.official_resolution_weak_candidates ?? 0} · 최고 ${data.official_resolution_top_score ?? 0}`],
+            ["반박/모순 검토", `후보 ${data.contradiction_candidates_searched ?? 0} · 매칭 ${data.contradiction_candidates_matched ?? 0} · 확인된 모순 ${data.confirmed_contradictions ?? 0} · 가능성 ${data.possible_contradictions ?? 0}`],
+            ["사람 검토 반영", `${formatDiagnosticText(data.human_review_feedback || "없음")} · 승인 보정 ${Boolean(data.approved_boost) ? "예" : "아니오"} · 반려 감점 ${Boolean(data.rejected_penalty) ? "예" : "아니오"}`],
+            ["분석 입력 상태", `${formatDiagnosticText(newsCacheState)} · ${formatDiagnosticText(analysisCacheState)}`],
+          ])}
+          ${advDefList([
+            ["선택된 주요 출처", userFacingReportText(publicInstitutionName(data.selected_primary_source || "-"), "-")],
+            ["공식 상세문서", userFacingReportText(publicInstitutionName(data.top_official_detail_title || "-"), "-")],
+            ["공식 출처 제외/불일치 사유", formatDiagnosticText(formatList(data.official_mismatch_reasons))],
+            ["공식 직접 매칭 사유", formatDiagnosticText(data.official_direct_match_reason || "-")],
+            ["공식 본문 실패 사유", userFacingReportText(formatReasonCounts(data.official_body_failures || {}), "없음")],
+            ["근거 없음 사유", formatDiagnosticText(zeroReasons)],
+            ["누락 단계", formatDiagnosticText(missing)],
+          ])}
         </div>
       `;
     }
@@ -1531,19 +1534,22 @@
               const sourceHtml = snippet.source_url
                 ? `<a href="${sourceUrl}" target="_blank" rel="noopener noreferrer">${sourceTitle}</a>`
                 : sourceTitle;
+              // DESIGN-DETAIL-5a: evidence_text stays; the 9-cell grid → populated-only
+              // definition list (empty 발행처/관련도/추출 방식 etc. drop out; formatter
+              // cells guarded so empties don't render placeholder rows).
               return `
                 <div class="evidence-snippet-text">${escapeHtml(userFacingReportText(snippet.evidence_text || "-", "-"))}</div>
-                <div class="evidence-snippet-grid">
-                  <div><span class="label">출처</span><br>${sourceHtml}</div>
-                  <div><span class="label">발행처</span><br>${escapeHtml(publicInstitutionName(snippet.publisher || "-"))}</div>
-                  <div><span class="label">근거 유형</span><br>${escapeHtml(formatEvidenceType(snippet.evidence_type))}</div>
-                  <div><span class="label">관련도</span><br>${escapeHtml(snippet.relevance_score ?? "-")}</div>
-                  <div><span class="label">품질 점수</span><br>${escapeHtml(snippet.evidence_quality_score ?? "-")}</div>
-                  <div><span class="label">품질 등급</span><br>${escapeHtml(formatTechnicalLabel(snippet.evidence_quality_label || "-"))}</div>
-                  <div><span class="label">주장 지지</span><br>${escapeHtml(formatSupportsClaim(snippet.supports_claim))}</div>
-                  <div><span class="label">추출 신뢰도</span><br>${escapeHtml(formatExtractionConfidence(snippet.extraction_confidence))}</div>
-                  <div><span class="label">추출 방식</span><br>${escapeHtml(formatDiagnosticText(snippet.extraction_method || "-"))}</div>
-                </div>
+                ${advDefList([
+                  ["출처", sourceHtml, { html: true }],
+                  ["발행처", snippet.publisher ? publicInstitutionName(snippet.publisher) : ""],
+                  ["근거 유형", snippet.evidence_type ? formatEvidenceType(snippet.evidence_type) : ""],
+                  ["관련도", snippet.relevance_score ?? ""],
+                  ["품질 점수", snippet.evidence_quality_score ?? ""],
+                  ["품질 등급", snippet.evidence_quality_label ? formatTechnicalLabel(snippet.evidence_quality_label) : ""],
+                  ["주장 지지", snippet.supports_claim ? formatSupportsClaim(snippet.supports_claim) : ""],
+                  ["추출 신뢰도", snippet.extraction_confidence ? formatExtractionConfidence(snippet.extraction_confidence) : ""],
+                  ["추출 방식", snippet.extraction_method ? formatDiagnosticText(snippet.extraction_method) : ""],
+                ])}
               `;
             }).join("") : '<div class="evidence-source-meta">연결된 근거가 없습니다.</div>'}
           </div>
@@ -4639,10 +4645,10 @@
           // public/history feed these can coincide with ① by construction.
           renderCollapsibleSection(
             "검증 점수 상세",
-            `<div class="evidence-snippet-grid">
-              <div><span class="label">최종 점수</span><br>${escapeHtml(finalScore)}</div>
-              <div><span class="label">초안 신뢰도</span><br>${escapeHtml(verification.verdict_confidence ?? "-")}</div>
-            </div>`,
+            advDefList([
+              ["최종 점수", finalScore],
+              ["초안 신뢰도", verification.verdict_confidence ?? ""],
+            ]),
             false,
             "최종 점수와 초안 신뢰도는 화면 상단의 신뢰도 점수를 보조하는 내부 참고 값입니다. 신뢰도 점수와 같을 수 있습니다."
           ),
@@ -4678,7 +4684,11 @@
           ),
           renderCollapsibleSection(
             "근거 요약과 부족한 맥락",
-            `${renderEvidenceExtractionSummary(evidenceExtractionSummary)}${renderEvidenceSources(verification.evidence_sources)}<div class="evidence-source-meta">${escapeHtml(userFacingReportText(cleanConceptKeysForDisplay(verification.evidence_summary), "-"))}</div><div class="evidence-source-meta"><strong>부족한 맥락:</strong> ${escapeHtml(buildSafeMissingContext(result))}</div><div class="evidence-source-meta">마지막 확인: ${escapeHtml(verification.last_checked_at || "-")}</div>`,
+            `${renderEvidenceExtractionSummary(evidenceExtractionSummary)}${renderEvidenceSources(verification.evidence_sources)}${advDefList([
+              ["근거 요약", userFacingReportText(cleanConceptKeysForDisplay(verification.evidence_summary), "-")],
+              ["부족한 맥락", buildSafeMissingContext(result)],
+              ["마지막 확인", verification.last_checked_at],
+            ])}`,
             false,
             "현재 리포트가 어떤 근거에 기대고 있으며, 추가 확인이 필요한 부분은 무엇인지 정리합니다."
           ),
