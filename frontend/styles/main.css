@@ -1946,8 +1946,14 @@
        methodology/legal TEXT unchanged — presentation only. */
     .methodology-section {
       display: block;
-      max-width: 820px;
-      margin: 8px auto 0;   /* centered reading column, not edge-to-edge */
+      /* DESIGN-DETAIL-2c: widened 820px → 1000px so the content blends naturally
+         against the ~1280px page (was a narrow column floating in a wide page),
+         while staying a readable measure. The 2-col sub-pairs stay within it.
+         Top margin bumped 8px → 36px so the masthead has breathing room below the
+         header/tabs row (the home view is hidden, so methodology sits right under
+         the tabs) — consistent with the site's section spacing rhythm. */
+      max-width: 1000px;
+      margin: 36px auto 0;   /* centered reading column + header-to-masthead gap */
     }
 
     /* Section rhythm: each top-level block (a section card OR a 2-col grid pair)

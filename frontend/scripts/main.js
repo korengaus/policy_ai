@@ -6269,6 +6269,12 @@
       const showMethodology = name === "methodology";
       if (homeEl) homeEl.classList.toggle("screen-hidden", showMethodology);
       if (methodologyEl) methodologyEl.classList.toggle("screen-hidden", !showMethodology);
+      // DESIGN-DETAIL-2c: the under-search status line (#statusLine — e.g. "저장된
+      // 검증 결과를 불러왔습니다") lives in the always-visible header region, so it
+      // leaked onto the 검증 방법 page. Clear it whenever we leave home; it is a
+      // home-feed status only. Home status behavior is untouched — showStatus() on
+      // the home feed re-shows it as before. (Extends naturally to "detail".)
+      if (name !== "home") hideStatus();
       if (showMethodology) window.scrollTo(0, 0);
     }
     // DESIGN-DETAIL-2b: history sync for the screen toggle so browser BACK from the
