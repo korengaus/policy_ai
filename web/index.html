@@ -3483,35 +3483,25 @@
       background: transparent;
       margin-top: 16px;
     }
-    /* DESIGN-DETAIL-5e: restore a VISIBLE, clickable toggle line. 5d's un-boxing left
-       this summary with no container/contrast/affordance, so the 고급 검증 정보 보기
-       line read as blank. Keep it un-boxed (no big outer box) but give it an explicit
-       flat-toggle look: a thin --line top rule + comfortable padding + readable --ink
-       text + a CSS chevron (▸ collapsed / ▾ open) + a subtle hover. */
+    /* DESIGN-DETAIL-5f: restore a VISIBLE, clickable toggle line — robustly this time.
+       ROOT CAUSE of the 5e failure: 5e set `display: flex` on this <summary>. In
+       Chromium, changing a <summary>'s display away from the default list-item stops
+       it being recognized as the <details> disclosure summary, so the CLOSED <details>
+       hid it as ordinary content → zero rendered box + not findable by Ctrl+F. The
+       working collapsibles (reading-guide, the 8 inner sub-sections) never set `display`
+       on their summary, so they paint. FIX: do NOT touch `display` — keep the same
+       list-item rendering path as the working toggles (default disclosure marker),
+       and only apply the FLAT un-boxed look (thin --line top rule + padding + readable
+       --ink text + subtle hover). No flex, no chevron pseudo, no box. */
     .collapsible-section.adv-outer > summary {
       cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 7px;
       padding: 12px 0;
       border-top: 1px solid var(--line);
       color: var(--ink);
       font-size: 1rem;
       font-weight: 700;
       line-height: 1.4;
-      list-style: none;
-    }
-    .collapsible-section.adv-outer > summary::-webkit-details-marker {
-      display: none;
-    }
-    .collapsible-section.adv-outer > summary::before {
-      content: "▸";
-      color: var(--slate);
-      font-size: 0.9em;
-      line-height: 1;
-    }
-    .collapsible-section.adv-outer[open] > summary::before {
-      content: "▾";
+      list-style-position: inside;
     }
     .collapsible-section.adv-outer > summary:hover {
       color: var(--brand-ink);
