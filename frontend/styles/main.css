@@ -3647,7 +3647,12 @@
     .adv-cand-trace.trace-news { color: var(--slate); }
     .adv-cand-trace.trace-weak { color: #92400e; }
     .adv-cand-trace.trace-excluded { color: #991b1b; }
-    .adv-cand-line { color: var(--ink); overflow-wrap: anywhere; }
+    /* DESIGN-DETAIL-5i FIX 1: the candidate one-line summary text inherited the base
+       .collapsible-section summary font-weight:900, rendering bolder than the other
+       advanced rows. Set it to normal weight to match .adv-cell-value (the regular
+       advanced body text). The trace-label pill (.adv-cand-trace, 700) is untouched,
+       and the inner sub-section titles (검증 점수 상세 etc.) are unaffected. */
+    .adv-cand-line { color: var(--ink); overflow-wrap: anywhere; font-weight: 400; }
     .adv-cand-body { padding: 2px 0 12px; }
     .adv-cand-excl {
       margin: 4px 0;

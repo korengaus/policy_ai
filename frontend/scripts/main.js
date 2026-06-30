@@ -1219,7 +1219,7 @@
       const data = summary || {};
       const quality = data.evidence_quality_summary || {};
       // DESIGN-DETAIL-5a: 8 count tiles → definition list (counts incl. 0 kept).
-      return advDefList([
+      const cells = [
         ["근거 문장 수", data.evidence_snippet_count ?? 0],
         ["직접 근거 수", data.direct_support_count ?? 0],
         ["공식 참조 수", data.official_reference_count ?? 0],
@@ -1228,7 +1228,16 @@
         ["품질 medium", data.total_medium_evidence ?? quality.medium ?? 0],
         ["품질 weak", data.total_weak_evidence ?? quality.weak ?? 0],
         ["평균 품질", data.average_evidence_quality_score ?? quality.average_evidence_quality_score ?? 0],
-      ]);
+      ];
+      // DESIGN-DETAIL-5i FIX 2: if EVERY numeric field is 0 (no evidence collected at
+      // all), collapse the eight 0-cells to one honest muted line. If ANY value is
+      // non-zero, show the full numbers exactly as before (individual 0s among
+      // non-zeros still show) — no real data is hidden, only the all-zero case folds.
+      const allZero = cells.every(([, value]) => Number(value) === 0);
+      if (allZero) {
+        return '<div class="adv-empty">수집된 근거 문장이 없습니다</div>';
+      }
+      return advDefList(cells);
     }
 
     function formatContradictionStatus(value) {
