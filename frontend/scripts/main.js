@@ -6257,10 +6257,12 @@
     // the footer (with the page-level disclaimer) sit OUTSIDE both and stay
     // always-visible. The sidebar lives inside .home-shell (inside #homeScreen), so
     // it hides with the home view → 검증 방법 is full-width. Built so a "detail"
-    // case slots in trivially next step. Kept INDEPENDENT of the HISTORY-BACK
-    // popstate layer this step (no hash sync / pushState) so the existing detail
-    // history is untouched — the detail-screen step unifies history. The tabs +
-    // logo are the methodology→home path.
+    // case slots in trivially next step. showScreen itself stays PURE (visual
+    // only — no history side effects) so it is safe to call from init, the tab/
+    // logo handlers, and the popstate handler without loops; the history push/pop
+    // is driven by the link/tab/logo handlers + the unified popstate handler
+    // (DETAIL-2b) — mirroring how openTopicCard (not renderResults) owns
+    // pushDetailHistoryState.
     function showScreen(name) {
       const homeEl = document.getElementById("homeScreen");
       const methodologyEl = document.getElementById("methodology");
@@ -6268,6 +6270,38 @@
       if (homeEl) homeEl.classList.toggle("screen-hidden", showMethodology);
       if (methodologyEl) methodologyEl.classList.toggle("screen-hidden", !showMethodology);
       if (showMethodology) window.scrollTo(0, 0);
+    }
+    // DESIGN-DETAIL-2b: history sync for the screen toggle so browser BACK from the
+    // 검증 방법 page returns to the home screen (was exiting the site — no entry was
+    // pushed). Mirrors the HISTORY-BACK detail layer: a state flag rides in
+    // history.state (.tickedinScreen) + a module variable; the URL is left UNCHANGED
+    // (pass window.location.href) so the ?result_id= deep-link read + the
+    // operator_tools replaceState are unaffected (same choice as pushDetailHistoryState).
+    let methodologyHistoryActive = false;
+    function pushMethodologyHistoryState() {
+      if (!window.history || !window.history.pushState) return;
+      if (window.history.state && window.history.state.tickedinScreen === "methodology") {
+        methodologyHistoryActive = true;  // already a methodology entry — don't stack duplicates
+        return;
+      }
+      try {
+        window.history.pushState({ tickedinScreen: "methodology" }, "", window.location.href);
+        methodologyHistoryActive = true;
+      } catch (_) {
+        /* history unavailable — the page still opens via the visual toggle */
+      }
+    }
+    function clearMethodologyHistoryState() {
+      // Leaving 검증 방법 via in-page nav (tab/logo): demote the current methodology
+      // entry to a neutral state so a later BACK can't resurface it (which would
+      // otherwise hijack a card-detail BACK opened from the returned-to home view).
+      // replaceState keeps the URL; the browser owns the pop when BACK is pressed.
+      if (!methodologyHistoryActive) return;
+      methodologyHistoryActive = false;
+      if (!window.history || !window.history.replaceState) return;
+      if (window.history.state && window.history.state.tickedinScreen === "methodology") {
+        try { window.history.replaceState(null, "", window.location.href); } catch (_) { /* noop */ }
+      }
     }
     // DESIGN-DETAIL-2: every in-page link to #methodology now OPENS the 검증 방법
     // page via the toggle instead of anchor-scrolling to a now-hidden section
@@ -6277,6 +6311,7 @@
     document.querySelectorAll('a[href="#methodology"]').forEach((link) => {
       link.addEventListener("click", (event) => {
         event.preventDefault();
+        pushMethodologyHistoryState();  // DETAIL-2b: BACK from here returns home
         showScreen("methodology");
       });
     });
@@ -6287,6 +6322,7 @@
     if (brandHomeEl) {
       brandHomeEl.addEventListener("click", (event) => {
         event.preventDefault();
+        clearMethodologyHistoryState();  // DETAIL-2b: don't leave a dangling methodology entry
         showScreen("home");
         window.scrollTo(0, 0);
       });
@@ -6301,6 +6337,7 @@
       categoryTabsEl.addEventListener("click", (event) => {
         const tab = event.target.closest("[data-domain]");
         if (!tab) return;
+        clearMethodologyHistoryState();  // DETAIL-2b: don't leave a dangling methodology entry
         showScreen("home");
         setActiveDomain(tab.dataset.domain || "전체");
       });
@@ -7746,12 +7783,33 @@
     // primitive (resets #results to empty-state + re-renders the feed). Scroll is
     // restored on the next frame (mirrors the detail loaders' post-render scroll
     // timing) so it lands after the DOM settles, not pre-paint. Registered once.
+    // DESIGN-DETAIL-2b: unified screen/detail router. Routes a popstate to the
+    // correct screen (methodology / home / detail) by the popped state, without
+    // breaking the existing card-detail BACK behavior:
+    //   - methodology entry (forward/re-enter) → show the 검증 방법 page
+    //   - detail entry (forward/re-enter) → keep the detail flag (unchanged)
+    //   - popped OUT of methodology (state is now home/null) → return to home
+    //   - popped OUT of a detail (state is now home/null) → dismiss + restore scroll
     window.addEventListener("popstate", (event) => {
       const navState = event.state;
+      if (navState && navState.tickedinScreen === "methodology") {
+        // Entered (or re-entered, via FORWARD) the methodology history entry.
+        methodologyHistoryActive = true;
+        showScreen("methodology");
+        return;
+      }
       if (navState && navState.tickedinDetail) {
         // Forward into the detail entry again; keep the flag so a later BACK still
         // returns home. (Re-rendering the specific detail is out of scope.)
         detailHistoryActive = true;
+        return;
+      }
+      // Popped back to a home/neutral entry. If we were on the methodology page,
+      // return to the home screen (BACK from 검증 방법 → home, not off-site).
+      if (methodologyHistoryActive) {
+        methodologyHistoryActive = false;
+        showScreen("home");
+        window.scrollTo(0, 0);
         return;
       }
       if (!detailHistoryActive) return;  // not our transition — leave the page alone

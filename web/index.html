@@ -1972,28 +1972,29 @@
       display: none !important;
     }
 
-    /* DESIGN-DETAIL-2: 검증 방법 is a standalone full-width page (shown via
-       showScreen; the home view is hidden). Restyled from the old boxed cards
-       (border + radius:12 + shadow + white surface) to the C3 design language:
-       serif (Nanum Myeongjo) headings, borderless sections separated by thin
-       --line rules, shared tokens (--ink/--slate/--muted/--line/--brand/
-       --radius-sm). Width is bounded by .page (max 1280px + 22px side padding),
-       so the page matches the rest of the site's content bounds (not edge-to-edge).
-       ALL methodology/legal TEXT is unchanged — presentation only. */
+    /* DESIGN-DETAIL-2b: 검증 방법 redesigned as a polished article page — a clean
+       masthead (eyebrow → serif title → lead), the prose constrained to a readable
+       measure (820px) instead of stretched across the full 1280px page, the 검증
+       상태 sub-cards un-boxed to a borderless definition list, and a consistent
+       section rhythm. The page is still sidebar-less "full width"; only the TEXT
+       sits in a centered reading column within the .page bounds. Reuses C3 tokens/
+       typography (serif headings, --ink/--slate/--muted/--line/--brand-ink); ALL
+       methodology/legal TEXT unchanged — presentation only. */
     .methodology-section {
       display: block;
-      margin: 8px 0 0;
+      max-width: 820px;
+      margin: 8px auto 0;   /* centered reading column, not edge-to-edge */
     }
 
-    /* Each top-level block (a .methodology-card section OR a .methodology-grid
-       pair) flows borderless; a thin rule + spacing separates consecutive blocks,
-       like the feed / .corrections lists. The lead title block keeps no rule. */
+    /* Section rhythm: each top-level block (a section card OR a 2-col grid pair)
+       flows borderless; a thin --line rule + generous spacing separates
+       consecutive blocks like a well-paced document. The masthead carries no rule. */
     .methodology-section > * {
       margin: 0;
     }
     .methodology-section > * + * {
-      margin-top: 26px;
-      padding-top: 26px;
+      margin-top: 34px;
+      padding-top: 34px;
       border-top: 1px solid var(--line);
     }
 
@@ -2003,6 +2004,21 @@
       background: none;
       box-shadow: none;
       padding: 0;
+    }
+
+    /* 2a — masthead: eyebrow (brand-ink, uppercase, tracked) directly above the
+       large serif title, lead below; a tight intentional hierarchy on the shared
+       content left edge. */
+    .methodology-masthead .public-eyebrow {
+      color: var(--brand-ink);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 0.85rem;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+    .methodology-masthead h2 {
+      margin: 0;
     }
 
     /* DESIGN-DETAIL-2: serif (Nanum Myeongjo) page titles, applied here in the
@@ -2019,7 +2035,7 @@
     }
 
     .methodology-card h2 {
-      font-size: 1.846rem;
+      font-size: 2rem;
     }
 
     .methodology-card h3 {
@@ -2034,28 +2050,35 @@
     }
 
     .methodology-card p {
-      margin: 8px 0 0;
+      margin: 10px 0 0;
     }
 
+    /* the two-column sub-section pairs (무엇을 검증 / AI는 무엇을, 경고단계 / 한계정정)
+       stay side-by-side within the reading column. */
     .methodology-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 28px;
     }
 
-    /* the 검증 상태 의미 grid nests INSIDE a section card (under its h3), so it is
-       not caught by the top-level "> * + *" rule — give it its own top spacing. */
+    /* 2c — the 검증 상태 의미 items: un-boxed to a clean borderless definition list
+       (one per row, thin --line dividers), consistent with the un-boxed sections
+       above (was a 2-col surface-soft box grid). The nested grid (inside a section
+       card) becomes a single-column stack; the top-level pairs above stay 2-col. */
     .methodology-card .methodology-grid {
-      margin-top: 12px;
+      display: block;
+      margin-top: 14px;
     }
-
-    /* the 검증 상태 의미 definitions: the light C3 chip (surface-soft + 1px --line
-       + --radius-sm), the same family as .verify-how — no heavy old box/shadow. */
     .methodology-definition {
-      border: 1px solid var(--line);
-      border-radius: var(--radius-sm);
-      background: var(--surface-soft);
-      padding: 13px 15px;
+      border: none;
+      border-radius: 0;
+      background: none;
+      padding: 14px 0;
+      border-top: 1px solid var(--line);
+    }
+    .methodology-definition:first-child {
+      padding-top: 4px;
+      border-top: none;
     }
 
     .methodology-definition strong {
@@ -4638,7 +4661,9 @@
     </div><!-- /#homeScreen (DESIGN-DETAIL-2 home view) -->
 
     <section id="methodology" class="methodology-section" aria-labelledby="methodologyTitle">
-      <div class="methodology-card">
+      <!-- DESIGN-DETAIL-2b: masthead — eyebrow → serif title → lead, a tight
+           intentional hierarchy (styled in main.css). Text + ids unchanged. -->
+      <div class="methodology-card methodology-masthead">
         <div class="public-eyebrow">How We Verify</div>
         <h2 id="methodologyTitle">검증 방법</h2>
         <p>
@@ -11049,10 +11074,12 @@
     // the footer (with the page-level disclaimer) sit OUTSIDE both and stay
     // always-visible. The sidebar lives inside .home-shell (inside #homeScreen), so
     // it hides with the home view → 검증 방법 is full-width. Built so a "detail"
-    // case slots in trivially next step. Kept INDEPENDENT of the HISTORY-BACK
-    // popstate layer this step (no hash sync / pushState) so the existing detail
-    // history is untouched — the detail-screen step unifies history. The tabs +
-    // logo are the methodology→home path.
+    // case slots in trivially next step. showScreen itself stays PURE (visual
+    // only — no history side effects) so it is safe to call from init, the tab/
+    // logo handlers, and the popstate handler without loops; the history push/pop
+    // is driven by the link/tab/logo handlers + the unified popstate handler
+    // (DETAIL-2b) — mirroring how openTopicCard (not renderResults) owns
+    // pushDetailHistoryState.
     function showScreen(name) {
       const homeEl = document.getElementById("homeScreen");
       const methodologyEl = document.getElementById("methodology");
@@ -11060,6 +11087,38 @@
       if (homeEl) homeEl.classList.toggle("screen-hidden", showMethodology);
       if (methodologyEl) methodologyEl.classList.toggle("screen-hidden", !showMethodology);
       if (showMethodology) window.scrollTo(0, 0);
+    }
+    // DESIGN-DETAIL-2b: history sync for the screen toggle so browser BACK from the
+    // 검증 방법 page returns to the home screen (was exiting the site — no entry was
+    // pushed). Mirrors the HISTORY-BACK detail layer: a state flag rides in
+    // history.state (.tickedinScreen) + a module variable; the URL is left UNCHANGED
+    // (pass window.location.href) so the ?result_id= deep-link read + the
+    // operator_tools replaceState are unaffected (same choice as pushDetailHistoryState).
+    let methodologyHistoryActive = false;
+    function pushMethodologyHistoryState() {
+      if (!window.history || !window.history.pushState) return;
+      if (window.history.state && window.history.state.tickedinScreen === "methodology") {
+        methodologyHistoryActive = true;  // already a methodology entry — don't stack duplicates
+        return;
+      }
+      try {
+        window.history.pushState({ tickedinScreen: "methodology" }, "", window.location.href);
+        methodologyHistoryActive = true;
+      } catch (_) {
+        /* history unavailable — the page still opens via the visual toggle */
+      }
+    }
+    function clearMethodologyHistoryState() {
+      // Leaving 검증 방법 via in-page nav (tab/logo): demote the current methodology
+      // entry to a neutral state so a later BACK can't resurface it (which would
+      // otherwise hijack a card-detail BACK opened from the returned-to home view).
+      // replaceState keeps the URL; the browser owns the pop when BACK is pressed.
+      if (!methodologyHistoryActive) return;
+      methodologyHistoryActive = false;
+      if (!window.history || !window.history.replaceState) return;
+      if (window.history.state && window.history.state.tickedinScreen === "methodology") {
+        try { window.history.replaceState(null, "", window.location.href); } catch (_) { /* noop */ }
+      }
     }
     // DESIGN-DETAIL-2: every in-page link to #methodology now OPENS the 검증 방법
     // page via the toggle instead of anchor-scrolling to a now-hidden section
@@ -11069,6 +11128,7 @@
     document.querySelectorAll('a[href="#methodology"]').forEach((link) => {
       link.addEventListener("click", (event) => {
         event.preventDefault();
+        pushMethodologyHistoryState();  // DETAIL-2b: BACK from here returns home
         showScreen("methodology");
       });
     });
@@ -11079,6 +11139,7 @@
     if (brandHomeEl) {
       brandHomeEl.addEventListener("click", (event) => {
         event.preventDefault();
+        clearMethodologyHistoryState();  // DETAIL-2b: don't leave a dangling methodology entry
         showScreen("home");
         window.scrollTo(0, 0);
       });
@@ -11093,6 +11154,7 @@
       categoryTabsEl.addEventListener("click", (event) => {
         const tab = event.target.closest("[data-domain]");
         if (!tab) return;
+        clearMethodologyHistoryState();  // DETAIL-2b: don't leave a dangling methodology entry
         showScreen("home");
         setActiveDomain(tab.dataset.domain || "전체");
       });
@@ -12538,12 +12600,33 @@
     // primitive (resets #results to empty-state + re-renders the feed). Scroll is
     // restored on the next frame (mirrors the detail loaders' post-render scroll
     // timing) so it lands after the DOM settles, not pre-paint. Registered once.
+    // DESIGN-DETAIL-2b: unified screen/detail router. Routes a popstate to the
+    // correct screen (methodology / home / detail) by the popped state, without
+    // breaking the existing card-detail BACK behavior:
+    //   - methodology entry (forward/re-enter) → show the 검증 방법 page
+    //   - detail entry (forward/re-enter) → keep the detail flag (unchanged)
+    //   - popped OUT of methodology (state is now home/null) → return to home
+    //   - popped OUT of a detail (state is now home/null) → dismiss + restore scroll
     window.addEventListener("popstate", (event) => {
       const navState = event.state;
+      if (navState && navState.tickedinScreen === "methodology") {
+        // Entered (or re-entered, via FORWARD) the methodology history entry.
+        methodologyHistoryActive = true;
+        showScreen("methodology");
+        return;
+      }
       if (navState && navState.tickedinDetail) {
         // Forward into the detail entry again; keep the flag so a later BACK still
         // returns home. (Re-rendering the specific detail is out of scope.)
         detailHistoryActive = true;
+        return;
+      }
+      // Popped back to a home/neutral entry. If we were on the methodology page,
+      // return to the home screen (BACK from 검증 방법 → home, not off-site).
+      if (methodologyHistoryActive) {
+        methodologyHistoryActive = false;
+        showScreen("home");
+        window.scrollTo(0, 0);
         return;
       }
       if (!detailHistoryActive) return;  // not our transition — leave the page alone

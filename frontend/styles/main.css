@@ -1936,28 +1936,29 @@
       display: none !important;
     }
 
-    /* DESIGN-DETAIL-2: 검증 방법 is a standalone full-width page (shown via
-       showScreen; the home view is hidden). Restyled from the old boxed cards
-       (border + radius:12 + shadow + white surface) to the C3 design language:
-       serif (Nanum Myeongjo) headings, borderless sections separated by thin
-       --line rules, shared tokens (--ink/--slate/--muted/--line/--brand/
-       --radius-sm). Width is bounded by .page (max 1280px + 22px side padding),
-       so the page matches the rest of the site's content bounds (not edge-to-edge).
-       ALL methodology/legal TEXT is unchanged — presentation only. */
+    /* DESIGN-DETAIL-2b: 검증 방법 redesigned as a polished article page — a clean
+       masthead (eyebrow → serif title → lead), the prose constrained to a readable
+       measure (820px) instead of stretched across the full 1280px page, the 검증
+       상태 sub-cards un-boxed to a borderless definition list, and a consistent
+       section rhythm. The page is still sidebar-less "full width"; only the TEXT
+       sits in a centered reading column within the .page bounds. Reuses C3 tokens/
+       typography (serif headings, --ink/--slate/--muted/--line/--brand-ink); ALL
+       methodology/legal TEXT unchanged — presentation only. */
     .methodology-section {
       display: block;
-      margin: 8px 0 0;
+      max-width: 820px;
+      margin: 8px auto 0;   /* centered reading column, not edge-to-edge */
     }
 
-    /* Each top-level block (a .methodology-card section OR a .methodology-grid
-       pair) flows borderless; a thin rule + spacing separates consecutive blocks,
-       like the feed / .corrections lists. The lead title block keeps no rule. */
+    /* Section rhythm: each top-level block (a section card OR a 2-col grid pair)
+       flows borderless; a thin --line rule + generous spacing separates
+       consecutive blocks like a well-paced document. The masthead carries no rule. */
     .methodology-section > * {
       margin: 0;
     }
     .methodology-section > * + * {
-      margin-top: 26px;
-      padding-top: 26px;
+      margin-top: 34px;
+      padding-top: 34px;
       border-top: 1px solid var(--line);
     }
 
@@ -1967,6 +1968,21 @@
       background: none;
       box-shadow: none;
       padding: 0;
+    }
+
+    /* 2a — masthead: eyebrow (brand-ink, uppercase, tracked) directly above the
+       large serif title, lead below; a tight intentional hierarchy on the shared
+       content left edge. */
+    .methodology-masthead .public-eyebrow {
+      color: var(--brand-ink);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 0.85rem;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+    .methodology-masthead h2 {
+      margin: 0;
     }
 
     /* DESIGN-DETAIL-2: serif (Nanum Myeongjo) page titles, applied here in the
@@ -1983,7 +1999,7 @@
     }
 
     .methodology-card h2 {
-      font-size: 1.846rem;
+      font-size: 2rem;
     }
 
     .methodology-card h3 {
@@ -1998,28 +2014,35 @@
     }
 
     .methodology-card p {
-      margin: 8px 0 0;
+      margin: 10px 0 0;
     }
 
+    /* the two-column sub-section pairs (무엇을 검증 / AI는 무엇을, 경고단계 / 한계정정)
+       stay side-by-side within the reading column. */
     .methodology-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 28px;
     }
 
-    /* the 검증 상태 의미 grid nests INSIDE a section card (under its h3), so it is
-       not caught by the top-level "> * + *" rule — give it its own top spacing. */
+    /* 2c — the 검증 상태 의미 items: un-boxed to a clean borderless definition list
+       (one per row, thin --line dividers), consistent with the un-boxed sections
+       above (was a 2-col surface-soft box grid). The nested grid (inside a section
+       card) becomes a single-column stack; the top-level pairs above stay 2-col. */
     .methodology-card .methodology-grid {
-      margin-top: 12px;
+      display: block;
+      margin-top: 14px;
     }
-
-    /* the 검증 상태 의미 definitions: the light C3 chip (surface-soft + 1px --line
-       + --radius-sm), the same family as .verify-how — no heavy old box/shadow. */
     .methodology-definition {
-      border: 1px solid var(--line);
-      border-radius: var(--radius-sm);
-      background: var(--surface-soft);
-      padding: 13px 15px;
+      border: none;
+      border-radius: 0;
+      background: none;
+      padding: 14px 0;
+      border-top: 1px solid var(--line);
+    }
+    .methodology-definition:first-child {
+      padding-top: 4px;
+      border-top: none;
     }
 
     .methodology-definition strong {
