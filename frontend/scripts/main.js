@@ -1608,6 +1608,12 @@
 
     // ===== C6 — Status / error / busy UI & metrics =====
     function showStatus(message, success = false) {
+      // DESIGN-DETAIL-3b (FIX B): the status line (#statusLine) and the v2 progress
+      // slot (#v2ProgressWrap) are DISTINCT elements both positioned at the same
+      // under-search spot, so they overlap if both carry content. Clear the v2 slot
+      // first → mutual exclusion (the two never coexist). analyze() drives the v2
+      // slot and is never interleaved with showStatus, so no in-progress bar is lost.
+      v2ResetProgress();
       statusLine.textContent = message;
       statusLine.className = success ? "status-line success" : "status-line";
       statusLine.style.display = "block";
@@ -6330,10 +6336,13 @@
     let methodologyHistoryActive = false;
     function pushMethodologyHistoryState() {
       if (!window.history || !window.history.pushState) return;
-      // DESIGN-DETAIL-3: at-most-one-non-home rule — demote any existing DETAIL
-      // entry before pushing methodology, so the stack stays [base, methodology]
-      // (no detail↔methodology sandwich; BACK from methodology returns home).
-      clearDetailHistoryState();
+      // DESIGN-DETAIL-3b (FIX C): demote-before-push REMOVED. The old
+      // clearDetailHistoryState() here replaceState(null)'d the detail entry, nulling
+      // its state so a later FORWARD popped null → router showed home → detail never
+      // re-shown. The symmetric popstate router routes by the POPPED state in both
+      // directions, so a [base, detail, methodology] sandwich is harmless — each
+      // BACK/FORWARD shows the correct screen (accepted tradeoff: detail→검증방법→BACK
+      // is now a standard one-step undo back to the detail, not a jump home).
       if (window.history.state && window.history.state.tickedinScreen === "methodology") {
         methodologyHistoryActive = true;  // already a methodology entry — don't stack duplicates
         return;
@@ -6345,6 +6354,9 @@
         /* history unavailable — the page still opens via the visual toggle */
       }
     }
+    // DESIGN-DETAIL-3b (FIX C): now UNUSED — all callers (the demote-before-push and
+    // the tab/logo cleanup) were removed because the replaceState(null) demote killed
+    // browser FORWARD. Kept (not deleted) in case a future demote is wanted.
     function clearMethodologyHistoryState() {
       // Leaving 검증 방법 via in-page nav (tab/logo): demote the current methodology
       // entry to a neutral state so a later BACK can't resurface it (which would
@@ -6376,8 +6388,20 @@
     if (brandHomeEl) {
       brandHomeEl.addEventListener("click", (event) => {
         event.preventDefault();
-        clearMethodologyHistoryState();  // DETAIL-2b: don't leave a dangling methodology entry
-        clearDetailHistoryState();       // DETAIL-3: nor a dangling detail entry
+        // DESIGN-DETAIL-3b (FIX A): restore the FULL home feed. The detail loaders
+        // narrow currentReportContext to the single opened card, so without this
+        // clear currentTopicCards() returns a 1-card pool and the feed stays narrowed.
+        // clearCurrentReportContext() nulls it → currentTopicCards falls back to the
+        // full serverHotTopicResults; setActiveDomain("전체") repaints the full
+        // unfiltered feed (the logo previously did NOT re-render). "전체" is the
+        // all-domain key (renderCategoryTabs / setActiveDomain). (FIX B) clear both
+        // under-search banners so the fresh home shows no stale message. (FIX C) the
+        // demote clear…HistoryState calls are dropped — the symmetric popstate router
+        // makes any residual entry harmless, and the demotes were killing FORWARD.
+        clearCurrentReportContext();
+        hideStatus();
+        v2ResetProgress();
+        setActiveDomain("전체");
         showScreen("home");
         window.scrollTo(0, 0);
       });
@@ -6392,8 +6416,17 @@
       categoryTabsEl.addEventListener("click", (event) => {
         const tab = event.target.closest("[data-domain]");
         if (!tab) return;
-        clearMethodologyHistoryState();  // DETAIL-2b: don't leave a dangling methodology entry
-        clearDetailHistoryState();       // DETAIL-3: nor a dangling detail entry
+        // DESIGN-DETAIL-3b (FIX A): restore the FULL home feed BEFORE filtering. The
+        // detail loaders narrow currentReportContext to the single opened card, so
+        // without this clear setActiveDomain would filter that 1-card pool. Clearing
+        // it lets currentTopicCards() fall back to the full serverHotTopicResults;
+        // setActiveDomain then filters that full pool to the tab's domain — identical
+        // to clicking the tab from a fresh home. (FIX B) clear both under-search
+        // banners. (FIX C) the demote clear…HistoryState calls are dropped — the
+        // symmetric popstate router makes any residual entry harmless.
+        clearCurrentReportContext();
+        hideStatus();
+        v2ResetProgress();
         showScreen("home");
         setActiveDomain(tab.dataset.domain || "전체");
       });
@@ -6461,10 +6494,11 @@
     let detailReturnScrollY = 0;
     function pushDetailHistoryState(scrollY) {
       if (!window.history || !window.history.pushState) return;
-      // DESIGN-DETAIL-3: at-most-one-non-home rule — demote any existing METHODOLOGY
-      // entry before pushing a detail, so the stack stays [base, detail] (BACK from
-      // a detail returns home cleanly). No-op in the normal home→card flow.
-      clearMethodologyHistoryState();
+      // DESIGN-DETAIL-3b (FIX C): demote-before-push REMOVED. The old
+      // clearMethodologyHistoryState() here replaceState(null)'d the methodology entry,
+      // nulling its state so a later FORWARD popped null → router showed home →
+      // methodology never re-shown. The symmetric popstate router routes by the POPPED
+      // state in both directions, so a residual methodology entry is harmless.
       const alreadyDetail = !!(window.history.state && window.history.state.tickedinDetail);
       try {
         if (alreadyDetail) {
@@ -6492,6 +6526,7 @@
     // SCREEN via in-page nav (tab/logo) OR before pushing another non-home screen —
     // demote the current detail entry to a neutral state so a later BACK can't
     // resurface a stale detail (at-most-one-non-home rule). replaceState keeps the URL.
+    // DESIGN-DETAIL-3b (FIX C): now UNUSED — see clearMethodologyHistoryState. Kept.
     function clearDetailHistoryState() {
       if (!detailHistoryActive) return;
       detailHistoryActive = false;
@@ -7862,38 +7897,51 @@
     //   - detail entry (forward/re-enter) → keep the detail flag (unchanged)
     //   - popped OUT of methodology (state is now home/null) → return to home
     //   - popped OUT of a detail (state is now home/null) → dismiss + restore scroll
+    // DESIGN-DETAIL-3b (FIX C): SYMMETRIC, state-driven router. Routes a popstate to
+    // the screen indicated by the POPPED state in BOTH directions (BACK and FORWARD),
+    // so re-entering a screen via FORWARD re-shows it (the old detail branch was
+    // flag-only — it never called showScreen, so FORWARD into a detail didn't re-show
+    // it). Detail/methodology painted content survives in their own DOM regions
+    // (#detailScreen / #methodology), so re-showing is just a visibility toggle.
     window.addEventListener("popstate", (event) => {
       const navState = event.state;
       if (navState && navState.tickedinScreen === "methodology") {
-        // Entered (or re-entered, via FORWARD) the methodology history entry.
+        // Entered (BACK) or re-entered (FORWARD) the methodology entry → re-show it.
         methodologyHistoryActive = true;
-        showScreen("methodology");
+        detailHistoryActive = false;
+        showScreen("methodology");  // non-home branch scrolls to top
         return;
       }
       if (navState && navState.tickedinDetail) {
-        // Forward into the detail entry again; keep the flag so a later BACK still
-        // returns home. (Re-rendering the specific detail is out of scope.)
+        // Entered (FORWARD, or a sandwiched BACK) the detail entry → re-SHOW the
+        // detail screen. Its painted content in #detailScreen survives, so this is a
+        // pure visibility toggle. Restore the saved scroll for the detail entry.
         detailHistoryActive = true;
-        return;
-      }
-      // Popped back to a home/neutral entry. If we were on the methodology page,
-      // return to the home screen (BACK from 검증 방법 → home, not off-site).
-      if (methodologyHistoryActive) {
         methodologyHistoryActive = false;
-        showScreen("home");
-        window.scrollTo(0, 0);
+        showScreen("detail");
+        const detailY = (typeof navState.scrollY === "number") ? navState.scrollY : 0;
+        requestAnimationFrame(() => { window.scrollTo(0, detailY || 0); });
         return;
       }
-      if (!detailHistoryActive) return;  // not our transition — leave the page alone
-      // Popped OUT of a detail entry → return to the home SCREEN (DETAIL-3: the
-      // detail is now a real screen) AND dismiss the detail content + restore the
-      // pre-open scroll (DETAIL-2b behavior, kept). showScreen("home") doesn't
-      // scroll (home branch), so the scroll restore below stands.
+      // Popped to a home/neutral (null) entry. Only act if we were tracking a non-home
+      // screen; otherwise this popstate isn't ours (e.g. an operator_tools
+      // replaceState navigation) and the page is left alone.
+      if (!methodologyHistoryActive && !detailHistoryActive) return;
+      const wasDetail = detailHistoryActive;
+      methodologyHistoryActive = false;
       detailHistoryActive = false;
+      // Restore the FULL home feed WITHOUT destroying #detailScreen content (so a
+      // later FORWARD can re-show the detail). The old renderResults([]) wiped it —
+      // replaced with showScreen("home") + clearCurrentReportContext() (un-narrow the
+      // pool) + renderHotTopics() (repaint from serverHotTopicResults). Clear both
+      // under-search banners. Detail-back restores the pre-open scroll; methodology-
+      // back lands at the top.
       showScreen("home");
-      renderResults([]);
-      const targetY = (navState && typeof navState.scrollY === "number")
-        ? navState.scrollY : detailReturnScrollY;
+      clearCurrentReportContext();
+      renderHotTopics();
+      hideStatus();
+      v2ResetProgress();
+      const targetY = wasDetail ? (detailReturnScrollY || 0) : 0;
       requestAnimationFrame(() => { window.scrollTo(0, targetY || 0); });
     });
     // M9.4 — decide reviewer/admin visibility BEFORE binding the
