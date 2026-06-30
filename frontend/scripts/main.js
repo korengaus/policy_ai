@@ -1496,9 +1496,9 @@
       `;
     }
 
-    function renderCollapsibleSection(title, body, open = false, helper = "") {
+    function renderCollapsibleSection(title, body, open = false, helper = "", extraClass = "") {
       return `
-        <details class="collapsible-section" ${open ? "open" : ""}>
+        <details class="collapsible-section${extraClass ? ` ${extraClass}` : ""}" ${open ? "open" : ""}>
           <summary>${escapeHtml(title)}</summary>
           <div class="collapsible-body">${helper ? `<div class="reader-note">${escapeHtml(helper)}</div>` : ""}${body || ""}</div>
         </details>
@@ -1533,19 +1533,24 @@
               // DESIGN-DETAIL-5a: evidence_text stays; the 9-cell grid → populated-only
               // definition list (empty 발행처/관련도/추출 방식 etc. drop out; formatter
               // cells guarded so empties don't render placeholder rows).
+              // DESIGN-DETAIL-5d FIX 4: wrap each evidence sentence + its fields in an
+              // .adv-item so a clear boundary (stronger rule + spacing + heading
+              // emphasis) separates one evidence from the next (vs the thin field rules).
               return `
-                <div class="evidence-snippet-text">${escapeHtml(userFacingReportText(snippet.evidence_text || "-", "-"))}</div>
-                ${advDefList([
-                  ["출처", sourceHtml, { html: true }],
-                  ["발행처", snippet.publisher ? publicInstitutionName(snippet.publisher) : ""],
-                  ["근거 유형", snippet.evidence_type ? formatEvidenceType(snippet.evidence_type) : ""],
-                  ["관련도", snippet.relevance_score ?? ""],
-                  ["품질 점수", snippet.evidence_quality_score ?? ""],
-                  ["품질 등급", snippet.evidence_quality_label ? formatTechnicalLabel(snippet.evidence_quality_label) : ""],
-                  ["주장 지지", snippet.supports_claim ? formatSupportsClaim(snippet.supports_claim) : ""],
-                  ["추출 신뢰도", snippet.extraction_confidence ? formatExtractionConfidence(snippet.extraction_confidence) : ""],
-                  ["추출 방식", snippet.extraction_method ? formatDiagnosticText(snippet.extraction_method) : ""],
-                ])}
+                <div class="adv-item">
+                  <div class="evidence-snippet-text adv-item-head">${escapeHtml(userFacingReportText(snippet.evidence_text || "-", "-"))}</div>
+                  ${advDefList([
+                    ["출처", sourceHtml, { html: true }],
+                    ["발행처", snippet.publisher ? publicInstitutionName(snippet.publisher) : ""],
+                    ["근거 유형", snippet.evidence_type ? formatEvidenceType(snippet.evidence_type) : ""],
+                    ["관련도", snippet.relevance_score ?? ""],
+                    ["품질 점수", snippet.evidence_quality_score ?? ""],
+                    ["품질 등급", snippet.evidence_quality_label ? formatTechnicalLabel(snippet.evidence_quality_label) : ""],
+                    ["주장 지지", snippet.supports_claim ? formatSupportsClaim(snippet.supports_claim) : ""],
+                    ["추출 신뢰도", snippet.extraction_confidence ? formatExtractionConfidence(snippet.extraction_confidence) : ""],
+                    ["추출 방식", snippet.extraction_method ? formatDiagnosticText(snippet.extraction_method) : ""],
+                  ])}
+                </div>
               `;
             }).join("") : '<div class="evidence-source-meta">연결된 근거가 없습니다.</div>'}
           </div>
@@ -1564,79 +1569,96 @@
         return '<div class="evidence-source-meta">표시할 출처 탐색 후보가 없습니다.</div>';
       }
 
+      const renderCand = (source) => {
+        const title = escapeHtml(userFacingReportText(publicInstitutionName(source.title || source.url || "출처 후보"), "출처 후보"));
+        const url = escapeHtml(safeUrl(source.url || ""));
+        const titleHtml = source.url
+          ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a>`
+          : title;
+        const exclusionLabel = sourceExclusionLabel(source);
+        const trace = sourceTraceability(source);
+        const domain = sourceDomain(source.url || "");
+        const publisher = source.publisher ? publicInstitutionName(source.publisher) : "";
+        // One-line summary (populated bits only). Falls back to the candidate title.
+        // DESIGN-DETAIL-5d FIX 2: this reliability_score is the 0-100 candidate score —
+        // shown as plain "신뢰도 N" (the bogus "/5" was removed; the genuine 0-5
+        // source.reliability_score lives in renderEvidenceSources / the reader card).
+        const summaryBits = [
+          source.source_type ? formatSourceType(source.source_type) : "",
+          publisher,
+          source.reliability_score == null ? "" : `신뢰도 ${source.reliability_score}`,
+          source.verification_role ? formatVerificationRole(source.verification_role) : "",
+        ].filter((b) => b && String(b).trim() && String(b).trim() !== "-");
+        const summaryText = summaryBits.length
+          ? summaryBits.join(" · ")
+          : userFacingReportText(publicInstitutionName(source.title || "출처 후보"), "출처 후보");
+        const detail = advDefList([
+          ["검색어", source.query_used],
+          ["목적", source.purpose ? formatSourcePurpose(source.purpose) : ""],
+          ["출처 유형", source.source_type ? formatSourceType(source.source_type) : ""],
+          ["수집 방식", source.retrieval_method ? formatDiagnosticText(source.retrieval_method) : ""],
+          ["발행처", publisher],
+          ["본문 확보", source.raw_text_available ? "예" : "아니오"],
+          ["공식 본문 수집", source.official_body_fetched ? "예" : "아니오"],
+          ["공식 본문 길이", source.official_body_length ?? ""],
+          ["공식 본문 매칭", source.official_body_match ? "예" : "아니오"],
+          ["공식 매칭 점수", source.official_body_match_score ?? ""],
+          ["공식 직접 매칭", officialDirectMatchLabel(source)],
+          ["공식 직접 점수", source.official_final_direct_match_score ?? source.official_body_match_score ?? ""],
+          ["URL 해소 점수", source.official_url_score ?? ""],
+          ["의미 매칭", source.semantic_match_score ?? ""],
+          ["정책 일치도", source.policy_alignment_score ?? ""],
+          ["공식 근거 점수", source.official_evidence_score ?? ""],
+          ["공식 실패 사유", source.official_body_failure_reason ? formatDiagnosticText(source.official_body_failure_reason) : ""],
+          ["신뢰도 점수", source.reliability_score == null ? "" : `${source.reliability_score}`],
+          ["신뢰도 등급", source.reliability_level ? formatReliabilityLevel(source.reliability_level) : ""],
+          ["검증 역할", source.verification_role ? formatVerificationRole(source.verification_role) : ""],
+          ["도메인", domain || ""],
+          ["공개 표시 판단", userFacingReportText(trace.explanation, "")],
+        ]);
+        const matched = (Array.isArray(source.official_matched_sentences) && source.official_matched_sentences.length) ? `
+          <div class="evidence-source-meta"><strong>공식 문서 매칭 문장</strong></div>
+          <ul class="compact-list">
+            ${source.official_matched_sentences.slice(0, 2).map((match) => `
+              <li>${escapeHtml(match.sentence || "-")} <span class="adv-cell-label">(${escapeHtml(match.score ?? "-")}점)</span></li>
+            `).join("")}
+          </ul>
+        ` : "";
+        const reason = advIsEmptyDisplay(source.reliability_reason)
+          ? ""
+          : `<div class="evidence-source-meta">${escapeHtml(userFacingReportText(source.reliability_reason, ""))}</div>`;
+        const flagText = formatDiagnosticText(formatList(source.source_risk_flags));
+        const flags = advIsEmptyDisplay(flagText) ? "" : `<div class="risk-flags">${escapeHtml(flagText)}</div>`;
+        return `
+          <details class="adv-cand">
+            <summary class="adv-cand-summary">
+              <span class="adv-cand-trace ${escapeHtml(trace.className)}">${escapeHtml(trace.label)}</span>
+              <span class="adv-cand-line">${escapeHtml(summaryText)}</span>
+            </summary>
+            <div class="adv-cand-body">
+              <div class="source-candidate-title">${titleHtml}</div>
+              ${exclusionLabel ? `<div class="adv-cand-excl">${escapeHtml(exclusionLabel)}</div>` : ""}
+              ${detail}${matched}${reason}${flags}
+            </div>
+          </details>
+        `;
+      };
+
+      // DESIGN-DETAIL-5d FIX 1: show the first 6 candidates; the rest go inside a
+      // "전체 보기" expander. ALL N candidates stay in the DOM (the overflow ones are
+      // inside the nested <details>) — no truncation, just not all visible at once.
+      const VISIBLE = 6;
+      const head = list.slice(0, VISIBLE);
+      const overflow = list.slice(VISIBLE);
       return `
         <div class="adv-cand-count">공식 출처 후보 ${list.length}개</div>
-        <div class="adv-cand-list">${list.map((source) => {
-          const title = escapeHtml(userFacingReportText(publicInstitutionName(source.title || source.url || "출처 후보"), "출처 후보"));
-          const url = escapeHtml(safeUrl(source.url || ""));
-          const titleHtml = source.url
-            ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a>`
-            : title;
-          const exclusionLabel = sourceExclusionLabel(source);
-          const trace = sourceTraceability(source);
-          const domain = sourceDomain(source.url || "");
-          const publisher = source.publisher ? publicInstitutionName(source.publisher) : "";
-          // One-line summary (populated bits only). Falls back to the candidate title.
-          const summaryBits = [
-            source.source_type ? formatSourceType(source.source_type) : "",
-            publisher,
-            source.reliability_score == null ? "" : `신뢰도 ${source.reliability_score}/5`,
-            source.verification_role ? formatVerificationRole(source.verification_role) : "",
-          ].filter((b) => b && String(b).trim() && String(b).trim() !== "-");
-          const summaryText = summaryBits.length
-            ? summaryBits.join(" · ")
-            : userFacingReportText(publicInstitutionName(source.title || "출처 후보"), "출처 후보");
-          const detail = advDefList([
-            ["검색어", source.query_used],
-            ["목적", source.purpose ? formatSourcePurpose(source.purpose) : ""],
-            ["출처 유형", source.source_type ? formatSourceType(source.source_type) : ""],
-            ["수집 방식", source.retrieval_method ? formatDiagnosticText(source.retrieval_method) : ""],
-            ["발행처", publisher],
-            ["본문 확보", source.raw_text_available ? "예" : "아니오"],
-            ["공식 본문 수집", source.official_body_fetched ? "예" : "아니오"],
-            ["공식 본문 길이", source.official_body_length ?? ""],
-            ["공식 본문 매칭", source.official_body_match ? "예" : "아니오"],
-            ["공식 매칭 점수", source.official_body_match_score ?? ""],
-            ["공식 직접 매칭", officialDirectMatchLabel(source)],
-            ["공식 직접 점수", source.official_final_direct_match_score ?? source.official_body_match_score ?? ""],
-            ["URL 해소 점수", source.official_url_score ?? ""],
-            ["의미 매칭", source.semantic_match_score ?? ""],
-            ["정책 일치도", source.policy_alignment_score ?? ""],
-            ["공식 근거 점수", source.official_evidence_score ?? ""],
-            ["공식 실패 사유", source.official_body_failure_reason ? formatDiagnosticText(source.official_body_failure_reason) : ""],
-            ["신뢰도 점수", source.reliability_score == null ? "" : `${source.reliability_score}/5`],
-            ["신뢰도 등급", source.reliability_level ? formatReliabilityLevel(source.reliability_level) : ""],
-            ["검증 역할", source.verification_role ? formatVerificationRole(source.verification_role) : ""],
-            ["도메인", domain || ""],
-            ["공개 표시 판단", userFacingReportText(trace.explanation, "")],
-          ]);
-          const matched = (Array.isArray(source.official_matched_sentences) && source.official_matched_sentences.length) ? `
-            <div class="evidence-source-meta"><strong>공식 문서 매칭 문장</strong></div>
-            <ul class="compact-list">
-              ${source.official_matched_sentences.slice(0, 2).map((match) => `
-                <li>${escapeHtml(match.sentence || "-")} <span class="adv-cell-label">(${escapeHtml(match.score ?? "-")}점)</span></li>
-              `).join("")}
-            </ul>
-          ` : "";
-          const reason = advIsEmptyDisplay(source.reliability_reason)
-            ? ""
-            : `<div class="evidence-source-meta">${escapeHtml(userFacingReportText(source.reliability_reason, ""))}</div>`;
-          const flagText = formatDiagnosticText(formatList(source.source_risk_flags));
-          const flags = advIsEmptyDisplay(flagText) ? "" : `<div class="risk-flags">${escapeHtml(flagText)}</div>`;
-          return `
-            <details class="adv-cand">
-              <summary class="adv-cand-summary">
-                <span class="adv-cand-trace ${escapeHtml(trace.className)}">${escapeHtml(trace.label)}</span>
-                <span class="adv-cand-line">${escapeHtml(summaryText)}</span>
-              </summary>
-              <div class="adv-cand-body">
-                <div class="source-candidate-title">${titleHtml}</div>
-                ${exclusionLabel ? `<div class="adv-cand-excl">${escapeHtml(exclusionLabel)}</div>` : ""}
-                ${detail}${matched}${reason}${flags}
-              </div>
-            </details>
-          `;
-        }).join("")}</div>
+        <div class="adv-cand-list">${head.map(renderCand).join("")}</div>
+        ${overflow.length ? `
+          <details class="adv-cand-more">
+            <summary class="adv-cand-more-summary">공식 출처 후보 ${list.length}개 전체 보기</summary>
+            <div class="adv-cand-list">${overflow.map(renderCand).join("")}</div>
+          </details>
+        ` : ""}
       `;
     }
 
@@ -4727,7 +4749,10 @@
           "고급 검증 정보 보기",
           verificationDetails,
           false,
-          "핵심 판단을 뒷받침하는 주장 추출, 근거 매칭, 반박 검사, 프레이밍 검사, 출처 후보, 내부 점검 정보를 한곳에 모았습니다."
+          "핵심 판단을 뒷받침하는 주장 추출, 근거 매칭, 반박 검사, 프레이밍 검사, 출처 후보, 내부 점검 정보를 한곳에 모았습니다.",
+          // DESIGN-DETAIL-5d FIX 3b: mark the OUTER advanced container so CSS un-boxes
+          // only it (not the top-level reader reading-guide, which shares the class).
+          "adv-outer"
         );
 
         return `

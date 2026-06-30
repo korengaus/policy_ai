@@ -2646,19 +2646,22 @@
       font-weight: 700;
     }
 
+    /* DESIGN-DETAIL-5d FIX 3a: un-boxed — the 근거·출처 source cards are now a flat
+       stacked list separated by a thin var(--line) rule (was bordered --paper cards).
+       The inner 배경 맥락/공식 약한 후보 pill (.source-support-badge) is kept. */
     .public-source-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 10px;
-      margin-top: 10px;
+      display: block;
+      margin-top: 6px;
     }
 
     .public-source-card {
-      border: 1px solid var(--line);
-      border-radius: var(--radius-sm);
-      background: var(--paper);
-      padding: 12px;
+      padding: 14px 0 0;
+      margin-top: 14px;
+      border-top: 1px solid var(--line);
       min-width: 0;
+    }
+    .public-source-card:first-child {
+      margin-top: 8px;
     }
 
     .public-source-card-title {
@@ -3434,6 +3437,24 @@
       overflow: hidden;
     }
 
+    /* DESIGN-DETAIL-5d FIX 3b: un-box ONLY the outer advanced container (marked
+       .adv-outer in renderCollapsibleSection) → flat, no border/bg/radius. The
+       top-level reader reading-guide shares .collapsible-section but is NOT .adv-outer,
+       so it keeps its subtle box; the 8 inner sub-sections were flattened in 5c. */
+    .collapsible-section.adv-outer {
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      margin-top: 16px;
+    }
+    .collapsible-section.adv-outer > summary {
+      padding: 11px 0;
+    }
+    .collapsible-section.adv-outer > .collapsible-body {
+      border-top: 0;
+      padding: 0;
+    }
+
     .collapsible-section summary {
       cursor: pointer;
       padding: 11px 12px;
@@ -3564,11 +3585,29 @@
       font-weight: 700;
       font-size: 0.86rem;
     }
+    /* DESIGN-DETAIL-5d FIX 4: each candidate is one ITEM — a stronger var(--rule-strong)
+       rule (the home's section-divider weight) separates it from the next. */
     .adv-cand {
-      border-top: 1px solid var(--line);
+      border-top: 1px solid var(--rule-strong);
     }
     .adv-cand-list .adv-cand:last-child {
-      border-bottom: 1px solid var(--line);
+      border-bottom: 1px solid var(--rule-strong);
+    }
+    /* DESIGN-DETAIL-5d FIX 1: the "전체 보기" overflow expander (candidates 7..N). */
+    .adv-cand-more {
+      margin-top: 4px;
+    }
+    .adv-cand-more-summary {
+      cursor: pointer;
+      padding: 9px 0;
+      color: var(--brand);
+      font-weight: 700;
+      font-size: 0.86rem;
+      list-style-position: inside;
+    }
+    .adv-cand-more-summary:hover {
+      color: var(--brand-ink);
+      text-decoration: underline;
     }
     .adv-cand-summary {
       cursor: pointer;
@@ -3597,6 +3636,21 @@
     .adv-cand-body .source-candidate-title {
       margin-bottom: 6px;
       font-weight: 700;
+    }
+
+    /* DESIGN-DETAIL-5d FIX 4: one repeated ITEM = a heading line + its field cells
+       (used for each evidence sentence in #3 근거 문장). A stronger var(--rule-strong)
+       rule + larger spacing separates items from each other, vs the thin var(--line)
+       rules between fields WITHIN an item. The heading line is set heavier/darker so
+       it visually "starts" the block. Flat — no boxes. */
+    .adv-item + .adv-item {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid var(--rule-strong);
+    }
+    .adv-item-head {
+      color: var(--ink);
+      font-weight: 600;
     }
 
     /* DESIGN-DETAIL-5c: flat (was a bordered --paper card) — thin-rule separated. */
@@ -3634,14 +3688,16 @@
       margin-top: 8px;
     }
 
-    /* DESIGN-DETAIL-5c: flat (was a bordered --paper card) — thin-rule separated. */
+    /* DESIGN-DETAIL-5c/5d: flat (no box). FIX 4: each normalized claim is one ITEM —
+       a stronger var(--rule-strong) rule separates it from the next claim. */
     .normalized-claim {
-      padding: 12px 0 0;
-      border-top: 1px solid var(--line);
+      padding: 14px 0 0;
+      border-top: 1px solid var(--rule-strong);
     }
 
     .normalized-claim-text {
-      font-weight: 800;
+      color: var(--ink);
+      font-weight: 700;
       margin-bottom: 8px;
     }
 
@@ -3705,10 +3761,12 @@
       margin-top: 8px;
     }
 
-    /* DESIGN-DETAIL-5c: flat (was a bordered --paper card) — thin-rule separated. */
+    /* DESIGN-DETAIL-5c/5d: flat (no box). FIX 4: each claim's evidence block is one
+       ITEM — a stronger var(--rule-strong) rule separates it from the next claim
+       (the per-sentence .adv-item boundaries sit inside, one weight down by spacing). */
     .evidence-snippet {
-      padding: 12px 0 0;
-      border-top: 1px solid var(--line);
+      padding: 14px 0 0;
+      border-top: 1px solid var(--rule-strong);
     }
 
     .evidence-snippet-text {
