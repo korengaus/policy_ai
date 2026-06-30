@@ -2231,7 +2231,18 @@
     function renderHotTopics(preferredResults) {
       if (!hotTopicsEl) return;
       const allCards = currentTopicCards(preferredResults);
-      renderCategoryTabs(allCards);
+      // DESIGN-DETAIL-3: drive the ALWAYS-VISIBLE domain-tab row from the FULL home
+      // pool (serverHotTopicResults), NOT the (possibly narrowed) feed set. Opening a
+      // detail narrows currentReportContext to ONE result, which would otherwise
+      // collapse the tabs to that single domain (전체 + 금융 only). Using the stable
+      // server pool keeps the full tab set (금융~기타) while a detail is shown. Falls
+      // back to allCards when the server pool isn't loaded yet (e.g. a pure search
+      // session) so tabs still reflect available domains. The feed below still uses
+      // allCards — home content is unaffected (on plain home the two pools coincide).
+      const tabPool = serverHotTopicResults.length
+        ? serverHotTopicResults.map((result, index) => topicCardFromResult(result, index, "server"))
+        : allCards;
+      renderCategoryTabs(tabPool);
       const filtered = activeDomain === "전체"
         ? allCards
         : allCards.filter((card) => cardDomainKey(card) === activeDomain);
@@ -3432,6 +3443,11 @@
         item?.updated_at || item?.created_at || new Date().toISOString()
       );
       renderResults(results);
+      // DESIGN-DETAIL-3: the loaded result renders into #results (now in
+      // #detailScreen) — switch to the detail SCREEN (before showStatus so the
+      // confirmation survives) so the operator sees it. Replaces the prior inline
+      // render on home.
+      showScreen("detail");
       renderHistory(safeReadLocalHistory());
       renderReviewQueue(safeReadReviewQueue());
       if (item?.query) {
@@ -3470,6 +3486,10 @@
         getHistoryAnalyzedAt(record)
       );
       renderResults(results, selectedResultIndex);
+      // DESIGN-DETAIL-3: switch to the detail SCREEN at its top (no jump-scroll).
+      // BEFORE showStatus so the confirmation below survives (showScreen calls
+      // hideStatus for non-home screens). Replaces the old resultsEl.scrollIntoView.
+      showScreen("detail");
       renderHistory(safeReadLocalHistory());
       if (record?.query) {
         queryInput.value = record.query;
@@ -3478,10 +3498,6 @@
         maxNewsInput.value = record.max_news;
       }
       showStatus(message || "선택한 분석 기록을 불러왔습니다.", true);
-      // DETAIL-FIX B: scroll to the report TOP after the report has painted and
-      // the status/hot-topics layout has settled, so the user lands at the AI
-      // summary rather than mid-report (the old scroll fired pre-render).
-      resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
     }
 
     function deleteHistoryRecord(recordId) {
@@ -6079,6 +6095,17 @@
       const results = renderData.results || [];
       setCurrentReportContext(query, maxNews, results, new Date().toISOString(), renderData.ai_status);
       renderResults(results);
+      // DESIGN-DETAIL-3: a search/analyze produces a report (detail content) that
+      // renders into #results (now in #detailScreen). Switch to the detail SCREEN so
+      // it's visible, and push a history entry so BACK returns to the home feed
+      // (mirrors the card-open flow). On zero results stay on home — the "찾지 못했습니다"
+      // message lives in the always-visible v2 progress slot below, not #results.
+      if (results.length) {
+        pushDetailHistoryState(window.scrollY || 0);
+        showScreen("detail");
+      } else {
+        showScreen("home");
+      }
       renderHistory(safeReadLocalHistory());
       renderReviewQueue(safeReadReviewQueue());
       // Terminal message lives in the reserved slim slot (not the legacy banner)
@@ -6153,6 +6180,10 @@
           showStatus("저장된 분석 기록이 없습니다.", true);
           return;
         }
+        // DESIGN-DETAIL-3: loadHistoryRecord switches to the detail screen; push a
+        // back-entry here too (this button path doesn't go through openTopicCard /
+        // the history-list opener that already push), so BACK returns to the feed.
+        pushDetailHistoryState(window.scrollY || 0);
         await loadHistoryRecord(records[0] || {}, "가장 최근 분석 기록을 불러왔습니다.");
       } catch (error) {
         showError(`최근 분석 불러오기 실패: ${error.message}`);
@@ -6240,6 +6271,9 @@
         renderReviewQueue(safeReadReviewQueue());
         return;
       }
+      // DESIGN-DETAIL-3: loadReviewQueueItem switches to the detail screen; push a
+      // back-entry so BACK returns to the feed (mirrors the history-list opener).
+      pushDetailHistoryState(window.scrollY || 0);
       loadReviewQueueItem(item, `"${item.query || "검토 항목"}" 검토 큐 항목을 불러왔습니다.`);
     });
     // DESIGN-C3h-2: shared tab-switch — set the active domain, reset paging, re-render.
@@ -6263,19 +6297,29 @@
     // is driven by the link/tab/logo handlers + the unified popstate handler
     // (DETAIL-2b) — mirroring how openTopicCard (not renderResults) owns
     // pushDetailHistoryState.
+    // DESIGN-DETAIL-3: three mutually-exclusive screens — home / methodology /
+    // detail. The card detail is now a real screen (#detailScreen wraps #metrics +
+    // #selectedIssueIntro + #reportActions + #results, outside #homeScreen). Exactly
+    // one of the three groups is shown; the header (logo/search), the domain-tabs
+    // row, and the footer sit OUTSIDE all three and stay always-visible.
     function showScreen(name) {
       const homeEl = document.getElementById("homeScreen");
       const methodologyEl = document.getElementById("methodology");
-      const showMethodology = name === "methodology";
-      if (homeEl) homeEl.classList.toggle("screen-hidden", showMethodology);
-      if (methodologyEl) methodologyEl.classList.toggle("screen-hidden", !showMethodology);
+      const detailEl = document.getElementById("detailScreen");
+      const isHome = name === "home";
+      if (homeEl) homeEl.classList.toggle("screen-hidden", !isHome);
+      if (methodologyEl) methodologyEl.classList.toggle("screen-hidden", name !== "methodology");
+      if (detailEl) detailEl.classList.toggle("screen-hidden", name !== "detail");
       // DESIGN-DETAIL-2c: the under-search status line (#statusLine — e.g. "저장된
       // 검증 결과를 불러왔습니다") lives in the always-visible header region, so it
-      // leaked onto the 검증 방법 page. Clear it whenever we leave home; it is a
+      // leaked onto non-home pages. Clear it whenever we leave home; it is a
       // home-feed status only. Home status behavior is untouched — showStatus() on
-      // the home feed re-shows it as before. (Extends naturally to "detail".)
-      if (name !== "home") hideStatus();
-      if (showMethodology) window.scrollTo(0, 0);
+      // the home feed re-shows it as before. (NOTE: the detail loaders call
+      // showScreen("detail") BEFORE their own showStatus, so their confirmation
+      // survives — see loadHistoryRecord / loadServerResultById.)
+      if (!isHome) hideStatus();
+      // DESIGN-DETAIL-3: both non-home screens land at the top (was methodology-only).
+      if (!isHome) window.scrollTo(0, 0);
     }
     // DESIGN-DETAIL-2b: history sync for the screen toggle so browser BACK from the
     // 검증 방법 page returns to the home screen (was exiting the site — no entry was
@@ -6286,6 +6330,10 @@
     let methodologyHistoryActive = false;
     function pushMethodologyHistoryState() {
       if (!window.history || !window.history.pushState) return;
+      // DESIGN-DETAIL-3: at-most-one-non-home rule — demote any existing DETAIL
+      // entry before pushing methodology, so the stack stays [base, methodology]
+      // (no detail↔methodology sandwich; BACK from methodology returns home).
+      clearDetailHistoryState();
       if (window.history.state && window.history.state.tickedinScreen === "methodology") {
         methodologyHistoryActive = true;  // already a methodology entry — don't stack duplicates
         return;
@@ -6329,6 +6377,7 @@
       brandHomeEl.addEventListener("click", (event) => {
         event.preventDefault();
         clearMethodologyHistoryState();  // DETAIL-2b: don't leave a dangling methodology entry
+        clearDetailHistoryState();       // DETAIL-3: nor a dangling detail entry
         showScreen("home");
         window.scrollTo(0, 0);
       });
@@ -6344,6 +6393,7 @@
         const tab = event.target.closest("[data-domain]");
         if (!tab) return;
         clearMethodologyHistoryState();  // DETAIL-2b: don't leave a dangling methodology entry
+        clearDetailHistoryState();       // DETAIL-3: nor a dangling detail entry
         showScreen("home");
         setActiveDomain(tab.dataset.domain || "전체");
       });
@@ -6411,6 +6461,10 @@
     let detailReturnScrollY = 0;
     function pushDetailHistoryState(scrollY) {
       if (!window.history || !window.history.pushState) return;
+      // DESIGN-DETAIL-3: at-most-one-non-home rule — demote any existing METHODOLOGY
+      // entry before pushing a detail, so the stack stays [base, detail] (BACK from
+      // a detail returns home cleanly). No-op in the normal home→card flow.
+      clearMethodologyHistoryState();
       const alreadyDetail = !!(window.history.state && window.history.state.tickedinDetail);
       try {
         if (alreadyDetail) {
@@ -6432,6 +6486,18 @@
         detailHistoryActive = true;
       } catch (_) {
         /* history unavailable — feature degrades, the card still opens */
+      }
+    }
+    // DESIGN-DETAIL-3: mirror of clearMethodologyHistoryState. Leaving the detail
+    // SCREEN via in-page nav (tab/logo) OR before pushing another non-home screen —
+    // demote the current detail entry to a neutral state so a later BACK can't
+    // resurface a stale detail (at-most-one-non-home rule). replaceState keeps the URL.
+    function clearDetailHistoryState() {
+      if (!detailHistoryActive) return;
+      detailHistoryActive = false;
+      if (!window.history || !window.history.replaceState) return;
+      if (window.history.state && window.history.state.tickedinDetail) {
+        try { window.history.replaceState(null, "", window.location.href); } catch (_) { /* noop */ }
       }
     }
     // DISPLAY-CATEGORY B-1: open a topic card's detail report. Extracted so the
@@ -6468,12 +6534,12 @@
       }
       if (Array.isArray(currentReportContext?.results) && currentReportContext.results[index]) {
         renderResults(currentReportContext.results, selectedResultIndex);
-        resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
+        showScreen("detail");  // DESIGN-DETAIL-3: detail screen at top (was scrollIntoView); showStatus after survives
         showStatus("상세 검증 리포트로 이동했습니다.", true);
       } else {
         renderSelectedIssueIntro([]);
         resultsEl.innerHTML = '<div class="empty-state">이 카드에는 아직 상세 검증 데이터가 충분하지 않습니다. 검색을 실행하면 상세 리포트가 표시됩니다.</div>';
-        resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
+        showScreen("detail");  // DESIGN-DETAIL-3: detail screen at top (was scrollIntoView)
       }
     }
     // DESIGN-C3h-1d: the card-open delegation is bound to .home-main (the shared
@@ -7744,11 +7810,11 @@
           inflated.ai_status
         );
         renderResults(results);
+        // DESIGN-DETAIL-3: switch to the detail SCREEN at its top (no jump-scroll).
+        // BEFORE showStatus so the confirmation below survives (showScreen calls
+        // hideStatus for non-home screens). Replaces the old resultsEl.scrollIntoView.
+        showScreen("detail");
         showStatus("저장된 검증 결과를 불러왔습니다.", true);
-        // DETAIL-FIX B: scroll to the report TOP after render (and after the
-        // hot-topics/status layout settles), so the user lands at the AI summary
-        // rather than mid-report (the old pre-render scroll landed wrong).
-        resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
       } catch (_) {
         hideStatus();
       } finally {
@@ -7819,7 +7885,12 @@
         return;
       }
       if (!detailHistoryActive) return;  // not our transition — leave the page alone
+      // Popped OUT of a detail entry → return to the home SCREEN (DETAIL-3: the
+      // detail is now a real screen) AND dismiss the detail content + restore the
+      // pre-open scroll (DETAIL-2b behavior, kept). showScreen("home") doesn't
+      // scroll (home branch), so the scroll restore below stands.
       detailHistoryActive = false;
+      showScreen("home");
       renderResults([]);
       const targetY = (navState && typeof navState.scrollY === "number")
         ? navState.scrollY : detailReturnScrollY;

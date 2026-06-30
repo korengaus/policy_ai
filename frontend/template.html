@@ -132,24 +132,9 @@
          moves them). showScreen is built so adding a "detail" case is trivial. -->
     <div id="homeScreen">
 
-    <section id="metrics" class="metrics">
-      <div class="metric">
-        <div class="metric-label">분석 결과 수</div>
-        <div id="metricResults" class="metric-value">0</div>
-      </div>
-      <div class="metric">
-        <div class="metric-label">최고 경고 단계</div>
-        <div id="metricAlert" class="metric-value">-</div>
-      </div>
-      <div class="metric">
-        <div class="metric-label">평균 신뢰도</div>
-        <div id="metricConfidence" class="metric-value">0</div>
-      </div>
-      <div class="metric">
-        <div class="metric-label">고영향 뉴스 수</div>
-        <div id="metricImpact" class="metric-value">0</div>
-      </div>
-    </section>
+    <!-- DESIGN-DETAIL-3: #metrics (the detail's summary strip) was RELOCATED into
+         #detailScreen below — it renders only when a detail/search renders, and
+         would be display:none inside the hidden #homeScreen on a detail. -->
 
     <!-- DESIGN-3A: 2-column layout shell. .home-main wraps the existing feed
          markup VERBATIM (ids unchanged, only re-indented for the new nesting);
@@ -354,26 +339,9 @@
       </aside>
     </div>
 
-    <section id="selectedIssueIntro" class="selected-issue-intro">
-      <h2>선택한 이슈 검증 리포트</h2>
-      <p>관심 있는 이슈의 상세 보기를 누르거나 검색어를 입력하면 검증 리포트가 표시됩니다.</p>
-    </section>
-
-    <section id="reportActions" class="report-actions">
-      <div>
-        <div class="report-actions-title">공유용 검증 리포트</div>
-        <div class="reader-note">현재 화면의 핵심 판단과 근거 요약만 정리해 복사하거나 저장할 수 있습니다.</div>
-      </div>
-      <div class="report-actions-buttons">
-        <button id="copyReportBtn" class="report-copy" type="button">리포트 복사</button>
-        <button id="downloadReportBtn" class="report-download" type="button">리포트 다운로드</button>
-        <button id="downloadMarkdownBtn" class="report-download" type="button">Markdown 다운로드</button>
-      </div>
-    </section>
-
-    <section id="results" class="results">
-      <div class="empty-state">분석을 실행하면 결과가 여기에 표시됩니다.</div>
-    </section>
+    <!-- DESIGN-DETAIL-3: #selectedIssueIntro / #reportActions / #results were
+         RELOCATED into #detailScreen (a sibling of #homeScreen below), so the
+         card detail is a real screen. ids unchanged. -->
 
     <!--
       M9.4 — public/admin surface separation.
@@ -634,6 +602,58 @@
     </section>
 
     </div><!-- /#homeScreen (DESIGN-DETAIL-2 home view) -->
+
+    <!-- DESIGN-DETAIL-3: the card-detail SCREEN — a sibling of #homeScreen /
+         #methodology (OUTSIDE #homeScreen) so showScreen() shows exactly one.
+         Holds the detail's summary strip (#metrics) + the detail render targets
+         (#selectedIssueIntro / #reportActions / #results), relocated here VERBATIM.
+         All ids unchanged (renderMetrics / renderSelectedIssueIntro / renderResults /
+         loadServerResultById target them by id, position-independently). #metrics
+         lives here because it is the detail's summary strip (it would be display:none
+         if left inside the hidden #homeScreen while a detail shows). -->
+    <div id="detailScreen">
+
+    <section id="metrics" class="metrics">
+      <div class="metric">
+        <div class="metric-label">분석 결과 수</div>
+        <div id="metricResults" class="metric-value">0</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">최고 경고 단계</div>
+        <div id="metricAlert" class="metric-value">-</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">평균 신뢰도</div>
+        <div id="metricConfidence" class="metric-value">0</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">고영향 뉴스 수</div>
+        <div id="metricImpact" class="metric-value">0</div>
+      </div>
+    </section>
+
+    <section id="selectedIssueIntro" class="selected-issue-intro">
+      <h2>선택한 이슈 검증 리포트</h2>
+      <p>관심 있는 이슈의 상세 보기를 누르거나 검색어를 입력하면 검증 리포트가 표시됩니다.</p>
+    </section>
+
+    <section id="reportActions" class="report-actions">
+      <div>
+        <div class="report-actions-title">공유용 검증 리포트</div>
+        <div class="reader-note">현재 화면의 핵심 판단과 근거 요약만 정리해 복사하거나 저장할 수 있습니다.</div>
+      </div>
+      <div class="report-actions-buttons">
+        <button id="copyReportBtn" class="report-copy" type="button">리포트 복사</button>
+        <button id="downloadReportBtn" class="report-download" type="button">리포트 다운로드</button>
+        <button id="downloadMarkdownBtn" class="report-download" type="button">Markdown 다운로드</button>
+      </div>
+    </section>
+
+    <section id="results" class="results">
+      <div class="empty-state">분석을 실행하면 결과가 여기에 표시됩니다.</div>
+    </section>
+
+    </div><!-- /#detailScreen (DESIGN-DETAIL-3 detail view) -->
 
     <section id="methodology" class="methodology-section" aria-labelledby="methodologyTitle">
       <!-- DESIGN-DETAIL-2b: masthead — eyebrow → serif title → lead, a tight
