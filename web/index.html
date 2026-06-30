@@ -3483,12 +3483,43 @@
       background: transparent;
       margin-top: 16px;
     }
+    /* DESIGN-DETAIL-5e: restore a VISIBLE, clickable toggle line. 5d's un-boxing left
+       this summary with no container/contrast/affordance, so the 고급 검증 정보 보기
+       line read as blank. Keep it un-boxed (no big outer box) but give it an explicit
+       flat-toggle look: a thin --line top rule + comfortable padding + readable --ink
+       text + a CSS chevron (▸ collapsed / ▾ open) + a subtle hover. */
     .collapsible-section.adv-outer > summary {
-      padding: 11px 0;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 12px 0;
+      border-top: 1px solid var(--line);
+      color: var(--ink);
+      font-size: 1rem;
+      font-weight: 700;
+      line-height: 1.4;
+      list-style: none;
+    }
+    .collapsible-section.adv-outer > summary::-webkit-details-marker {
+      display: none;
+    }
+    .collapsible-section.adv-outer > summary::before {
+      content: "▸";
+      color: var(--slate);
+      font-size: 0.9em;
+      line-height: 1;
+    }
+    .collapsible-section.adv-outer[open] > summary::before {
+      content: "▾";
+    }
+    .collapsible-section.adv-outer > summary:hover {
+      color: var(--brand-ink);
+      background: transparent;
     }
     .collapsible-section.adv-outer > .collapsible-body {
       border-top: 0;
-      padding: 0;
+      padding: 8px 0 0;
     }
 
     .collapsible-section summary {
