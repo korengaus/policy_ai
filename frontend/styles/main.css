@@ -429,7 +429,13 @@
     .corrections-head h2,
     .latest-checks-head h2,
     .rank-panel-heading h2,
-    .domain-section-title {
+    .domain-section-title,
+    /* DESIGN-DETAIL-4: the detail reader headings join the serif group so the
+       detail reads like the same site as home/methodology. */
+    .verdict-reasoning h3,
+    .plain-section h4,
+    .public-source-section h3,
+    .verification-card h3 {
       font-family: 'Nanum Myeongjo', 'Apple SD Gothic Neo', 'Pretendard', serif;
     }
     /* DESIGN-C3g: the brand wordmark (+ the footer brand via the shared .brand
@@ -835,14 +841,12 @@
       line-height: 1.35;
     }
 
-    /* DETAIL-CLEANUP-V2: the AI summary prose lead — promoted to the top of the
-       detail view, large and readable (item 2 of the new order). */
+    /* DESIGN-DETAIL-4: the news content lead now reads as a flat pull-quote — a
+       left rule only, no heavy box (dropped the radius + paper fill). */
     .report-summary-lead {
       margin: 14px 0 16px;
-      padding: 16px 18px;
-      border-left: 4px solid var(--brand);
-      border-radius: var(--radius-sm);
-      background: var(--paper);
+      padding: 4px 0 4px 16px;
+      border-left: 3px solid var(--brand);
       color: var(--ink);
       font-size: 17px;
       line-height: 1.7;
@@ -872,6 +876,61 @@
       grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 10px;
       margin: 0 0 16px;
+    }
+
+    /* DESIGN-DETAIL-4 STEP 1: the consolidated AI verdict block at the top of the
+       detail. Indicators as a clean flat row bounded by thin --line rules (no heavy
+       colored tiles), then the 왜 판단 reasoning under a serif sub-heading. */
+    .verdict-block {
+      margin: 16px 0 18px;
+    }
+
+    .verdict-indicators {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+      padding: 14px 0;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .verdict-indicator {
+      min-width: 0;
+    }
+
+    .verdict-label {
+      display: block;
+      color: var(--slate);
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 5px;
+    }
+
+    .verdict-value {
+      display: block;
+      color: var(--ink);
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+
+    .verdict-reasoning {
+      margin-top: 16px;
+    }
+
+    .verdict-reasoning h3 {
+      margin: 0 0 8px;
+      color: var(--ink);
+      font-size: 17px;
+    }
+
+    .verdict-reasoning ul {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--slate);
+      font-size: 14px;
+      line-height: 1.65;
     }
 
     .reviewer-dashboard {
@@ -1087,12 +1146,10 @@
       line-height: 1.65;
     }
 
+    /* DESIGN-DETAIL-4 STEP 4: reading guide un-boxed (was a green #f0fdf4 box). */
     .reading-guide {
-      border: 1px solid #d1fae5;
-      border-radius: 10px;
-      background: #f0fdf4;
-      margin: 14px 0;
-      padding: 15px;
+      margin: 4px 0 0;
+      padding: 0;
     }
 
     .reading-guide-header {
@@ -1116,11 +1173,11 @@
     }
 
     .reading-guide-card {
-      border: 1px solid #bbf7d0;
-      border-radius: 8px;
-      background: #ffffff;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: var(--paper);
       padding: 11px;
-      color: #1f2937;
+      color: var(--slate);
       font-size: 13px;
       line-height: 1.5;
     }
@@ -1128,46 +1185,46 @@
     .reading-guide-card strong {
       display: block;
       margin-bottom: 5px;
-      color: #064e3b;
+      color: var(--ink);
       font-size: 13px;
     }
 
+    /* DESIGN-DETAIL-4 STEP 4: 영향 sections un-boxed into flat columns separated by
+       a thin top rule (was a #fff box). */
     .plain-section-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 12px;
-      margin: 14px 0;
+      gap: 16px 20px;
+      margin: 18px 0;
     }
 
     .plain-section {
-      border: 1px solid #e5e7eb;
-      border-radius: 10px;
-      background: #fff;
-      padding: 13px 14px;
+      border-top: 1px solid var(--line);
+      padding: 13px 0 0;
     }
 
     .plain-section h4 {
       margin: 0 0 8px;
-      color: #111827;
-      font-size: 14px;
-      font-weight: 900;
+      color: var(--ink);
+      font-size: 15px;
+      font-weight: 700;
     }
 
     .plain-section ul {
       margin: 0;
       padding-left: 18px;
-      color: #374151;
+      color: var(--slate);
       font-size: 13px;
       line-height: 1.58;
     }
 
+    /* DESIGN-DETAIL-4 STEP 4: the supplementary explain line is now a thin-rule note
+       (was a blue-left filled box). */
     .user-explain {
-      border-left: 4px solid #93c5fd;
-      border-radius: 8px;
-      background: #f8fafc;
-      margin: 12px 0;
-      padding: 11px 13px;
-      color: #374151;
+      border-top: 1px solid var(--line);
+      margin: 16px 0;
+      padding: 12px 0 0;
+      color: var(--slate);
       font-size: 14px;
       line-height: 1.55;
     }
@@ -2556,17 +2613,17 @@
       margin-top: 18px;
     }
 
+    /* DESIGN-DETAIL-4 STEP 4: 근거와 출처 요약 un-boxed (was a #f8fbff tinted box) —
+       flat section with a thin top rule; inner source cards stay lightly bordered. */
     .public-source-section {
-      border: 1px solid #dbeafe;
-      border-radius: 12px;
-      background: #f8fbff;
-      margin: 14px 0;
-      padding: 14px;
+      border-top: 1px solid var(--line);
+      margin: 18px 0;
+      padding: 16px 0 0;
     }
 
     .public-source-section h3 {
       margin: 0;
-      color: #0f172a;
+      color: var(--ink);
       font-size: 17px;
       line-height: 1.35;
     }
@@ -2579,15 +2636,15 @@
     }
 
     .public-source-card {
-      border: 1px solid #dbe2ea;
-      border-radius: 10px;
-      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: var(--paper);
       padding: 12px;
       min-width: 0;
     }
 
     .public-source-card-title {
-      color: #0f172a;
+      color: var(--ink);
       font-size: 14px;
       font-weight: 900;
       line-height: 1.45;
@@ -3311,22 +3368,26 @@
       font-size: 14px;
     }
 
+    /* DESIGN-DETAIL-4 STEP 4: the AI 종합 검증 판단 residual card un-boxed to a flat
+       section with a thin top rule (was a bordered paper box). */
     .verification-card {
-      margin: 14px 0;
-      border: 1px solid var(--line);
-      border-radius: var(--radius-sm);
-      background: var(--paper);
-      padding: 14px;
+      margin: 18px 0;
+      border-top: 1px solid var(--line);
+      padding: 16px 0 0;
     }
 
     .verification-card h3 {
       margin: 0 0 10px;
-      font-size: 16px;
+      color: var(--ink);
+      font-size: 17px;
     }
 
+    /* DESIGN-DETAIL-4 STEP 3c: the 초안 판정 tile was removed (now in the top verdict
+       block), so this holds just the single 리뷰 상태 tile — flex so it sizes to
+       content instead of stranding it in a 3-col grid. */
     .verification-intro {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      display: flex;
+      flex-wrap: wrap;
       gap: 10px;
       margin-bottom: 12px;
     }
@@ -3936,6 +3997,12 @@
 
       .normalized-grid {
         grid-template-columns: 1fr 1fr;
+      }
+
+      /* DESIGN-DETAIL-4: the 4-up verdict indicator row goes 2-up on narrow screens. */
+      .verdict-indicators {
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
       }
 
       .source-candidate-grid {

@@ -4240,12 +4240,12 @@
     }
 
     function renderUserSummarySections(context) {
+      // DESIGN-DETAIL-4 STEP 3b: the leading "왜 ${formatAlert(level)}인가" section
+      // was removed — it was byte-identical to the kept top verdict block's
+      // "왜 이렇게 판단했나요" (same decisionReasonBullets(context, 3)). The 영향
+      // sections + .user-explain below are unchanged.
       return `
         <div class="plain-section-grid">
-          <section class="plain-section">
-            <h4>왜 ${escapeHtml(formatAlert(context.level))}인가</h4>
-            ${renderBulletList(decisionReasonBullets(context, 3))}
-          </section>
           <section class="plain-section">
             <h4>주요 정책 영향</h4>
             ${renderBulletList(policyImpactBullets(context.impact, context.decision))}
@@ -4455,41 +4455,14 @@
       return String(value || "").includes("필요") ? "warning" : "positive";
     }
 
-    function renderVerificationSummaryCard(result, context = {}) {
-      const model = buildReviewerDashboardModel(result, context);
-      const officialState = model.officialEvidenceState || buildOfficialEvidenceState();
-      const reviewerAction = getReviewerAction(result, currentReportContext?.query || queryInput?.value || "");
-      const finalTone = String(model.finalJudgment || "").includes("높음")
-        ? "warning"
-        : String(model.finalJudgment || "").includes("관찰")
-          ? "warning"
-          : "neutral";
-      const items = [
-        ["최종 판정", model.finalJudgment, finalTone],
-        ["신뢰도 점수", context.confidence?.policy_confidence_score ?? context.decision?.final_score ?? "-", "neutral"],
-        ["공식 근거 상태", model.officialStatus, officialSummaryTone(officialState)],
-        ["공식 상세문서 상태", model.detailStatus, officialSummaryTone(officialState)],
-        ["의미 매칭 상태", model.semanticStatus, String(model.semanticStatus || "").includes("부족") ? "warning" : "neutral"],
-        ["반박/모순 상태", model.contradictionStatus, String(model.contradictionStatus || "").includes("가능") ? "warning" : "neutral"],
-        ["사람 검토", model.needsReview, reviewSummaryTone(model.needsReview)],
-        ["검토 상태", reviewerActionStatusLabel(reviewerAction.review_status), reviewSummaryTone(reviewerAction.review_status === "unreviewed" ? "필요" : "")],
-        ["추천 다음 조치", model.nextAction, "neutral"],
-      ];
-      return `
-        <section class="verification-summary-card">
-          <h3>검증 결과 요약 카드</h3>
-          <div class="reader-note">${escapeHtml(buildOfficialEvidenceNarrative(officialState).detailedExplanation)}</div>
-          <div class="verification-summary-grid">
-            ${items.map(([label, value, tone]) => `
-              <div class="verification-summary-item ${escapeHtml(tone)}">
-                <span class="label">${escapeHtml(label)}</span>
-                <strong>${escapeHtml(value || "확인 필요")}</strong>
-              </div>
-            `).join("")}
-          </div>
-        </section>
-      `;
-    }
+    // DESIGN-DETAIL-4 STEP 3a: renderVerificationSummaryCard (the 9-tile 검증 결과
+    // 요약 카드) was REMOVED. Every tile duplicated data shown elsewhere: 최종 판정 →
+    // verdict block 판정 단계 + headline badge; 신뢰도 점수 → verdict block 신뢰도;
+    // 공식 근거/상세문서/의미 매칭 상태 → verdict block 공식 출처 상태 + the
+    // "출처와 공식 근거" advanced collapsible + .user-explain; 반박/모순 상태 → the
+    // 왜 판단 bullets + .user-explain; 사람 검토/검토 상태 → AI-card 리뷰 상태; 추천
+    // 다음 조치 → the 왜 판단 next-step bullet. No data lost. (The unused
+    // .verification-summary-* CSS is left in place; it is harmless dead style.)
 
     // ===== C14 — Result pipeline assembly & main render (HUB) =====
     function getResultPipelineParts(result) {
@@ -4598,6 +4571,12 @@
       renderHotTopics(results);
       const hasFocus = Number.isInteger(focusIndex) && results[focusIndex];
       const displayResults = hasFocus ? [results[focusIndex]] : results;
+      // DESIGN-DETAIL-4: on the focused single-card detail, hide the aggregate
+      // 4-tile #metrics strip — its 판정/신뢰도 values are folded into the top
+      // verdict block and over a 1-card context it only restates them. renderMetrics
+      // set #metrics to display:grid just above; we only hide it here. The element/id
+      // is kept, so the non-focused full-results path is unaffected.
+      if (hasFocus) metricsEl.style.display = "none";
       renderSelectedIssueIntro(results, hasFocus ? focusIndex : 0);
       resultsEl.innerHTML = displayResults.map((result) => {
         const parts = getResultPipelineParts(result);
@@ -4725,73 +4704,72 @@
               <h2 class="result-title">
                 <a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a>
               </h2>
-              <!-- DETAIL-CLEANUP-V2: .headline-meta tiles removed (pure duplicates):
-                   신뢰도→core strip, 근거 강도→"근거 요약" collapsible,
-                   영향도/위험도→영향 section (renderUserSummarySections). -->
               <div class="ai-status-note">${escapeHtml(buildAiStatusDescriptor(getResultAiStatus(result).status).note)}</div>
             </div>
 
-            <!-- SUMMARY-CONTENT-A item 2: news CONTENT lead (what the news says),
-                 built from the first 2-3 claims — large/primary. Then a smaller
-                 VERIFICATION note (how it was verified). Each renders only if its
-                 value is truthy, so no empty box on sparse rows. -->
+            <!-- DESIGN-DETAIL-4 STEP 1: the consolidated AI VERDICT BLOCK — the first
+                 thing the reader sees. Verdict indicators (판정 단계 / AI 초안 판정 /
+                 신뢰도 / 공식 출처 상태) as a clean flat row, then the single
+                 "왜 이렇게 판단했나요" bullets right below: conclusion → why. This
+                 ABSORBS the former core-indicator-strip AND the standalone reasoning
+                 section (both removed). safeAiDraftVerdictForExport is surfaced HERE
+                 so the duplicate AI-card 초안 판정 tile (STEP 3c) is removed with no
+                 data loss; decisionReasonBullets keeps the next-step guidance that
+                 made the 9-tile grid's 추천 다음 조치 safe to drop. -->
+            <section class="verdict-block">
+              <div class="verdict-indicators">
+                <div class="verdict-indicator">
+                  <span class="verdict-label">판정 단계</span>
+                  <span class="verdict-value">${escapeHtml(formatAlert(level))}</span>
+                </div>
+                <div class="verdict-indicator">
+                  <span class="verdict-label">AI 초안 판정</span>
+                  <span class="verdict-value">${escapeHtml(safeAiDraftVerdictForExport(result))}</span>
+                </div>
+                <div class="verdict-indicator">
+                  <span class="verdict-label">신뢰도</span>
+                  <span class="verdict-value">${escapeHtml(confidence.policy_confidence_score ?? "-")}</span>
+                </div>
+                <div class="verdict-indicator">
+                  <span class="verdict-label">공식 출처 상태</span>
+                  <span class="verdict-value">${escapeHtml(officialStatusLabel(result))}</span>
+                </div>
+              </div>
+              <div class="verdict-reasoning">
+                <h3>왜 이렇게 판단했나요?</h3>
+                ${renderBulletList(decisionReasonBullets(userContext, 3))}
+              </div>
+            </section>
+
+            <!-- STEP 2 item 3: the news CONTENT lead (the article's own claim quote)
+                 + the muted verification note, just under the verdict so the reader
+                 sees conclusion → the claim it's about. Each renders only if truthy. -->
             ${contentLead ? `<div class="report-summary-lead">${escapeHtml(contentLead)}</div>` : ""}
             ${verifyNote ? `<div class="report-verify-note">${escapeHtml(verifyNote)}</div>` : ""}
 
-            <!-- DETAIL-CLEANUP-V2 item 3: the single core indicator strip (shown once):
-                 판정 단계 / 신뢰도 / 공식 출처 상태, directly under the summary. -->
-            <div class="core-indicator-strip">
-              <div class="summary-tile">
-                <span class="label">판정 단계</span>
-                <strong>${escapeHtml(formatAlert(level))}</strong>
-              </div>
-              <div class="summary-tile">
-                <span class="label">신뢰도</span>
-                <strong>${escapeHtml(confidence.policy_confidence_score ?? "-")}</strong>
-              </div>
-              <div class="summary-tile">
-                <span class="label">공식 출처 상태</span>
-                <strong>${escapeHtml(officialStatusLabel(result))}</strong>
-              </div>
-            </div>
-
-            <div class="news-nav" aria-label="분석 섹션">
-              <span>핵심 요약</span>
-              <span>정책 영향</span>
-              <span>검증 근거</span>
-              <span>반박 확인</span>
-              <span>상세 보기</span>
-            </div>
-
-            <!-- DETAIL-CLEANUP-V2 item 4: single reasoning section. The former
-                 "핵심 요약" takeaway panel duplicated these same decisionReasonBullets
-                 and was removed — this is the one kept reasoning block. -->
-            <section class="plain-section">
-              <h4>왜 이렇게 판단했나요?</h4>
-              ${renderBulletList(decisionReasonBullets(userContext, 3))}
-            </section>
-
-            ${renderVerificationSummaryCard(result, userContext)}
+            <!-- STEP 2 item 4: 정책 영향 / 소비자 영향 / 금융 시스템 영향 + the
+                 .user-explain line. The duplicate "왜 관찰(WATCH)인가" sub-block was
+                 removed from renderUserSummarySections (STEP 3b — byte-identical to
+                 the kept top reasoning above). -->
             ${renderUserSummarySections(userContext)}
+
+            <!-- STEP 2 item 5: 근거와 출처 요약. -->
             ${renderPublicSourceCards(result)}
 
-            <!-- DETAIL-CLEANUP-V2 item 8: reading guide kept but moved into a collapsed
-                 section so it stays available without taking top space. Content
-                 unchanged; title supplied by the collapsible summary. -->
+            <!-- Reading guide kept, collapsed (content unchanged). -->
             ${renderCollapsibleSection("이 리포트는 이렇게 읽으면 됩니다", renderReadingGuide(userContext), false, "처음 보는 분을 위한 안내입니다. 판정 단계·신뢰도·공식 출처·근거를 어떻게 읽으면 되는지 설명합니다.")}
 
+            <!-- STEP 2 items 6+7: the AI 종합 검증 판단 residual card. STEP 3c removed
+                 the duplicate 초안 판정 tile (now led by the top verdict block); kept:
+                 리뷰 상태 + 핵심 주장 + the advanced collapsible. STEP 5: the advanced
+                 collapsible (고급 검증 정보 보기 + its 8 sub-collapsibles) is KEPT and
+                 COLLAPSED with internals UNTOUCHED — presentation redesign is DETAIL-5. -->
             <section class="verification-card">
               <h3>AI 종합 검증 판단</h3>
               <div class="reader-note">
                 현재 수집된 기사와 공식 자료 기준의 검증 초안입니다. 절대적 결론이 아니라, 확인 가능한 근거를 바탕으로 한 판단입니다.
               </div>
               <div class="verification-intro">
-                <div class="summary-tile">
-                  <span class="label">AI 초안 판정</span>
-                  <strong>${escapeHtml(safeAiDraftVerdictForExport(result))}</strong>
-                </div>
-                <!-- DISPLAY-CATEGORY ⑩: 초안 신뢰도 demoted into the
-                     "검증 점수 상세" advanced collapsible (value preserved). -->
                 <div class="summary-tile">
                   <span class="label">리뷰 상태</span>
                   <strong>${escapeHtml(formatReviewStatus(verification.review_status))}</strong>
