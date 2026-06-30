@@ -121,6 +121,17 @@
       <a class="grade-guide-link" href="#methodology">검증 등급 안내 →</a>
     </nav>
 
+    <!-- DESIGN-DETAIL-2: #homeScreen wraps the home-only view (#metrics through
+         #correctionsSection) as ONE node the showScreen() toggle hides/shows. The
+         header (utility-bar/topbar/search), the domain tabs (nav.domain-tabs-row),
+         the 검증 방법 page (#methodology), and the footer all sit OUTSIDE this
+         wrapper so they stay always-visible. The sidebar (.home-aside) lives INSIDE
+         .home-shell here, so it hides with the home view → the 검증 방법 page is
+         full-width. The detail render targets (#selectedIssueIntro/#reportActions/
+         #results) stay inside (they self-hide as before; the detail-screen step
+         moves them). showScreen is built so adding a "detail" case is trivial. -->
+    <div id="homeScreen">
+
     <section id="metrics" class="metrics">
       <div class="metric">
         <div class="metric-label">분석 결과 수</div>
@@ -621,6 +632,8 @@
         </li>
       </ul>
     </section>
+
+    </div><!-- /#homeScreen (DESIGN-DETAIL-2 home view) -->
 
     <section id="methodology" class="methodology-section" aria-labelledby="methodologyTitle">
       <div class="methodology-card">

@@ -6251,17 +6251,63 @@
       tier2VisibleCount = TIER2_INITIAL;
       renderHotTopics();
     }
+    // DESIGN-DETAIL-2: screen toggle. The home view (#homeScreen — #metrics
+    // through #correctionsSection) and the 검증 방법 page (#methodology) are
+    // mutually-exclusive "screens"; the header (logo/search), the domain tabs, and
+    // the footer (with the page-level disclaimer) sit OUTSIDE both and stay
+    // always-visible. The sidebar lives inside .home-shell (inside #homeScreen), so
+    // it hides with the home view → 검증 방법 is full-width. Built so a "detail"
+    // case slots in trivially next step. Kept INDEPENDENT of the HISTORY-BACK
+    // popstate layer this step (no hash sync / pushState) so the existing detail
+    // history is untouched — the detail-screen step unifies history. The tabs +
+    // logo are the methodology→home path.
+    function showScreen(name) {
+      const homeEl = document.getElementById("homeScreen");
+      const methodologyEl = document.getElementById("methodology");
+      const showMethodology = name === "methodology";
+      if (homeEl) homeEl.classList.toggle("screen-hidden", showMethodology);
+      if (methodologyEl) methodologyEl.classList.toggle("screen-hidden", !showMethodology);
+      if (showMethodology) window.scrollTo(0, 0);
+    }
+    // DESIGN-DETAIL-2: every in-page link to #methodology now OPENS the 검증 방법
+    // page via the toggle instead of anchor-scrolling to a now-hidden section
+    // (footer 검증 방법론 ×2, the 검증 방법론 전체 → teaser link, 검증 등급 안내 →).
+    // The compact 이렇게 검증합니다 teaser (#verifyHowSection) stays on home; only
+    // its "전체 →" link opens the full page.
+    document.querySelectorAll('a[href="#methodology"]').forEach((link) => {
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        showScreen("methodology");
+      });
+    });
+    // DESIGN-DETAIL-2: the brand/logo returns to the home screen — an obvious
+    // "back to home" affordance from the 검증 방법 page. preventDefault swaps the
+    // href="/" full reload for the lighter in-page toggle.
+    const brandHomeEl = document.querySelector(".brand-home");
+    if (brandHomeEl) {
+      brandHomeEl.addEventListener("click", (event) => {
+        event.preventDefault();
+        showScreen("home");
+        window.scrollTo(0, 0);
+      });
+    }
     if (categoryTabsEl) {
       // DISPLAY-CATEGORY B-1: filter on the raw domain enum (data-domain), not
       // the old resultCategory() heuristic. renderCategoryTabs re-renders the
       // tab strip (incl. the .active state) on every renderHotTopics, so the
       // handler only needs to set activeDomain and re-render.
+      // DESIGN-DETAIL-2: prepend showScreen("home") so a tab click from ANY screen
+      // (incl. 검증 방법) returns to the home feed filtered to that domain.
       categoryTabsEl.addEventListener("click", (event) => {
         const tab = event.target.closest("[data-domain]");
         if (!tab) return;
+        showScreen("home");
         setActiveDomain(tab.dataset.domain || "전체");
       });
     }
+    // DESIGN-DETAIL-2: land on the home screen (hides #methodology, which is no
+    // longer an always-on in-page section).
+    showScreen("home");
     // DESIGN-C3h-2: the "{label} 전체 →" section links switch to that domain tab via
     // the SAME setActiveDomain. They carry [data-domain] (not [data-topic-source]),
     // so the .home-main card-open delegation ignores them and these never open a card.

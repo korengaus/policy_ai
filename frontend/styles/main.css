@@ -1928,30 +1928,62 @@
       line-height: 1.45;
     }
 
+    /* DESIGN-DETAIL-2: screen toggle utility — #homeScreen / #methodology are
+       mutually-exclusive "screens" hidden by adding this class. !important so it
+       wins over the section's own display (e.g. .methodology-section display:block
+       below) regardless of source order. */
+    .screen-hidden {
+      display: none !important;
+    }
+
+    /* DESIGN-DETAIL-2: 검증 방법 is a standalone full-width page (shown via
+       showScreen; the home view is hidden). Restyled from the old boxed cards
+       (border + radius:12 + shadow + white surface) to the C3 design language:
+       serif (Nanum Myeongjo) headings, borderless sections separated by thin
+       --line rules, shared tokens (--ink/--slate/--muted/--line/--brand/
+       --radius-sm). Width is bounded by .page (max 1280px + 22px side padding),
+       so the page matches the rest of the site's content bounds (not edge-to-edge).
+       ALL methodology/legal TEXT is unchanged — presentation only. */
     .methodology-section {
-      display: grid;
-      gap: 14px;
-      margin: 16px 0;
+      display: block;
+      margin: 8px 0 0;
+    }
+
+    /* Each top-level block (a .methodology-card section OR a .methodology-grid
+       pair) flows borderless; a thin rule + spacing separates consecutive blocks,
+       like the feed / .corrections lists. The lead title block keeps no rule. */
+    .methodology-section > * {
+      margin: 0;
+    }
+    .methodology-section > * + * {
+      margin-top: 26px;
+      padding-top: 26px;
+      border-top: 1px solid var(--line);
     }
 
     .methodology-card {
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      background: var(--surface);
-      box-shadow: var(--shadow);
-      padding: 18px;
+      border: none;
+      border-radius: 0;
+      background: none;
+      box-shadow: none;
+      padding: 0;
     }
 
+    /* DESIGN-DETAIL-2: serif (Nanum Myeongjo) page titles, applied here in the
+       methodology block (not the shared serif group near the top of the file) so
+       the 검증 방법 page matches the rest of the site without tripping the v2 pin
+       that scans 2000 chars after the first "methodology" token. */
     .methodology-card h2,
     .methodology-card h3 {
       margin: 0;
-      color: #111827;
+      color: var(--ink);
       line-height: 1.3;
       letter-spacing: 0;
+      font-family: 'Nanum Myeongjo', 'Apple SD Gothic Neo', 'Pretendard', serif;
     }
 
     .methodology-card h2 {
-      font-size: 1.692rem;
+      font-size: 1.846rem;
     }
 
     .methodology-card h3 {
@@ -1960,7 +1992,7 @@
 
     .methodology-card p,
     .methodology-card li {
-      color: #475569;
+      color: var(--slate);
       font-size: 1.077rem;
       line-height: 1.65;
     }
@@ -1972,27 +2004,36 @@
     .methodology-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 12px;
+      gap: 28px;
     }
 
+    /* the 검증 상태 의미 grid nests INSIDE a section card (under its h3), so it is
+       not caught by the top-level "> * + *" rule — give it its own top spacing. */
+    .methodology-card .methodology-grid {
+      margin-top: 12px;
+    }
+
+    /* the 검증 상태 의미 definitions: the light C3 chip (surface-soft + 1px --line
+       + --radius-sm), the same family as .verify-how — no heavy old box/shadow. */
     .methodology-definition {
-      border: 1px solid #e2e8f0;
-      border-radius: 10px;
-      background: #f8fafc;
-      padding: 13px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: var(--surface-soft);
+      padding: 13px 15px;
     }
 
     .methodology-definition strong {
       display: block;
-      color: #0f172a;
+      color: var(--ink);
       font-size: 1.077rem;
+      font-weight: 700;
       line-height: 1.45;
     }
 
     .methodology-definition span {
       display: block;
       margin-top: 6px;
-      color: #475569;
+      color: var(--slate);
       font-size: 1rem;
       line-height: 1.55;
     }
