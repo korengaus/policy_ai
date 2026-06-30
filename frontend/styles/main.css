@@ -423,22 +423,16 @@
        .latest-checks-head h2 + the sidebar .rank-panel-heading h2) joined the
        group so every heading matches. Fallback chain degrades gracefully to a
        system Korean face then a generic serif if Nanum Myeongjo fails to load. */
+    /* DESIGN-DETAIL-5c: the DETAIL headings were removed from this serif group — the
+       detail now uses a single font (Pretendard, hierarchy by size/weight only). Only
+       the HOME feed + methodology headings keep the Nanum Myeongjo serif here. */
     .topic-card-title,
     .section-heading h2,
     .verify-how-head h2,
     .corrections-head h2,
     .latest-checks-head h2,
     .rank-panel-heading h2,
-    .domain-section-title,
-    /* DESIGN-DETAIL-4 / -4b: the detail reader headings join the serif group so the
-       detail reads like the same site as home/methodology. -4b adds the page title
-       (.result-title) and the 상세 검증 정보 sub-heading (.news-section-title). */
-    .result-title,
-    .verdict-reasoning h3,
-    .plain-section h4,
-    .public-source-section h3,
-    .verification-card h3,
-    .news-section-title {
+    .domain-section-title {
       font-family: 'Nanum Myeongjo', 'Apple SD Gothic Neo', 'Pretendard', serif;
     }
     /* DESIGN-C3g: the brand wordmark (+ the footer brand via the shared .brand
@@ -3458,15 +3452,28 @@
       padding: 12px;
     }
 
-    /* DESIGN-DETAIL-5a: the 8 advanced sub-sections are collapsibles NESTED inside
-       "고급 검증 정보 보기"; give their summary titles the serif secondary scale to
-       match the rest of the detail. Top-level collapsibles (the reader-view reading
-       guide) are NOT nested, so they are unaffected. */
+    /* DESIGN-DETAIL-5c: the 8 nested advanced sub-section summary titles — Pretendard
+       (no serif; the detail is single-font, hierarchy by size/weight). Scoped to nested
+       collapsibles so the top-level reader-view reading guide is unaffected. */
     .collapsible-section .collapsible-section > summary {
-      font-family: 'Nanum Myeongjo', 'Apple SD Gothic Neo', 'Pretendard', serif;
       font-size: 1rem;
       font-weight: 700;
       color: var(--ink);
+      padding: 10px 0;
+    }
+    /* DESIGN-DETAIL-5c: flatten the 8 NESTED advanced sub-section boxes → thin-rule
+       separated flat sections (was 8 bordered/rounded boxes). The parent
+       "고급 검증 정보 보기" and the top-level reader reading-guide keep their subtle box. */
+    .collapsible-section .collapsible-section {
+      border: 0;
+      border-top: 1px solid var(--line);
+      border-radius: 0;
+      background: transparent;
+      margin-top: 0;
+    }
+    .collapsible-section .collapsible-section > .collapsible-body {
+      border-top: 0;
+      padding: 0 0 12px;
     }
 
     .verification-grid {
@@ -3496,30 +3503,33 @@
       margin-top: 6px;
     }
 
-    /* DESIGN-DETAIL-5a: shared advanced definition-list language. Replaces the
-       repeat(4,1fr) tile grids in the advanced sub-sections with compact key:value
-       rows separated by thin --line rules (--slate labels / --ink values), C3 tokens,
-       0.923rem body. Empty cells are dropped upstream by advDefList(). */
+    /* DESIGN-DETAIL-5c: shared advanced label+value language (label ABOVE value, both
+       visible) — the readable #6 pattern, now used by ALL 8 sub-sections. A 2-col grid
+       of cells separated by thin --line rules (--slate label / --ink value), C3 tokens,
+       0.923rem. Replaces the 5a <dt>/<dd> grid whose label column collapsed so only
+       values showed. Empty cells are dropped upstream by advDefList(). */
     .adv-deflist {
-      margin: 8px 0 0;
-      border-top: 1px solid var(--line);
-    }
-    .adv-row {
       display: grid;
-      grid-template-columns: minmax(6.5rem, 30%) 1fr;
-      gap: 14px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0 22px;
+      margin: 8px 0 0;
+    }
+    .adv-cell {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      min-width: 0;
       padding: 7px 0;
-      border-bottom: 1px solid var(--line);
+      border-top: 1px solid var(--line);
       font-size: 0.923rem;
       line-height: 1.5;
     }
-    .adv-label {
-      margin: 0;
+    .adv-cell-label {
       color: var(--slate);
       font-weight: 700;
+      font-size: 0.82rem;
     }
-    .adv-value {
-      margin: 0;
+    .adv-cell-value {
       color: var(--ink);
       overflow-wrap: anywhere;
     }
@@ -3545,15 +3555,61 @@
     .adv-status.debug-partial { color: #92400e; }
     .adv-status.debug-missing { color: #991b1b; }
 
+    /* DESIGN-DETAIL-5c: #6 출처와 공식 근거 candidates — each a collapsed <details>
+       (one-line summary, expandable to the full label+value detail). Flat, thin-rule
+       separated; no heavy boxes. All candidates kept (no truncation). */
+    .adv-cand-count {
+      margin: 12px 0 2px;
+      color: var(--slate);
+      font-weight: 700;
+      font-size: 0.86rem;
+    }
+    .adv-cand {
+      border-top: 1px solid var(--line);
+    }
+    .adv-cand-list .adv-cand:last-child {
+      border-bottom: 1px solid var(--line);
+    }
+    .adv-cand-summary {
+      cursor: pointer;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 6px 10px;
+      padding: 9px 0;
+      font-size: 0.923rem;
+      list-style-position: inside;
+    }
+    .adv-cand-summary:hover { color: var(--brand-ink); }
+    .adv-cand-trace { font-weight: 700; font-size: 0.8rem; }
+    .adv-cand-trace.trace-direct { color: #166534; }
+    .adv-cand-trace.trace-context { color: var(--brand-ink); }
+    .adv-cand-trace.trace-news { color: var(--slate); }
+    .adv-cand-trace.trace-weak { color: #92400e; }
+    .adv-cand-trace.trace-excluded { color: #991b1b; }
+    .adv-cand-line { color: var(--ink); overflow-wrap: anywhere; }
+    .adv-cand-body { padding: 2px 0 12px; }
+    .adv-cand-excl {
+      margin: 4px 0;
+      color: var(--slate);
+      font-size: 0.82rem;
+    }
+    .adv-cand-body .source-candidate-title {
+      margin-bottom: 6px;
+      font-weight: 700;
+    }
+
+    /* DESIGN-DETAIL-5c: flat (was a bordered --paper card) — thin-rule separated. */
     .evidence-source {
-      border: 1px solid var(--line);
-      border-radius: var(--radius-sm);
-      background: var(--paper);
-      padding: 9px;
+      padding: 8px 0 0;
+    }
+    .evidence-source + .evidence-source {
+      border-top: 1px solid var(--line);
+      margin-top: 8px;
     }
 
     .evidence-source-title {
-      font-weight: 800;
+      font-weight: 700;
     }
 
     .evidence-source-meta {
@@ -3578,11 +3634,10 @@
       margin-top: 8px;
     }
 
+    /* DESIGN-DETAIL-5c: flat (was a bordered --paper card) — thin-rule separated. */
     .normalized-claim {
-      border: 1px solid var(--line);
-      border-radius: var(--radius-sm);
-      background: var(--paper);
-      padding: 10px;
+      padding: 12px 0 0;
+      border-top: 1px solid var(--line);
     }
 
     .normalized-claim-text {
@@ -3650,11 +3705,10 @@
       margin-top: 8px;
     }
 
+    /* DESIGN-DETAIL-5c: flat (was a bordered --paper card) — thin-rule separated. */
     .evidence-snippet {
-      border: 1px solid var(--line);
-      border-radius: var(--radius-sm);
-      background: var(--paper);
-      padding: 10px;
+      padding: 12px 0 0;
+      border-top: 1px solid var(--line);
     }
 
     .evidence-snippet-text {
@@ -3701,7 +3755,6 @@
       font-size: 1.05rem;
       font-weight: 700;
       margin-bottom: 4px;
-      font-family: 'Nanum Myeongjo', 'Apple SD Gothic Neo', 'Pretendard', serif;
     }
 
     .pipeline-debug-grid {
@@ -4193,7 +4246,9 @@
       .source-reliability-summary,
       .evidence-extraction-summary,
       .evidence-snippet-grid,
-      .pipeline-debug-grid {
+      .pipeline-debug-grid,
+      /* DESIGN-DETAIL-5c: the 2-col advanced label+value grid stacks on phones. */
+      .adv-deflist {
         grid-template-columns: 1fr;
       }
     }

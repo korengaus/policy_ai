@@ -997,12 +997,15 @@
       if (!rows.length) {
         return '<div class="adv-empty">정보 없음</div>';
       }
-      return `<dl class="adv-deflist">${rows.map(([label, value, opts]) => `
-        <div class="adv-row">
-          <dt class="adv-label">${escapeHtml(label)}</dt>
-          <dd class="adv-value">${opts && opts.html ? value : escapeHtml(value)}</dd>
+      // DESIGN-DETAIL-5c: label ABOVE value, both visible (the readable #6 pattern,
+      // adopted for all 8 sub-sections). Replaces the 5a <dl><dt>/<dd> grid whose
+      // label column collapsed so only values showed.
+      return `<div class="adv-deflist">${rows.map(([label, value, opts]) => `
+        <div class="adv-cell">
+          <span class="adv-cell-label">${escapeHtml(label)}</span>
+          <span class="adv-cell-value">${opts && opts.html ? value : escapeHtml(value)}</span>
         </div>
-      `).join("")}</dl>`;
+      `).join("")}</div>`;
     }
 
     function renderEvidenceSources(sources) {
@@ -1154,21 +1157,14 @@
       const topHtml = topUrl
         ? `<a href="${escapeHtml(safeUrl(topUrl))}" target="_blank" rel="noopener noreferrer">${escapeHtml(topTitle)}</a>`
         : escapeHtml(topTitle);
+      // DESIGN-DETAIL-5c: unified to the shared label+value deflist (counts incl. 0 kept).
       return `
-        <div class="source-reliability-summary">
-          <div class="source-reliability-tile">
-            <span class="label">최고 신뢰 출처</span><br>${topHtml}
-          </div>
-          <div class="source-reliability-tile">
-            <span class="label">공식 출처 후보 수</span><br>${escapeHtml(data.official_candidate_count ?? 0)}
-          </div>
-          <div class="source-reliability-tile">
-            <span class="label">본문 확보 출처</span><br>${escapeHtml(data.raw_text_available_count ?? 0)}
-          </div>
-          <div class="source-reliability-tile">
-            <span class="label">평균 출처 신뢰도</span><br>${escapeHtml(data.average_reliability_score ?? 0)}
-          </div>
-        </div>
+        ${advDefList([
+          ["최고 신뢰 출처", topHtml, { html: true }],
+          ["공식 출처 후보 수", data.official_candidate_count ?? 0],
+          ["본문 확보 출처", data.raw_text_available_count ?? 0],
+          ["평균 출처 신뢰도", data.average_reliability_score ?? 0],
+        ])}
         ${data.official_mismatch ? `<div class="evidence-source-meta">공식 출처 불일치/제외: ${escapeHtml(mismatchReasons || "공식 상세 근거 부족")}</div>` : ""}
       `;
     }
@@ -1558,62 +1554,90 @@
     }
 
     function renderSourceCandidates(sourceCandidates) {
-      const list = Array.isArray(sourceCandidates) ? sourceCandidates.slice(0, 8) : [];
+      // DESIGN-DETAIL-5c: tame the candidate scroll-wall WITHOUT losing any candidate
+      // or field. ALL candidates are kept (no slice/truncation) — each becomes its own
+      // <details> COLLAPSED by default, with a one-line at-a-glance summary
+      // (출처유형 · 발행처 · 신뢰도 · 검증역할). Expanding shows the full populated-only
+      // label+value list + matched sentences + risk flags. ~8×22 cells → N one-line rows.
+      const list = Array.isArray(sourceCandidates) ? sourceCandidates : [];
       if (!list.length) {
         return '<div class="evidence-source-meta">표시할 출처 탐색 후보가 없습니다.</div>';
       }
 
-      return `<div class="source-candidate-list">${list.map((source) => {
-        const title = escapeHtml(userFacingReportText(publicInstitutionName(source.title || source.url || "출처 후보"), "출처 후보"));
-        const url = escapeHtml(safeUrl(source.url || ""));
-        const titleHtml = source.url
-          ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a>`
-          : title;
-        const exclusionLabel = sourceExclusionLabel(source);
-        const trace = sourceTraceability(source);
-        const domain = sourceDomain(source.url || "");
-        return `
-          <div class="source-candidate">
-            <div class="source-candidate-title">${titleHtml}</div>
-            <div class="source-support-badge ${escapeHtml(trace.className)}">${escapeHtml(trace.label)}</div>
-            ${exclusionLabel ? `<div class="evidence-source-meta">${escapeHtml(exclusionLabel)}</div>` : ""}
-            <div class="source-candidate-grid">
-              <div><span class="label">검색어</span><br>${escapeHtml(source.query_used || "-")}</div>
-              <div><span class="label">목적</span><br>${escapeHtml(formatSourcePurpose(source.purpose))}</div>
-              <div><span class="label">출처 유형</span><br>${escapeHtml(formatSourceType(source.source_type))}</div>
-              <div><span class="label">수집 방식</span><br>${escapeHtml(formatDiagnosticText(source.retrieval_method || "-"))}</div>
-              <div><span class="label">발행처</span><br>${escapeHtml(publicInstitutionName(source.publisher || "-"))}</div>
-              <div><span class="label">본문 확보</span><br>${source.raw_text_available ? "예" : "아니오"}</div>
-              <div><span class="label">공식 본문 수집</span><br>${source.official_body_fetched ? "예" : "아니오"}</div>
-              <div><span class="label">공식 본문 길이</span><br>${escapeHtml(source.official_body_length ?? "-")}</div>
-              <div><span class="label">공식 본문 매칭</span><br>${source.official_body_match ? "예" : "아니오"}</div>
-              <div><span class="label">공식 매칭 점수</span><br>${escapeHtml(source.official_body_match_score ?? "-")}</div>
-              <div><span class="label">공식 직접 매칭</span><br>${escapeHtml(officialDirectMatchLabel(source))}</div>
-              <div><span class="label">공식 직접 점수</span><br>${escapeHtml(source.official_final_direct_match_score ?? source.official_body_match_score ?? "-")}</div>
-              <div><span class="label">URL 해소 점수</span><br>${escapeHtml(source.official_url_score ?? "-")}</div>
-              <div><span class="label">의미 매칭</span><br>${escapeHtml(source.semantic_match_score ?? "-")}</div>
-              <div><span class="label">정책 일치도</span><br>${escapeHtml(source.policy_alignment_score ?? "-")}</div>
-              <div><span class="label">공식 근거 점수</span><br>${escapeHtml(source.official_evidence_score ?? "-")}</div>
-              <div><span class="label">공식 실패 사유</span><br>${escapeHtml(formatDiagnosticText(source.official_body_failure_reason || "-"))}</div>
-              <div><span class="label">신뢰도 점수</span><br>${source.reliability_score == null ? "-" : `${escapeHtml(source.reliability_score)}/5`}</div>
-              <div><span class="label">신뢰도 등급</span><br>${escapeHtml(formatReliabilityLevel(source.reliability_level))}</div>
-              <div><span class="label">검증 역할</span><br>${escapeHtml(formatVerificationRole(source.verification_role))}</div>
-              <div><span class="label">도메인</span><br>${escapeHtml(domain || "URL 없음")}</div>
-              <div><span class="label">공개 표시 판단</span><br>${escapeHtml(userFacingReportText(trace.explanation, "추가 확인 필요"))}</div>
-            </div>
-            ${Array.isArray(source.official_matched_sentences) && source.official_matched_sentences.length ? `
-              <div class="evidence-source-meta"><strong>공식 문서 매칭 문장</strong></div>
-              <ul class="compact-list">
-                ${source.official_matched_sentences.slice(0, 2).map((match) => `
-                  <li>${escapeHtml(match.sentence || "-")} <span class="label">(${escapeHtml(match.score ?? "-")}점)</span></li>
-                `).join("")}
-              </ul>
-            ` : ""}
-            <div class="evidence-source-meta">${escapeHtml(userFacingReportText(source.reliability_reason || "", ""))}</div>
-            <div class="risk-flags">${escapeHtml(formatDiagnosticText(formatList(source.source_risk_flags)))}</div>
-          </div>
-        `;
-      }).join("")}</div>`;
+      return `
+        <div class="adv-cand-count">공식 출처 후보 ${list.length}개</div>
+        <div class="adv-cand-list">${list.map((source) => {
+          const title = escapeHtml(userFacingReportText(publicInstitutionName(source.title || source.url || "출처 후보"), "출처 후보"));
+          const url = escapeHtml(safeUrl(source.url || ""));
+          const titleHtml = source.url
+            ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a>`
+            : title;
+          const exclusionLabel = sourceExclusionLabel(source);
+          const trace = sourceTraceability(source);
+          const domain = sourceDomain(source.url || "");
+          const publisher = source.publisher ? publicInstitutionName(source.publisher) : "";
+          // One-line summary (populated bits only). Falls back to the candidate title.
+          const summaryBits = [
+            source.source_type ? formatSourceType(source.source_type) : "",
+            publisher,
+            source.reliability_score == null ? "" : `신뢰도 ${source.reliability_score}/5`,
+            source.verification_role ? formatVerificationRole(source.verification_role) : "",
+          ].filter((b) => b && String(b).trim() && String(b).trim() !== "-");
+          const summaryText = summaryBits.length
+            ? summaryBits.join(" · ")
+            : userFacingReportText(publicInstitutionName(source.title || "출처 후보"), "출처 후보");
+          const detail = advDefList([
+            ["검색어", source.query_used],
+            ["목적", source.purpose ? formatSourcePurpose(source.purpose) : ""],
+            ["출처 유형", source.source_type ? formatSourceType(source.source_type) : ""],
+            ["수집 방식", source.retrieval_method ? formatDiagnosticText(source.retrieval_method) : ""],
+            ["발행처", publisher],
+            ["본문 확보", source.raw_text_available ? "예" : "아니오"],
+            ["공식 본문 수집", source.official_body_fetched ? "예" : "아니오"],
+            ["공식 본문 길이", source.official_body_length ?? ""],
+            ["공식 본문 매칭", source.official_body_match ? "예" : "아니오"],
+            ["공식 매칭 점수", source.official_body_match_score ?? ""],
+            ["공식 직접 매칭", officialDirectMatchLabel(source)],
+            ["공식 직접 점수", source.official_final_direct_match_score ?? source.official_body_match_score ?? ""],
+            ["URL 해소 점수", source.official_url_score ?? ""],
+            ["의미 매칭", source.semantic_match_score ?? ""],
+            ["정책 일치도", source.policy_alignment_score ?? ""],
+            ["공식 근거 점수", source.official_evidence_score ?? ""],
+            ["공식 실패 사유", source.official_body_failure_reason ? formatDiagnosticText(source.official_body_failure_reason) : ""],
+            ["신뢰도 점수", source.reliability_score == null ? "" : `${source.reliability_score}/5`],
+            ["신뢰도 등급", source.reliability_level ? formatReliabilityLevel(source.reliability_level) : ""],
+            ["검증 역할", source.verification_role ? formatVerificationRole(source.verification_role) : ""],
+            ["도메인", domain || ""],
+            ["공개 표시 판단", userFacingReportText(trace.explanation, "")],
+          ]);
+          const matched = (Array.isArray(source.official_matched_sentences) && source.official_matched_sentences.length) ? `
+            <div class="evidence-source-meta"><strong>공식 문서 매칭 문장</strong></div>
+            <ul class="compact-list">
+              ${source.official_matched_sentences.slice(0, 2).map((match) => `
+                <li>${escapeHtml(match.sentence || "-")} <span class="adv-cell-label">(${escapeHtml(match.score ?? "-")}점)</span></li>
+              `).join("")}
+            </ul>
+          ` : "";
+          const reason = advIsEmptyDisplay(source.reliability_reason)
+            ? ""
+            : `<div class="evidence-source-meta">${escapeHtml(userFacingReportText(source.reliability_reason, ""))}</div>`;
+          const flagText = formatDiagnosticText(formatList(source.source_risk_flags));
+          const flags = advIsEmptyDisplay(flagText) ? "" : `<div class="risk-flags">${escapeHtml(flagText)}</div>`;
+          return `
+            <details class="adv-cand">
+              <summary class="adv-cand-summary">
+                <span class="adv-cand-trace ${escapeHtml(trace.className)}">${escapeHtml(trace.label)}</span>
+                <span class="adv-cand-line">${escapeHtml(summaryText)}</span>
+              </summary>
+              <div class="adv-cand-body">
+                <div class="source-candidate-title">${titleHtml}</div>
+                ${exclusionLabel ? `<div class="adv-cand-excl">${escapeHtml(exclusionLabel)}</div>` : ""}
+                ${detail}${matched}${reason}${flags}
+              </div>
+            </details>
+          `;
+        }).join("")}</div>
+      `;
     }
 
     // ===== C6 — Status / error / busy UI & metrics =====
