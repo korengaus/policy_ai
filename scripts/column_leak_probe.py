@@ -1,5 +1,16 @@
-"""COLUMN-LEAK Phase 1 — READ-ONLY probe: how did opinion/column pieces become
+"""COLUMN-LEAK Phase 1 / 1b — READ-ONLY probe: how did opinion/column pieces become
 stored feed cards after the 6/26 COLUMN-FILTER shipped?
+
+Phase 1b refinement (this revision) adds, on top of Phase 1's buckets:
+  * B1 DATE-SPLIT around COLUMN_FILTER_SHIP_DATE — B1_pre (before the filter =
+    EXPECTED, not a bypass) vs B1_post (on/after = candidate REAL mode1 bypass),
+    with a full per-row dump of B1_post + its origin split; plus B2_pre/B2_post.
+  * MODE2 TOKEN CLASSIFICATION — sorts the mode2 bracket tokens into OPINION /
+    FACTUAL-KEEP / UNCLASSIFIED (probe-side ADVISORY heuristic, NOT applied to
+    production) so a later fix blocks ONLY safe opinion labels, never a source
+    like [정책브리핑].
+  * A FUNNEL summary: recent genuine leak = B1_post + B2_post, and how B2_post
+    splits across OPINION / FACTUAL-KEEP / UNCLASSIFIED (the real fix-target size).
 
 This is a MEASUREMENT-ONLY diagnostic. Every database statement is a SELECT; the
 script issues NO INSERT / UPDATE / DELETE / ALTER, never touches verdict logic,
@@ -109,6 +120,18 @@ except Exception:
 # int N to scan only the most recent N rows by id (id DESC).
 # ---------------------------------------------------------------------------
 SCAN_LAST_N_ROWS = None
+
+# ---------------------------------------------------------------------------
+# COLUMN-FILTER ship date — the B1 date-split boundary (Phase 1b). Rows created
+# BEFORE this date predate the filter (their being stored is EXPECTED, not a
+# bypass); rows ON/AFTER are candidate REAL mode1 bypasses. Resolved from git:
+# commit 54e5ce2 "COLUMN-FILTER: reject opinion/column pieces at collection",
+# committed 2026-06-26 03:52 KST. Compared as a 'YYYY-MM-DD' string prefix of
+# created_at (lexicographic == chronological). NOTE: the deploy landed ~03:52 KST
+# on 06-26, so a handful of very-early-06-26 rows could be borderline pre-deploy;
+# the whole ship date is treated as 'post' here (conservative — it can only
+# OVER-count post, never hide a real bypass).
+COLUMN_FILTER_SHIP_DATE = "2026-06-26"
 
 
 # ---------------------------------------------------------------------------
@@ -268,6 +291,113 @@ def bucket_of(info: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Phase 1b — B1 DATE-SPLIT (pre/post COLUMN-FILTER ship date).
+# ---------------------------------------------------------------------------
+def _date10(created_at) -> str:
+    """'YYYY-MM-DD' from a str or datetime created_at; '(unknown)' if unusable.
+    Guards malformed/short/NULL so a bad timestamp can never crash the split."""
+    if created_at is None:
+        return "(unknown)"
+    if isinstance(created_at, str):
+        s = created_at.strip()
+        return s[:10] if len(s) >= 10 else "(unknown)"
+    try:
+        return created_at.isoformat()[:10]  # datetime / date
+    except Exception:  # noqa: BLE001 — unexpected type must not crash
+        s = str(created_at)
+        return s[:10] if len(s) >= 10 else "(unknown)"
+
+
+def filter_era(created_at) -> str:
+    """'pre' / 'post' / 'unknown' relative to COLUMN_FILTER_SHIP_DATE. Uses a
+    'YYYY-MM-DD' string compare (lexicographic == chronological for that format)."""
+    day = _date10(created_at)
+    if day == "(unknown)":
+        return "unknown"
+    return "post" if day >= COLUMN_FILTER_SHIP_DATE else "pre"
+
+
+# ---------------------------------------------------------------------------
+# Phase 1b — MODE2 TOKEN CLASSIFICATION (probe-side heuristic; ADVISORY ONLY).
+#
+# THIS IS NOT A PRODUCTION FILTER. These sets live INSIDE the probe purely to
+# SORT the mode2 bracket tokens into OPINION / FACTUAL-KEEP / UNCLASSIFIED so an
+# operator can approve a precise, safe block-list in a LATER milestone. NONE of
+# this is imported by, or applied to, news_collector / hot_topics. Blocking a
+# FACTUAL/curation label ([정책브리핑] is a CORE source) would be an honesty/recall
+# regression, so the classifier is deliberately CONSERVATIVE: FACTUAL wins ties,
+# and factual matches use EXACT tokens + safe suffix rules (never a bare-substring
+# like '전문', which is a substring of the opinion label '전문가의 눈').
+# ---------------------------------------------------------------------------
+# Opinion signals (personal column / byline). The highest-value rule is
+# "ends with 칼럼" (the [○○ 칼럼] family). NOTE: in practice tokens containing an
+# existing marker/bracket-token (칼럼/시선/시각/단상/시평/논단) are already caught by
+# the live filter (they land in B1, not the mode2 set), so these rules mostly
+# document intent + catch any that slip through; they are harmless if they never
+# fire on the actual mode2 list.
+_OPINION_SUFFIXES = ("칼럼", "눈")
+_OPINION_SUBSTRINGS = ("시선", "시각", "단상", "직썰", "정조준", "역설")
+_EXPLICIT_OPINION = {
+    "규제의 역설", "전문가의 눈", "아하대만", "청계광장", "임나래 직썰",
+    "양준서의 정조준", "주정완의 시선", "송윤주의 부동산생태계", "서리풀 연구通",
+}
+# Factual / news-section / curation labels — MUST NOT be blocked.
+_EXPLICIT_FACTUAL = {
+    "정책브리핑", "단독", "전문", "인터뷰", "밀착취재", "산업브리핑", "유통브리핑",
+    "예산소식", "청양소식", "장성군 소식", "오늘의 정책 픽", "초밀착 정책 라이프",
+    "안심전세정보안전망", "금융 Pick", "CEO PICK", "아침에 PICK",
+}
+
+
+def _is_factual_token(token: str) -> bool:
+    """Exact-match + safe suffix/curation rules only (NO bare substrings that could
+    swallow an opinion label)."""
+    t = token.strip()
+    if t in _EXPLICIT_FACTUAL:
+        return True
+    if t.endswith("브리핑") or t.endswith("소식"):
+        return True
+    low = t.lower()
+    if "pick" in low or "픽" in t:      # curation picks ([오늘의 정책 픽], [금융 Pick])
+        return True
+    return False
+
+
+def _is_opinion_token(token: str) -> bool:
+    t = token.strip()
+    if t in _EXPLICIT_OPINION:
+        return True
+    if any(t.endswith(suffix) for suffix in _OPINION_SUFFIXES):
+        return True
+    if any(sub in t for sub in _OPINION_SUBSTRINGS):
+        return True
+    return False
+
+
+def classify_mode2_token(token: str) -> str:
+    """OPINION / FACTUAL-KEEP / UNCLASSIFIED. FACTUAL wins ties — conservative: the
+    dangerous error is mislabeling a factual SOURCE as opinion (-> proposing to
+    block it), so factual matches are checked first."""
+    if _is_factual_token(token):
+        return "FACTUAL-KEEP"
+    if _is_opinion_token(token):
+        return "OPINION"
+    return "UNCLASSIFIED"
+
+
+def row_mode2_class(info: dict) -> str:
+    """Classify a B2 row by its unknown token(s): OPINION if ANY token is opinion,
+    else FACTUAL-KEEP if any is factual, else UNCLASSIFIED. (Opinion-presence wins
+    for a ROW because that row IS a genuine leak target.)"""
+    classes = [classify_mode2_token(t) for t in info["unknown_tokens"]]
+    if "OPINION" in classes:
+        return "OPINION"
+    if "FACTUAL-KEEP" in classes:
+        return "FACTUAL-KEEP"
+    return "UNCLASSIFIED"
+
+
+# ---------------------------------------------------------------------------
 # OFFLINE SELF-TEST — validates the probe's logic against the 4 observed ids
 # WITHOUT any DB. Runnable locally (no DATABASE_URL).
 # ---------------------------------------------------------------------------
@@ -309,12 +439,56 @@ def run_selftest() -> int:
         p(f"        title: {title[:70]}")
         p(f"        expect: flagged={exp_flagged} test={exp_test} "
           f"reject_is_opinion={exp_reject_opinion}  ({note})")
+
+    # Phase 1b — mode2 token classifier assertions.
+    p("")
+    p("--- mode2 token classifier ---")
+    token_cases = [
+        ("규제의 역설", "OPINION"),
+        ("전문가의 눈", "OPINION"),
+        ("임나래 직썰", "OPINION"),
+        ("양준서의 정조준", "OPINION"),
+        ("박근종 칼럼", "OPINION"),          # ends-with 칼럼 rule
+        ("정책브리핑", "FACTUAL-KEEP"),      # CORE source — must not block
+        ("단독", "FACTUAL-KEEP"),
+        ("전문", "FACTUAL-KEEP"),            # exact — NOT swallowed by opinion '전문가의 눈'
+        ("산업브리핑", "FACTUAL-KEEP"),      # endswith 브리핑
+        ("예산소식", "FACTUAL-KEEP"),        # endswith 소식
+        ("오늘의 정책 픽", "FACTUAL-KEEP"),  # curation pick
+        ("금융 Pick", "FACTUAL-KEEP"),
+        ("기자24시", "UNCLASSIFIED"),        # borderline -> human eyeball
+    ]
+    for token, expected in token_cases:
+        got = classify_mode2_token(token)
+        ok = got == expected
+        if not ok:
+            failures += 1
+        p(f"[{'PASS' if ok else 'FAIL'}] {token} -> {got} (expect {expected})")
+
+    # Phase 1b — date-split (filter_era) assertions.
+    p("")
+    p(f"--- filter_era (COLUMN_FILTER_SHIP_DATE = {COLUMN_FILTER_SHIP_DATE}) ---")
+    era_cases = [
+        ("2026-06-06 12:00:00", "pre"),
+        ("2026-06-19T09:30:00", "pre"),
+        ("2026-06-26 04:00:00", "post"),
+        ("2026-06-30 08:15:00", "post"),
+        ("2026-07-01", "post"),
+        (None, "unknown"),
+    ]
+    for created_at, expected in era_cases:
+        got = filter_era(created_at)
+        ok = got == expected
+        if not ok:
+            failures += 1
+        p(f"[{'PASS' if ok else 'FAIL'}] {created_at!r} -> {got} (expect {expected})")
+
     p("")
     if failures:
-        p(f"SELF-TEST FAILED: {failures} case(s) mismatched the expected buckets.")
+        p(f"SELF-TEST FAILED: {failures} case(s) mismatched.")
         return 1
-    p("SELF-TEST PASSED: all 4 observed ids classify as expected "
-      "(546/512 -> B1 mode1; 559/529 -> B2 mode2).")
+    p("SELF-TEST PASSED: 4 observed ids (546/512 -> B1 mode1; 559/529 -> B2 mode2) "
+      "+ mode2 token classifier + filter_era date-split all correct.")
     return 0
 
 
@@ -345,10 +519,11 @@ def main(argv=None) -> int:
     # snapshot was taken, even if the engine turns out to be unavailable.
     now_utc = datetime.now(timezone.utc)
     now_local = now_utc.astimezone()
-    p("=== COLUMN-LEAK Phase 1 PROBE (READ-ONLY) ===")
+    p("=== COLUMN-LEAK Phase 1b PROBE (READ-ONLY) ===")
     p(f"local: {now_local.isoformat(timespec='seconds')}")
     p(f"UTC:   {now_utc.isoformat(timespec='seconds')}")
     p(f"scan window: {'WHOLE CORPUS' if SCAN_LAST_N_ROWS is None else f'last {SCAN_LAST_N_ROWS} rows by id'}")
+    p(f"COLUMN_FILTER_SHIP_DATE (B1 date-split boundary): {COLUMN_FILTER_SHIP_DATE}")
 
     # Echo the ACTUAL filter surface being replayed (imported, not copied).
     p("")
@@ -436,6 +611,50 @@ def main(argv=None) -> int:
     p(f"    count = {len(buckets['B_OTHER'])}  sample ids = "
       f"{[fr['id'] for fr in buckets['B_OTHER'][:10]]}")
 
+    # ---- SECTION 2b: B1/B2 DATE-SPLIT around the COLUMN-FILTER ship date --------
+    # B1_pre  = created_at <  ship date  -> EXPECTED (no filter yet), NOT a bypass.
+    # B1_post = created_at >= ship date  -> candidate REAL mode1 bypass.
+    def _split_era(rows):
+        pre = [fr for fr in rows if filter_era(fr["created_at"]) == "pre"]
+        post = [fr for fr in rows if filter_era(fr["created_at"]) == "post"]
+        unk = [fr for fr in rows if filter_era(fr["created_at"]) == "unknown"]
+        return pre, post, unk
+
+    b1_pre, b1_post, b1_unk = _split_era(buckets["B1"])
+    b2_pre, b2_post, b2_unk = _split_era(buckets["B2"])
+
+    p("")
+    p("=== SECTION 2b — B1/B2 DATE-SPLIT ===")
+    p(f"boundary: COLUMN_FILTER_SHIP_DATE = {COLUMN_FILTER_SHIP_DATE} "
+      f"(created_at < boundary = pre = expected; >= boundary = post = candidate leak)")
+    p(f"B1_pre  (before filter, EXPECTED)          = {len(b1_pre)}  "
+      f"ids={[fr['id'] for fr in b1_pre]}")
+    p(f"B1_post (on/after filter, CANDIDATE BYPASS) = {len(b1_post)}  "
+      f"ids={[fr['id'] for fr in b1_post]}")
+    if b1_unk:
+        p(f"B1_unknown (unparseable created_at)        = {len(b1_unk)}  "
+          f"ids={[fr['id'] for fr in b1_unk]}")
+    p(f"B2_pre  (before filter)                     = {len(b2_pre)}")
+    p(f"B2_post (on/after filter)                   = {len(b2_post)}")
+    if b2_unk:
+        p(f"B2_unknown                                 = {len(b2_unk)}")
+
+    # Per-row dump of the genuine-bypass candidates (B1_post) so we can eyeball them.
+    p("")
+    p("--- B1_post rows (candidate REAL mode1 bypasses) — full lines ---")
+    p("id | date | token | query | origin | title")
+    if not b1_post:
+        p("(none — no B1 row was created on/after the filter ship date)")
+    for fr in b1_post:
+        info = fr["info"]
+        p(f"{fr['id']} | {_date10(fr['created_at'])} | {matched_token(info)} | "
+          f"{str(fr['query'])[:30]} | {fr['origin']} | {str(fr['title'])[:70]}")
+    # B1_post origin split (the mode1 signal) — origin is SUGGESTIVE (see Section 5).
+    b1p_seed = [fr for fr in b1_post if fr["origin"] == "seed"]
+    b1p_nonseed = [fr for fr in b1_post if fr["origin"] == "non-seed"]
+    p(f"B1_post origin: seed={len(b1p_seed)} ids={[fr['id'] for fr in b1p_seed]}  |  "
+      f"non-seed(dynamic-kw OR user)={len(b1p_nonseed)} ids={[fr['id'] for fr in b1p_nonseed]}")
+
     # ---- SECTION 3: ORIGIN-CORRELATION (of B1 = mode1 candidates) --------------
     p("")
     p("=== SECTION 3 — ORIGIN-CORRELATION (B1 rows) ===")
@@ -460,18 +679,33 @@ def main(argv=None) -> int:
     p("    searches — the DB has no field that separates them. This is the KEY")
     p("    mode1 signal but it is SUGGESTIVE, not definitive.")
 
-    # ---- SECTION 4: CANDIDATE BRACKET TOKENS (mode2, for later) ----------------
+    # ---- SECTION 4: MODE2 TOKEN CLASSIFICATION (advisory) ----------------------
     unknown_counter = {}
+    unknown_example = {}
     for fr in flagged_rows:
         for tok in fr["info"]["unknown_tokens"]:
             unknown_counter[tok] = unknown_counter.get(tok, 0) + 1
+            if tok not in unknown_example:
+                unknown_example[tok] = str(fr["title"])[:70]
     p("")
-    p("=== SECTION 4 — DISTINCT BRACKET TOKENS NOT IN THE MARKER SET ===")
-    p("(candidate additions for a LATER milestone — do NOT add now; just listed)")
-    if not unknown_counter:
-        p("(none)")
-    for tok, n in sorted(unknown_counter.items(), key=lambda kv: (-kv[1], kv[0])):
-        p(f"    {tok}  (x{n})")
+    p("=== SECTION 4 — MODE2 TOKEN CLASSIFICATION (probe-side heuristic; ADVISORY) ===")
+    p("Each distinct bracket token NOT in the live marker set, sorted into one of:")
+    p("  OPINION      -> safe-to-block candidate (personal column/byline)")
+    p("  FACTUAL-KEEP -> MUST NOT block (news-section/curation/source; kills recall)")
+    p("  UNCLASSIFIED -> needs a human eyeball before any decision")
+    p("This sorting is NOT applied to production; it only shapes a later, operator-")
+    p("approved block-list. FACTUAL wins ties (never mislabel a source as opinion).")
+    grouped = {"OPINION": [], "FACTUAL-KEEP": [], "UNCLASSIFIED": []}
+    for tok, n in unknown_counter.items():
+        grouped[classify_mode2_token(tok)].append((tok, n))
+    for group in ("OPINION", "FACTUAL-KEEP", "UNCLASSIFIED"):
+        items = sorted(grouped[group], key=lambda kv: (-kv[1], kv[0]))
+        p("")
+        p(f"[{group}] {len(items)} distinct token(s):")
+        if not items:
+            p("    (none)")
+        for tok, n in items:
+            p(f"    {tok}  (x{n})  e.g. {unknown_example.get(tok, '')}")
 
     # ---- SECTION 5: FAITHFULNESS + SUMMARY -------------------------------------
     p("")
@@ -483,15 +717,41 @@ def main(argv=None) -> int:
     p("  collection_source = winning SEARCH ENGINE, not entry path. The query-vs-seed")
     p("  split is the closest signal and it conflates dynamic keywords with user")
     p("  searches. Read Section 3 as 'reject-replay definitive; origin suggestive'.")
+    p("* The mode2 TOKEN CLASSIFICATION (Section 4) is a PROBE-SIDE HEURISTIC for")
+    p("  operator review — it is NOT applied to any production filter. FACTUAL-KEEP")
+    p("  labels ([정책브리핑] etc.) must never be blocked; UNCLASSIFIED needs a human.")
+
+    # Funnel: how much of the leak is RECENT (post-filter) vs legacy (pre-filter).
+    b2p_class = {"OPINION": 0, "FACTUAL-KEEP": 0, "UNCLASSIFIED": 0}
+    for fr in b2_post:
+        b2p_class[row_mode2_class(fr["info"])] += 1
+    recent_leak = len(b1_post) + len(b2_post)
 
     p("")
-    p("=== SUMMARY ===")
+    p("=== SUMMARY (FUNNEL) ===")
     p(f"rows scanned:            {scanned}")
     p(f"flagged (opinion-like):  {len(flagged_rows)}")
-    p(f"B1 mode1 (filter-would-catch-but-stored): {len(buckets['B1'])}")
-    p(f"B2 mode2 (coverage gap, filter passes):   {len(buckets['B2'])}")
-    p(f"B_OTHER (unrelated reject reason):        {len(buckets['B_OTHER'])}")
-    p(f"distinct unknown bracket tokens (mode2 candidates): {len(unknown_counter)}")
+    p(f"B1 total = {len(buckets['B1'])}  ->  B1_pre (expected) = {len(b1_pre)} | "
+      f"B1_post (candidate bypass) = {len(b1_post)}"
+      + (f" | B1_unknown = {len(b1_unk)}" if b1_unk else ""))
+    p(f"B2 total = {len(buckets['B2'])}  ->  B2_pre = {len(b2_pre)} | "
+      f"B2_post = {len(b2_post)}"
+      + (f" | B2_unknown = {len(b2_unk)}" if b2_unk else ""))
+    p(f"B_OTHER (unrelated reject reason): {len(buckets['B_OTHER'])}")
+    p("")
+    p(f"RECENT GENUINE LEAK (created on/after the filter) = B1_post + B2_post = "
+      f"{len(b1_post)} + {len(b2_post)} = {recent_leak}")
+    p(f"  of B2_post ({len(b2_post)}), by token class:  "
+      f"OPINION={b2p_class['OPINION']}  "
+      f"FACTUAL-KEEP={b2p_class['FACTUAL-KEEP']}  "
+      f"UNCLASSIFIED={b2p_class['UNCLASSIFIED']}")
+    p(f"  -> the actual mode2 FIX TARGET is the B2_post OPINION count "
+      f"({b2p_class['OPINION']}) + any UNCLASSIFIED an operator confirms as opinion "
+      f"({b2p_class['UNCLASSIFIED']}); FACTUAL-KEEP ({b2p_class['FACTUAL-KEEP']}) "
+      f"must stay unblocked.")
+    p(f"distinct mode2 tokens: {len(unknown_counter)}  "
+      f"(OPINION={len(grouped['OPINION'])}, FACTUAL-KEEP={len(grouped['FACTUAL-KEEP'])}, "
+      f"UNCLASSIFIED={len(grouped['UNCLASSIFIED'])})")
 
     p("\n[Safety] READ-ONLY probe — no rows written, updated, or deleted.")
     return 0
