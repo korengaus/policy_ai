@@ -430,6 +430,7 @@
     .section-heading h2,
     .verify-how-head h2,
     .corrections-head h2,
+    .recent-head h2,
     .latest-checks-head h2,
     .rank-panel-heading h2,
     .domain-section-title {
@@ -566,7 +567,13 @@
          13px inside .panel. CSS offset only (no markup move); the absolute overlay +
          the showStatus/#v2ProgressWrap mutual-exclusion are unchanged. */
       padding-left: 13px;
-      margin-top: 4px;
+      /* LABEL-1b STEP 2: vertically center the message in the gap between the
+         search-box bottom (top:100%) and the black divider rule (.domain-tabs-row::before,
+         which sits ~40-42px below the search-box bottom: ~12px topbar lower-half +
+         14px .topbar margin-bottom + 8px .domain-tabs-row margin-top + 8px ::before
+         top offset). A ~14px top offset centers the 13px line mid-gap (was 4px = pinned
+         to the top, too close to the search box). Overlay stays zero-flow. */
+      margin-top: 14px;
       display: none;
       color: #334155;
       font-size: 13px;
@@ -1745,6 +1752,11 @@
       font-weight: 900;
       line-height: 1.1;
     }
+    /* LABEL-1b STEP 4: semantic number colors matching the legend/card labels.
+       Numbers only — the .stat-label captions stay muted. */
+    #statTotal { color: var(--brand); }      /* 총검증 — blue (the total) */
+    #statOfficial { color: var(--verify); }  /* 공식확인 — green (matches 공식 근거 확인) */
+    #statDraft { color: var(--slate); }       /* AI 초안 — muted slate (draft/unverified) */
     .stat-label {
       margin-top: 4px;
       color: var(--muted);
@@ -1766,8 +1778,16 @@
       align-items: flex-start;
       gap: 9px;
     }
-    .legend-row .verdict-dot {
-      margin-top: 5px;
+    /* LABEL-1b STEP 1: fixed-width centered leading cell so ALL legend row labels
+       left-align, regardless of whether the mark is the 9px round dot or the 15px
+       ✓ swatch. The mark keeps its natural size, centered inside the 18px cell. */
+    .legend-lead {
+      flex: 0 0 18px;
+      width: 18px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 3px;
     }
     /* LABEL-1 STEP 5: small-caps axis header separating 공식 근거 / AI 판정. First
        header drops its top margin so the panel keeps its existing rhythm. */
@@ -1790,7 +1810,6 @@
       flex: 0 0 auto;
       width: 15px;
       height: 15px;
-      margin-top: 3px;
       border-radius: 4px;
       background: var(--verify-soft);
       color: var(--verify);
@@ -1933,6 +1952,40 @@
        sections; rows use the same 1px --line divider as the feed/rank lists; the
        "✓ 정정 반영" pill reuses the existing card-pill tokens (--brand tint, 999px).
        All existing tokens; no new color/font. Stacks at <=960px (below). */
+    /* LABEL-1b STEP 3: 최근 분석 기록 container — mirrors .corrections (un-boxed, thin
+       top rule) so it matches the site instead of the old .history-card box. */
+    .recent-analyses {
+      margin: 24px 0 16px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+    }
+    .recent-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    .recent-head h2 {
+      margin: 0;
+      color: var(--ink);
+      font-size: 1.308rem;
+      line-height: 1.25;
+      font-weight: 700;
+    }
+    /* quiet muted empty state (was a heavy dashed .empty-state box); kept visible as
+       an onboarding cue, not auto-hidden. Scoped to #history so the JS re-render
+       (renderHistory) empty branch gets the same quiet treatment. */
+    #history .empty-state {
+      border: none;
+      background: none;
+      padding: 8px 0;
+      text-align: left;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
     .corrections {
       margin: 24px 0 16px;
       padding-top: 18px;
@@ -4132,34 +4185,35 @@
       font-size: 18px;
     }
 
+    /* LABEL-1b STEP 3: divider-list rows (was bordered white cards) — mirrors
+       .corrections-row: thin var(--line) top rule, no box, vertical padding only. */
     .history-row {
       display: grid;
       grid-template-columns: 52px 1fr auto;
       gap: 10px;
       align-items: start;
-      border: 1px solid #e5e7eb;
-      border-radius: 10px;
-      background: #ffffff;
-      padding: 13px;
-      margin-top: 10px;
+      border: none;
+      border-top: 1px solid var(--line);
+      border-radius: 0;
+      background: transparent;
+      padding: 12px 0;
+      margin-top: 0;
       font-size: 14px;
       cursor: pointer;
-      transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+      transition: background 120ms ease;
     }
 
     .history-row:hover {
-      border-color: #93c5fd;
-      background: #f8fbff;
+      background: var(--surface-soft);
     }
 
     .history-row:first-child {
+      border-top: none;
       margin-top: 0;
     }
 
     .history-row.selected {
-      border-color: var(--blue);
       background: #eff6ff;
-      box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
     }
 
     .history-id {
@@ -4200,9 +4254,11 @@
       background: #fecaca;
     }
 
+    /* LABEL-1b STEP 3: quiet site button (softened from the heavy 900-weight grey). */
     .history-clear {
-      background: #f1f5f9;
-      color: #334155;
+      background: var(--surface-soft);
+      color: var(--slate);
+      font-weight: 700;
     }
 
     .history-clear:hover:not(:disabled) {
