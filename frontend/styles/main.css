@@ -1759,6 +1759,12 @@
       width: 220px;
       align-items: stretch;
       padding: 6px 14px;
+      /* DESIGN-UNIFY-2: strip items reuse the sidebar .rank-row markup, which carries
+         border-top:1px var(--line) (the vertical-list divider). That painted a short
+         horizontal rule above each mini-card. Scope it OFF for the strip only (this
+         2-class selector beats .rank-row); the sidebar ranking rows keep their divider.
+         The vertical hairline (border-left below) is the strip's separator. */
+      border-top: none;
     }
     .recent-viewed-strip .recent-viewed-item:not(:first-child) {
       border-left: 1px solid var(--line);
