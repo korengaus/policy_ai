@@ -335,6 +335,24 @@
     function verdictDotColor(label) {
       return VERDICT_DOT_COLORS[String(label || "")] || "var(--muted)";
     }
+    // LABEL-1 STEP 3: verdict-pill tier class, mirroring VERDICT_DOT_COLORS above
+    // (same label keys). Returns vt-green / vt-orange / vt-red / vt-muted; default
+    // vt-muted. Display-only — does NOT change verdict_label or any score.
+    const VERDICT_TIER_CLASSES = {
+      draft_verified: "vt-green",
+      draft_likely_true: "vt-green",
+      draft_needs_context: "vt-orange",
+      draft_needs_official_confirmation: "vt-orange",
+      draft_needs_review: "vt-orange",
+      draft_high_risk_review: "vt-orange",
+      draft_misleading: "vt-red",
+      draft_disputed: "vt-red",
+      draft_unverified: "vt-muted",
+      draft_outdated: "vt-muted",
+    };
+    function verdictTierClass(label) {
+      return VERDICT_TIER_CLASSES[String(label || "")] || "vt-muted";
+    }
     function verdictLabelKo(label) {
       return VERDICT_LABELS[String(label || "")] || "추가 검증 필요";
     }
@@ -2222,7 +2240,7 @@
         ? `<span class="card-confidence">신뢰도 ${escapeHtml(card.confidence)}</span>`
         : "";
       return `
-        <article class="topic-card ${opts && opts.hero ? "topic-card--hero " : ""}${selected ? "selected" : ""}" data-topic-key="${escapeHtml(card.key)}" data-topic-source="${escapeHtml(card.source)}" data-topic-index="${escapeHtml(card.index)}" data-topic-record-id="${escapeHtml(card.recordId)}">
+        <article class="topic-card ${opts && opts.hero ? "topic-card--hero " : ""}${opts && opts.secondary ? "topic-card--secondary " : ""}${selected ? "selected" : ""}" data-topic-key="${escapeHtml(card.key)}" data-topic-source="${escapeHtml(card.source)}" data-topic-index="${escapeHtml(card.index)}" data-topic-record-id="${escapeHtml(card.recordId)}">
           <div class="topic-card-top">
             <span class="card-domain">${escapeHtml(domainDisplayLabel(cardDomainKey(card)))}</span>
             <span class="card-watch ${alertClass(card.alert)}">${escapeHtml(formatAlert(card.alert))}</span>
@@ -2235,8 +2253,10 @@
           ${hashtagRow}
           <div class="topic-card-verdict">
             ${sourcePill}
-            <span class="verdict-dot" style="background:${verdictDotColor(card.verdictLabel)}"></span>
-            <span class="verdict-text">판정 ${escapeHtml(verdictLabelKo(card.verdictLabel))}</span>
+            <span class="verdict-pill ${verdictTierClass(card.verdictLabel)}">
+              <span class="verdict-dot" style="background:${verdictDotColor(card.verdictLabel)}"></span>
+              <span class="verdict-text">판정 ${escapeHtml(verdictLabelKo(card.verdictLabel))}</span>
+            </span>
             ${confidenceInline}
           </div>
           ${sourceBody}
@@ -2359,7 +2379,7 @@
       } else if (hot.length >= 2) {
         const band = `<div class="feed-hero-band">`
           + renderTopicCardHtml(hot[0], { detailed: true, hero: true })
-          + renderTopicCardHtml(hot[1], { detailed: true })
+          + renderTopicCardHtml(hot[1], { detailed: true, secondary: true })
           + `</div>`;
         // DESIGN-C3h-3: #hotTopicsTop holds ONLY the hero band now (the 오늘의 검증 row
         // was removed; today cards flow into the feed below carrying the per-card badge).

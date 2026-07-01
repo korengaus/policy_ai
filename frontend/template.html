@@ -277,44 +277,54 @@
           <div class="rank-panel-heading">
             <h2>검증 등급</h2>
           </div>
+          <!-- LABEL-1 STEP 5: legend rebuilt into TWO labeled axes. GROUP 1 (공식 근거)
+               = evidence-presence layer, colors matched to the card's green evidence pill
+               (.card-source-head) + the blue 공식자료 참고 status. GROUP 2 (AI 판정) = the
+               verdict-dot color axis (green/orange/red/muted), now INCLUDING the previously
+               missing green draft_verified row. Colors mirror the card labels exactly. -->
           <ul class="legend-list">
+            <li class="legend-group-head">공식 근거</li>
             <li class="legend-row">
-              <span class="verdict-dot" style="background:var(--verify)"></span>
+              <span class="legend-swatch legend-swatch--check">✓</span>
               <div class="legend-body">
                 <span class="legend-label">공식 근거 확인</span>
-                <span class="legend-desc">1차·공식 출처 본문과 직접 대조 확인</span>
+                <span class="legend-desc">1차·공식 문서가 주장을 직접 뒷받침</span>
               </div>
             </li>
             <li class="legend-row">
               <span class="verdict-dot" style="background:var(--brand)"></span>
               <div class="legend-body">
                 <span class="legend-label">공식자료 참고</span>
-                <span class="legend-desc">관련 공식자료를 참고함 (직접 검증은 아님)</span>
+                <span class="legend-desc">관련 공식자료 참고 (직접 검증 아님)</span>
+              </div>
+            </li>
+            <li class="legend-group-head">AI 판정</li>
+            <li class="legend-row">
+              <span class="verdict-dot" style="background:var(--verify)"></span>
+              <div class="legend-body">
+                <span class="legend-label">검증 완료</span>
+                <span class="legend-desc">임시 검증 완료</span>
               </div>
             </li>
             <li class="legend-row">
               <span class="verdict-dot" style="background:var(--orange)"></span>
               <div class="legend-body">
-                <span class="legend-label">검증 중</span>
-                <span class="legend-desc">확인 진행 중</span>
+                <span class="legend-label">검토 필요</span>
+                <span class="legend-desc">맥락 추가·공식 확인·사람 검토 대기</span>
               </div>
             </li>
-            <!-- DESIGN-C3h-2f: the red verdict tier (draft_disputed 상충 + draft_misleading
-                 오해, both var(--red) on the card) was missing from the legend. Honest,
-                 conservative copy — a "needs human review" state, NOT a definitive
-                 falsehood. Same inline-style dot mechanism as the rows above. -->
             <li class="legend-row">
               <span class="verdict-dot" style="background:var(--red)"></span>
               <div class="legend-body">
                 <span class="legend-label">상충·오해 가능성</span>
-                <span class="legend-desc">상충되거나 오해를 부를 수 있는 근거가 있어 사람 검토가 필요한 상태</span>
+                <span class="legend-desc">근거 상충·오해 소지, 사람 검토 필요</span>
               </div>
             </li>
             <li class="legend-row">
               <span class="verdict-dot" style="background:var(--muted)"></span>
               <div class="legend-body">
-                <span class="legend-label">AI 초안</span>
-                <span class="legend-desc">자동 생성·사람 검토 전, 최종 아님</span>
+                <span class="legend-label">추가 검증 필요</span>
+                <span class="legend-desc">자동 생성·추가 확인 전</span>
               </div>
             </li>
           </ul>

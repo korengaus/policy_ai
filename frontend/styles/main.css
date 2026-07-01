@@ -561,10 +561,15 @@
       top: 100%;
       left: 0;
       right: 0;
+      /* LABEL-1 STEP 7: align the text's LEFT edge under the search placeholder — the
+         #query cell is .controls border (1px) + div:first-child padding-left (12px) =
+         13px inside .panel. CSS offset only (no markup move); the absolute overlay +
+         the showStatus/#v2ProgressWrap mutual-exclusion are unchanged. */
+      padding-left: 13px;
       margin-top: 4px;
       display: none;
       color: #334155;
-      font-size: 14px;
+      font-size: 13px;
       font-weight: 700;
       pointer-events: none;
     }
@@ -1764,6 +1769,38 @@
     .legend-row .verdict-dot {
       margin-top: 5px;
     }
+    /* LABEL-1 STEP 5: small-caps axis header separating 공식 근거 / AI 판정. First
+       header drops its top margin so the panel keeps its existing rhythm. */
+    .legend-group-head {
+      list-style: none;
+      color: var(--muted);
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin: 8px 0 2px;
+    }
+    .legend-group-head:first-child {
+      margin-top: 0;
+    }
+    /* LABEL-1 STEP 5: green ✓ swatch for the group-1 evidence row — mirrors the
+       card's green evidence pill (.card-source-head: --verify-soft fill + --verify ✓)
+       and aligns with the .verdict-dot's 5px top offset. */
+    .legend-swatch--check {
+      flex: 0 0 auto;
+      width: 15px;
+      height: 15px;
+      margin-top: 3px;
+      border-radius: 4px;
+      background: var(--verify-soft);
+      color: var(--verify);
+      font-size: 0.68rem;
+      font-weight: 900;
+      line-height: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
     .legend-body {
       min-width: 0;
       display: flex;
@@ -2282,6 +2319,18 @@
       font-size: 0.9rem;
     }
 
+    /* LABEL-1 STEP 6: hero-band MIDDLE tier (Joe's 3-tier band). The RIGHT band card
+       (hot[1], rendered with {secondary:true}) sits BETWEEN the ordinary feed card
+       (1.077rem / 0.923rem) and the big left hero (3.0rem / 1.28rem). Unlike the hero
+       it KEEPS its .card-domain badge. Stays inside the 1fr grid column. */
+    .topic-card--secondary .topic-card-title {
+      font-size: 1.6rem;
+      line-height: 1.25;
+    }
+    .topic-card--secondary .topic-card-summary {
+      font-size: 1.08rem;
+    }
+
     /* DESIGN-C3d: "오늘의 검증 / LATEST CHECKS" row — a re-chunk of the first ≤3
        post-hero cards into a 3-col grid (the rest continue single-column below).
        Header mirrors the existing section-heading pattern (left title + right
@@ -2483,12 +2532,20 @@
          (even with the hero eyebrow). */
       color: var(--brand-ink);
     }
+    /* LABEL-1: unified SEVERITY/GRADE pill base geometry (shared by .card-watch,
+       .card-source-head, .review-approved, .verdict-pill). Each member keeps its
+       own semantic color; only the geometry is unified. */
     .card-watch {
-      font-size: 0.72rem;
-      font-weight: 800;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 0.74rem;
+      font-weight: 700;
       letter-spacing: 0.01em;
-      padding: 2px 7px;
-      border-radius: 4px;
+      padding: 2px 9px;
+      border-radius: 999px;
+      line-height: 1.35;
+      white-space: nowrap;
     }
     /* editorial WATCH tag — light tint + colored text per alert tier (overrides
        the chunky solid .alert-* backgrounds in the card context). */
@@ -2505,16 +2562,19 @@
        (created_at >= KST-midnight). A brand-tinted pill, deliberately DISTINCT from
        the green official/verdict pills and the orange 🔥 article-freshness marker, so
        it reads as "we verified this today," not as a verdict. Reuses brand tokens. */
+    /* LABEL-1 STEP 4: DE-PILLED to a squared light CLASSIFICATION chip (was a rounded
+       blue pill) so "오늘 검증" reads as recency, not a grade. Matches the .topic-card-tag
+       classification look. */
     .card-today-badge {
       display: inline-flex;
       align-items: center;
-      background: rgba(30, 95, 216, 0.08);
-      color: var(--brand-ink);
-      border-radius: 999px;
+      background: var(--surface-soft);
+      color: var(--slate);
+      border-radius: 4px;
       font-size: 0.72rem;
       font-weight: 700;
       letter-spacing: 0.01em;
-      padding: 2px 8px;
+      padding: 1px 7px;
       line-height: 1.4;
     }
     .topic-card-tags {
@@ -2538,6 +2598,25 @@
       margin-top: 2px;
       font-size: 0.86rem;
     }
+    /* LABEL-1 STEP 3: verdict wrapped in a tinted pill on the CARD verdict band
+       (renderTopicCardHtml only — the detail verdict block is untouched). Shares the
+       unified pill base geometry; the four tints mirror the verdictDotColor map. The
+       saturated dot stays inside as the color anchor. */
+    .verdict-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      border-radius: 999px;
+      padding: 2px 9px;
+      font-size: 0.74rem;
+      font-weight: 700;
+      line-height: 1.35;
+      white-space: nowrap;
+    }
+    .verdict-pill.vt-green  { background: #e7f6ef; color: #0e9f6e; }
+    .verdict-pill.vt-orange { background: #fff7ed; color: #c2410c; }
+    .verdict-pill.vt-red    { background: #fef2f2; color: #b91c1c; }
+    .verdict-pill.vt-muted  { background: #f1f5f9; color: var(--slate); }
     .verdict-dot {
       width: 9px;
       height: 9px;
@@ -2545,8 +2624,10 @@
       flex: 0 0 auto;
     }
     .verdict-text {
-      font-weight: 750;
-      color: var(--ink);
+      /* LABEL-1: inherit the pill tint (was 750/0.86rem/var(--ink)). */
+      font-weight: 700;
+      font-size: 0.74rem;
+      color: inherit;
     }
     .card-confidence {
       /* DESIGN-C3h-2c: --muted → --slate (one step darker grey) so 신뢰도 NN reads
@@ -2579,17 +2660,21 @@
     }
     /* CARD-BOX: compact blue PILL, rendered on the verdict band beside the
        verdict label (no longer a full-width green line). */
+    /* LABEL-1 STEP 2: evidence pill BLUE -> GREEN so it matches the sidebar legend
+       group-1 row and reads as confirmed official evidence (evidence-presence, NOT
+       a truth verdict). Shares the unified pill base geometry. */
     .card-source-head {
       display: inline-flex;
       align-items: center;
       gap: 4px;
-      color: var(--brand);
-      background: rgba(30, 95, 216, 0.10);
+      color: var(--verify);
+      background: var(--verify-soft);
       border-radius: 999px;
-      padding: 2px 10px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      line-height: 1.3;
+      padding: 2px 9px;
+      font-size: 0.74rem;
+      font-weight: 700;
+      line-height: 1.35;
+      white-space: nowrap;
     }
     .card-source-row {
       display: flex;
@@ -4148,6 +4233,14 @@
     .review-approved {
       background: #dcfce7;
       color: #166534;
+      /* LABEL-1: unify to the severity pill base geometry (was 0.846rem/900/4px 8px
+         via .review-status). Green fill/text preserved. */
+      border-radius: 999px;
+      padding: 2px 9px;
+      font-size: 0.74rem;
+      font-weight: 700;
+      gap: 4px;
+      line-height: 1.35;
     }
 
     .review-rejected {
