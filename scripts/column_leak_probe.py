@@ -12,6 +12,19 @@ Phase 1b refinement (this revision) adds, on top of Phase 1's buckets:
   * A FUNNEL summary: recent genuine leak = B1_post + B2_post, and how B2_post
     splits across OPINION / FACTUAL-KEEP / UNCLASSIFIED (the real fix-target size).
 
+Phase 1c refinement (this revision) adds:
+  * PART A (trace, in comments + Section 3 note): the opinion reject
+    (_reject_title_reason) is wired ONLY into _accept_fallback_candidate, called
+    ONLY by the naver_fallback / daum_fallback HTML scrapers. The PRIMARY collectors
+    (naver_api, google_rss ladder, forced_google_rss) apply the M17b relevance
+    filter ONLY and NEVER call the reject; main.analyze_pipeline consumes the
+    collector result with no extra reject. So a B1 row whose collection_source is
+    NOT a fallback scraper leaked through a primary path the reject never guards.
+  * PART B (Section 6): a DRY-RUN of a PROPOSED opinion-genre rule (SIMULATION ONLY,
+    not wired to production) showing (1) would-newly-block rows, (2) a FACTUAL-KEEP
+    safety check (must be zero), (3) still-unblocked post-era rows left to the
+    verdict layer.
+
 This is a MEASUREMENT-ONLY diagnostic. Every database statement is a SELECT; the
 script issues NO INSERT / UPDATE / DELETE / ALTER, never touches verdict logic,
 the pipeline, the scheduler, the frontend, pins, or any test. It reads the ACTUAL
@@ -398,6 +411,69 @@ def row_mode2_class(info: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Phase 1c PART B — PROPOSED opinion-genre rule (SIMULATION ONLY).
+#
+# *** THIS IS NOT WIRED TO PRODUCTION. *** It lives here purely so the dry-run
+# below can show EXACTLY which stored rows a proposed opinion-genre detector would
+# newly block, so the operator can approve it BEFORE any real news_collector change.
+# It is never imported by news_collector / hot_topics / main.
+#
+# Rule: fires iff SOME bracket token is a byline-opinion label — AFTER hard-
+# excluding factual/curation labels (_is_factual_token from Phase 1b) and generic
+# 기획/연재/analysis corners (_PROPOSED_NEUTRAL_KEEP). Guardrails run FIRST so a
+# factual source ([정책브리핑]) or a fact-carrying corner ([초점]/[기획]) can never
+# be caught.
+# ---------------------------------------------------------------------------
+# byline-opinion suffixes: [○○ 칼럼], [○○의 시선], [○○ 직썰], [○○의 정조준].
+_PROPOSED_OPINION_SUFFIXES = ("칼럼", "시선", "직썰", "정조준")
+# explicit personal-view corners (byline columns). Matched as the WHOLE token OR a
+# slash-separated byline part (some feeds render "○○ / 청계광장"). Case-insensitive
+# for ASCII tokens ([View]/[VIEW]).
+_PROPOSED_EXPLICIT_OPINION = {
+    "규제의 역설", "전문가의 눈", "view", "현장에서", "책의 향기", "아하대만",
+    "이송렬의 우주인", "서리풀 연구通", "송윤주의 부동산생태계", "임나래 직썰",
+    "양준서의 정조준", "주정완의 시선", "청계광장",
+}
+_PROPOSED_EXPLICIT_OPINION_LOWER = {t.lower() for t in _PROPOSED_EXPLICIT_OPINION}
+# generic 기획/연재/analysis corners that carry verifiable facts — MUST stay
+# UNBLOCKED (the verdict layer handles them). Hard-excluded from the rule.
+_PROPOSED_NEUTRAL_KEEP = {
+    "초점", "기획", "기자24시", "하반기 집값은①", "6·27 대책 1년①", "포스트 전세⑤",
+    "요즘 부동산+", "갈 길 잃은 고정금리", "갈길 먼 통합돌봄②", "N2 포커스",
+    "경제 동향", "금융家", "Biz & Now", "위클리오늘",
+}
+
+
+def proposed_fire_reason(title: str) -> str:
+    """Return a short reason string if PROPOSED_OPINION_RULE fires on `title`, else
+    "". Guardrails (factual + neutral-keep) are applied per-token BEFORE any opinion
+    match, so a factual/curation/neutral token can never trigger a fire."""
+    for tok in _bracket_inner_tokens(title):
+        t = tok.strip()
+        # Guardrail 1: never fire on factual/curation labels (Phase 1b test).
+        if _is_factual_token(t):
+            continue
+        # Guardrail 2: never fire on generic fact-carrying corners.
+        if t in _PROPOSED_NEUTRAL_KEEP:
+            continue
+        # byline-opinion suffix.
+        for suffix in _PROPOSED_OPINION_SUFFIXES:
+            if t.endswith(suffix):
+                return f"suffix:{suffix} ({t})"
+        # explicit opinion corner — whole token or a slash-separated byline part.
+        parts = [t] + [seg.strip() for seg in t.split("/")]
+        for seg in parts:
+            if seg.lower() in _PROPOSED_EXPLICIT_OPINION_LOWER:
+                return f"explicit:{seg}"
+    return ""
+
+
+def PROPOSED_OPINION_RULE(title: str) -> bool:
+    """PROPOSED opinion-genre detector — SIMULATION ONLY, NOT wired to production."""
+    return bool(proposed_fire_reason(title))
+
+
+# ---------------------------------------------------------------------------
 # OFFLINE SELF-TEST — validates the probe's logic against the 4 observed ids
 # WITHOUT any DB. Runnable locally (no DATABASE_URL).
 # ---------------------------------------------------------------------------
@@ -483,6 +559,30 @@ def run_selftest() -> int:
             failures += 1
         p(f"[{'PASS' if ok else 'FAIL'}] {created_at!r} -> {got} (expect {expected})")
 
+    # Phase 1c — PROPOSED_OPINION_RULE assertions (fires on opinion; NEVER on
+    # factual/curation; NEVER on generic fact-carrying corners).
+    p("")
+    p("--- PROPOSED_OPINION_RULE (simulation) ---")
+    proposed_cases = [
+        ("[박근종 칼럼] 부동산 세제개편의 방향을 다시 생각한다", True, "ends-with 칼럼"),
+        ("[규제의 역설] 금리·전세·공급 정책이 서로 부딪칠 때 생기는 왜곡", True, "explicit 규제의 역설"),
+        ("[전문가의 눈] 농업위성 원년, 정밀농업 시대를 여는 정책 과제", True, "explicit 전문가의 눈"),
+        ("[주정완의 시선] 가계부채 대책이 놓친 것", True, "ends-with 시선"),
+        ("[정책브리핑] 국토부 전세대책 세부 시행방안 발표", False, "FACTUAL-KEEP core source"),
+        ("[단독] 금융위, 스트레스 DSR 3단계 연기 검토", False, "FACTUAL-KEEP 단독"),
+        ("[전문] 대통령 부동산 담화 전문 게재", False, "FACTUAL-KEEP 전문 (not opinion '전문가의 눈')"),
+        ("[초점] 하반기 집값 향방은 어디로", False, "neutral 기획 corner — verdict layer handles"),
+        ("[기획] 청년 주거지원 3년의 성적표", False, "neutral 기획 corner"),
+        ("전세대출 규제 강화, 실수요자 부담 커진다", False, "no bracket -> never fires"),
+    ]
+    for title, expected, note in proposed_cases:
+        got = PROPOSED_OPINION_RULE(title)
+        ok = got == expected
+        if not ok:
+            failures += 1
+        p(f"[{'PASS' if ok else 'FAIL'}] fires={got} (expect {expected}) "
+          f"reason={proposed_fire_reason(title)!r}  ({note})")
+
     p("")
     if failures:
         p(f"SELF-TEST FAILED: {failures} case(s) mismatched.")
@@ -561,11 +661,34 @@ def main(argv=None) -> int:
 
     scanned = 0
     flagged_rows = []          # list of dicts with id/created_at/query/title/info/src/origin
+    # Phase 1c dry-run accumulators (computed over ALL rows, not just flagged):
+    dry_newblock = []          # group (1): PROPOSED fires AND live opinion-reject does NOT
+    dry_factual_total = 0      # group (2): rows carrying a FACTUAL-KEEP bracket token
+    dry_factual_violations = []  # group (2): factual rows the PROPOSED rule WRONGLY fires on
     for r in rows:
         m = r._mapping
         scanned += 1
         title = m["title"] or ""
         info = classify_title(title)
+
+        # ---- Phase 1c PART B dry-run (over EVERY row; SIMULATION ONLY) ----------
+        proposed = PROPOSED_OPINION_RULE(title)
+        live_opinion = (info["reject_reason"] == "opinion_or_column")
+        era = filter_era(m["created_at"])
+        has_factual_token = any(_is_factual_token(t) for t in info["bracket_tokens"])
+        if proposed and not live_opinion:
+            dry_newblock.append({
+                "id": m["id"], "created_at": m["created_at"], "era": era,
+                "reason": proposed_fire_reason(title), "title": title,
+            })
+        if has_factual_token:
+            dry_factual_total += 1
+            if proposed:  # a factual/curation label must NEVER be blocked
+                dry_factual_violations.append({
+                    "id": m["id"], "title": title,
+                    "reason": proposed_fire_reason(title),
+                })
+
         if not is_flagged(info):
             continue
         query = m["query"] or ""
@@ -678,6 +801,14 @@ def main(argv=None) -> int:
     p("    NOTE: 'non-seed' conflates dynamic hot-topic keywords with live user")
     p("    searches — the DB has no field that separates them. This is the KEY")
     p("    mode1 signal but it is SUGGESTIVE, not definitive.")
+    p("    BYPASS MECHANISM (Phase 1c static trace, DEFINITIVE from code): the opinion")
+    p("    reject (_reject_title_reason) is wired ONLY into _accept_fallback_candidate,")
+    p("    called ONLY by the naver_fallback / daum_fallback HTML scrapers. The PRIMARY")
+    p("    collectors (naver_api, google_rss window ladder, forced_google_rss) build the")
+    p("    selected item with the M17b relevance filter ONLY and NEVER call the reject.")
+    p("    => any B1 row whose collection_source is NOT naver_fallback/daum_fallback")
+    p("    (i.e. naver_api / google_rss / forced_search_fallback above) is a row the")
+    p("    reject NEVER saw — the src cross-tab above is the data-side confirmation.")
 
     # ---- SECTION 4: MODE2 TOKEN CLASSIFICATION (advisory) ----------------------
     unknown_counter = {}
@@ -706,6 +837,61 @@ def main(argv=None) -> int:
             p("    (none)")
         for tok, n in items:
             p(f"    {tok}  (x{n})  e.g. {unknown_example.get(tok, '')}")
+
+    # ---- SECTION 6: DRY-RUN of the PROPOSED opinion-genre rule (SIMULATION) -----
+    p("")
+    p("=== SECTION 6 — DRY-RUN: PROPOSED opinion-genre rule (SIMULATION ONLY) ===")
+    p("*** NOT wired to production — this only shows what a proposed rule WOULD do. ***")
+    p("Rule: fires on byline-opinion brackets (ends-with 칼럼/시선/직썰/정조준, or an")
+    p("explicit column set) AFTER hard-excluding factual/curation + generic corners.")
+
+    # (1) WOULD-NEWLY-BLOCK — PROPOSED fires AND the live opinion-reject does NOT.
+    dry_newblock.sort(key=lambda d: str(d["created_at"]))
+    newblock_post = [d for d in dry_newblock if d["era"] == "post"]
+    p("")
+    p(f"(1) WOULD-NEWLY-BLOCK: {len(dry_newblock)} rows "
+      f"(post-{COLUMN_FILTER_SHIP_DATE} = {len(newblock_post)} — the ones that matter now)")
+    p("    id | created_at | era | reason | title")
+    if not dry_newblock:
+        p("    (none)")
+    for d in dry_newblock:
+        p(f"    {d['id']} | {_date10(d['created_at'])} | {d['era']} | {d['reason']} | "
+          f"{str(d['title'])[:70]}")
+
+    # (2) FACTUAL-KEEP SAFETY CHECK — the rule must fire on ZERO factual rows.
+    p("")
+    p(f"(2) FACTUAL-KEEP SAFETY CHECK: {dry_factual_total} rows carry a FACTUAL-KEEP "
+      f"bracket token; PROPOSED rule fired on {len(dry_factual_violations)} of them.")
+    if not dry_factual_violations:
+        p("    OK — the rule blocks ZERO factual/curation rows. Safe on this axis.")
+    else:
+        p("    !!! RULE BUG — the PROPOSED rule would block FACTUAL rows below. FIX")
+        p("    the rule BEFORE shipping (a source like [정책브리핑] must never block):")
+        for d in dry_factual_violations:
+            p(f"    id={d['id']} reason={d['reason']} title={str(d['title'])[:70]}")
+
+    # (3) STILL-UNBLOCKED (post-era) — opinion-ish B2 UNCLASSIFIED rows the rule
+    # deliberately leaves to the verdict layer.
+    still = []
+    for fr in flagged_rows:
+        if filter_era(fr["created_at"]) != "post":
+            continue
+        if fr["info"]["reject_reason"] is not None:       # B2 only (filter passes)
+            continue
+        if row_mode2_class(fr["info"]) != "UNCLASSIFIED":
+            continue
+        if PROPOSED_OPINION_RULE(fr["title"]):            # not left-unblocked if rule fires
+            continue
+        still.append(fr)
+    p("")
+    p(f"(3) STILL-UNBLOCKED (post-{COLUMN_FILTER_SHIP_DATE}, old UNCLASSIFIED the rule "
+      f"does NOT block): {len(still)} rows — consciously left to the verdict layer.")
+    p("    id | token(s) | title")
+    if not still:
+        p("    (none)")
+    for fr in still:
+        toks = "+".join(fr["info"]["unknown_tokens"]) or "(none)"
+        p(f"    {fr['id']} | {toks} | {str(fr['title'])[:70]}")
 
     # ---- SECTION 5: FAITHFULNESS + SUMMARY -------------------------------------
     p("")
@@ -752,6 +938,17 @@ def main(argv=None) -> int:
     p(f"distinct mode2 tokens: {len(unknown_counter)}  "
       f"(OPINION={len(grouped['OPINION'])}, FACTUAL-KEEP={len(grouped['FACTUAL-KEEP'])}, "
       f"UNCLASSIFIED={len(grouped['UNCLASSIFIED'])})")
+    p("")
+    p(f"PROPOSED-RULE DRY-RUN (Section 6, simulation): would-newly-block = "
+      f"{len(dry_newblock)} (post-{COLUMN_FILTER_SHIP_DATE} = {len(newblock_post)}); "
+      f"factual-safety violations = {len(dry_factual_violations)} "
+      f"({'OK' if not dry_factual_violations else 'RULE BUG — see Section 6'}); "
+      f"still-unblocked(post) = {len(still)}.")
+    p("BYPASS (Part A trace): the opinion reject runs ONLY on the naver_fallback/")
+    p("daum_fallback scrapers (via _accept_fallback_candidate); the primary naver_api")
+    p("+ google_rss paths never call it -> B1_post rows leaked through a primary path.")
+    p("A real fix must WIRE the reject into the primary selection, not just grow the")
+    p("marker list. (Fix is a separate milestone; this probe changes nothing.)")
 
     p("\n[Safety] READ-ONLY probe — no rows written, updated, or deleted.")
     return 0
