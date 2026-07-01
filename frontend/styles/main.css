@@ -2362,9 +2362,12 @@
        multi-column auto-fill grid of boxed cards). Cards stack full-width; a
        hairline rule between them replaces the box chrome. Per-domain multi-column
        section layouts are a later milestone (C-3). */
+    /* C3-1: post-hero feed is now a uniform 3-column grid (was a 1-col divider list).
+       Collapses to 1fr at <=960px via the shared media group below. */
     .topic-card-grid {
       display: grid;
-      grid-template-columns: 1fr;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 20px 24px;
     }
 
     /* DESIGN-C1: borderless editorial row — the box chrome (border / radius /
@@ -2409,6 +2412,33 @@
       background: #f7faff;
       margin: 0 -12px;
       padding: 16px 12px 16px 9px;
+    }
+
+    /* C3-1: light-bordered card INSIDE the 3-col grid (scoped so the divider-list
+       .topic-card look elsewhere — hero band, per-domain .latest-checks-row — is
+       untouched). Neutralizes the divider-list border-bottom (the shorthand border
+       covers all sides) and the hover margin:0 -12px bleed (which would collide with
+       grid tracks). Reuses existing tokens; no new colors. */
+    .topic-card-grid > .topic-card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      padding: 16px;
+    }
+    .topic-card-grid > .topic-card:hover {
+      margin: 0;
+      padding: 16px;
+      background: var(--surface-soft);
+      border-color: var(--brand);
+    }
+    /* .selected inside the grid → a full brand border with a thicker 3px left accent
+       + faint tint, no negative-margin bleed (adapts the divider-list left-bar marker
+       to a bordered card). */
+    .topic-card-grid > .topic-card.selected {
+      margin: 0;
+      padding: 16px;
+      border: 1px solid var(--brand);
+      border-left-width: 3px;
+      background: #f7faff;
     }
 
     /* DESIGN-C2: editorial top band — the hero (left, 1.6fr) + a secondary card

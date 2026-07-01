@@ -2359,24 +2359,17 @@
       const heroKeys = new Set(hot.slice(0, 2).map((c) => c.key));
       const poolBase = filtered.filter((c) => !heroKeys.has(c.key));
       const poolSorted = sortTopicCards(poolBase, activeSort);
-      const cardRow3 = poolSorted.slice(0, 3);
-      const listPool = poolSorted.slice(3);
-      const listTotal = Math.min(REMAINDER_CAP, listPool.length);
-      const listShown = Math.min(tier1VisibleCount, listTotal);
+      // C3-1: ONE uniform 3-col grid of the FULL post-hero pool (pagination is C3-2 —
+      // no 12-cap this step; the grid shows every post-hero card, still ≤48 since the
+      // server pool is ≤50). gridPool = poolSorted (filtered MINUS the 2 hero cards,
+      // already sorted by activeSort so the sort dropdown still drives grid order).
+      const gridPool = poolSorted;
 
-      // 3-col card row, reusing .latest-checks-row + the current card call verbatim.
-      // Gated on length → "있는 만큼만" (0 cards omits the row entirely).
-      const cardGrid = (cards) => cards.length
-        ? `<div class="latest-checks-row">`
-          + cards.map((card) => renderTopicCardHtml(card, { detailed: true })).join("")
-          + `</div>`
-        : "";
-
-      // DESIGN-C3h-1d: hero band + 오늘의 검증 render into #hotTopicsTop (above the
-      // static sort row); the card-row + 1-col list render into #hotTopics (below it).
-      // Grey 1px var(--line) dividers come from .feed-sec-ruled wrappers, emitted ONLY
-      // with their section so no orphan rule shows when a section is empty. The list is
-      // wrapped in .feed-list so the Fix-2 max-width selector targets only list cards.
+      // Hero band → #hotTopicsTop (UNCHANGED: hot[0] {hero} + hot[1] {secondary}); the
+      // uniform grid → #hotTopics.topic-card-grid via the ORDINARY card builder
+      // ({detailed:true} only — no hero/secondary), written straight in with NO
+      // .feed-sec-ruled / .latest-checks-row / .feed-list wrappers (the container IS
+      // the 3-col grid now).
       if (!hot.length) {
         hotTopicsTopEl.innerHTML = "";
         hotTopicsEl.innerHTML = '<div class="empty-state">검색을 실행하거나 최근 분석을 불러오면 검증 카드가 표시됩니다.</div>';
@@ -2385,62 +2378,35 @@
           + renderTopicCardHtml(hot[0], { detailed: true, hero: true })
           + renderTopicCardHtml(hot[1], { detailed: true, secondary: true })
           + `</div>`;
-        // DESIGN-C3h-3: #hotTopicsTop holds ONLY the hero band now (the 오늘의 검증 row
-        // was removed; today cards flow into the feed below carrying the per-card badge).
         hotTopicsTopEl.innerHTML = band;
-
-        // first-3 card row (no header) + the 1-col list, each ruled + gated.
-        const cardsRow = cardRow3.length
-          ? `<div class="feed-sec-ruled">` + cardGrid(cardRow3) + `</div>`
-          : "";
-        const listHtml = listPool
-          .slice(0, listShown)
+        hotTopicsEl.innerHTML = gridPool
           .map((card) => renderTopicCardHtml(card, { detailed: true }))
           .join("");
-        const listSection = listHtml
-          ? `<div class="feed-sec-ruled feed-list">` + listHtml + `</div>`
-          : "";
-        hotTopicsEl.innerHTML = cardsRow + listSection;
       } else {
-        // <2 fallback — a single card renders as the hero alone (no rows/list).
+        // <2 fallback — a single card renders as the hero alone (no grid below).
         hotTopicsTopEl.innerHTML = renderTopicCardHtml(hot[0], { detailed: true, hero: true });
         hotTopicsEl.innerHTML = "";
       }
-      // 더 보기 reflects the LIST chunk only (hero + 오늘의 검증 + the card row are NOT counted).
-      updateTierButtons(hotTopicsLoadMoreEl, hotTopicsCollapseEl, listShown, listTotal, TIER1_INITIAL);
 
-      // DESIGN-C3h-2: tab branch for what follows the card-row/list +
-      // 이렇게 검증합니다.
-      //   전체  → per-domain grouped sections (browse-by-category); the long
-      //           나머지 뉴스 (#tier2Section) is HIDDEN + EMPTIED (replaced by them).
-      //   domain → no domain sections (#feedDomainSections emptied); the existing
-      //           나머지 뉴스 block runs as before. Switching tabs always clears the
-      //           other container, so no stale content lingers.
+      // C3-1: HIDE the tier-1 더보기/접기 — the grid shows the full pool now, so there is
+      // no paginator this step. The shells are KEPT (not deleted); C3-2 repurposes them
+      // as page-nav. No orphan 더보기. (updateTierButtons is intentionally not called.)
+      if (hotTopicsLoadMoreEl) hotTopicsLoadMoreEl.hidden = true;
+      if (hotTopicsCollapseEl) hotTopicsCollapseEl.hidden = true;
+
+      // C3-1: RETIRE the TIER-2 "나머지 뉴스" block on BOTH tabs — the domain grid now
+      // shows the full domain pool, so the separate tier is redundant. Kept hidden +
+      // emptied (shells preserved for C3-2). renderDomainSections stays 전체-only (C3-3
+      // handles gating); #verifyHowSection is untouched.
       if (activeDomain === "전체") {
         if (feedDomainSectionsEl) feedDomainSectionsEl.innerHTML = renderDomainSections(allCards);
-        if (tier2SectionEl) tier2SectionEl.hidden = true;
-        if (tier2GridEl) tier2GridEl.innerHTML = "";
       } else {
         if (feedDomainSectionsEl) feedDomainSectionsEl.innerHTML = "";
-        // TIER 2 — the pool overflow beyond the card row (3) + the list-window cap.
-        const tier2Pool = poolSorted.slice(3 + REMAINDER_CAP);
-        if (tier2SectionEl) {
-          if (!tier2Pool.length) {
-            tier2SectionEl.hidden = true;
-            if (tier2GridEl) tier2GridEl.innerHTML = "";
-          } else {
-            tier2SectionEl.hidden = false;
-            const tier2Shown = Math.min(tier2VisibleCount, tier2Pool.length);
-            if (tier2GridEl) {
-              tier2GridEl.innerHTML = tier2Pool
-                .slice(0, tier2Shown)
-                .map((card) => renderTopicCardHtml(card, { detailed: false }))
-                .join("");
-            }
-            updateTierButtons(tier2LoadMoreEl, tier2CollapseEl, tier2Shown, tier2Pool.length, TIER2_INITIAL);
-          }
-        }
       }
+      if (tier2SectionEl) tier2SectionEl.hidden = true;
+      if (tier2GridEl) tier2GridEl.innerHTML = "";
+      if (tier2LoadMoreEl) tier2LoadMoreEl.hidden = true;
+      if (tier2CollapseEl) tier2CollapseEl.hidden = true;
 
       // SIDEBAR-RANK: keep the 인기 검증 랭킹 panel in sync with the feed's data
       // lifecycle. Called here (rather than at the two renderHotTopics() call
