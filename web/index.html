@@ -2029,6 +2029,17 @@
       line-height: 1.25;
       font-weight: 700;
     }
+    /* VERIFY-STEPS-REDESIGN: title + one-line subtitle stack on the left; the
+       methodology link stays on the right of .verify-how-head. */
+    .verify-how-titles {
+      min-width: 0;
+    }
+    .verify-how-sub {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 0.92rem;
+      line-height: 1.45;
+    }
     .verify-how-link {
       color: var(--muted);
       font-size: 0.86rem;
@@ -2038,22 +2049,48 @@
     .verify-how-link:hover {
       color: var(--brand-ink);
     }
+    /* VERIFY-STEPS-REDESIGN: step / arrow / step / arrow / step so the flow arrows
+       sit BETWEEN the three steps. Arrows collapse (display:none) at the shared
+       <=960px breakpoint where the steps stack (see the media block below). */
     .verify-how-steps {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 18px;
+      grid-template-columns: 1fr auto 1fr auto 1fr;
+      align-items: start;
+      gap: 14px;
     }
     .verify-how-step {
       min-width: 0;
     }
-    /* Large, light brand-blue accent number (reads as a section accent, not a
-       feed item) — consistent with the mockup's 01/02/03. */
-    .verify-how-num {
+    /* 48px rounded-square icon tile — a white chip on the surface-soft box, thin
+       --line border, brand-colored inline-SVG line icon (stroke=currentColor). */
+    .verify-how-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: var(--radius-sm);
+      background: var(--paper);
+      border: 1px solid var(--line);
       color: var(--brand);
-      font-size: 1.846rem;
-      font-weight: 400;
-      line-height: 1.1;
-      margin-bottom: 6px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 10px;
+    }
+    /* small letter-spaced "STEP 01" eyebrow (replaces the big accent number). */
+    .verify-how-eyebrow {
+      color: var(--muted);
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      margin-bottom: 4px;
+    }
+    /* muted right-arrow connector, aligned to the icon-tile row. */
+    .verify-how-arrow {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      align-self: start;
+      margin-top: 14px;
+      color: var(--muted);
     }
     .verify-how-title {
       margin: 0 0 4px;
@@ -4534,6 +4571,12 @@
       .verification-grid {
         grid-template-columns: 1fr;
       }
+      /* VERIFY-STEPS-REDESIGN: the how-we-verify steps stack to one column here, so
+         hide the horizontal flow arrows (a sideways arrow between stacked steps reads
+         wrong). The steps read top-to-bottom instead. */
+      .verify-how-arrow {
+        display: none;
+      }
 
       /* DESIGN-C2b: the band has stacked to one column here, so drop the hero|
          secondary vertical rule (it would become a stray left border on the
@@ -4797,24 +4840,62 @@
              no data, no JS. Sits between the feed and "나머지 뉴스". The right link is a
              same-page jump to the existing long explainer section. Reuses existing
              tokens (--surface-soft / --brand / --line / --muted / --radius-sm). -->
+        <!-- VERIFY-STEPS-REDESIGN: icon tile + STEP eyebrow per step + arrow connectors
+             showing the 01→02→03 flow. Box kept; step copy unchanged. All icons are
+             INLINE SVG line icons (stroke=currentColor → brand via CSS), no images. -->
         <section id="verifyHowSection" class="verify-how" aria-label="이렇게 검증합니다">
           <div class="verify-how-head">
-            <h2>이렇게 검증합니다</h2>
+            <div class="verify-how-titles">
+              <h2>이렇게 검증합니다</h2>
+              <p class="verify-how-sub">뉴스 속 주장을 공식 1차 자료로 검증하는 3단계</p>
+            </div>
             <a class="verify-how-link" href="#methodology">검증 방법론 전체 →</a>
           </div>
           <div class="verify-how-steps">
             <div class="verify-how-step">
-              <div class="verify-how-num">01</div>
+              <div class="verify-how-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M7 3h7l4 4v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/>
+                  <path d="M14 3v4h4"/>
+                  <path d="M9 12h6"/>
+                  <path d="M9 16h5"/>
+                </svg>
+              </div>
+              <div class="verify-how-eyebrow">STEP 01</div>
               <h3 class="verify-how-title">주장 수집·분류</h3>
               <p class="verify-how-desc">온라인·제보·언론에서 확인이 필요한 주장을 모아 도메인별로 분류합니다.</p>
             </div>
+            <div class="verify-how-arrow" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 12h14"/>
+                <path d="M13 6l6 6-6 6"/>
+              </svg>
+            </div>
             <div class="verify-how-step">
-              <div class="verify-how-num">02</div>
+              <div class="verify-how-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="11" cy="11" r="6"/>
+                  <path d="M20 20l-3.6-3.6"/>
+                  <path d="M8.4 11l1.9 1.9 3.3-3.7"/>
+                </svg>
+              </div>
+              <div class="verify-how-eyebrow">STEP 02</div>
               <h3 class="verify-how-title">1차·공식 출처 대조</h3>
               <p class="verify-how-desc">정부·기관 원문과 공개 데이터를 직접 대조해 사실 여부를 확인합니다.</p>
             </div>
+            <div class="verify-how-arrow" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 12h14"/>
+                <path d="M13 6l6 6-6 6"/>
+              </svg>
+            </div>
             <div class="verify-how-step">
-              <div class="verify-how-num">03</div>
+              <div class="verify-how-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 3.5l2.5 5.1 5.6.8-4.05 3.95.96 5.6L12 16.4l-5.02 2.55.96-5.6L3.9 9.4l5.6-.8L12 3.5z"/>
+                </svg>
+              </div>
+              <div class="verify-how-eyebrow">STEP 03</div>
               <h3 class="verify-how-title">등급 판정·공개</h3>
               <p class="verify-how-desc">근거 등급과 판정을 출처 링크와 함께 공개하고, 새 사실이 나오면 정정합니다.</p>
             </div>
