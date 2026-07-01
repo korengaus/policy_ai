@@ -6535,29 +6535,43 @@
         showScreen("methodology");
       });
     });
-    // DESIGN-DETAIL-2: the brand/logo returns to the home screen — an obvious
-    // "back to home" affordance from the 검증 방법 page. preventDefault swaps the
-    // href="/" full reload for the lighter in-page toggle.
+    // DESIGN-DETAIL-2 / DESIGN-UNIFY: restore the FULL home feed and land on home.
+    // Shared by the header .brand-home logo AND the footer .footer-brand logo. The
+    // detail loaders narrow currentReportContext to the single opened card, so without
+    // clearCurrentReportContext() currentTopicCards() returns a 1-card pool and the
+    // feed stays narrowed; setActiveDomain("전체") repaints the full unfiltered feed;
+    // hideStatus()/v2ResetProgress() clear stale under-search banners. (The demote
+    // clear…HistoryState calls are intentionally omitted — the symmetric popstate
+    // router makes any residual entry harmless, and the demotes killed FORWARD.)
+    function goHome() {
+      clearCurrentReportContext();
+      hideStatus();
+      v2ResetProgress();
+      setActiveDomain("전체");
+      showScreen("home");
+      window.scrollTo(0, 0);
+    }
+    // Header logo: preventDefault swaps the href="/" full reload for the in-page toggle.
     const brandHomeEl = document.querySelector(".brand-home");
     if (brandHomeEl) {
       brandHomeEl.addEventListener("click", (event) => {
         event.preventDefault();
-        // DESIGN-DETAIL-3b (FIX A): restore the FULL home feed. The detail loaders
-        // narrow currentReportContext to the single opened card, so without this
-        // clear currentTopicCards() returns a 1-card pool and the feed stays narrowed.
-        // clearCurrentReportContext() nulls it → currentTopicCards falls back to the
-        // full serverHotTopicResults; setActiveDomain("전체") repaints the full
-        // unfiltered feed (the logo previously did NOT re-render). "전체" is the
-        // all-domain key (renderCategoryTabs / setActiveDomain). (FIX B) clear both
-        // under-search banners so the fresh home shows no stale message. (FIX C) the
-        // demote clear…HistoryState calls are dropped — the symmetric popstate router
-        // makes any residual entry harmless, and the demotes were killing FORWARD.
-        clearCurrentReportContext();
-        hideStatus();
-        v2ResetProgress();
-        setActiveDomain("전체");
-        showScreen("home");
-        window.scrollTo(0, 0);
+        goHome();
+      });
+    }
+    // DESIGN-UNIFY: footer logo (a <div>, no href) — same go-home behavior, no
+    // preventDefault needed. cursor:pointer is added in CSS so it reads as clickable.
+    const footerBrandEl = document.querySelector(".footer-brand");
+    if (footerBrandEl) {
+      footerBrandEl.addEventListener("click", () => {
+        goHome();
+      });
+    }
+    // DESIGN-UNIFY: "맨 위로" — smooth scroll to the top of the (long) detail screen.
+    const scrollTopLinkEl = document.getElementById("scrollTopLink");
+    if (scrollTopLinkEl) {
+      scrollTopLinkEl.addEventListener("click", () => {
+        window.scrollTo({ top: 0, behavior: "smooth" });
       });
     }
     if (categoryTabsEl) {

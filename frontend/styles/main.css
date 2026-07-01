@@ -745,8 +745,18 @@
       color: var(--brand-ink);
     }
 
+    /* DESIGN-UNIFY: scoped de-box of the detail wrapper ONLY. The shared boxed rule
+       (.panel,.metric,.result-card,.history-card at ~471) is LEFT INTACT for
+       .panel/.metric/.history-card; this same-specificity rule sits AFTER it so it
+       wins by source order and strips the box for .result-card alone. The inner blocks
+       (already border-top divider-list) become the visual structure; the headline-card
+       carries its own border-bottom, so the top still reads correctly. */
     .result-card {
-      padding: 18px;
+      background: transparent;
+      border: none;
+      border-radius: 0;
+      box-shadow: none;
+      padding: 0;
     }
 
     .card-top {
@@ -1737,27 +1747,50 @@
     }
     .recent-viewed-strip {
       display: flex;
-      gap: 12px;
+      gap: 0;                           /* the vertical hairline is the separator */
       overflow-x: auto;
       padding-bottom: 4px;              /* leave room for the horizontal scrollbar */
       -webkit-overflow-scrolling: touch;
     }
-    /* each item = a bordered mini-card (overrides the sidebar row-divider look). */
+    /* DESIGN-UNIFY: borderless divider-list look — no box; items separated by a thin
+       vertical hairline (like the feed hero band), horizontal scroll kept. */
     .recent-viewed-strip .recent-viewed-item {
       flex: 0 0 auto;
       width: 220px;
       align-items: stretch;
-      padding: 12px;
-      border: 1px solid var(--line);
-      border-radius: var(--radius-sm);
-      background: var(--paper);
+      padding: 6px 14px;
     }
+    .recent-viewed-strip .recent-viewed-item:not(:first-child) {
+      border-left: 1px solid var(--line);
+    }
+    .recent-viewed-strip .recent-viewed-item:first-child {
+      padding-left: 2px;                /* align the first item's text to the block edge */
+    }
+    /* divider-list hover, matching .history-row:hover (was a border/box hover). */
     .recent-viewed-strip .recent-viewed-item:hover {
-      border-color: var(--brand);
       background: var(--surface-soft);
     }
     @media (max-width: 640px) {
       .recent-viewed-strip .recent-viewed-item { width: 200px; }
+    }
+
+    /* DESIGN-UNIFY: quiet "back to top" text link at the detail bottom (not a heavy
+       button, not floating). Centered, muted, with a subtle hover emphasis. */
+    .scroll-top-link {
+      display: block;
+      width: 100%;
+      margin: 20px 0 8px;
+      padding: 8px 0;
+      border: none;
+      background: none;
+      color: var(--muted);
+      font-size: 0.9rem;
+      font-weight: 700;
+      text-align: center;
+      cursor: pointer;
+    }
+    .scroll-top-link:hover {
+      color: var(--brand-ink);
     }
 
     /* SIDEBAR-RANK-B2: the three sidebar panels below the ranking. All reuse the
@@ -3614,11 +3647,16 @@
       color: var(--ink);
     }
 
+    /* DESIGN-UNIFY: de-boxed to the divider-list look (was border+radius+paper box).
+       A thin --line TOP RULE bounds it like .plain-section, not a box. The <summary>
+       affordance (cursor/weight/marker/hover below) is UNTOUCHED — the toggle still
+       reads clickable. .adv-outer + the nested sub-sections keep their own overrides. */
     .collapsible-section {
-      border: 1px solid var(--line);
-      border-radius: var(--radius-sm);
-      background: var(--paper);
-      margin-top: 9px;
+      border: none;
+      border-top: 1px solid var(--line);
+      border-radius: 0;
+      background: transparent;
+      margin-top: 16px;
       overflow: hidden;
     }
 
@@ -4133,6 +4171,12 @@
       font-size: 1.9rem;
       font-weight: 800;
       letter-spacing: -0.02em;
+      /* DESIGN-UNIFY: clickable → home (same as the header logo; .brand already
+         provides inline-flex/align). */
+      cursor: pointer;
+    }
+    .footer-brand:hover {
+      opacity: 0.85;
     }
     .footer-desc {
       margin: 10px 0 0;
