@@ -483,10 +483,12 @@ _SELFTEST_CASES = [
      True, "DIRECT", True, "기고 IS a direct marker -> B1 (mode1 candidate)"),
     (512, "[보라매칼럼] 부동산 세제개편 논의가 시장에 던지는 신호를 읽는 법",
      True, "DIRECT", True, "칼럼 substring + opinion bracket -> B1 (mode1 candidate)"),
+    # Post COLUMN-LEAK fix: 전문가의 눈 / 규제의 역설 are NOW caught by the shipped
+    # genre rule (_has_opinion_bracket extension) -> DIRECT / B1 (were B2 pre-fix).
     (559, "[전문가의 눈] 농업위성 원년, 정밀농업 시대를 여는 정책 과제를 짚어본다",
-     True, "BRACKET", False, "전문가의 눈 NOT in marker set -> filter passes -> B2 (mode2)"),
+     True, "DIRECT", True, "전문가의 눈 now caught by the shipped genre rule -> B1"),
     (529, "[규제의 역설] 금리·전세·공급 정책이 서로 부딪칠 때 생기는 왜곡을 분석한다",
-     True, "BRACKET", False, "규제의 역설 NOT in marker set -> filter passes -> B2 (mode2)"),
+     True, "DIRECT", True, "규제의 역설 now caught by the shipped genre rule -> B1"),
 ]
 
 
@@ -583,12 +585,74 @@ def run_selftest() -> int:
         p(f"[{'PASS' if ok else 'FAIL'}] fires={got} (expect {expected}) "
           f"reason={proposed_fire_reason(title)!r}  ({note})")
 
+    # COLUMN-LEAK fix Phase 2 — LIVE oracle: assert the REAL post-edit
+    # news_collector._reject_title_reason drops the 14 opinion titles as
+    # "opinion_or_column" and KEEPS every factual/curation/generic-corner title.
+    # This is the definitive removal-free proof for the shipped genre rule.
+    opinion_drop = [
+        "[현장에서] 강남 아파트",
+        "[이송렬의 우주인] 늙으면 여기 살겁니다",
+        "[책의 향기] 파산이 예정된 청년들",
+        "[송윤주의 부동산생태계] 저축은행 대출 부실",
+        "[View] 부동산 표심",
+        "[아하대만] 독거노인",
+        "[서리풀 연구通] AI가 돌봄을",
+        "[임나래 직썰] 규제 이전에 신뢰",
+        "[양준서의 정조준] 닥치고 공급",
+        "주식 수익이 부동산으로[청계광장/박원갑]",
+        "[규제의 역설] 금리·전세·공급",
+        "[전문가의 눈] 농업위성 원년",
+        "[보라매칼럼] 부동산 세제개편",
+        "[기고] 비수도권 세제 차등",
+    ]
+    factual_keep = [
+        "[정책브리핑] 2026년 06월 08일 주요 정책",
+        "[단독] 이찬진 금감원장",
+        "[전문] 이승기 전세사기 혐의",
+        "[인터뷰] 동해시노인종합복지관 팀장",
+        "[밀착취재] 도시농업으로 키운 작물",
+        "[산업브리핑] 농협경제지주",
+        "[예산소식] 스마트농업 육성",
+        "[오늘의 정책 픽] 경기도 청년",
+        "[금융 Pick] KB국민·신한은행",
+        "정부, 화성 동탄·용인 기흥·구리 규제지역 지정",
+        "최저임금 심의 법정 시한 넘겨",
+        "[하반기 집값은①] 보유세 낮다",
+        "[6·27 대책 1년①] 빚내서 집 사는 시대",
+        "[서남권 부동산 들썩] 반도체 훈풍",
+        "[금융신상] 신한은행·농협은행",
+    ]
+    p("")
+    p("--- LIVE _reject_title_reason: OPINION-DROP (must == opinion_or_column) ---")
+    drop_fail = 0
+    for title in opinion_drop:
+        reason = _reject_title_reason(title)
+        ok = reason == "opinion_or_column"
+        if not ok:
+            drop_fail += 1
+            failures += 1
+        p(f"[{'PASS' if ok else 'FAIL'}] {reason!r} | {title[:45]}")
+    p(f"OPINION-DROP: {len(opinion_drop) - drop_fail}/{len(opinion_drop)} dropped as opinion_or_column")
+
+    p("")
+    p("--- LIVE _reject_title_reason: FACTUAL-KEEP (must != opinion_or_column) ---")
+    keep_fail = 0
+    for title in factual_keep:
+        reason = _reject_title_reason(title)
+        ok = reason != "opinion_or_column"
+        if not ok:
+            keep_fail += 1
+            failures += 1
+        p(f"[{'PASS' if ok else 'FAIL'}] {reason!r} | {title[:45]}")
+    p(f"FACTUAL-KEEP: {len(factual_keep) - keep_fail}/{len(factual_keep)} kept (not opinion_or_column)")
+
     p("")
     if failures:
         p(f"SELF-TEST FAILED: {failures} case(s) mismatched.")
         return 1
-    p("SELF-TEST PASSED: 4 observed ids (546/512 -> B1 mode1; 559/529 -> B2 mode2) "
-      "+ mode2 token classifier + filter_era date-split all correct.")
+    p("SELF-TEST PASSED: 4 observed ids (546/512/559/529 all -> B1 post-fix) "
+      "+ mode2 token classifier + filter_era date-split + LIVE OPINION-DROP (14/14) "
+      "+ LIVE FACTUAL-KEEP (15/15) all correct.")
     return 0
 
 

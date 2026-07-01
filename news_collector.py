@@ -154,12 +154,37 @@ OPINION_MARKERS = (
 _OPINION_BRACKET_TOKENS = ("칼럼", "시선", "시각", "창", "단상", "시평", "논단")
 _OPINION_BRACKET_RE = re.compile(r"[\[【][^\]】]*[\]】]")
 
+# COLUMN-LEAK fix: byline-opinion genre rule (dry-run validated: 12 opinion rows
+# blocked, 0 factual-keep, 4 generic corners deliberately kept). Applied per
+# bracket to the bracket-stripped inner text — in ADDITION to the substring
+# _OPINION_BRACKET_TOKENS check above. 칼럼/시선 are already caught elsewhere
+# (OPINION_MARKERS substring / _OPINION_BRACKET_TOKENS); listed here for clarity.
+_OPINION_BRACKET_SUFFIXES = ("칼럼", "시선", "직썰", "정조준")
+# Explicit byline/opinion corner labels. ASCII tokens are matched case-insensitively
+# (e.g. "View"/"VIEW" -> "view"); Korean tokens match as-is.
+_OPINION_BRACKET_EXPLICIT = frozenset({
+    "규제의 역설", "전문가의 눈", "view", "현장에서", "책의 향기", "아하대만",
+    "이송렬의 우주인", "서리풀 연구通", "송윤주의 부동산생태계", "임나래 직썰",
+    "양준서의 정조준", "주정완의 시선", "청계광장",
+})
+_OPINION_BRACKET_EXPLICIT_LOWER = frozenset(tok.lower() for tok in _OPINION_BRACKET_EXPLICIT)
+
 
 def _has_opinion_bracket(title: str) -> bool:
-    """True iff a bracketed segment of ``title`` contains an opinion token.
-    Bracket-scoped so 'mid-word' syllables like 창/시각 don't false-positive."""
+    """True iff a bracketed segment of ``title`` is an opinion/column label.
+    Bracket-scoped so 'mid-word' syllables like 창/시각 don't false-positive.
+    Pure over the title (no query, no logging)."""
     for chunk in _OPINION_BRACKET_RE.findall(title or ""):
         if any(tok in chunk for tok in _OPINION_BRACKET_TOKENS):
+            return True
+        # COLUMN-LEAK genre rule, on the bracket-stripped, whitespace-normalized inner.
+        inner = " ".join(chunk.strip("[]").strip("【】").split())
+        if not inner:
+            continue
+        if any(inner.endswith(suffix) for suffix in _OPINION_BRACKET_SUFFIXES):
+            return True
+        parts = [inner] + [seg.strip() for seg in inner.split("/")]
+        if any(part.lower() in _OPINION_BRACKET_EXPLICIT_LOWER for part in parts):
             return True
     return False
 
@@ -1101,6 +1126,17 @@ def search_google_news_rss_with_meta(query: str, max_results: int = 3):
             raw_results = relevant_raw
         else:
             raw_results = []
+    # COLUMN-LEAK fix (A1): wire the opinion reject into the PRIMARY google_rss pool
+    # (was only on the fallback scrapers). Covers recent_results / relaxed / unfiltered
+    # / forced_google_rss (all derive from raw_results). Placed AFTER M17b relevance so
+    # a dropped opinion piece leaves the remaining relevant candidates available. Guard
+    # is EXACTLY "opinion_or_column" — removal-free for non-opinion (obituary/too-short
+    # etc. are NOT dropped here). Silent drop, mirroring the M17b comprehension above.
+    if raw_results:
+        raw_results = [
+            item for item in raw_results
+            if _reject_title_reason(item.get("title", "")) != "opinion_or_column"
+        ]
     recent_results = [
         item for item in raw_results if is_recent(item.get("published", ""), days=RECENT_DAYS)
     ]
@@ -1165,6 +1201,15 @@ def search_google_news_rss_with_meta(query: str, max_results: int = 3):
             naver_items = [
                 item for item in naver_items
                 if _title_has_query_overlap(item.get("title", ""), query)
+            ]
+        # COLUMN-LEAK fix (A2): wire the opinion reject into the PRIMARY naver_api pool
+        # (id 512/546 leaked here). AFTER M17b relevance, BEFORE truncation, so a
+        # non-opinion item is promoted instead of the query going empty. Same guard
+        # (exactly "opinion_or_column") + silent drop as A1.
+        if naver_items:
+            naver_items = [
+                item for item in naver_items
+                if _reject_title_reason(item.get("title", "")) != "opinion_or_column"
             ]
         # Bypass the strict 30d is_recent gate for the primary tier (sort=date
         # already biases toward recency); M17b is the hard on-topic gate.
