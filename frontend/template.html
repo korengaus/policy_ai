@@ -660,6 +660,12 @@
       <div class="empty-state">분석을 실행하면 결과가 여기에 표시됩니다.</div>
     </section>
 
+    <!-- RECENT-VIEWED: "최근 본 검증" strip — filled by renderRecentViewed() with the
+         other cards the user has opened (current card excluded). Starts hidden; JS
+         removes [hidden] only when >=1 resolvable item exists. Sibling of #results /
+         #reportActions inside #detailScreen. -->
+    <section id="recentViewed" class="recent-viewed" hidden></section>
+
     <!-- DESIGN-DETAIL-4b FIX 4: the share/export utility (#reportActions) was moved
          out of the reader's lead down to the END of the detail, near 원문 보기/신고하기
          (rendered inside #results). A secondary utility belongs at the bottom. The id

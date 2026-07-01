@@ -1718,6 +1718,48 @@
       font-weight: 600;
     }
 
+    /* RECENT-VIEWED: "최근 본 검증" strip on the detail bottom (between #results and
+       #reportActions). A distinct block (thin top rule) holding a horizontal scroll
+       row of mini-cards that REUSE the sidebar .rank-row shape (.rank-domain /
+       .rank-title / .rank-verdict + verdictDotColor) — no new colors. Item selectors
+       are 2-class-scoped so they override the sidebar's vertical-divider .rank-row
+       rules (source order after them settles any tie). */
+    .recent-viewed {
+      margin-top: 22px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+    }
+    .recent-viewed-heading {
+      font-size: 0.98rem;
+      font-weight: 700;
+      color: var(--ink);
+      margin-bottom: 10px;
+    }
+    .recent-viewed-strip {
+      display: flex;
+      gap: 12px;
+      overflow-x: auto;
+      padding-bottom: 4px;              /* leave room for the horizontal scrollbar */
+      -webkit-overflow-scrolling: touch;
+    }
+    /* each item = a bordered mini-card (overrides the sidebar row-divider look). */
+    .recent-viewed-strip .recent-viewed-item {
+      flex: 0 0 auto;
+      width: 220px;
+      align-items: stretch;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: var(--paper);
+    }
+    .recent-viewed-strip .recent-viewed-item:hover {
+      border-color: var(--brand);
+      background: var(--surface-soft);
+    }
+    @media (max-width: 640px) {
+      .recent-viewed-strip .recent-viewed-item { width: 200px; }
+    }
+
     /* SIDEBAR-RANK-B2: the three sidebar panels below the ranking. All reuse the
        .rank-panel card chrome (shared tokens) so the four panels read as a
        consistent stack. New classes only; feed cards + .rank-panel untouched.

@@ -12,6 +12,10 @@
     const REVIEW_ACTION_KEY = "policy_ai_reviewer_actions";
     const LOCAL_HISTORY_LIMIT = 5;
     const REVIEW_QUEUE_LIMIT = 20;
+    // RECENT-VIEWED: NEW localStorage key for the detail-screen "최근 본 검증" strip
+    // (click history — distinct from the home search-history LOCAL_HISTORY_KEY above).
+    const RECENT_VIEWED_KEY = "policy_ai_recent_viewed_v1";
+    const RECENT_VIEWED_LIMIT = 8;
 
     // M17-search-quality: one-shot cleanup of the legacy storage key.
     // Idempotent — removeItem on a missing key is a no-op. Wrapped in
@@ -2474,6 +2478,43 @@
       `).join("");
     }
 
+    // RECENT-VIEWED: render the "최근 본 검증" strip on the detail screen. Reads the
+    // stored result_ids, EXCLUDES the currently-open id, resolves each against the
+    // serverHotTopicResults pool (skips stale ids no longer in the pool), and emits
+    // .rank-row items (reusing the sidebar row shape + the unified label/verdict
+    // helpers) carrying the same data-topic-* attrs so a click re-opens detail via
+    // openTopicCard. Section stays [hidden] unless >=1 resolvable OTHER card exists.
+    function renderRecentViewed(currentId) {
+      const el = document.getElementById("recentViewed");
+      if (!el) return;
+      const current = Number(currentId);
+      const ids = safeReadRecentViewed().filter((id) => id !== current);
+      const items = ids.map((id) => {
+        const idx = serverHotTopicResults.findIndex((r) => Number(r?.result_id) === id);
+        if (idx < 0) return "";  // stale id (pool refreshed) -> skip
+        const card = topicCardFromResult(serverHotTopicResults[idx], idx, "server");
+        return `
+        <div class="rank-row recent-viewed-item" data-topic-key="${escapeHtml(card.key)}" data-topic-source="${escapeHtml(card.source)}" data-topic-index="${escapeHtml(card.index)}" data-topic-record-id="${escapeHtml(card.recordId)}">
+          <div class="rank-body">
+            <span class="rank-domain">${escapeHtml(domainDisplayLabel(cardDomainKey(card)))}</span>
+            <span class="rank-title">${escapeHtml(card.title)}</span>
+            <span class="rank-verdict">
+              <span class="verdict-dot" style="background:${verdictDotColor(card.verdictLabel)}"></span>
+              <span class="rank-verdict-text">판정 ${escapeHtml(verdictLabelKo(card.verdictLabel))}</span>
+            </span>
+          </div>
+        </div>`;
+      }).filter(Boolean);
+      if (!items.length) {
+        el.innerHTML = "";
+        el.hidden = true;
+        return;
+      }
+      el.innerHTML = `<div class="recent-viewed-heading">최근 본 검증</div>`
+        + `<div class="recent-viewed-strip">${items.join("")}</div>`;
+      el.hidden = false;
+    }
+
     // SIDEBAR-RANK-B2: 이번 주 검증 현황 — fetch the read-only GET /stats once and
     // fill the three numbers + the MM.DD–MM.DD range. REAL counts only (no
     // hardcoded numbers). Fail-quiet: on any error the panel keeps its "–"
@@ -2638,6 +2679,45 @@
           return trimArrayPayload(parsed);
         },
       });
+    }
+
+    // RECENT-VIEWED: read/write/push for the detail-screen click history. Mirrors the
+    // safeReadLocalHistory / safeWriteLocalHistory pattern with the NEW key; the stored
+    // payload is a plain array of numeric result_ids (most-recent-first).
+    function safeReadRecentViewed() {
+      try {
+        const raw = safeStorage.get(RECENT_VIEWED_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return [];
+        return parsed.map((id) => Number(id)).filter((id) => Number.isFinite(id));
+      } catch (error) {
+        console.warn("safeReadRecentViewed parse failed; clearing storage", error);
+        safeStorage.remove(RECENT_VIEWED_KEY);
+        return [];
+      }
+    }
+
+    function safeWriteRecentViewed(ids) {
+      const capped = (Array.isArray(ids) ? ids : []).slice(0, RECENT_VIEWED_LIMIT);
+      const serialized = JSON.stringify(capped);
+      safeStorage.set(RECENT_VIEWED_KEY, serialized, {
+        onQuotaTrim(currentValue) {
+          const parsed = typeof currentValue === "string" ? JSON.parse(currentValue) : currentValue;
+          return trimArrayPayload(parsed);
+        },
+      });
+    }
+
+    // Record an opened card at the FRONT (dedupe-to-front, cap 8). The just-opened id
+    // is stored; renderRecentViewed excludes it from what it DISPLAYS, so the current
+    // card never appears in its own strip while remaining recorded for the next detail.
+    function pushRecentViewed(id) {
+      const numId = Number(id);
+      if (!Number.isFinite(numId)) return;
+      const next = [numId, ...safeReadRecentViewed().filter((existing) => existing !== numId)]
+        .slice(0, RECENT_VIEWED_LIMIT);
+      safeWriteRecentViewed(next);
     }
 
     function safeReadReviewQueue() {
@@ -4918,7 +4998,6 @@
           <div class="history-id">#${escapeHtml(index + 1)}</div>
           <div>
             <strong>${escapeHtml(row.query || row.title || "분석 기록")}</strong>
-            ${selected ? '<span class="current-badge">현재 표시 중</span>' : ""}
             <div class="history-meta">
               <span class="label">뉴스 개수:</span> ${escapeHtml(row.max_news ?? "-")}
               &nbsp; <span class="label">최고 경고:</span> ${escapeHtml(formatAlert(alert))}
@@ -6675,6 +6754,17 @@
         openTopicCard(card);
       });
     }
+    // RECENT-VIEWED: the strip items carry the same data-topic-* attrs as feed/sidebar
+    // rows, so this delegated listener reuses openTopicCard verbatim (re-opens detail +
+    // records the click + pushDetailHistoryState). Same closest() pattern as above.
+    const recentViewedEl = document.getElementById("recentViewed");
+    if (recentViewedEl) {
+      recentViewedEl.addEventListener("click", (event) => {
+        const card = event.target.closest("[data-topic-source]");
+        if (!card) return;
+        openTopicCard(card);
+      });
+    }
     // SIDEBAR-RANK-B2: 제보 — open a mailto to the REAL contact address with the
     // typed claim/link as the body (mirrors the per-analysis error-report mailto).
     // NO backend write, NO live-analysis trigger. Empty input still opens a blank
@@ -7910,6 +8000,9 @@
           hideStatus();
           return;
         }
+        // RECENT-VIEWED: record this successful card open (dedupe-to-front, cap 8).
+        // Only fires here (after the load succeeds), never on a failed deep-link.
+        pushRecentViewed(resultId);
         selectedResultIndex = null;
         activeTopicKey = "";
         setCurrentReportContext(
@@ -7920,6 +8013,8 @@
           inflated.ai_status
         );
         renderResults(results);
+        // RECENT-VIEWED: repaint the strip with the OTHER opened cards (current excluded).
+        renderRecentViewed(resultId);
         // DESIGN-DETAIL-3: switch to the detail SCREEN at its top (no jump-scroll).
         // BEFORE showStatus so the confirmation below survives (showScreen calls
         // hideStatus for non-home screens). Replaces the old resultsEl.scrollIntoView.
