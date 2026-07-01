@@ -567,13 +567,14 @@
          13px inside .panel. CSS offset only (no markup move); the absolute overlay +
          the showStatus/#v2ProgressWrap mutual-exclusion are unchanged. */
       padding-left: 13px;
-      /* LABEL-1b STEP 2: vertically center the message in the gap between the
-         search-box bottom (top:100%) and the black divider rule (.domain-tabs-row::before,
-         which sits ~40-42px below the search-box bottom: ~12px topbar lower-half +
-         14px .topbar margin-bottom + 8px .domain-tabs-row margin-top + 8px ::before
-         top offset). A ~14px top offset centers the 13px line mid-gap (was 4px = pinned
-         to the top, too close to the search box). Overlay stays zero-flow. */
-      margin-top: 14px;
+      /* LABEL-1c STEP 3: EXACT vertical centering, recomputed from the real box model.
+         Gap G (top:100% anchor -> black rule .domain-tabs-row::before) = space-below-panel
+         (~(title-block 62px - panel 44px)/2 ≈ 9px) + 14px (.topbar margin-bottom) + 8px
+         (.domain-tabs-row margin-top) + 8px (::before top). Box-model ≈39px, but the prior
+         14px read as nearly touching the rule, pinning the real rule at ≈33px — so G≈33.
+         Text line-box H = 13px × 1.2 (inherited normal line-height) ≈ 15.6px.
+         margin-top = (G - H)/2 = (33 - 15.6)/2 ≈ 8px (was 14px = too low). */
+      margin-top: 8px;
       display: none;
       color: #334155;
       font-size: 13px;
@@ -599,7 +600,11 @@
     .v2-progress-wrap {
       position: absolute;
       top: 100%;
-      left: 0;
+      /* LABEL-1c STEP 2: left edge aligned to the search input's left border (13px =
+         .controls 1px border + div:first-child 12px padding-left; #query has padding-left:0
+         + border:none, so its left edge is at 13px). Was left:0, which overshot the input
+         on the left. Right stays flush with the bar's right edge. Height/behavior unchanged. */
+      left: 13px;
       right: 0;
       margin-top: 4px;
       display: flex;
@@ -4198,7 +4203,9 @@
       background: transparent;
       padding: 12px 0;
       margin-top: 0;
-      font-size: 14px;
+      /* LABEL-1c STEP 1: calm the row text to the 정정·업데이트 tone (was 14px). */
+      font-size: 0.86rem;
+      color: var(--slate);
       cursor: pointer;
       transition: background 120ms ease;
     }
@@ -4216,15 +4223,48 @@
       background: #eff6ff;
     }
 
+    /* LABEL-1c STEP 1: the #N index — quiet muted (was #334155/900), matching the
+       .corrections-date tone. */
     .history-id {
-      color: #334155;
-      font-weight: 900;
+      color: var(--muted);
+      font-weight: 700;
+      font-size: 0.86rem;
     }
 
     .history-meta {
       margin-top: 6px;
       color: var(--muted);
       line-height: 1.55;
+    }
+
+    /* LABEL-1c STEP 1: saved-analysis title — modest emphasis matching .corrections-title
+       (0.95rem/700/--ink), NOT the old heavy bold-tag look. Only the title <strong>
+       (the .history-meta below carries no <strong>). */
+    .history-row strong {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--ink);
+    }
+    /* meta field labels (뉴스 개수: / 최고 경고: …) softened 800 -> 600; values stay
+       normal weight (~400). Scoped to .history-meta so the shared generic .label
+       (weight 800) elsewhere is untouched. */
+    .history-meta .label {
+      font-weight: 600;
+    }
+    /* row status chips kept but quieted (small, light) so they don't shout. Both
+       scoped to the recent-analyses rows only; the shared .review-status-badge used
+       in the detail/reviewer UI keeps its louder style. */
+    .history-row .current-badge {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 1px 7px;
+    }
+    .history-meta .review-status-badge {
+      background: var(--surface-soft);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 7px;
     }
 
     .history-actions {
