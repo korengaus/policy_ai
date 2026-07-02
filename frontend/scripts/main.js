@@ -1655,8 +1655,10 @@
         return `
           <details class="adv-cand">
             <summary class="adv-cand-summary">
-              <span class="adv-cand-trace ${escapeHtml(trace.className)}">${escapeHtml(trace.label)}</span>
-              <span class="adv-cand-line">${escapeHtml(summaryText)}</span>
+              <span class="adv-cand-summary-inner">
+                <span class="adv-cand-trace ${escapeHtml(trace.className)}">${escapeHtml(trace.label)}</span>
+                <span class="adv-cand-line">${escapeHtml(summaryText)}</span>
+              </span>
             </summary>
             <div class="adv-cand-body">
               <div class="source-candidate-title">${titleHtml}</div>

@@ -3970,15 +3970,28 @@
       color: var(--brand-ink);
       text-decoration: underline;
     }
+    /* SUMMARY-FLEX-FIX: the <summary> keeps its DEFAULT (list-item) display so it stays
+       a valid <details> disclosure control — a flex/grid/contents summary can stop being
+       recognized as the control and vanish when the <details> is closed (the
+       DESIGN-DETAIL-5f rule documented above). The row layout moved to the inner
+       .adv-cand-summary-inner wrapper; the disclosure marker is suppressed the SAME way
+       the working .review-tools-details > summary does it (list-style:none +
+       ::-webkit-details-marker) so the prior no-triangle flex look is unchanged. Pure
+       structural correctness — appearance identical. */
     .adv-cand-summary {
       cursor: pointer;
+      padding: 9px 0;
+      font-size: 0.923rem;
+      list-style: none;
+    }
+    .adv-cand-summary::-webkit-details-marker {
+      display: none;
+    }
+    .adv-cand-summary-inner {
       display: flex;
       flex-wrap: wrap;
       align-items: baseline;
       gap: 6px 10px;
-      padding: 9px 0;
-      font-size: 0.923rem;
-      list-style-position: inside;
     }
     .adv-cand-summary:hover { color: var(--brand-ink); }
     .adv-cand-trace { font-weight: 700; font-size: 0.8rem; }
