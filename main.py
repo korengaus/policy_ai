@@ -64,7 +64,7 @@ from policy_scoring import calibrate_final_decision
 from topic_classifier import classify_policy_topic
 import domain_classifier
 from timeline import print_timeline_summary
-from verification_card import build_verification_card, print_verification_card
+from verification_card import build_verification_card, print_verification_card, _verdict_label
 from pipeline_debug import build_pipeline_debug_summary
 from text_utils import sanitize_data, sanitize_text
 
@@ -965,6 +965,28 @@ def _process_news_item_phase_a(
                 decision_reasons.append(reason)
         final_decision["decision_reasons"] = decision_reasons
         verification_card["verdict_confidence"] = policy_confidence["policy_confidence_score"]
+        # CLABEL-FIX: the label was computed inside build_verification_card from the
+        # PRE-clamp confidence, so a supportive label (both gates need >=60/>=85) could
+        # survive next to the clamped <=20 score (measured: 24 stored rows, 24/24
+        # reconstruct to draft_unverified). Recompute it here from the POST-clamp
+        # signals with the REAL _verdict_label — downgrade-only by construction: the
+        # supportive gates are blocked (strength=="none", score<=20) and the
+        # conflict/contradiction/bias gates read inputs the clamp does not touch, so
+        # they fall through exactly as they did at build time. official_sources=[] is
+        # provably irrelevant (strength=="none" short-circuits) and matches the clamp's
+        # meaning ("no usable official evidence"). Guarded on the supportive tiers so
+        # every already-honest clamped row stays byte-identical. NEW-rows-only; no
+        # score/box/has_genuine change; truth_claim/operator_review_required untouched.
+        if verification_card.get("verdict_label") in {"draft_verified", "draft_likely_true"}:
+            verification_card["verdict_label"] = _verdict_label(
+                policy_confidence,
+                evidence_comparison,
+                [],
+                evidence_snippets=evidence_snippets,
+                contradiction_summary=contradiction_summary,
+                bias_framing_summary=bias_framing_summary,
+                claim_count=len(verification_card.get("claims") or []),
+            )
 
     # M11.0d-3b (NARROW Strategy A): codification point. P2 is the
     # authoritative producer of policy_alert_level. P1's value
