@@ -7977,12 +7977,21 @@
       // sort dropdown still drives grid order). Only the grid pages — the hero band
       // (hot[0]/hot[1], fixed 뜨는순) is independent of currentPage.
       const gridPool = poolSorted;
-      // Pages over the post-hero pool. Self-CLAMP currentPage: an async /history
-      // re-render can shrink the pool while a page is retained (e.g. after a detail
-      // BACK), so heal a now-out-of-range page HERE rather than at every caller.
+      // Pages over the post-hero pool. DESIGN-C3-2-FIX (BUG 1): the clamp must NOT be
+      // destructive on a NARROWED render. Opening a card calls renderResults(results) →
+      // renderHotTopics(results): currentTopicCards returns that 1-card pool → gridPool
+      // is empty → totalPages 1 → the old `currentPage = clamp(...)` forced currentPage
+      // to 1, so browser BACK always landed on page 1. Fix: only HEAL currentPage on a
+      // genuine home-feed render (no preferredResults — setActiveDomain / sort / page
+      // click / popstate-home / init / async server-fill all call renderHotTopics() with
+      // NO args); a narrowed/transient render leaves currentPage untouched so it survives
+      // the detail round-trip. Slice + nav always use a LOCAL effectivePage, so no render
+      // is ever out of range even before the heal (covers the async pool-shrink case too).
       const totalPages = Math.max(1, Math.ceil(gridPool.length / PAGE_SIZE));
-      currentPage = Math.min(Math.max(1, currentPage), totalPages);
-      const pageSlice = gridPool.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+      const isHomeFeedRender = !(Array.isArray(preferredResults) && preferredResults.length);
+      if (isHomeFeedRender) currentPage = Math.min(Math.max(1, currentPage), totalPages);
+      const effectivePage = Math.min(Math.max(1, currentPage), totalPages);
+      const pageSlice = gridPool.slice((effectivePage - 1) * PAGE_SIZE, effectivePage * PAGE_SIZE);
 
       // Hero band → #hotTopicsTop (UNCHANGED: hot[0] {hero} + hot[1] {secondary}); the
       // uniform grid → #hotTopics.topic-card-grid via the ORDINARY card builder
@@ -8008,8 +8017,9 @@
       }
 
       // DESIGN-C3-2: render the page-number nav (prev / 1..N / next) below the grid.
-      // Empty when totalPages <= 1 (small pool → no nav shown).
-      renderFeedPagination(totalPages, currentPage);
+      // Empty when totalPages <= 1 (small pool → no nav shown). Uses effectivePage so the
+      // highlighted/active page always matches the rendered slice (BUG-1-FIX).
+      renderFeedPagination(totalPages, effectivePage);
 
       // C3-1: RETIRE the TIER-2 "나머지 뉴스" block on BOTH tabs — the domain grid now
       // shows the full domain pool, so the separate tier is redundant. Kept hidden +
@@ -12261,7 +12271,13 @@
         if (!Number.isFinite(target) || target === currentPage) return;
         currentPage = target;  // renderHotTopics self-clamps to [1, totalPages]
         renderHotTopics();
-        if (hotTopicsEl) hotTopicsEl.scrollIntoView({ behavior: "smooth", block: "start" });
+        // DESIGN-C3-2-FIX (BUG 2): scroll to the SORT row (.feed-sort-row sits above
+        // #hotTopics and below the hero band #hotTopicsTop) so the sort dropdown + grid
+        // land at the top of the viewport with the hero scrolled off above — was the
+        // grid's first card row, which pushed the sort above the fold. No sticky/fixed
+        // header anywhere → plain block:"start" needs no offset. Falls back to the grid.
+        const scrollTargetEl = document.querySelector(".feed-sort-row") || hotTopicsEl;
+        if (scrollTargetEl) scrollTargetEl.scrollIntoView({ behavior: "smooth", block: "start" });
       });
     }
     // HISTORY-BACK: minimal browser-history layer for the in-page detail view.
