@@ -149,6 +149,7 @@
     const hotTopicsTopEl = document.getElementById("hotTopicsTop");
     // DESIGN-C3h-2: per-domain grouped sections container (filled on the 전체 tab only).
     const feedDomainSectionsEl = document.getElementById("feedDomainSections");
+    const verifyHowEl = document.getElementById("verifyHowSection");
     // SIDEBAR-RANK: 인기 검증 랭킹 list container in the right sidebar (.home-aside).
     const rankListEl = document.getElementById("rankList");
     // SIDEBAR-RANK-B2: weekly-stats panel numbers + range; 제보 input/button.
@@ -2408,6 +2409,9 @@
       } else {
         if (feedDomainSectionsEl) feedDomainSectionsEl.innerHTML = "";
       }
+      // C3-3: the "이렇게 검증합니다" intro box is a site intro → 전체 tab only, hidden on
+      // domain tabs. Mirrors the per-domain-section 전체-only gate above.
+      if (verifyHowEl) verifyHowEl.hidden = activeDomain !== "전체";
       if (tier2SectionEl) tier2SectionEl.hidden = true;
       if (tier2GridEl) tier2GridEl.innerHTML = "";
       if (tier2LoadMoreEl) tier2LoadMoreEl.hidden = true;
