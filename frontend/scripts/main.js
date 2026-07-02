@@ -1184,18 +1184,14 @@
     }
 
     function renderSourceQueries(sourceQueries) {
-      const list = Array.isArray(sourceQueries) ? sourceQueries.slice(0, 8) : [];
-      if (!list.length) {
-        return '<div class="evidence-source-meta">생성된 출처 검색 쿼리가 없습니다.</div>';
-      }
-
-      return `<div class="source-query-list">${list.map((query) => `
-        <div>
-          <span class="label">claim #${escapeHtml(Number(query.claim_index ?? 0) + 1)}</span>
-          · ${escapeHtml(formatSourcePurpose(query.purpose))}
-          · ${escapeHtml(query.query || "-")}
-        </div>
-      `).join("")}</div>`;
+      // DISPLAY-HONESTY (②): the generated search queries (source_queries[].query, e.g.
+      // "site:molit.go.kr OR site:moef.go.kr ...") are INTERNAL system queries, not
+      // user-facing evidence or claim text, so they are no longer rendered. Display-only:
+      // source_queries is still stored/persisted unchanged — only this sub-section stops
+      // surfacing it. The enclosing "출처와 공식 근거" section keeps its reliability summary
+      // and candidate list. formatSourcePurpose stays defined (used elsewhere).
+      void sourceQueries;
+      return "";
     }
 
     function formatEvidenceType(value) {
@@ -1940,7 +1936,7 @@
       // renders its full summary via a separate path (contentLead), unaffected.
       const line = userFacingReportText(exportClaimText(result) || decision.decision_summary || verification.evidence_summary || "", "");
       if (line) return String(line).slice(0, 115);
-      return evidenceQualityExplanation(quality, debug.evidence_strength_summary || {});
+      return evidenceQualityExplanation(quality, debug.evidence_strength_summary || {}, officialEvidenceIsGenuine(verification.source_reliability_summary || {}, debug));
     }
 
     // NARRATIVE-3B: strip the repeated cautious wrapper from the CARD FACE summary
@@ -3727,13 +3723,31 @@
       return "자료 부족: 점수 산정에 필요한 근거가 충분하지 않습니다.";
     }
 
-    function evidenceQualityExplanation(quality, strength) {
+    // DISPLAY-HONESTY (①): the SAME genuine-official predicate the "공식 근거 확인" /
+    // "공식자료 참고" box uses (officialStatusLabel, ~L1908): the persisted
+    // has_genuine_official_support boolean, else the old-row body-match fallback. Reused
+    // to gate affirmative official-evidence COPY so it never over-claims strong official
+    // evidence on a non-genuine row. Reads only — no stored field / score / verdict change.
+    function officialEvidenceIsGenuine(summary, debug) {
+      const s = summary || {};
+      const d = debug || {};
+      return (typeof s.has_genuine_official_support === "boolean")
+        ? s.has_genuine_official_support
+        : (Number(d.official_body_matches || 0) > 0);
+    }
+
+    function evidenceQualityExplanation(quality, strength, genuine) {
       const avg = numberValue(quality?.average_evidence_quality_score, 0);
       const strong = numberValue(quality?.strong, 0);
       const medium = numberValue(quality?.medium, 0);
       const weak = numberValue(quality?.weak, 0);
       const strongStrength = numberValue(strength?.strong, 0);
-      if (strong > 0 && avg >= 75) {
+      // DISPLAY-HONESTY (①): only assert "강한 근거가 확인됐습니다" when the row is GENUINELY
+      // officially supported (same predicate as the official-status box). When genuine is
+      // explicitly false the affirmative is skipped and the copy reads honestly — consistent
+      // with a "공식자료 참고" box. A null/undefined genuine (callers that don't pass it)
+      // preserves the prior behavior byte-identically. Copy only; score/box/verdict untouched.
+      if (strong > 0 && avg >= 75 && genuine !== false) {
         return "주장과 출처가 잘 연결된 강한 근거가 확인됐습니다.";
       }
       if (strongStrength > 0 || medium > 0 || avg >= 45) {
@@ -4292,7 +4306,7 @@
       } else {
         bullets.push(`현재 단계는 ${formatAlert(level)}이며 최종 점수는 ${finalScore}점입니다.`);
       }
-      bullets.push(evidenceQualityExplanation(quality || {}, debugSummary?.evidence_strength_summary || {}));
+      bullets.push(evidenceQualityExplanation(quality || {}, debugSummary?.evidence_strength_summary || {}, officialEvidenceIsGenuine(sourceReliabilitySummary, debugSummary)));
       bullets.push(officialVerificationExplanation(sourceReliabilitySummary, debugSummary));
       bullets.push(contradictionExplanation(contradictionSummary));
       return bullets;
@@ -4387,7 +4401,7 @@
 
     function renderReadingGuide(context) {
       const officialText = officialVerificationExplanation(context.sourceReliabilitySummary, context.debugSummary);
-      const evidenceText = evidenceQualityExplanation(context.quality, context.strength);
+      const evidenceText = evidenceQualityExplanation(context.quality, context.strength, officialEvidenceIsGenuine(context.sourceReliabilitySummary, context.debugSummary));
       const contradictionText = contradictionExplanation(context.contradictionSummary);
       const confidenceScore = context.confidence?.policy_confidence_score ?? context.decision?.final_score ?? "-";
       // DETAIL-CLEANUP-V2: header removed — this guide now lives inside a collapsed
@@ -4440,7 +4454,7 @@
           <!-- DETAIL-CLEANUP-V2: 영향도/위험도 relocated here from the removed
                .headline-meta tiles so these fields stay visible on the page. -->
           <strong>영향도:</strong> ${escapeHtml(formatLevel(context.impact?.impact_level))} · <strong>위험도:</strong> ${escapeHtml(formatLevel(context.confidence?.risk_level))}
-          <br><strong>근거 품질:</strong> ${escapeHtml(evidenceQualityExplanation(context.quality, context.strength))}
+          <br><strong>근거 품질:</strong> ${escapeHtml(evidenceQualityExplanation(context.quality, context.strength, officialEvidenceIsGenuine(context.sourceReliabilitySummary, context.debugSummary)))}
           <br><strong>공식 출처 확인:</strong> ${escapeHtml(officialVerificationExplanation(context.sourceReliabilitySummary, context.debugSummary))}
           <br><strong>반박/모순 확인:</strong> ${escapeHtml(contradictionExplanation(context.contradictionSummary))}
         </div>
@@ -5685,7 +5699,7 @@
         exportLine(lines, `- 주요 정책 영향: ${policyImpactBullets(impact, decision).join(" / ")}`);
         exportLine(lines, `- 소비자 영향: ${consumerImpactBullets(impact).join(" / ")}`);
         exportLine(lines, `- 금융 시스템 영향: ${financialSystemBullets(impact).join(" / ")}`);
-        exportLine(lines, `- 근거 품질: ${evidenceQualityExplanation(evidence.quality, evidence.strength)}`);
+        exportLine(lines, `- 근거 품질: ${evidenceQualityExplanation(evidence.quality, evidence.strength, officialEvidenceIsGenuine(reliability, debug))}`);
         exportLine(lines, `- 공식 출처 확인: ${officialVerificationExplanation(reliability, debug)}`);
         exportLine(lines, `- 공식 상세문서 상태: ${officialDirectMatchLabel(reliability, debug)}`);
         exportLine(lines, `- 공식 직접 매칭 점수: ${plain(reliability.official_direct_match_score, 0)}`);
