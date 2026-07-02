@@ -1642,6 +1642,50 @@
       border-color: var(--brand);
     }
 
+    /* DESIGN-C3-2: page-number nav for the post-hero grid. The .hot-topics-load-more-wrap
+       already centers the row; this styles the nav's own gap + the number/prev/next
+       pills. Pills reuse the .hot-topics-load-more token family (light bordered brand).
+       The current page (.active) is brand-filled; disabled prev/next are muted + no
+       pointer. flex-wrap keeps it centered + tappable on narrow screens (min 38px tap). */
+    .feed-pagination {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      align-items: center;
+      gap: 6px;
+    }
+    .feed-pagination-btn {
+      min-width: 38px;
+      min-height: 38px;
+      padding: 6px 12px;
+      background: var(--paper);
+      color: var(--brand);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      font-size: 0.92rem;
+      font-weight: 600;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .feed-pagination-btn:hover:not(:disabled):not(.active) {
+      background: rgba(30, 95, 216, 0.06);
+      color: var(--brand-ink);
+      border-color: var(--brand);
+    }
+    .feed-pagination-btn.active {
+      background: var(--brand);
+      color: #fff;
+      border-color: var(--brand);
+      cursor: default;
+    }
+    .feed-pagination-btn:disabled {
+      color: var(--muted);
+      border-color: var(--line);
+      background: var(--paper);
+      opacity: 0.55;
+      cursor: default;
+    }
+
     /* DESIGN-3A: 2-column home body. LEFT = feed (.home-main); RIGHT = ~300px
        sidebar (.home-aside, empty placeholder until DESIGN-3B). minmax(0,1fr) on
        the content column keeps the inner .topic-card-grid from blowing the track
@@ -4861,8 +4905,10 @@
             <div class="empty-state">분석을 실행하거나 최근 분석을 불러오면 검증 뉴스 카드가 표시됩니다.</div>
           </div>
           <div class="hot-topics-load-more-wrap">
-            <button id="hotTopicsLoadMore" class="secondary hot-topics-load-more" type="button" hidden>더 보기</button>
-            <button id="hotTopicsCollapse" class="secondary hot-topics-load-more" type="button" hidden>접기</button>
+            <!-- DESIGN-C3-2: page-number nav (prev / 1..N / next) for the post-hero grid;
+                 filled by renderFeedPagination, empty when totalPages <= 1. Replaced the
+                 retired 더보기/접기 buttons; the centering wrap is reused. -->
+            <nav id="feedPagination" class="feed-pagination" aria-label="페이지"></nav>
           </div>
         </section>
 
@@ -5736,11 +5782,10 @@
     const reportClaimBtnEl = document.getElementById("reportClaimBtn");
     const categoryTabsEl = document.getElementById("categoryTabs");
     const hotTopicsSortEl = document.getElementById("hotTopicsSort");
-    const hotTopicsLoadMoreEl = document.getElementById("hotTopicsLoadMore");
-    // HOMEPAGE-TIERED: tier-1 collapse + tier-2 (concise "나머지 뉴스") elements.
-    // #domainSections is repurposed as the tier-2 card grid (was the retired
-    // per-domain browse-sections container).
-    const hotTopicsCollapseEl = document.getElementById("hotTopicsCollapse");
+    // DESIGN-C3-2: page-number nav container (replaced the dead 더보기/접기 buttons).
+    const feedPaginationEl = document.getElementById("feedPagination");
+    // HOMEPAGE-TIERED: tier-2 (concise "나머지 뉴스") elements. #domainSections is
+    // repurposed as the tier-2 card grid (was the retired per-domain sections).
     const tier2SectionEl = document.getElementById("tier2Section");
     const tier2GridEl = document.getElementById("domainSections");
     const tier2LoadMoreEl = document.getElementById("tier2LoadMore");
@@ -5764,22 +5809,14 @@
     // default "뜨는순" is a composite proxy: 위험도(alert) → freshness → 신뢰도
     // → recency tiebreak (stable sort preserves server id-DESC order).
     let activeSort = "뜨는순";
-    // HOMEPAGE-TIERED: two tiers drawn from one ranked array.
-    //   TIER 1 (지금 뜨는 이슈, full cards): 4 → +6 → cap 12, 접기 → 4.
-    //   TIER 2 (나머지 뉴스, concise): ranks beyond TIER1_CAP; 12 → +12, 접기 → 12.
-    const TIER1_INITIAL = 5;
-    const TIER1_CAP = 12;
-    const TIER1_STEP = 6;
-    const TIER2_INITIAL = 12;
-    const TIER2_STEP = 12;
-    // DESIGN-C3h-1: the feed now pulls hero(2) + 인기(3) = 5 cards OUT of the hot
-    // ranking into their own band/rows, so the 1-col "remainder" list governs the
-    // 더 보기 paginator. REMAINDER_CAP = TIER1_CAP - 5 keeps the 나머지 뉴스 boundary
-    // exactly where it was (old ranked[12]) under the default 뜨는순 sort.
-    // tier1VisibleCount is reused as the remainder visible count (initial 5, +6, cap 7).
-    const REMAINDER_CAP = TIER1_CAP - 5;
-    let tier1VisibleCount = TIER1_INITIAL;
-    let tier2VisibleCount = TIER2_INITIAL;
+    // DESIGN-C3-2: page-number pagination over the post-hero grid — 12 cards/page
+    // (3×4). currentPage is module state (survives a card-open → detail → BACK
+    // round-trip with no reload, so BACK returns to the SAME page); it resets to 1
+    // only on a genuine domain-tab or sort change, and self-clamps in
+    // renderHotTopics when the pool shrinks. Replaces the retired HOMEPAGE-TIERED
+    // 더보기/접기 tier machinery (constants + tier1/tier2VisibleCount).
+    const PAGE_SIZE = 12;
+    let currentPage = 1;
     let activeTopicKey = "";
     let selectedResultIndex = null;
     // M45: server-side recent analyses (incl. cron output) used to fill the
@@ -7935,11 +7972,17 @@
       const heroKeys = new Set(hot.slice(0, 2).map((c) => c.key));
       const poolBase = filtered.filter((c) => !heroKeys.has(c.key));
       const poolSorted = sortTopicCards(poolBase, activeSort);
-      // C3-1: ONE uniform 3-col grid of the FULL post-hero pool (pagination is C3-2 —
-      // no 12-cap this step; the grid shows every post-hero card, still ≤48 since the
-      // server pool is ≤50). gridPool = poolSorted (filtered MINUS the 2 hero cards,
-      // already sorted by activeSort so the sort dropdown still drives grid order).
+      // DESIGN-C3-2: ONE uniform 3-col grid, PAGE_SIZE (12) cards per page. gridPool =
+      // poolSorted (filtered MINUS the 2 hero cards, already sorted by activeSort so the
+      // sort dropdown still drives grid order). Only the grid pages — the hero band
+      // (hot[0]/hot[1], fixed 뜨는순) is independent of currentPage.
       const gridPool = poolSorted;
+      // Pages over the post-hero pool. Self-CLAMP currentPage: an async /history
+      // re-render can shrink the pool while a page is retained (e.g. after a detail
+      // BACK), so heal a now-out-of-range page HERE rather than at every caller.
+      const totalPages = Math.max(1, Math.ceil(gridPool.length / PAGE_SIZE));
+      currentPage = Math.min(Math.max(1, currentPage), totalPages);
+      const pageSlice = gridPool.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
       // Hero band → #hotTopicsTop (UNCHANGED: hot[0] {hero} + hot[1] {secondary}); the
       // uniform grid → #hotTopics.topic-card-grid via the ORDINARY card builder
@@ -7955,7 +7998,7 @@
           + renderTopicCardHtml(hot[1], { detailed: true, secondary: true })
           + `</div>`;
         hotTopicsTopEl.innerHTML = band;
-        hotTopicsEl.innerHTML = gridPool
+        hotTopicsEl.innerHTML = pageSlice
           .map((card) => renderTopicCardHtml(card, { detailed: true }))
           .join("");
       } else {
@@ -7964,11 +8007,9 @@
         hotTopicsEl.innerHTML = "";
       }
 
-      // C3-1: HIDE the tier-1 더보기/접기 — the grid shows the full pool now, so there is
-      // no paginator this step. The shells are KEPT (not deleted); C3-2 repurposes them
-      // as page-nav. No orphan 더보기. (updateTierButtons is intentionally not called.)
-      if (hotTopicsLoadMoreEl) hotTopicsLoadMoreEl.hidden = true;
-      if (hotTopicsCollapseEl) hotTopicsCollapseEl.hidden = true;
+      // DESIGN-C3-2: render the page-number nav (prev / 1..N / next) below the grid.
+      // Empty when totalPages <= 1 (small pool → no nav shown).
+      renderFeedPagination(totalPages, currentPage);
 
       // C3-1: RETIRE the TIER-2 "나머지 뉴스" block on BOTH tabs — the domain grid now
       // shows the full domain pool, so the separate tier is redundant. Kept hidden +
@@ -7989,6 +8030,41 @@
       // sites) so the sidebar always re-renders together with the feed —
       // including the async post-fetch re-render that first fills the pool.
       renderSidebarRanking();
+    }
+
+    // DESIGN-C3-2: page-number nav for the post-hero grid. prev (‹) / 1..N / next (›).
+    // The current page gets .active; prev on page 1 and next on the last page render
+    // disabled (kept in place so the row doesn't jump). Empty string when totalPages
+    // <= 1 so no nav shows for a small pool. Buttons carry data-page (a number) or
+    // data-page-nav ("prev"/"next"); one delegated listener on #feedPagination handles
+    // clicks (set currentPage → renderHotTopics → scroll the grid into view). Numbers
+    // are integers → no escaping needed; the ≤50 pool means ≤5 pages, so no ellipsis.
+    function renderFeedPagination(totalPages, current) {
+      if (!feedPaginationEl) return;
+      if (!totalPages || totalPages <= 1) {
+        feedPaginationEl.innerHTML = "";
+        return;
+      }
+      const parts = [];
+      const prevDisabled = current <= 1 ? " disabled" : "";
+      parts.push(
+        `<button type="button" class="feed-pagination-btn feed-pagination-nav" `
+        + `data-page-nav="prev"${prevDisabled} aria-label="이전 페이지">‹</button>`
+      );
+      for (let p = 1; p <= totalPages; p += 1) {
+        const active = p === current ? " active" : "";
+        const aria = p === current ? ' aria-current="page"' : "";
+        parts.push(
+          `<button type="button" class="feed-pagination-btn feed-pagination-page${active}" `
+          + `data-page="${p}"${aria}>${p}</button>`
+        );
+      }
+      const nextDisabled = current >= totalPages ? " disabled" : "";
+      parts.push(
+        `<button type="button" class="feed-pagination-btn feed-pagination-nav" `
+        + `data-page-nav="next"${nextDisabled} aria-label="다음 페이지">›</button>`
+      );
+      feedPaginationEl.innerHTML = parts.join("");
     }
 
     // SIDEBAR-RANK: 인기 검증 랭킹 (1-10). Reuses the SAME loaded card pool and
@@ -11983,8 +12059,7 @@
     // needed. Reused by the category tabs AND the "{label} 전체 →" section links.
     function setActiveDomain(key) {
       activeDomain = key || "전체";
-      tier1VisibleCount = TIER1_INITIAL;
-      tier2VisibleCount = TIER2_INITIAL;
+      currentPage = 1;  // DESIGN-C3-2: different card set → back to page 1
       renderHotTopics();
     }
     // DESIGN-DETAIL-2: screen toggle. The home view (#homeScreen — #metrics
@@ -12158,36 +12233,35 @@
     if (hotTopicsSortEl) {
       hotTopicsSortEl.addEventListener("change", () => {
         activeSort = hotTopicsSortEl.value || "뜨는순";
-        tier1VisibleCount = TIER1_INITIAL;  // reset both tiers on sort change
-        tier2VisibleCount = TIER2_INITIAL;
+        currentPage = 1;  // DESIGN-C3-2: order changed → page N is meaningless, reset
         renderHotTopics();
       });
     }
-    // DESIGN-C3h-1: 더보기 (+6) for the REMAINDER list, capped at REMAINDER_CAP
-    // (was TIER1_CAP — the remainder is what this paginator now governs) / 접기 (→initial).
-    if (hotTopicsLoadMoreEl) {
-      hotTopicsLoadMoreEl.addEventListener("click", () => {
-        tier1VisibleCount = Math.min(tier1VisibleCount + TIER1_STEP, REMAINDER_CAP);
+    // DESIGN-C3-2: page-number nav — ONE delegated click on #feedPagination. A number
+    // button jumps to that page; prev/next step by one. Disabled buttons (page-1 prev /
+    // last next) are ignored. Then re-render (re-slices the grid; hero unchanged, sort +
+    // domain KEPT — only currentPage changes) and smooth-scroll the grid into view so
+    // page N shows from its start. NO history entry is pushed per page — that would
+    // reintroduce the DETAIL-3b history sandwiching (page preservation on a detail BACK
+    // is achieved by currentPage being module state, not by history).
+    if (feedPaginationEl) {
+      feedPaginationEl.addEventListener("click", (event) => {
+        const btn = event.target.closest("button");
+        if (!btn || btn.disabled) return;
+        let target = currentPage;
+        if (btn.dataset.page) {
+          target = Number(btn.dataset.page);
+        } else if (btn.dataset.pageNav === "prev") {
+          target = currentPage - 1;
+        } else if (btn.dataset.pageNav === "next") {
+          target = currentPage + 1;
+        } else {
+          return;
+        }
+        if (!Number.isFinite(target) || target === currentPage) return;
+        currentPage = target;  // renderHotTopics self-clamps to [1, totalPages]
         renderHotTopics();
-      });
-    }
-    if (hotTopicsCollapseEl) {
-      hotTopicsCollapseEl.addEventListener("click", () => {
-        tier1VisibleCount = TIER1_INITIAL;
-        renderHotTopics();
-      });
-    }
-    // HOMEPAGE-TIERED: tier-2 더보기 (+12) / 접기 (→12).
-    if (tier2LoadMoreEl) {
-      tier2LoadMoreEl.addEventListener("click", () => {
-        tier2VisibleCount += TIER2_STEP;
-        renderHotTopics();
-      });
-    }
-    if (tier2CollapseEl) {
-      tier2CollapseEl.addEventListener("click", () => {
-        tier2VisibleCount = TIER2_INITIAL;
-        renderHotTopics();
+        if (hotTopicsEl) hotTopicsEl.scrollIntoView({ behavior: "smooth", block: "start" });
       });
     }
     // HISTORY-BACK: minimal browser-history layer for the in-page detail view.

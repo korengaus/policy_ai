@@ -169,8 +169,10 @@
             <div class="empty-state">분석을 실행하거나 최근 분석을 불러오면 검증 뉴스 카드가 표시됩니다.</div>
           </div>
           <div class="hot-topics-load-more-wrap">
-            <button id="hotTopicsLoadMore" class="secondary hot-topics-load-more" type="button" hidden>더 보기</button>
-            <button id="hotTopicsCollapse" class="secondary hot-topics-load-more" type="button" hidden>접기</button>
+            <!-- DESIGN-C3-2: page-number nav (prev / 1..N / next) for the post-hero grid;
+                 filled by renderFeedPagination, empty when totalPages <= 1. Replaced the
+                 retired 더보기/접기 buttons; the centering wrap is reused. -->
+            <nav id="feedPagination" class="feed-pagination" aria-label="페이지"></nav>
           </div>
         </section>
 
