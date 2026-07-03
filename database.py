@@ -318,6 +318,10 @@ def save_analysis_result(result: dict, query: str):
         # CLASSIFY-2a — domain category label (metadata only; never a verdict
         # field). None when CLASSIFY_ENABLED is off or classification failed.
         result.get("domain"),
+        # NOISE1-A — content-nature label (metadata only; never a verdict field).
+        # None when CONTENT_NATURE_ENABLED is off or classification failed.
+        # LOCKSTEP with _ANALYSIS_RESULTS_COLUMN_ORDER below.
+        result.get("content_nature"),
     )
 
     # M12.0d Stage 3c-3: build the Postgres mirror payload once. The
@@ -339,6 +343,8 @@ def save_analysis_result(result: dict, query: str):
         "bias_framing_summary", "debug_summary", "created_at",
         # CLASSIFY-2a — must stay in lockstep with the values tuple above.
         "domain",
+        # NOISE1-A — must stay in lockstep with the values tuple above.
+        "content_nature",
     )
     row_dict = dict(zip(_ANALYSIS_RESULTS_COLUMN_ORDER, values))
 

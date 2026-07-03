@@ -63,6 +63,7 @@ from policy_decision import (
 from policy_scoring import calibrate_final_decision
 from topic_classifier import classify_policy_topic
 import domain_classifier
+import content_nature_classifier
 from timeline import print_timeline_summary
 from verification_card import build_verification_card, print_verification_card, _verdict_label
 from pipeline_debug import build_pipeline_debug_summary
@@ -1350,6 +1351,19 @@ def _apply_news_item_phase_b(
         else None
     )
 
+    # NOISE1-A — content-nature classification (metadata only; flag-gated,
+    # fail-soft, OBSERVE mode). When CONTENT_NATURE_ENABLED is off ->
+    # content_nature=None, zero API call. classify_content_nature NEVER raises
+    # (errors -> mixed_or_unclear); content_nature feeds NO verdict field.
+    content_nature = (
+        content_nature_classifier.classify_content_nature(
+            news.get("title"),
+            (phase_a.get("verification_card") or {}).get("claim_text"),
+        )
+        if config.content_nature_enabled()
+        else None
+    )
+
     report_item = sanitize_data({
         "title": news.get("title"),
         "published": news.get("published"),
@@ -1357,6 +1371,7 @@ def _apply_news_item_phase_b(
         "summary": news.get("summary"),
         "topic": topic,
         "domain": domain,
+        "content_nature": content_nature,
         "claims": phase_a["claims"],
         "normalized_claims": phase_a["normalized_claims"],
         "source_queries": phase_a["source_queries"],
@@ -1387,6 +1402,7 @@ def _apply_news_item_phase_b(
             "original_url": original_url,
             "topic": topic,
             "domain": domain,
+            "content_nature": content_nature,
             "claims": phase_a["claims"],
             "normalized_claims": phase_a["normalized_claims"],
             "source_queries": phase_a["source_queries"],

@@ -369,6 +369,15 @@ def classify_enabled() -> bool:
     return _env_bool("CLASSIFY_ENABLED", False)
 
 
+def content_nature_enabled() -> bool:
+    # NOISE1-A — content-nature classification at analysis time (metadata only;
+    # government_policy / market_commercial / mixed_or_unclear). Default False
+    # (ships dark, OBSERVE mode): no classify call, rows persist with
+    # content_nature=NULL until the operator sets CONTENT_NATURE_ENABLED=true per
+    # service. Read at runtime. Verdict-isolated; never feeds any scoring field.
+    return _env_bool("CONTENT_NATURE_ENABLED", False)
+
+
 def embedding_provider() -> str:
     return (os.getenv("EMBEDDING_PROVIDER") or "disabled").strip().lower()
 
