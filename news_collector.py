@@ -470,6 +470,59 @@ def _looks_sentence_like(title: str) -> bool:
     return has_space_or_punctuation and (has_josa or has_mixed_words)
 
 
+# POLLEAK-FIX — political-SUBJECT intake reject (recall-safe). Reuses the EXISTING
+# hot_topics signal sets: _ALLOWLIST is the MASTER RECALL GUARD (any policy term in
+# the title => KEEP), and the political subset of _DENYLIST (politician names +
+# election-event words) is the marker. POL_ACTION_HEAD is the ONLY new list —
+# political/personal-ACTION nouns (no policy nouns) for the SUBJECT test. Predicate:
+#   political_subject := has(POL_MARKER) AND NOT has(POLICY_HEAD)
+#                        AND (has(POL_ACTION_HEAD) OR election-event OR name-at-title-head)
+# Intake-only, verdict-isolated. NEW-intake-only (existing rows untouched).
+_POL_NAMES = ("이재명", "윤석열", "한동훈", "이준석", "김건희")
+_ELECTION_EVENT = ("선거", "당선", "득표", "지방선거", "대선", "총선", "공천", "탄핵", "여당", "야당")
+_POL_ACTION_HEAD = (
+    "공소", "기소", "구속", "소환", "체포", "재판", "판결", "선고", "구형",
+    "사퇴", "사임", "출마", "낙선", "특검", "수사", "영장", "혐의",
+    "발언", "논란", "회견", "인터뷰",
+)
+# Lazy, cached reuse of hot_topics._ALLOWLIST (the policy-head recall guard). Lazy to
+# avoid the hot_topics<->news_collector import cycle; cached so the per-title reject is
+# cheap. FAIL-OPEN: if hot_topics cannot be imported, the political reject is DISABLED
+# (never reject) — an empty allowlist would otherwise over-block, the wrong direction.
+_POL_SIGNAL_CACHE: dict = {}
+
+
+def _pol_policy_head_allowlist() -> tuple:
+    if "allowlist" not in _POL_SIGNAL_CACHE:
+        try:
+            from hot_topics import _ALLOWLIST as _AL  # lazy: cycle-safe at call time
+            _POL_SIGNAL_CACHE["allowlist"] = tuple(_AL)
+            _POL_SIGNAL_CACHE["ok"] = True
+        except Exception:  # fail-open: disable the reject rather than over-block
+            _POL_SIGNAL_CACHE["allowlist"] = ()
+            _POL_SIGNAL_CACHE["ok"] = False
+    return _POL_SIGNAL_CACHE["allowlist"]
+
+
+def _is_political_subject(normalized: str) -> bool:
+    """True iff the SUBJECT of the title is an election/politician (drop-worthy),
+    NOT a policy article that merely names one (keep). Recall-safe hard conjunction:
+    any policy-domain (_ALLOWLIST) term => keep, by construction."""
+    text = normalized or ""
+    has_name = any(n in text for n in _POL_NAMES)
+    has_event = any(e in text for e in _ELECTION_EVENT)
+    if not (has_name or has_event):
+        return False                                  # no political marker -> not our case
+    allowlist = _pol_policy_head_allowlist()
+    if not _POL_SIGNAL_CACHE.get("ok"):
+        return False                                  # fail-open: guard unavailable -> never reject
+    if any(term in text for term in allowlist):
+        return False                                  # MASTER RECALL GUARD: any policy term -> KEEP
+    has_action = any(a in text for a in _POL_ACTION_HEAD)
+    name_at_head = any(n in text[:6] for n in _POL_NAMES)
+    return has_action or has_event or name_at_head    # the politician/election is the subject
+
+
 def _reject_title_reason(title: str, query: str = "") -> str | None:
     normalized = _normalize_spaces(title)
     if not normalized:
@@ -488,6 +541,13 @@ def _reject_title_reason(title: str, query: str = "") -> str | None:
     # the obituary check above; uses the SAME normalized title.
     if any(marker in normalized for marker in OPINION_MARKERS) or _has_opinion_bracket(normalized):
         return "opinion_or_column"
+    # POLLEAK-FIX: reject titles whose SUBJECT is an election/politician (defamation-
+    # sensitive, off-topic) BEFORE they become verification cards. Same precedence tier
+    # + return-style as the obituary/opinion checks above; uses the SAME normalized
+    # title. Recall-safe: any policy-domain term (_ALLOWLIST) keeps the card, so policy
+    # news that merely names a politician ("X 정부 ... 부동산 대책") is NOT dropped.
+    if _is_political_subject(normalized):
+        return "political_subject"
     if _low_quality_phrase(normalized):
         return f"low quality phrase: {_low_quality_phrase(normalized)}"
     if _is_media_only_title(normalized):
@@ -1135,7 +1195,7 @@ def search_google_news_rss_with_meta(query: str, max_results: int = 3):
     if raw_results:
         raw_results = [
             item for item in raw_results
-            if _reject_title_reason(item.get("title", "")) != "opinion_or_column"
+            if _reject_title_reason(item.get("title", "")) not in ("opinion_or_column", "political_subject")
         ]
     recent_results = [
         item for item in raw_results if is_recent(item.get("published", ""), days=RECENT_DAYS)
@@ -1209,7 +1269,7 @@ def search_google_news_rss_with_meta(query: str, max_results: int = 3):
         if naver_items:
             naver_items = [
                 item for item in naver_items
-                if _reject_title_reason(item.get("title", "")) != "opinion_or_column"
+                if _reject_title_reason(item.get("title", "")) not in ("opinion_or_column", "political_subject")
             ]
         # Bypass the strict 30d is_recent gate for the primary tier (sort=date
         # already biases toward recency); M17b is the hard on-topic gate.
