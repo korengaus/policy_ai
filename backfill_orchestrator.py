@@ -175,9 +175,22 @@ def run_backfill(
                 api_result = (out.get("report_item") or {}).get("api_result") or {}
                 if api_result:
                     # Provenance tag — additive debug_summary JSON key (design §5).
+                    # TAG-FIX: database.save_analysis_result serializes
+                    # ``verification_card.get("debug_summary") OR result.get("debug_summary")``
+                    # (verification_card copy wins by OR-precedence, database.py:313-316).
+                    # main.py:1206 deep-copies verification_card (sanitize_data) into a
+                    # SEPARATE dict from the top-level api_result["debug_summary"], so
+                    # tagging ONLY the top-level copy is discarded. Set on BOTH copies
+                    # (belt-and-braces), defensively guarded so a missing nested dict
+                    # never raises — mirrors how api_result is read elsewhere here.
+                    vc = api_result.get("verification_card")
+                    if isinstance(vc, dict):
+                        vc_ds = vc.get("debug_summary")
+                        if isinstance(vc_ds, dict):
+                            vc_ds["ingest_origin"] = ingest_origin   # the SERIALIZED copy
                     ds = api_result.get("debug_summary")
                     if isinstance(ds, dict):
-                        ds["ingest_origin"] = ingest_origin
+                        ds["ingest_origin"] = ingest_origin           # top-level (redundant, harmless)
                     # Persist — mirrors pipeline_worker._persist_results (:137-157):
                     # sanitize, save, handle the duplicate status the same way.
                     api_result = sanitize_data(api_result)
