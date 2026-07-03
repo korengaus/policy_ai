@@ -39,6 +39,13 @@ DEFAULT_QUERIES = [
     "청년 일자리",
     "고용 안정 지원",
     "근로자 권익",
+    # ENV-SEED — environment-domain expansion (program-level; one domain at a time,
+    # mirroring WELFARE-SEED / AGRI-LABOR-SEED). Health held for later (higher noise).
+    "탄소중립 온실가스 감축",
+    "배출권거래제",
+    "재생에너지 태양광 풍력 정책",
+    "미세먼지 대기질 대책",
+    "기후위기 대응 녹색금융",
 ]
 
 
