@@ -76,6 +76,15 @@ RISING_MIN_RECENT_DF = 2
 # Minimum document frequency for a keyword to enter the raw-frequency table at
 # all (filters one-off noise before the top-K cut).
 MIN_DF = 2
+# MEMORY BOUND (OBS-LIMIT). Never materialize the whole (growing) corpus: load
+# only the newest MAX_ROWS rows (ORDER BY id DESC LIMIT). title+claim_text are
+# light columns, but a large backfill could still make a full-table fetchall OOM
+# the 2GB Worker, so the cap keeps memory bounded INDEPENDENTLY of corpus size.
+# The LOOKBACK_DAYS window still applies Python-side within the capped rows; the
+# cap is set comfortably above 14 days of current volume so today's output is
+# unchanged. Aggregation (df counters, older/recent halves) is order-independent,
+# so the DESC order is harmless. Set MAX_ROWS=0 to disable the cap.
+MAX_ROWS = 500
 
 
 # Cron seed queries — IMPORTED conceptually but COPIED here read-only to avoid
@@ -291,17 +300,32 @@ def main() -> int:
     # NOTE: `query` is the seed query string itself, so it is DELIBERATELY
     # EXCLUDED from the keyword text (including it would make every row trivially
     # echo its seed). Keywords are extracted from title + claim_text only.
+    # MEMORY BOUND: newest MAX_ROWS rows only + a cheap COUNT(*) for the corpus
+    # total (no row materialization). The LOOKBACK_DAYS filter still narrows
+    # Python-side within the loaded window.
     rows = []
+    corpus_total = 0
     with psycopg.connect(url) as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT id, created_at, title, claim_text "
-            "FROM analysis_results ORDER BY id"
-        )
-        for rid, created_at, title, claim_text in cur.fetchall():
+        cur.execute("SELECT COUNT(*) FROM analysis_results")
+        corpus_total = int((cur.fetchone() or [0])[0] or 0)
+        if MAX_ROWS and MAX_ROWS > 0:
+            cur.execute(
+                "SELECT id, created_at, title, claim_text "
+                "FROM analysis_results ORDER BY id DESC LIMIT %s",
+                (MAX_ROWS,),
+            )
+        else:
+            cur.execute(
+                "SELECT id, created_at, title, claim_text "
+                "FROM analysis_results ORDER BY id"
+            )
+        fetched = cur.fetchall()
+        for rid, created_at, title, claim_text in fetched:
             day = _row_date(created_at)
             if day and day < cutoff:
                 continue  # outside the lookback window
             rows.append((rid, day, f"{title or ''}\n{claim_text or ''}"))
+    n_loaded = len(fetched)
 
     print("SELFDB-2 Phase 1 — self-DB keyword aggregation probe (READ-ONLY, noise-filtered)")
     print(f"  lookback={LOOKBACK_DAYS}d  top_k={TOP_K}  rising_ratio={RISING_RATIO}  "
@@ -311,6 +335,8 @@ def main() -> int:
 
     # ---- SECTION 1: CORPUS SIZE -------------------------------------------
     print("=== 1. CORPUS SIZE ===")
+    print("  window: newest %d rows loaded (MAX_ROWS=%d) of %d corpus total — memory-bounded"
+          % (n_loaded, MAX_ROWS, corpus_total))
     print("  rows scanned (in window):", len(rows))
     dated = [d for _, d, _ in rows if d]
     if dated:

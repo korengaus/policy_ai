@@ -60,6 +60,17 @@ except Exception:
 # created_at[:10] (YYYY-MM-DD), mirroring domain_coverage_probe.py.
 LOOKBACK_DAYS = 0
 
+# MEMORY BOUND (OBS-LIMIT). The SELECT below pulls the heavy source_candidates
+# JSON column, so it must NEVER materialize the whole (growing) corpus — a full
+# fetchall of ~838 rows x source_candidates OOM'd the 2GB Worker. Load only the
+# newest MAX_ROWS rows (ORDER BY id DESC LIMIT). This bounds memory INDEPENDENTLY
+# of corpus size — including a large backfill landing many recent rows — because
+# the cap is a fixed row count, not a date range. The LOOKBACK_DAYS date filter
+# still applies Python-side WITHIN this capped window; aggregation is order-
+# independent (Counters) so the DESC order is harmless. Set MAX_ROWS=0 to disable
+# the cap (whole corpus — only safe on a small table / big-memory host).
+MAX_ROWS = 300
+
 # Official candidate source_types that can carry a policy_briefing release
 # (mirrors domain_coverage_probe.py / body2_overlap.py).
 OFFICIAL_TYPES = ("official_government", "public_institution")
@@ -176,22 +187,41 @@ def main() -> int:
         cutoff = (datetime.now() - timedelta(days=LOOKBACK_DAYS)).strftime("%Y-%m-%d")
 
     # SELECT-only. Pull the text + confidence + candidates; aggregate Python-side.
+    # MEMORY BOUND: newest MAX_ROWS rows only (heavy source_candidates column) +
+    # a cheap COUNT(*) for the corpus-total context line (no row materialization).
     rows = []
+    corpus_total = 0
     with psycopg.connect(url) as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT id, created_at, query, title, claim_text, "
-            "policy_confidence_score, source_candidates "
-            "FROM analysis_results ORDER BY id"
-        )
-        for rid, created_at, query, title, claim_text, pcs, sc in cur.fetchall():
+        cur.execute("SELECT COUNT(*) FROM analysis_results")
+        corpus_total = int((cur.fetchone() or [0])[0] or 0)
+        if MAX_ROWS and MAX_ROWS > 0:
+            cur.execute(
+                "SELECT id, created_at, query, title, claim_text, "
+                "policy_confidence_score, source_candidates "
+                "FROM analysis_results ORDER BY id DESC LIMIT %s",
+                (MAX_ROWS,),
+            )
+        else:
+            cur.execute(
+                "SELECT id, created_at, query, title, claim_text, "
+                "policy_confidence_score, source_candidates "
+                "FROM analysis_results ORDER BY id"
+            )
+        fetched = cur.fetchall()
+        for rid, created_at, query, title, claim_text, pcs, sc in fetched:
             day = _row_date(created_at)
             if cutoff and day and day < cutoff:
                 continue
             rows.append((rid, query, title, claim_text, pcs, _j(sc) or []))
+    n_loaded = len(fetched)
 
     print("DOMAIN-USABILITY-PROBE Phase 2 — per-domain category-readiness (READ-ONLY)")
-    scope = "whole corpus" if not cutoff else ("created_at >= %s" % cutoff)
-    print("  scope: %s   (LOOKBACK_DAYS=%d; 0 = whole corpus)" % (scope, LOOKBACK_DAYS))
+    scope = ("newest %d rows" % MAX_ROWS) if (MAX_ROWS and MAX_ROWS > 0) else "whole corpus"
+    if cutoff:
+        scope += " AND created_at >= %s" % cutoff
+    print("  scope: %s   (MAX_ROWS=%d, LOOKBACK_DAYS=%d)" % (scope, MAX_ROWS, LOOKBACK_DAYS))
+    print("  window: %d rows loaded of %d corpus total (memory-bounded, independent of corpus size)"
+          % (n_loaded, corpus_total))
     print("  ADVISORY: domain assignment is keyword/publisher INFERENCE, NOT a stored")
     print("            taxonomy. `topic` is only a housing-finance sub-taxonomy.")
     print()
