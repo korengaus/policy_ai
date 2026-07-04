@@ -49,6 +49,18 @@ import collections
 import os
 import sys
 import time
+from pathlib import Path
+
+# Make the project root importable so the lazy `from content_nature_classifier
+# import classify_content_nature` below resolves in the Render Worker Shell when
+# launched as `python scripts/content_nature_backfill.py` (cwd=project root), even
+# WITHOUT PYTHONPATH=. Mirrors the proven pattern in the sibling scripts
+# (noise1_recall_probe.py / backfill_pilot_verify.py). The domain twin
+# classify_backfill.py has no such insert and relies on PYTHONPATH=. being set;
+# this self-insert makes the operator's plain `python scripts/...` command work too.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
