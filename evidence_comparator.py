@@ -256,8 +256,6 @@ def _verification_level(
         return "strong_official_match"
     if semantic_support_score >= 45:
         return "medium_official_match"
-    if semantic_support_score >= 25:
-        return "low_confidence_match"
     return "low_confidence_match"
 
 

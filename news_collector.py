@@ -548,8 +548,9 @@ def _reject_title_reason(title: str, query: str = "") -> str | None:
     # news that merely names a politician ("X 정부 ... 부동산 대책") is NOT dropped.
     if _is_political_subject(normalized):
         return "political_subject"
-    if _low_quality_phrase(normalized):
-        return f"low quality phrase: {_low_quality_phrase(normalized)}"
+    low_quality = _low_quality_phrase(normalized)
+    if low_quality:
+        return f"low quality phrase: {low_quality}"
     if _is_media_only_title(normalized):
         return "media name only"
     if normalized.isdigit():

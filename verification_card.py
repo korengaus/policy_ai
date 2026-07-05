@@ -657,7 +657,7 @@ def build_verification_card(
     claim_text = (
         claim_list[0]
         if claim_list
-            else _first_policy_claim(
+        else _first_policy_claim(
             policy_claims,
             news.get("title") or "",
             news.get("summary") or "",

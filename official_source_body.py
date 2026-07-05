@@ -589,10 +589,6 @@ def official_body_supports_claim(claim: dict, body_text: str) -> dict:
     score = body_match_score + title_match_score + entity_match_score + numeric_date_match_score + concept_score
     if matched_concepts:
         score += min(5, len(matched_concepts) * 2)
-    if matched_numbers:
-        score += 0
-    if matched_institutions:
-        score += 0
     for field in ["actor", "action", "target", "object"]:
         value = sanitize_text(str(claim.get(field) or ""))
         if value and value != "unknown" and value in body_text:

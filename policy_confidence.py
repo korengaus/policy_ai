@@ -124,10 +124,10 @@ def _action_priority(risk_level: str, verification_strength: str) -> str:
 # M22-1 — Lane B (Policy-Briefing) conservative confidence ceiling. A genuine
 # strong Lane-B official body match raises confidence to a FIXED 70 (never
 # higher) with verification_strength forced to "low". 70 < 85 blocks the
-# draft_verified gate (verification_card.py:472); "low" ∉
-# _STRONG_VERIFICATION_STRENGTHS blocks the snippet draft_verified gate
-# (verification_card.py:456). Max achievable label is therefore
-# draft_likely_true — "likely true, human still confirms".
+# draft_verified gate; "low" ∉ _STRONG_VERIFICATION_STRENGTHS blocks the
+# snippet draft_verified gate (both in verification_card._verdict_label). Max
+# achievable label is therefore draft_likely_true — "likely true, human still
+# confirms".
 LANE_B_STRONG_CONFIDENCE = 70
 
 
