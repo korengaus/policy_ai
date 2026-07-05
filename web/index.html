@@ -7722,6 +7722,10 @@
         // DISPLAY-CATEGORY B-1: raw backend domain enum (or null). Drives the
         // domain tabs/sections; normalized via cardDomainKey() at filter time.
         domain: result?.domain ?? record?.domain ?? null,
+        // NOISE-1 Part B: content_nature metadata label (from the slim payload).
+        // Display-only; drives the 뜨는순 rank-down + "시장·시세" chip when
+        // market_commercial AND NOT genuine. NULL/old rows → never treated.
+        contentNature: result?.content_nature ?? record?.content_nature ?? null,
         alert: String(decision.policy_alert_level || record?.highest_alert || "WATCH").toUpperCase(),
         confidence: confidence.policy_confidence_score ?? record?.average_confidence ?? "-",
         officialStatus: officialStatusLabel(result),
@@ -7783,7 +7787,14 @@
         const score = (c) =>
           (ALERT_RANK[c.alert] || 0) * 1000
           + (c.freshness ? 100 : 0)
-          + (Number(c.confidence) || 0);
+          + (Number(c.confidence) || 0)
+          // NOISE-1 Part B: rank-DOWN (뜨는순 only) market_commercial noise that
+          // lacks genuine official support. -1_000_000 exceeds any real composite
+          // (max ALERT_RANK*1000 + 100 + confidence), so demoted cards always sort
+          // below non-demoted ones while keeping their relative order among
+          // themselves. Still visible on scroll — NOT a hide/filter. Reuses the
+          // existing hasGenuineOfficial predicate; never recomputed.
+          + ((c.contentNature === "market_commercial" && !c.hasGenuineOfficial) ? -1000000 : 0);
         list.sort((a, b) => score(b) - score(a));
       } else if (sortKey === "위험도순") {
         list.sort((a, b) => (ALERT_RANK[b.alert] || 0) - (ALERT_RANK[a.alert] || 0));
@@ -7874,6 +7885,7 @@
             <span class="card-domain">${escapeHtml(domainDisplayLabel(cardDomainKey(card)))}</span>
             <span class="card-watch ${alertClass(card.alert)}">${escapeHtml(formatAlert(card.alert))}</span>
             ${isTodayCard(card) ? `<span class="card-today-badge">오늘 검증</span>` : ""}
+            ${(card.contentNature === "market_commercial" && !card.hasGenuineOfficial) ? `<span class="card-today-badge">시장·시세</span>` : ""}
             ${card.freshness ? `<span class="card-fresh">🔥 ${escapeHtml(FRESHNESS_BADGE_LABEL)}</span>` : ""}
             ${card.humanReviewedAt ? `<span class="review-status review-approved">${escapeHtml(HUMAN_REVIEWED_LABEL)}</span>` : ""}
           </div>
