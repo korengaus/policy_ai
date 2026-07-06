@@ -14,71 +14,114 @@
   Self-contained: inline CSS + JS, no external lib/CDN.
 -->
 <style>
+  /* BRAINMAP-COHESION: tokens mirrored from the main site's design system
+     (frontend/styles/main.css :root) so this standalone page reads as tickedin.
+     Values copied, not linked — the page stays self-contained (no CDN). */
   :root {
-    --bg: #f7f8fa;
-    --panel: #ffffff;
-    --ink: #1c2430;
-    --ink-soft: #5a6577;
-    --line: #e3e7ee;
-    --accent: #2b6cb0;
+    --ink: #0f172a;          /* headings / strong text */
+    --slate: #475569;        /* body text */
+    --muted: #94a3b8;        /* captions / secondary */
+    --line: #e2e8f0;         /* borders */
+    --paper: #ffffff;        /* card surface */
+    --canvas: #f6f8fb;       /* page background */
+    --brand: #1e5fd8;        /* tickedin blue */
+    --brand-ink: #1542a0;    /* darker blue: hover / links */
+    --shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+    --radius-sm: 9px;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
   body {
-    background: var(--bg);
+    background: var(--canvas);
     color: var(--ink);
-    font-family: "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+    /* Site body font stack (Pretendard on the main site; graceful Korean
+       system fallbacks here — no CDN font load on this standalone page). */
+    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
     display: flex; flex-direction: column;
   }
   header.map-head {
-    background: var(--panel);
+    background: var(--paper);
     border-bottom: 1px solid var(--line);
-    padding: 14px 20px 12px;
+    padding: 16px 24px 14px;
     flex: 0 0 auto;
   }
-  .head-row { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
-  .map-title { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
-  .map-home { font-size: 13px; color: var(--accent); text-decoration: none; }
+  /* tickedin identity row — mirrors the site's .brand treatment (favicon mark +
+     serif wordmark). The wordmark links home. */
+  .brand-row {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .brand {
+    display: inline-flex; align-items: center; gap: 8px;
+    color: var(--ink); text-decoration: none;
+    font-family: 'Noto Serif KR', 'Nanum Myeongjo', 'Apple SD Gothic Neo', serif;
+    font-size: 21px; font-weight: 700; letter-spacing: -0.01em;
+  }
+  .brand img { width: 1.25em; height: 1.25em; object-fit: contain; vertical-align: middle; }
+  .brand-page-label {
+    color: var(--muted); font-size: 13px; font-weight: 600;
+    padding-left: 12px; border-left: 1px solid var(--line);
+  }
+  .map-home {
+    margin-left: auto; font-size: 13px; font-weight: 600;
+    color: var(--brand-ink); text-decoration: none;
+  }
   .map-home:hover { text-decoration: underline; }
   .map-reset {
-    margin-left: auto; font-size: 12px; padding: 4px 11px;
-    border: 1px solid var(--line); border-radius: 6px;
-    background: var(--panel); color: var(--ink-soft); cursor: pointer;
+    margin-left: auto;
+    font-size: 12.5px; font-weight: 600; padding: 5px 13px;
+    border: 1px solid var(--line); border-radius: var(--radius-sm);
+    background: var(--paper); color: var(--slate); cursor: pointer;
+    font-family: inherit;
   }
-  .map-reset:hover { color: var(--ink); border-color: #c7cdd8; }
+  .map-reset:hover { color: var(--ink); border-color: var(--muted); }
+  .head-row { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  .map-title {
+    font-size: 22px; font-weight: 800; letter-spacing: -0.02em; color: var(--ink);
+    font-family: 'Nanum Myeongjo', 'Apple SD Gothic Neo', 'Pretendard', serif;
+  }
   /* HONESTY (fixed, always visible): this map is spread/connection, NOT verification. */
-  .map-subtitle { margin-top: 4px; font-size: 13px; color: var(--ink-soft); }
-  .map-subtitle strong { color: var(--ink); font-weight: 600; }
+  .map-subtitle { margin-top: 6px; font-size: 13.5px; line-height: 1.55; color: var(--slate); }
+  .map-subtitle strong { color: var(--ink); font-weight: 700; }
   .legend {
-    margin-top: 8px; display: flex; flex-wrap: wrap; gap: 10px 14px;
-    font-size: 12px; color: var(--ink-soft); align-items: center;
+    margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px 16px;
+    font-size: 12.5px; color: var(--slate); align-items: center;
   }
-  .legend .key { display: inline-flex; align-items: center; gap: 5px; }
+  .legend .key { display: inline-flex; align-items: center; gap: 6px; }
   .legend .dot {
     width: 10px; height: 10px; border-radius: 50%; display: inline-block;
   }
   .legend .dot.hollow { background: transparent !important; border: 2px solid #98a2b3; }
   main.map-body { position: relative; flex: 1 1 auto; min-height: 0; }
   canvas#map { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: default; }
+  /* Tooltip as a light site-style card (paper surface, line border, soft shadow). */
   #tooltip {
     position: absolute; pointer-events: none; display: none;
-    max-width: 320px; padding: 8px 10px;
-    background: rgba(28, 36, 48, 0.94); color: #fff;
-    border-radius: 6px; font-size: 12.5px; line-height: 1.45;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.25); z-index: 5;
+    max-width: 320px; padding: 9px 12px;
+    background: var(--paper); color: var(--ink);
+    border: 1px solid var(--line); border-radius: var(--radius-sm);
+    font-size: 12.5px; line-height: 1.5;
+    box-shadow: var(--shadow); z-index: 5;
   }
-  #tooltip .tip-spread { color: #a8c7ea; margin-top: 3px; font-size: 12px; }
+  #tooltip .tip-spread { color: var(--brand-ink); margin-top: 4px; font-size: 12px; font-weight: 600; }
   #status {
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-    color: var(--ink-soft); font-size: 15px; text-align: center; padding: 24px;
+    color: var(--slate); font-size: 15px; text-align: center; padding: 24px;
   }
 </style>
 </head>
 <body>
 <header class="map-head">
+  <!-- BRAINMAP-COHESION: tickedin identity row — the site's wordmark (favicon
+       mark + serif "tickedin", same treatment as the main header's .brand),
+       linking home, with the page label + return link. -->
+  <div class="brand-row">
+    <a class="brand" href="/" aria-label="tickedin 홈으로"><img src="/web/assets/favicon-180.png" alt="" aria-hidden="true">tickedin</a>
+    <span class="brand-page-label">연결지도</span>
+    <a class="map-home" href="/">← 홈으로</a>
+  </div>
   <div class="head-row">
     <span class="map-title">뉴스 연결지도</span>
-    <a class="map-home" href="/">← 홈으로</a>
     <button type="button" id="resetView" class="map-reset">리셋</button>
   </div>
   <p class="map-subtitle">
