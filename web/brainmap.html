@@ -40,6 +40,12 @@
   .map-title { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
   .map-home { font-size: 13px; color: var(--accent); text-decoration: none; }
   .map-home:hover { text-decoration: underline; }
+  .map-reset {
+    margin-left: auto; font-size: 12px; padding: 4px 11px;
+    border: 1px solid var(--line); border-radius: 6px;
+    background: var(--panel); color: var(--ink-soft); cursor: pointer;
+  }
+  .map-reset:hover { color: var(--ink); border-color: #c7cdd8; }
   /* HONESTY (fixed, always visible): this map is spread/connection, NOT verification. */
   .map-subtitle { margin-top: 4px; font-size: 13px; color: var(--ink-soft); }
   .map-subtitle strong { color: var(--ink); font-weight: 600; }
@@ -73,6 +79,7 @@
   <div class="head-row">
     <span class="map-title">뉴스 연결지도</span>
     <a class="map-home" href="/">← 홈으로</a>
+    <button type="button" id="resetView" class="map-reset">리셋</button>
   </div>
   <p class="map-subtitle">
     이 지도는 뉴스의 <strong>유통·연결</strong>을 보여줍니다. <strong>검증이 아닙니다.</strong>
@@ -125,6 +132,20 @@
   var positions = [];       // per node: {px, py} in CSS pixels
   var labelSpots = [];      // top-cluster label placements
   var hoverNode = null;
+
+  // View transform (pan/zoom). Screen = world * scale + offset. Initial
+  // {1, 0, 0} is byte-identical to the original static fit-to-viewport view.
+  // `positions` / `labelSpots` remain the WORLD layer; this rides on top so
+  // node radii, line widths, and label fonts stay constant in SCREEN pixels
+  // at any zoom, and the hover hit test uses a constant screen-px radius.
+  var view = { scale: 1, offsetX: 0, offsetY: 0 };
+  var MIN_SCALE = 0.3, MAX_SCALE = 8;
+  var isDragging = false, dragStartX = 0, dragStartY = 0,
+      startOffsetX = 0, startOffsetY = 0, dragDist = 0;
+  var CLICK_MOVE_THRESHOLD = 4; // screen px; a mouseup past this = pan, not click
+
+  function toScreenX(px) { return px * view.scale + view.offsetX; }
+  function toScreenY(py) { return py * view.scale + view.offsetY; }
 
   function colorFor(domain) {
     return DOMAIN_COLORS[domain] || FALLBACK_COLOR;
@@ -186,7 +207,7 @@
     var h = canvas.height / (window.devicePixelRatio || 1);
     ctx.clearRect(0, 0, w, h);
 
-    // Edges first — thin, low-alpha.
+    // Edges first — thin, low-alpha. (Line width stays constant in screen px.)
     ctx.lineWidth = 0.7;
     ctx.strokeStyle = "rgba(90, 101, 119, 0.16)";
     ctx.beginPath();
@@ -194,19 +215,20 @@
       var a = nodeById[e.src], b = nodeById[e.dst];
       if (!a || !b) return;
       var pa = positions[a._i], pb = positions[b._i];
-      ctx.moveTo(pa.px, pa.py);
-      ctx.lineTo(pb.px, pb.py);
+      ctx.moveTo(toScreenX(pa.px), toScreenY(pa.py));
+      ctx.lineTo(toScreenX(pb.px), toScreenY(pb.py));
     });
     ctx.stroke();
 
     // Nodes on top. Clustered nodes slightly larger; market_commercial hollow.
+    // Radii are constant screen px (positions transform, sizes do not).
     graph.nodes.forEach(function (n, i) {
       var p = positions[i];
       var clustered = n.cluster_id !== null && n.cluster_id !== undefined;
       var r = clustered ? 3.4 : 2.1;
       var isMarket = n.content_nature === "market_commercial";
       ctx.beginPath();
-      ctx.arc(p.px, p.py, r, 0, Math.PI * 2);
+      ctx.arc(toScreenX(p.px), toScreenY(p.py), r, 0, Math.PI * 2);
       if (isMarket) {
         ctx.globalAlpha = 0.75;
         ctx.lineWidth = 1.4;
@@ -221,36 +243,39 @@
       }
     });
 
-    // Hover ring.
+    // Hover ring (constant screen-px radius, transformed position).
     if (hoverNode) {
       var hp = positions[hoverNode._i];
       ctx.beginPath();
-      ctx.arc(hp.px, hp.py, 6, 0, Math.PI * 2);
+      ctx.arc(toScreenX(hp.px), toScreenY(hp.py), 6, 0, Math.PI * 2);
       ctx.lineWidth = 1.6;
       ctx.strokeStyle = "#1c2430";
       ctx.stroke();
     }
 
     // Always-on labels for the biggest clusters — stored spread label VERBATIM.
+    // Font stays constant screen size; only the anchor point transforms.
     ctx.textAlign = "center";
     labelSpots.forEach(function (s) {
+      var lx = toScreenX(s.x), ly = toScreenY(s.y);
       ctx.font = "600 12px sans-serif";
       ctx.lineWidth = 3;
       ctx.strokeStyle = "rgba(247, 248, 250, 0.9)";
-      ctx.strokeText(s.title, s.x, s.y - 14);
+      ctx.strokeText(s.title, lx, ly - 14);
       ctx.fillStyle = "#1c2430";
-      ctx.fillText(s.title, s.x, s.y - 14);
+      ctx.fillText(s.title, lx, ly - 14);
       ctx.font = "11px sans-serif";
-      ctx.strokeText(s.spread, s.x, s.y);
+      ctx.strokeText(s.spread, lx, ly);
       ctx.fillStyle = "#5a6577";
-      ctx.fillText(s.spread, s.x, s.y);
+      ctx.fillText(s.spread, lx, ly);
     });
   }
 
+  // Hit test in SCREEN space so the radius stays a constant ~9px at any zoom.
   function nearestNode(mx, my) {
     var best = null, bestD = HIT_RADIUS * HIT_RADIUS;
     for (var i = 0; i < graph.nodes.length; i++) {
-      var dx = positions[i].px - mx, dy = positions[i].py - my;
+      var dx = toScreenX(positions[i].px) - mx, dy = toScreenY(positions[i].py) - my;
       var d = dx * dx + dy * dy;
       if (d <= bestD) { bestD = d; best = graph.nodes[i]; }
     }
@@ -260,9 +285,21 @@
   function onMove(ev) {
     var rect = canvas.getBoundingClientRect();
     var mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
+    if (isDragging) {
+      // Pan: move the offset by the raw mouse delta; track distance so a
+      // genuine click (below threshold) still navigates to the card.
+      var ddx = ev.clientX - dragStartX, ddy = ev.clientY - dragStartY;
+      dragDist = Math.max(dragDist, Math.abs(ddx) + Math.abs(ddy));
+      view.offsetX = startOffsetX + ddx;
+      view.offsetY = startOffsetY + ddy;
+      hoverNode = null;
+      tooltip.style.display = "none";
+      draw();
+      return;
+    }
     var n = nearestNode(mx, my);
     if (n !== hoverNode) { hoverNode = n; draw(); }
-    if (!n) { tooltip.style.display = "none"; canvas.style.cursor = "default"; return; }
+    if (!n) { tooltip.style.display = "none"; canvas.style.cursor = "grab"; return; }
     canvas.style.cursor = "pointer";
     var spread = "";
     if (n.cluster_id !== null && n.cluster_id !== undefined && clusterById[n.cluster_id]) {
@@ -275,7 +312,44 @@
     tooltip.style.top = (my + 14) + "px";
   }
 
+  function onDown(ev) {
+    isDragging = true;
+    dragStartX = ev.clientX; dragStartY = ev.clientY;
+    startOffsetX = view.offsetX; startOffsetY = view.offsetY;
+    dragDist = 0;
+    canvas.style.cursor = "grabbing";
+  }
+
+  function onUp() {
+    if (isDragging) { isDragging = false; canvas.style.cursor = "grab"; }
+  }
+
+  // Scroll-to-zoom, anchored so the world point under the cursor stays fixed.
+  function onWheel(ev) {
+    ev.preventDefault();
+    var rect = canvas.getBoundingClientRect();
+    var mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
+    var wx = (mx - view.offsetX) / view.scale;
+    var wy = (my - view.offsetY) / view.scale;
+    var factor = ev.deltaY < 0 ? 1.1 : 1 / 1.1;
+    var s = Math.max(MIN_SCALE, Math.min(MAX_SCALE, view.scale * factor));
+    if (s === view.scale) return;
+    view.scale = s;
+    view.offsetX = mx - wx * s;
+    view.offsetY = my - wy * s;
+    hoverNode = null;
+    tooltip.style.display = "none";
+    draw();
+  }
+
+  function resetView() {
+    view.scale = 1; view.offsetX = 0; view.offsetY = 0;
+    draw();
+  }
+
   function onClick(ev) {
+    // A drag past the threshold was a pan, not a click — do not navigate.
+    if (dragDist > CLICK_MOVE_THRESHOLD) { dragDist = 0; return; }
     var rect = canvas.getBoundingClientRect();
     var n = nearestNode(ev.clientX - rect.left, ev.clientY - rect.top);
     if (n && n.id) window.location.href = "/?result_id=" + encodeURIComponent(n.id);
@@ -299,11 +373,20 @@
     buildLegend(graph.nodes);
     layout();
     draw();
+    canvas.style.cursor = "grab";
     canvas.addEventListener("mousemove", onMove);
+    canvas.addEventListener("mousedown", onDown);
+    window.addEventListener("mouseup", onUp);
     canvas.addEventListener("mouseleave", function () {
       hoverNode = null; tooltip.style.display = "none"; draw();
     });
     canvas.addEventListener("click", onClick);
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+    canvas.addEventListener("dblclick", resetView);
+    var resetBtn = document.getElementById("resetView");
+    if (resetBtn) resetBtn.addEventListener("click", resetView);
+    // Resize: re-fit the world layer to the new viewport; preserve the
+    // current pan/zoom transform on top (a sensible, non-jarring default).
     window.addEventListener("resize", function () { layout(); draw(); });
   }
 
