@@ -2836,6 +2836,22 @@
     /* CARD-ICONS: thin-stroke DOMAIN line-icon (metadata only, never a verdict).
        Sizing/stroke here; the per-domain tint comes from the inline color the
        card builder sets (symbols use stroke:currentColor;fill:none). */
+    /* ABOUT-ICONS: calm Lucide OUTLINE section icons before About + methodology
+       card headings. A subtle brand-tinted accent (two-tone with the ink heading
+       text); never a verdict glyph. Shares the domain-icon outline treatment. */
+    .section-icon {
+      width: 18px;
+      height: 18px;
+      flex: none;
+      vertical-align: -3px;
+      margin-right: 7px;
+      color: var(--brand);
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
     .domain-icon {
       width: 17px;
       height: 17px;
