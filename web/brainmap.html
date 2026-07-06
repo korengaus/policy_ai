@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>뉴스 연결지도 — tickedin</title>
+<!--
+  BRAINMAP 2d-ii — standalone, hand-authored page (NOT build_index-managed;
+  touches none of the index pins). Fetches GET /api/brainmap (the newest
+  brainmap_graph row) and renders the 유통/연결 (spread/connection) graph on a
+  single canvas. VERDICT-ISOLATED: this page shows NO verdict — cluster labels
+  render the stored "N개 매체 보도 중" (spread) verbatim; a node click links
+  BACK to its verification card (/?result_id=N) where verification lives.
+  Self-contained: inline CSS + JS, no external lib/CDN.
+-->
+<style>
+  :root {
+    --bg: #f7f8fa;
+    --panel: #ffffff;
+    --ink: #1c2430;
+    --ink-soft: #5a6577;
+    --line: #e3e7ee;
+    --accent: #2b6cb0;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+    display: flex; flex-direction: column;
+  }
+  header.map-head {
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    padding: 14px 20px 12px;
+    flex: 0 0 auto;
+  }
+  .head-row { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  .map-title { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
+  .map-home { font-size: 13px; color: var(--accent); text-decoration: none; }
+  .map-home:hover { text-decoration: underline; }
+  /* HONESTY (fixed, always visible): this map is spread/connection, NOT verification. */
+  .map-subtitle { margin-top: 4px; font-size: 13px; color: var(--ink-soft); }
+  .map-subtitle strong { color: var(--ink); font-weight: 600; }
+  .legend {
+    margin-top: 8px; display: flex; flex-wrap: wrap; gap: 10px 14px;
+    font-size: 12px; color: var(--ink-soft); align-items: center;
+  }
+  .legend .key { display: inline-flex; align-items: center; gap: 5px; }
+  .legend .dot {
+    width: 10px; height: 10px; border-radius: 50%; display: inline-block;
+  }
+  .legend .dot.hollow { background: transparent !important; border: 2px solid #98a2b3; }
+  main.map-body { position: relative; flex: 1 1 auto; min-height: 0; }
+  canvas#map { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: default; }
+  #tooltip {
+    position: absolute; pointer-events: none; display: none;
+    max-width: 320px; padding: 8px 10px;
+    background: rgba(28, 36, 48, 0.94); color: #fff;
+    border-radius: 6px; font-size: 12.5px; line-height: 1.45;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.25); z-index: 5;
+  }
+  #tooltip .tip-spread { color: #a8c7ea; margin-top: 3px; font-size: 12px; }
+  #status {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: var(--ink-soft); font-size: 15px; text-align: center; padding: 24px;
+  }
+</style>
+</head>
+<body>
+<header class="map-head">
+  <div class="head-row">
+    <span class="map-title">뉴스 연결지도</span>
+    <a class="map-home" href="/">← 홈으로</a>
+  </div>
+  <p class="map-subtitle">
+    이 지도는 뉴스의 <strong>유통·연결</strong>을 보여줍니다. <strong>검증이 아닙니다.</strong>
+    가까이 모인 점은 비슷한 내용이 여러 매체에 보도되었다는 뜻일 뿐, 사실 여부와는 무관합니다.
+  </p>
+  <div class="legend" id="legend" aria-label="범례"></div>
+</header>
+<main class="map-body">
+  <canvas id="map"></canvas>
+  <div id="status">지도를 불러오는 중…</div>
+  <div id="tooltip"></div>
+</main>
+<script>
+(function () {
+  "use strict";
+
+  // Fixed categorical palette per domain (calm, readable on the light bg).
+  var DOMAIN_COLORS = {
+    "finance":      "#2b6cb0",
+    "welfare":      "#b7791f",
+    "agriculture":  "#2f855a",
+    "labor":        "#975a16",
+    "health":       "#c53030",
+    "environment":  "#2c7a7b",
+    "SMB":          "#6b46c1",
+    "realestate":   "#b83280",
+    "statistics":   "#4a5568",
+    "기타-미분류":   "#98a2b3"
+  };
+  var DOMAIN_KO = {
+    "finance": "금융", "welfare": "복지", "agriculture": "농어업",
+    "labor": "고용·노동", "health": "보건", "environment": "환경",
+    "SMB": "소상공인·중기", "realestate": "부동산", "statistics": "통계",
+    "기타-미분류": "기타"
+  };
+  var FALLBACK_COLOR = "#98a2b3";
+  var PAD = 40;             // canvas margin (px)
+  var HIT_RADIUS = 9;       // hover hit-test radius (px)
+  var LABEL_TOP_N = 12;     // clusters drawn with an always-on label
+  var LABEL_MIN_SIZE = 5;
+
+  var canvas = document.getElementById("map");
+  var ctx = canvas.getContext("2d");
+  var tooltip = document.getElementById("tooltip");
+  var statusEl = document.getElementById("status");
+
+  var graph = null;         // {nodes, edges, clusters}
+  var nodeById = {};        // id -> node
+  var clusterById = {};     // cluster_id -> cluster meta
+  var positions = [];       // per node: {px, py} in CSS pixels
+  var labelSpots = [];      // top-cluster label placements
+  var hoverNode = null;
+
+  function colorFor(domain) {
+    return DOMAIN_COLORS[domain] || FALLBACK_COLOR;
+  }
+
+  function buildLegend(nodes) {
+    var counts = {};
+    nodes.forEach(function (n) {
+      var d = n.domain || "기타-미분류";
+      counts[d] = (counts[d] || 0) + 1;
+    });
+    var order = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; });
+    var html = order.map(function (d) {
+      var name = DOMAIN_KO[d] || d;
+      return '<span class="key"><span class="dot" style="background:' + colorFor(d) + '"></span>' +
+             name + "</span>";
+    }).join("");
+    html += '<span class="key"><span class="dot hollow"></span>시장·시세 소식(빈 점)</span>';
+    document.getElementById("legend").innerHTML = html;
+  }
+
+  function layout() {
+    var rect = canvas.parentElement.getBoundingClientRect();
+    var w = Math.max(320, rect.width), h = Math.max(280, rect.height);
+    var dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    positions = graph.nodes.map(function (n) {
+      return {
+        px: PAD + n.x * (w - PAD * 2),
+        py: PAD + n.y * (h - PAD * 2)
+      };
+    });
+
+    // Top-N cluster label placements at each cluster's centroid.
+    var byCluster = {};
+    graph.nodes.forEach(function (n, i) {
+      if (n.cluster_id === null || n.cluster_id === undefined) return;
+      (byCluster[n.cluster_id] = byCluster[n.cluster_id] || []).push(i);
+    });
+    var top = graph.clusters
+      .filter(function (c) { return c.size >= LABEL_MIN_SIZE; })
+      .slice(0, LABEL_TOP_N);
+    labelSpots = top.map(function (c) {
+      var members = byCluster[c.cluster_id] || [];
+      var cx = 0, cy = 0;
+      members.forEach(function (i) { cx += positions[i].px; cy += positions[i].py; });
+      var m = Math.max(1, members.length);
+      var title = c.label_title || "";
+      if (title.length > 20) title = title.slice(0, 20) + "…";
+      return { x: cx / m, y: cy / m, title: title, spread: c.size_label };
+    });
+  }
+
+  function draw() {
+    var w = canvas.width / (window.devicePixelRatio || 1);
+    var h = canvas.height / (window.devicePixelRatio || 1);
+    ctx.clearRect(0, 0, w, h);
+
+    // Edges first — thin, low-alpha.
+    ctx.lineWidth = 0.7;
+    ctx.strokeStyle = "rgba(90, 101, 119, 0.16)";
+    ctx.beginPath();
+    graph.edges.forEach(function (e) {
+      var a = nodeById[e.src], b = nodeById[e.dst];
+      if (!a || !b) return;
+      var pa = positions[a._i], pb = positions[b._i];
+      ctx.moveTo(pa.px, pa.py);
+      ctx.lineTo(pb.px, pb.py);
+    });
+    ctx.stroke();
+
+    // Nodes on top. Clustered nodes slightly larger; market_commercial hollow.
+    graph.nodes.forEach(function (n, i) {
+      var p = positions[i];
+      var clustered = n.cluster_id !== null && n.cluster_id !== undefined;
+      var r = clustered ? 3.4 : 2.1;
+      var isMarket = n.content_nature === "market_commercial";
+      ctx.beginPath();
+      ctx.arc(p.px, p.py, r, 0, Math.PI * 2);
+      if (isMarket) {
+        ctx.globalAlpha = 0.75;
+        ctx.lineWidth = 1.4;
+        ctx.strokeStyle = colorFor(n.domain);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      } else {
+        ctx.globalAlpha = clustered ? 0.95 : 0.6;
+        ctx.fillStyle = colorFor(n.domain);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+    });
+
+    // Hover ring.
+    if (hoverNode) {
+      var hp = positions[hoverNode._i];
+      ctx.beginPath();
+      ctx.arc(hp.px, hp.py, 6, 0, Math.PI * 2);
+      ctx.lineWidth = 1.6;
+      ctx.strokeStyle = "#1c2430";
+      ctx.stroke();
+    }
+
+    // Always-on labels for the biggest clusters — stored spread label VERBATIM.
+    ctx.textAlign = "center";
+    labelSpots.forEach(function (s) {
+      ctx.font = "600 12px sans-serif";
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "rgba(247, 248, 250, 0.9)";
+      ctx.strokeText(s.title, s.x, s.y - 14);
+      ctx.fillStyle = "#1c2430";
+      ctx.fillText(s.title, s.x, s.y - 14);
+      ctx.font = "11px sans-serif";
+      ctx.strokeText(s.spread, s.x, s.y);
+      ctx.fillStyle = "#5a6577";
+      ctx.fillText(s.spread, s.x, s.y);
+    });
+  }
+
+  function nearestNode(mx, my) {
+    var best = null, bestD = HIT_RADIUS * HIT_RADIUS;
+    for (var i = 0; i < graph.nodes.length; i++) {
+      var dx = positions[i].px - mx, dy = positions[i].py - my;
+      var d = dx * dx + dy * dy;
+      if (d <= bestD) { bestD = d; best = graph.nodes[i]; }
+    }
+    return best;
+  }
+
+  function onMove(ev) {
+    var rect = canvas.getBoundingClientRect();
+    var mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
+    var n = nearestNode(mx, my);
+    if (n !== hoverNode) { hoverNode = n; draw(); }
+    if (!n) { tooltip.style.display = "none"; canvas.style.cursor = "default"; return; }
+    canvas.style.cursor = "pointer";
+    var spread = "";
+    if (n.cluster_id !== null && n.cluster_id !== undefined && clusterById[n.cluster_id]) {
+      spread = '<div class="tip-spread">' + clusterById[n.cluster_id].size_label + "</div>";
+    }
+    tooltip.innerHTML = escapeHtml(n.title || "(제목 없음)") + spread;
+    tooltip.style.display = "block";
+    var tx = Math.min(mx + 14, rect.width - 330);
+    tooltip.style.left = Math.max(4, tx) + "px";
+    tooltip.style.top = (my + 14) + "px";
+  }
+
+  function onClick(ev) {
+    var rect = canvas.getBoundingClientRect();
+    var n = nearestNode(ev.clientX - rect.left, ev.clientY - rect.top);
+    if (n && n.id) window.location.href = "/?result_id=" + encodeURIComponent(n.id);
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (ch) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch];
+    });
+  }
+
+  function start(data) {
+    if (!data || data.empty === true || !data.nodes || data.nodes.length === 0) {
+      statusEl.textContent = "지도가 아직 생성되지 않았습니다.";
+      return;
+    }
+    graph = data;
+    graph.nodes.forEach(function (n, i) { n._i = i; nodeById[n.id] = n; });
+    (graph.clusters || []).forEach(function (c) { clusterById[c.cluster_id] = c; });
+    statusEl.style.display = "none";
+    buildLegend(graph.nodes);
+    layout();
+    draw();
+    canvas.addEventListener("mousemove", onMove);
+    canvas.addEventListener("mouseleave", function () {
+      hoverNode = null; tooltip.style.display = "none"; draw();
+    });
+    canvas.addEventListener("click", onClick);
+    window.addEventListener("resize", function () { layout(); draw(); });
+  }
+
+  fetch("/api/brainmap")
+    .then(function (r) {
+      if (!r.ok) throw new Error("bad status " + r.status);
+      return r.json();
+    })
+    .then(start)
+    .catch(function () {
+      statusEl.textContent = "지도를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.";
+    });
+})();
+</script>
+</body>
+</html>
