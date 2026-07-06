@@ -2781,6 +2781,23 @@
       /* DESIGN-C3h-2c: --brand → --brand-ink for a touch more contrast on white
          (even with the hero eyebrow). */
       color: var(--brand-ink);
+      /* CARD-ICONS: align the leading domain line-icon with the label as one unit. */
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    /* CARD-ICONS: thin-stroke DOMAIN line-icon (metadata only, never a verdict).
+       Sizing/stroke here; the per-domain tint comes from the inline color the
+       card builder sets (symbols use stroke:currentColor;fill:none). */
+    .domain-icon {
+      width: 14px;
+      height: 14px;
+      flex: none;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
     }
     /* LABEL-1: unified SEVERITY/GRADE pill base geometry (shared by .card-watch,
        .card-source-head, .review-approved, .verdict-pill). Each member keeps its

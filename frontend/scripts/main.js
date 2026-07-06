@@ -292,6 +292,44 @@
     function domainDisplayLabel(domainKey) {
       return DOMAIN_LABELS_KO[domainKey] || DOMAIN_LABELS_KO["기타-미분류"];
     }
+    // CARD-ICONS: per-domain tint. Byte-identical to web/brainmap.html's
+    // DOMAIN_COLORS so the feed icon and the brain-map node share ONE color
+    // language (a user learns "자주 = 부동산" once; it reads on both surfaces).
+    const DOMAIN_COLORS = {
+      finance: "#2b6cb0",
+      welfare: "#b7791f",
+      agriculture: "#2f855a",
+      labor: "#975a16",
+      health: "#c53030",
+      environment: "#2c7a7b",
+      SMB: "#6b46c1",
+      realestate: "#b83280",
+      statistics: "#4a5568",
+      "기타-미분류": "#98a2b3",
+    };
+    const DOMAIN_ICON_FALLBACK_COLOR = "#98a2b3";
+    // CARD-ICONS: domain key → ascii <symbol> id (avoids unicode in the href).
+    // Unknown / "기타-미분류" → dom-etc so a card is NEVER icon-less.
+    const DOMAIN_ICON_IDS = {
+      finance: "dom-finance",
+      welfare: "dom-welfare",
+      agriculture: "dom-agriculture",
+      labor: "dom-labor",
+      health: "dom-health",
+      environment: "dom-environment",
+      SMB: "dom-smb",
+      realestate: "dom-realestate",
+      statistics: "dom-statistics",
+      "기타-미분류": "dom-etc",
+    };
+    // CARD-ICONS: the domain line-icon markup for a card. DOMAIN metadata only —
+    // never a verdict; the trust badge stays the sole verdict signal. Rides
+    // INSIDE .card-domain so hero cards (which hide .card-domain) auto-hide it.
+    function domainIconMarkup(domainKey) {
+      const symbolId = DOMAIN_ICON_IDS[domainKey] || "dom-etc";
+      const color = DOMAIN_COLORS[domainKey] || DOMAIN_ICON_FALLBACK_COLOR;
+      return `<svg class="domain-icon" style="color:${color}" aria-hidden="true" focusable="false"><use href="#${symbolId}"/></svg>`;
+    }
     // ===== end DISPLAY-CATEGORY B-1 =====
     // Deferred from M29-A1 (pin-sensitive): values contain regression-pinned
     // phrases (검증 완료 / 사람 검토 대기) and VERDICT_LABELS is mutated below.
@@ -2247,7 +2285,7 @@
       return `
         <article class="topic-card ${opts && opts.hero ? "topic-card--hero " : ""}${opts && opts.secondary ? "topic-card--secondary " : ""}${selected ? "selected" : ""}" data-topic-key="${escapeHtml(card.key)}" data-topic-source="${escapeHtml(card.source)}" data-topic-index="${escapeHtml(card.index)}" data-topic-record-id="${escapeHtml(card.recordId)}">
           <div class="topic-card-top">
-            <span class="card-domain">${escapeHtml(domainDisplayLabel(cardDomainKey(card)))}</span>
+            <span class="card-domain">${domainIconMarkup(cardDomainKey(card))}${escapeHtml(domainDisplayLabel(cardDomainKey(card)))}</span>
             <span class="card-watch ${alertClass(card.alert)}">${escapeHtml(formatAlert(card.alert))}</span>
             ${isTodayCard(card) ? `<span class="card-today-badge">오늘 검증</span>` : ""}
             ${(card.contentNature === "market_commercial" && !card.hasGenuineOfficial) ? `<span class="card-today-badge">시장·시세</span>` : ""}
