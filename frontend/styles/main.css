@@ -2792,17 +2792,15 @@
        Sizing/stroke here; the per-domain tint comes from the inline color the
        card builder sets (symbols use stroke:currentColor;fill:none). */
     .domain-icon {
-      width: 16px;
-      height: 16px;
+      width: 17px;
+      height: 17px;
       flex: none;
       vertical-align: -3px;
-      stroke: currentColor;
-      fill: none;
-      /* FEED-POLISH: 1.5 → 2 for a stronger, more legible line at feed scale
-         (still calm/professional — heavier, not loud). */
-      stroke-width: 2;
-      stroke-linecap: round;
-      stroke-linejoin: round;
+      /* FILLED-ICONS: solid glyphs (line icons were too faint at feed scale). The
+         per-domain tint still comes from the inline color the card builder sets
+         (style="color:<hex>") → currentColor → fill. Full opacity, no stroke. */
+      fill: currentColor;
+      stroke: none;
     }
     /* LABEL-1: unified SEVERITY/GRADE pill base geometry (shared by .card-watch,
        .card-source-head, .review-approved, .verdict-pill). Each member keeps its

@@ -277,6 +277,18 @@
       "finance", "welfare", "agriculture", "labor", "health",
       "environment", "SMB", "realestate", "statistics", "기타-미분류",
     ];
+    // TAB-ORDER: FIXED category-tab display order — corpus volume DESCENDING (from
+    // a one-time GROUP BY: welfare 582 / realestate 468 / agriculture 368 /
+    // finance 317 / SMB 170 / environment 157 / labor 104 / health 39 /
+    // statistics 14), with 기타-미분류 pinned LAST regardless of its count. This is
+    // a HARDCODED display order (not live-recomputed) so tab positions stay stable.
+    // SEPARATE from DOMAIN_ORDER (which stays canonical, still driving the per-domain
+    // sections + any keyed use) so this reorder touches ONLY the tab render. Every
+    // entry is a real user category; the tab CLICK/fetch (English-key) is unchanged.
+    const TAB_ORDER = [
+      "welfare", "realestate", "agriculture", "finance", "SMB",
+      "environment", "labor", "health", "statistics", "기타-미분류",
+    ];
     // DESIGN-C3h-2: static per-domain section subtitles (display-only UI copy; no
     // per-card data). Keyed by the raw domain key (note "기타-미분류").
     const DOMAIN_SUBTITLE = {
@@ -2331,7 +2343,7 @@
       // from GET /history?domain=<key> (setActiveDomain). Every DOMAIN_ORDER entry
       // is a real user category, so no filtering to an "intended set" is needed.
       const tabs = [["전체", "전체"]].concat(
-        DOMAIN_ORDER.map((d) => [d, domainDisplayLabel(d)])
+        TAB_ORDER.map((d) => [d, domainDisplayLabel(d)])
       );
       categoryTabsEl.innerHTML = tabs.map(([key, label]) => {
         const active = key === activeDomain ? " active" : "";
