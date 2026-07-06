@@ -13739,11 +13739,37 @@
     })();
     const requestedResultId = requestedResultIdFromUrl();
     if (requestedResultId) {
-      // HISTORY-BACK baseline guard: a deep-link detail is the tab's current entry,
-      // so pushing one detail entry on top leaves the load entry below as a "home
-      // base" to land on — BACK clears the detail and shows the feed instead of
-      // exiting to the previous site. (scrollY 0: a deep link loads at the top.)
-      pushDetailHistoryState(0);
+      // HISTORY-BACK baseline guard — behavior depends on WHERE the deep link
+      // came from:
+      //   * EXTERNAL / DIRECT (shared link, bookmark, new tab — referrer empty
+      //     or cross-origin): PUSH a detail entry on top of the load entry, so
+      //     the load entry stays below as an on-site "home base" and BACK clears
+      //     the detail → shows the feed instead of exiting to the previous site.
+      //     (Original behavior, preserved for on-site retention of shared links.)
+      //   * SAME-SITE (arrived from within tickedin — e.g. the brain map, or any
+      //     internal link): REPLACE the current /?result_id= entry with the same
+      //     detail state (no synthetic home-base), so BACK returns straight to the
+      //     referrer (the brain map) in ONE press — a full-document nav back, no
+      //     popstate involved. Uses the SAME state object shape as
+      //     pushDetailHistoryState so the popstate router still recognizes it.
+      // (scrollY 0: a deep link loads at the top.)
+      const referrer = (document && document.referrer) || "";
+      const sameSite = referrer !== "" &&
+        referrer.indexOf(location.origin + "/") === 0;
+      if (sameSite && window.history && window.history.replaceState) {
+        try {
+          detailReturnScrollY = 0;
+          window.history.replaceState(
+            { tickedinDetail: true, scrollY: 0 }, "", window.location.href
+          );
+          detailHistoryActive = true;
+        } catch (_) {
+          // history unavailable — fall back to the push path so the detail still opens.
+          pushDetailHistoryState(0);
+        }
+      } else {
+        pushDetailHistoryState(0);
+      }
       loadServerResultById(requestedResultId);
     }
     // HISTORY-BACK: on BACK out of a pushed detail entry, dismiss the detail and
