@@ -8,7 +8,7 @@ from typing import List, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
@@ -466,6 +466,63 @@ def stats() -> StatsResponse:
         range_start=cutoff.date().isoformat(),
         range_end=now.date().isoformat(),
     )
+
+
+# BRAINMAP 2d-i — the empty shape served when the graph doesn't exist yet
+# (engine off / table absent / no row). A normal 200 so the brain-map page
+# has exactly one code path. Matches graph_json's top-level keys.
+_BRAINMAP_EMPTY_JSON = '{"nodes": [], "edges": [], "clusters": [], "empty": true}'
+
+
+@app.get("/api/brainmap")
+def brainmap_graph() -> Response:
+    # BRAINMAP 2d-i: read-only 유통/연결 (spread/connection) graph for the
+    # brain-map page. Serves the NEWEST brainmap_graph row's graph_json AS-IS —
+    # the stored value is already valid JSON written by
+    # scripts/build_brainmap_graph.py, so the ~441KB blob is NOT parsed and
+    # re-serialized here. READ-ONLY: one SELECT, no write, no verdict field
+    # (the graph is metadata; its labels carry kind="spread" / "N개 매체 보도
+    # 중", never 검증). Mirrors /stats' error shape (logger.exception → 500).
+    try:
+        # Lazy imports keep api_server's module import surface unchanged —
+        # postgres_storage is only needed by this route.
+        import sqlalchemy as sa
+        from sqlalchemy.exc import ProgrammingError
+
+        import postgres_storage
+
+        engine = postgres_storage.get_engine()
+        if engine is None:
+            # Dual-write disabled (local dev without PG) — empty, not 500.
+            return Response(
+                content=_BRAINMAP_EMPTY_JSON, media_type="application/json",
+            )
+        try:
+            with engine.connect() as conn:
+                row = conn.execute(sa.text(
+                    "SELECT graph_json FROM brainmap_graph "
+                    "ORDER BY id DESC LIMIT 1"
+                )).fetchone()
+        except ProgrammingError:
+            # Table not created yet (build_brainmap_graph.py hasn't run
+            # against this DB) — empty, not 500.
+            return Response(
+                content=_BRAINMAP_EMPTY_JSON, media_type="application/json",
+            )
+        graph_json = row[0] if row else None
+        if not graph_json:
+            return Response(
+                content=_BRAINMAP_EMPTY_JSON, media_type="application/json",
+            )
+        return Response(
+            content=graph_json,
+            media_type="application/json",
+            # The graph regenerates manually/rarely; let clients cache 5 min.
+            headers={"Cache-Control": "max-age=300"},
+        )
+    except Exception:
+        logger.exception("Failed to load brainmap graph")
+        raise HTTPException(status_code=500, detail="failed to load brainmap")
 
 
 class JobCreateRequest(BaseModel):
