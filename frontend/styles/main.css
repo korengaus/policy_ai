@@ -2153,6 +2153,51 @@
       font-weight: 600;
     }
 
+    /* CONTENT-HONESTY: "tickedin 소개" (About) section — un-boxed, thin top rule,
+       mirroring the site's section aesthetic (same layout tokens as .corrections).
+       Replaced the fabricated corrections list. */
+    .about-section {
+      margin: 24px 0 16px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+    }
+    .about-section-head {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    .about-section-head h2 {
+      margin: 0;
+      color: var(--ink);
+      font-size: 1.308rem;
+      line-height: 1.25;
+      font-weight: 700;
+      font-family: 'Nanum Myeongjo', 'Apple SD Gothic Neo', 'Pretendard', serif;
+    }
+    .about-section-sub {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.92rem;
+      line-height: 1.45;
+    }
+    .about-body {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-width: 760px;
+    }
+    .about-body p {
+      margin: 0;
+      color: var(--ink);
+      font-size: 0.94rem;
+      line-height: 1.7;
+    }
+    .about-body strong {
+      color: var(--brand-ink);
+      font-weight: 700;
+    }
     .corrections {
       margin: 24px 0 16px;
       padding-top: 18px;

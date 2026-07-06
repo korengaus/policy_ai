@@ -59,8 +59,9 @@
   </svg>
   <div class="page">
     <!-- DESIGN-3A: top utility bar. STATIC placeholders only — live date/counts
-         are wired in DESIGN-3B. About/Contact/News are inert (href="#") until
-         those pages/sections exist; 제보하기 mirrors the footer mailto pattern.
+         are wired in DESIGN-3B. CONTENT-HONESTY: About now anchors the real
+         "tickedin 소개" section (#about); Contact opens the real contact email
+         (same as 제보하기); the dead "News" link was removed (no content yet).
          No JS is bound in this row. -->
     <div class="utility-bar">
       <div class="utility-left">
@@ -68,9 +69,8 @@
         <span class="utility-counts">오늘 업데이트 <strong class="utility-count-num">—</strong>건 · 검증 진행 <strong class="utility-count-num">—</strong>건</span>
       </div>
       <nav class="utility-right" aria-label="사이트 메뉴">
-        <a class="utility-link" href="#">About</a>
-        <a class="utility-link" href="#">Contact</a>
-        <a class="utility-link" href="#">News</a>
+        <a class="utility-link" href="#about">About</a>
+        <a class="utility-link" href="mailto:contact@tickedin.org">Contact</a>
         <a class="utility-link" href="/web/brainmap.html">연결지도</a>
         <a class="utility-report" href="mailto:contact@tickedin.org">제보하기</a>
       </nav>
@@ -643,42 +643,23 @@
       </div>
     </section>
 
-    <!-- DESIGN-C3b: static "정정·업데이트" placeholder section. Full-width, sits
-         just above the long explainer. Display-only — no data/column/endpoint yet;
-         the three rows are illustrative and will be swapped for data-driven rows in
-         a later step. The "✓ 정정 반영" pill reuses the existing card-pill pattern
-         (--brand tint). Reuses existing tokens (--line / --muted / --ink / --brand). -->
-    <section id="correctionsSection" class="corrections" aria-label="정정·업데이트">
-      <div class="corrections-head">
-        <h2>정정·업데이트</h2>
-        <p class="corrections-sub">투명한 정정은 신뢰의 일부입니다</p>
+    <!-- CONTENT-HONESTY: honest "tickedin 소개" (About) section. Replaces the
+         REMOVED fabricated 정정·업데이트 placeholder (it listed corrections that
+         never happened — an honesty violation for a 검증 인프라). Describes the
+         real hybrid model (AI 초안 + 사람 검토) without overclaiming accuracy or
+         certainty. Anchored by the About nav link (href="#about"). Display-only —
+         no data/endpoint. Reuses existing tokens (--line / --muted / --ink /
+         --brand-ink). -->
+    <section id="about" class="about-section" aria-label="tickedin 소개">
+      <div class="about-section-head">
+        <h2>tickedin 소개</h2>
+        <p class="about-section-sub">정책 뉴스를 공식 출처로 검증합니다</p>
       </div>
-      <ul class="corrections-list">
-        <li class="corrections-row">
-          <span class="corrections-date">06.22</span>
-          <div class="corrections-body">
-            <span class="corrections-title">서울 공시가격 급등 검증</span>
-            <span class="corrections-note">근거 수치 출처를 '전국 평균' → '서울 공동주택 평균'으로 정정했습니다.</span>
-          </div>
-          <span class="corrections-badge">✓ 정정 반영</span>
-        </li>
-        <li class="corrections-row">
-          <span class="corrections-date">06.20</span>
-          <div class="corrections-body">
-            <span class="corrections-title">청년도약계좌 5천만 원 검증</span>
-            <span class="corrections-note">'보장' 표현을 '최대 수령액'으로 수정했습니다.</span>
-          </div>
-          <span class="corrections-badge">✓ 정정 반영</span>
-        </li>
-        <li class="corrections-row">
-          <span class="corrections-date">06.18</span>
-          <div class="corrections-body">
-            <span class="corrections-title">주 4일제 도입 검증</span>
-            <span class="corrections-note">'전면 시행' → '일부 공공기관 시범사업'으로 정정했습니다.</span>
-          </div>
-          <span class="corrections-badge">✓ 정정 반영</span>
-        </li>
-      </ul>
+      <div class="about-body">
+        <p><strong>무엇인가요.</strong> tickedin은 정책·뉴스 속 주장을 정부 공식 1차 출처(공식 문서·법령·기관 자료)와 대조해 검증하는 AI 기반 검증 인프라입니다.</p>
+        <p><strong>어떻게 작동하나요.</strong> AI가 뉴스 속 주장을 공식 자료와 대조해 검증 초안을 만들고(‘AI 초안’), 사람이 선별적으로 검토해 등급을 확정합니다(‘사람 검토됨’). 모든 결과에는 이 상태가 정직하게 표시됩니다.</p>
+        <p><strong>무엇을 약속하나요.</strong> tickedin은 주장의 진위를 단정하지 않습니다. 검증은 “공식 출처가 그 주장을 뒷받침하는지”를 보여주는 것이지, 절대적 참·거짓 판정이 아닙니다. 근거와 출처를 그대로 공개하고, 새 사실이 확인되면 정정합니다.</p>
+      </div>
     </section>
 
     </div><!-- /#homeScreen (DESIGN-DETAIL-2 home view) -->
