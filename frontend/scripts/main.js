@@ -202,6 +202,14 @@
     // top hot-topic area when there is no live session search. Populated on
     // load from GET /history; never written to localStorage.
     let serverHotTopicResults = [];
+    // STABLE-TABS S2: in-memory (no localStorage) cache of domain-scoped feed
+    // results, keyed by the STORED English domain key (e.g. "realestate"). A
+    // domain tab click fetches GET /history?domain=<key> once and reuses the
+    // cache on re-click. domainLoadingKey / domainFetchErrorKey drive the feed's
+    // loading + friendly-error states. Read-only retrieval; display only.
+    const domainResultsCache = new Map();
+    let domainLoadingKey = null;
+    let domainFetchErrorKey = null;
     // ===== M29-A1 — pin-safe display label maps =====
     const ALERT_LABELS = {
       WATCH: "관찰",
@@ -2313,14 +2321,17 @@
     // kept in data-domain for comparison. Active selection is preserved; if the
     // active domain is no longer present it falls back to 전체 so the feed never
     // renders empty against a stale tab.
-    function renderCategoryTabs(allCards) {
+    function renderCategoryTabs() {
       if (!categoryTabsEl) return;
-      const present = new Set((allCards || []).map(cardDomainKey));
-      if (activeDomain !== "전체" && !present.has(activeDomain)) {
-        activeDomain = "전체";
-      }
+      // STABLE-TABS S2: render the STABLE full tab set — 전체 + every domain in
+      // DOMAIN_ORDER (== domain_classifier.LABELS), ALWAYS, in canonical order.
+      // Previously the tab set was derived from the recent pool (present domains),
+      // so domains absent from the agriculture-flooded tail lost their tab. Tabs
+      // no longer appear/disappear with the feed tail; a click loads the domain
+      // from GET /history?domain=<key> (setActiveDomain). Every DOMAIN_ORDER entry
+      // is a real user category, so no filtering to an "intended set" is needed.
       const tabs = [["전체", "전체"]].concat(
-        DOMAIN_ORDER.filter((d) => present.has(d)).map((d) => [d, domainDisplayLabel(d)])
+        DOMAIN_ORDER.map((d) => [d, domainDisplayLabel(d)])
       );
       categoryTabsEl.innerHTML = tabs.map(([key, label]) => {
         const active = key === activeDomain ? " active" : "";
@@ -2366,21 +2377,25 @@
     function renderHotTopics(preferredResults) {
       if (!hotTopicsEl) return;
       const allCards = currentTopicCards(preferredResults);
-      // DESIGN-DETAIL-3: drive the ALWAYS-VISIBLE domain-tab row from the FULL home
-      // pool (serverHotTopicResults), NOT the (possibly narrowed) feed set. Opening a
-      // detail narrows currentReportContext to ONE result, which would otherwise
-      // collapse the tabs to that single domain (전체 + 금융 only). Using the stable
-      // server pool keeps the full tab set (금융~기타) while a detail is shown. Falls
-      // back to allCards when the server pool isn't loaded yet (e.g. a pure search
-      // session) so tabs still reflect available domains. The feed below still uses
-      // allCards — home content is unaffected (on plain home the two pools coincide).
-      const tabPool = serverHotTopicResults.length
-        ? serverHotTopicResults.map((result, index) => topicCardFromResult(result, index, "server"))
-        : allCards;
-      renderCategoryTabs(tabPool);
-      const filtered = activeDomain === "전체"
-        ? allCards
-        : allCards.filter((card) => cardDomainKey(card) === activeDomain);
+      // STABLE-TABS S2: the tab SET is now stable (전체 + all DOMAIN_ORDER), so it
+      // no longer depends on the loaded pool — no tabPool derivation needed.
+      renderCategoryTabs();
+      // STABLE-TABS S2: the active pool.
+      //   전체 → the recent feed (allCards), byte-identical to before.
+      //   a domain → its server-fetched cards from the in-memory cache (built via
+      //     the SAME topicCardFromResult builder, so icons/badges/honesty match).
+      //   a domain not yet cached → [] + a loading/error state below (domainPending).
+      let filtered;
+      let domainPending = false;
+      if (activeDomain === "전체") {
+        filtered = allCards;
+      } else if (domainResultsCache.has(activeDomain)) {
+        filtered = domainResultsCache.get(activeDomain)
+          .map((result, index) => topicCardFromResult(result, index, "server"));
+      } else {
+        filtered = [];
+        domainPending = true;
+      }
       // DESIGN-C3h-1c: per-tab feed (every tab, filtered by activeDomain):
       //   hero      = top-2 by 뜨는순 (the band)
       //   오늘의 검증 = TODAY-verified, newest-first, ≤3 — SORT-INDEPENDENT (unchanged)
@@ -2427,7 +2442,15 @@
       // the 3-col grid now).
       if (!hot.length) {
         hotTopicsTopEl.innerHTML = "";
-        hotTopicsEl.innerHTML = '<div class="empty-state">검색을 실행하거나 최근 분석을 불러오면 검증 카드가 표시됩니다.</div>';
+        // STABLE-TABS S2: a domain tab whose data is still fetching / failed shows
+        // a loading or friendly-error line instead of the generic empty-state.
+        if (domainPending) {
+          hotTopicsEl.innerHTML = domainFetchErrorKey === activeDomain
+            ? '<div class="empty-state">이 분야의 뉴스를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</div>'
+            : '<div class="empty-state">불러오는 중…</div>';
+        } else {
+          hotTopicsEl.innerHTML = '<div class="empty-state">검색을 실행하거나 최근 분석을 불러오면 검증 카드가 표시됩니다.</div>';
+        }
       } else if (hot.length >= 2) {
         const band = `<div class="feed-hero-band">`
           + renderTopicCardHtml(hot[0], { detailed: true, hero: true })
@@ -6028,6 +6051,43 @@
       }
     }
 
+    // STABLE-TABS S2: fetch ONE domain's recent rows (S1 endpoint) and map them
+    // through the SAME mapHistoryRowToResult adapter the 전체 feed uses. `domainKey`
+    // is the STORED English domain key (e.g. "realestate"). Returns null on any
+    // failure (→ friendly-error state), a results[] on success (possibly empty).
+    async function getServerDomainAnalyses(domainKey, limit = 50) {
+      try {
+        const response = await fetch(
+          `${API_BASE}/history?domain=${encodeURIComponent(domainKey)}&limit=${encodeURIComponent(limit)}`
+        );
+        if (!response.ok) return null;
+        const body = await response.json();
+        const rows = Array.isArray(body?.results) ? body.results : [];
+        return rows.map(mapHistoryRowToResult);
+      } catch (_) {
+        return null;
+      }
+    }
+
+    // STABLE-TABS S2: ensure a domain's cards are cached, then re-render if that
+    // domain is still active. No-op when already cached or a fetch is in flight
+    // (in-memory only; no localStorage). Fire-and-forget — the feed shows a
+    // loading line until this resolves.
+    function ensureDomainLoaded(domainKey) {
+      if (domainResultsCache.has(domainKey) || domainLoadingKey === domainKey) return;
+      domainLoadingKey = domainKey;
+      if (domainFetchErrorKey === domainKey) domainFetchErrorKey = null;
+      getServerDomainAnalyses(domainKey).then((results) => {
+        if (domainLoadingKey === domainKey) domainLoadingKey = null;
+        if (results === null) {
+          domainFetchErrorKey = domainKey;
+        } else {
+          domainResultsCache.set(domainKey, results);
+        }
+        if (activeDomain === domainKey) renderHotTopics();
+      });
+    }
+
     // After a V2 job finishes, the SSE "completed" event carries the
     // `pipeline_worker._build_summary_payload` shape — which only
     // includes `saved_result_ids`, not the full per-news results.
@@ -6518,6 +6578,12 @@
     function setActiveDomain(key) {
       activeDomain = key || "전체";
       currentPage = 1;  // DESIGN-C3-2: different card set → back to page 1
+      // STABLE-TABS S2: a specific domain not yet cached → kick off its
+      // server-scoped fetch (fire-and-forget; the feed shows a loading line until
+      // ensureDomainLoaded re-renders). 전체 uses the existing recent feed.
+      if (activeDomain !== "전체" && !domainResultsCache.has(activeDomain)) {
+        ensureDomainLoaded(activeDomain);
+      }
       renderHotTopics();
     }
     // DESIGN-DETAIL-2: screen toggle. The home view (#homeScreen — #metrics
