@@ -2796,11 +2796,16 @@
       height: 17px;
       flex: none;
       vertical-align: -3px;
-      /* FILLED-ICONS: solid glyphs (line icons were too faint at feed scale). The
-         per-domain tint still comes from the inline color the card builder sets
-         (style="color:<hex>") → currentColor → fill. Full opacity, no stroke. */
-      fill: currentColor;
-      stroke: none;
+      /* ICON-SET-UNIFY: Lucide OUTLINE treatment (one matched family). The
+         per-domain tint comes from the inline color the card builder sets
+         (style="color:<hex>") → currentColor → stroke. fill:none so the outline
+         icons are not solid blobs (the tag's small dot carries its own inline
+         fill="currentColor" and still shows). */
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
     }
     /* LABEL-1: unified SEVERITY/GRADE pill base geometry (shared by .card-watch,
        .card-source-head, .review-approved, .verdict-pill). Each member keeps its
