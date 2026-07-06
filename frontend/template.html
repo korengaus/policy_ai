@@ -643,23 +643,18 @@
       </div>
     </section>
 
-    <!-- CONTENT-HONESTY: honest "tickedin 소개" (About) section. Replaces the
-         REMOVED fabricated 정정·업데이트 placeholder (it listed corrections that
-         never happened — an honesty violation for a 검증 인프라). Describes the
-         real hybrid model (AI 초안 + 사람 검토) without overclaiming accuracy or
-         certainty. Anchored by the About nav link (href="#about"). Display-only —
-         no data/endpoint. Reuses existing tokens (--line / --muted / --ink /
-         --brand-ink). -->
-    <section id="about" class="about-section" aria-label="tickedin 소개">
-      <div class="about-section-head">
-        <h2>tickedin 소개</h2>
-        <p class="about-section-sub">정책 뉴스를 공식 출처로 검증합니다</p>
+    <!-- CONTENT-HONESTY: 정정·업데이트 section restored as an HONEST EMPTY STATE.
+         The earlier version listed FABRICATED corrections (removed). Real
+         corrections data does not exist yet, so this shows an honest empty
+         message; the structure is ready for real entries later. Reuses the
+         existing .corrections* styles + the shared .empty-state. The About
+         content moved OUT to its own #aboutScreen page (mirrors 검증 등급 안내). -->
+    <section id="correctionsSection" class="corrections" aria-label="정정·업데이트">
+      <div class="corrections-head">
+        <h2>정정·업데이트</h2>
+        <p class="corrections-sub">투명한 정정은 신뢰의 일부입니다</p>
       </div>
-      <div class="about-body">
-        <p><strong>무엇인가요.</strong> tickedin은 정책·뉴스 속 주장을 정부 공식 1차 출처(공식 문서·법령·기관 자료)와 대조해 검증하는 AI 기반 검증 인프라입니다.</p>
-        <p><strong>어떻게 작동하나요.</strong> AI가 뉴스 속 주장을 공식 자료와 대조해 검증 초안을 만들고(‘AI 초안’), 사람이 선별적으로 검토해 등급을 확정합니다(‘사람 검토됨’). 모든 결과에는 이 상태가 정직하게 표시됩니다.</p>
-        <p><strong>무엇을 약속하나요.</strong> tickedin은 주장의 진위를 단정하지 않습니다. 검증은 “공식 출처가 그 주장을 뒷받침하는지”를 보여주는 것이지, 절대적 참·거짓 판정이 아닙니다. 근거와 출처를 그대로 공개하고, 새 사실이 확인되면 정정합니다.</p>
-      </div>
+      <div class="empty-state">아직 확인된 정정 사항이 없습니다. 새 사실이 확인되면 여기에 표시됩니다.</div>
     </section>
 
     </div><!-- /#homeScreen (DESIGN-DETAIL-2 home view) -->
@@ -826,6 +821,54 @@
             <li>수정 시 업데이트 시간과 수정 이유를 남기는 방향으로 운영합니다.</li>
           </ul>
         </div>
+      </div>
+    </section>
+
+    <!-- ABOUT-PAGE: "tickedin 소개" — a full-page VIEW-SWAP sibling of #homeScreen /
+         #methodology / #detailScreen (outside the header/tabs/footer), shown via
+         showScreen("about"). Mirrors the 검증 등급 안내 (#methodology) mechanism
+         EXACTLY: the About nav link (href="#about") is intercepted → pushes a
+         history entry {tickedinScreen:"about"} → showScreen("about"); BACK returns
+         to the prior screen via the popstate router; exit is the always-visible
+         header logo, same as methodology. Reuses the .methodology-* card styling so
+         About looks consistent with 검증 등급 안내. Content is HONEST (the real
+         hybrid AI-draft + human-review model) with NO accuracy/certainty overclaim.
+         (Section icons arrive in Slice 2.) -->
+    <section id="aboutScreen" class="methodology-section" aria-labelledby="aboutTitle">
+      <div class="methodology-card methodology-masthead">
+        <div class="public-eyebrow">About tickedin</div>
+        <h2 id="aboutTitle">tickedin 소개</h2>
+        <p>
+          정책 뉴스를 정부 공식 1차 출처와 대조해, 무엇이 공식 근거로 확인되는지 투명하게 보여주는
+          AI 기반 검증 인프라입니다. 단정하지 않고, 근거와 출처를 그대로 공개합니다.
+        </p>
+      </div>
+
+      <div class="methodology-grid">
+        <div class="methodology-card">
+          <h3>무엇인가요</h3>
+          <p>tickedin은 정책·뉴스 속 주장을 정부 공식 1차 출처(공식 문서·법령·기관 자료)와 대조해 검증하는 AI 기반 검증 인프라입니다.</p>
+        </div>
+        <div class="methodology-card">
+          <h3>왜 만들었나요</h3>
+          <p>정책 뉴스는 빠르게 퍼지지만 무엇이 공식 자료로 뒷받침되는지 확인하기 어렵습니다. tickedin은 그 검증 공백을 메우기 위한 도구입니다.</p>
+        </div>
+      </div>
+
+      <div class="methodology-card">
+        <h3>어떻게 작동하나요</h3>
+        <p>AI가 뉴스 속 주장을 공식 자료와 대조해 초안(‘AI 초안’)을 만들고, 사람이 선별적으로 검토해 등급을 확정합니다(‘사람 검토됨’). 모든 결과는 이 상태로 정직하게 표시됩니다.</p>
+      </div>
+
+      <div class="methodology-card">
+        <h3>무엇을 약속하나요</h3>
+        <p>tickedin은 주장의 진위를 단정하지 않습니다. 검증은 “공식 출처가 그 주장을 뒷받침하는지”를 보여주는 것이지, 절대적 참·거짓 판정이 아닙니다. 근거와 출처를 그대로 공개하고, 새 사실이 확인되면 정정합니다.</p>
+      </div>
+
+      <div class="methodology-card">
+        <h3>더 보기</h3>
+        <p><a href="/web/brainmap.html">연결지도 →</a> 뉴스가 어떻게 유통·연결되는지 보여주는 지도입니다.</p>
+        <p><a href="#methodology">검증 등급 안내 →</a> 검증 방법과 등급의 의미를 설명합니다.</p>
       </div>
     </section>
 

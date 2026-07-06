@@ -6619,10 +6619,14 @@
       const homeEl = document.getElementById("homeScreen");
       const methodologyEl = document.getElementById("methodology");
       const detailEl = document.getElementById("detailScreen");
+      // ABOUT-PAGE: #aboutScreen is a 4th mutually-exclusive screen, toggled here
+      // exactly like #methodology.
+      const aboutEl = document.getElementById("aboutScreen");
       const isHome = name === "home";
       if (homeEl) homeEl.classList.toggle("screen-hidden", !isHome);
       if (methodologyEl) methodologyEl.classList.toggle("screen-hidden", name !== "methodology");
       if (detailEl) detailEl.classList.toggle("screen-hidden", name !== "detail");
+      if (aboutEl) aboutEl.classList.toggle("screen-hidden", name !== "about");
       // DESIGN-DETAIL-2c: the under-search status line (#statusLine — e.g. "저장된
       // 검증 결과를 불러왔습니다") lives in the always-visible header region, so it
       // leaked onto non-home pages. Clear it whenever we leave home; it is a
@@ -6686,6 +6690,32 @@
         event.preventDefault();
         pushMethodologyHistoryState();  // DETAIL-2b: BACK from here returns home
         showScreen("methodology");
+      });
+    });
+    // ABOUT-PAGE: About opens as a full-page view-swap, mirroring the methodology
+    // interception above line-for-line (pushAboutHistoryState → showScreen). The
+    // About nav link stays href="#about"; this preventDefault swaps the anchor
+    // scroll for the screen toggle. BACK returns to the prior screen via the
+    // popstate router. pushAboutHistoryState mirrors pushMethodologyHistoryState.
+    let aboutHistoryActive = false;
+    function pushAboutHistoryState() {
+      if (!window.history || !window.history.pushState) return;
+      if (window.history.state && window.history.state.tickedinScreen === "about") {
+        aboutHistoryActive = true;  // already an about entry — don't stack duplicates
+        return;
+      }
+      try {
+        window.history.pushState({ tickedinScreen: "about" }, "", window.location.href);
+        aboutHistoryActive = true;
+      } catch (_) {
+        /* history unavailable — the page still opens via the visual toggle */
+      }
+    }
+    document.querySelectorAll('a[href="#about"]').forEach((link) => {
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        pushAboutHistoryState();
+        showScreen("about");
       });
     });
     // DESIGN-DETAIL-2 / DESIGN-UNIFY: restore the FULL home feed and land on home.
@@ -8277,7 +8307,17 @@
         // Entered (BACK) or re-entered (FORWARD) the methodology entry → re-show it.
         methodologyHistoryActive = true;
         detailHistoryActive = false;
+        aboutHistoryActive = false;
         showScreen("methodology");  // non-home branch scrolls to top
+        return;
+      }
+      // ABOUT-PAGE: mirror the methodology branch — entering (BACK) or re-entering
+      // (FORWARD) the about entry re-shows the About page (pure visibility toggle).
+      if (navState && navState.tickedinScreen === "about") {
+        aboutHistoryActive = true;
+        methodologyHistoryActive = false;
+        detailHistoryActive = false;
+        showScreen("about");  // non-home branch scrolls to top
         return;
       }
       if (navState && navState.tickedinDetail) {
@@ -8286,6 +8326,7 @@
         // pure visibility toggle. Restore the saved scroll for the detail entry.
         detailHistoryActive = true;
         methodologyHistoryActive = false;
+        aboutHistoryActive = false;
         showScreen("detail");
         const detailY = (typeof navState.scrollY === "number") ? navState.scrollY : 0;
         requestAnimationFrame(() => { window.scrollTo(0, detailY || 0); });
@@ -8294,10 +8335,11 @@
       // Popped to a home/neutral (null) entry. Only act if we were tracking a non-home
       // screen; otherwise this popstate isn't ours (e.g. an operator_tools
       // replaceState navigation) and the page is left alone.
-      if (!methodologyHistoryActive && !detailHistoryActive) return;
+      if (!methodologyHistoryActive && !detailHistoryActive && !aboutHistoryActive) return;
       const wasDetail = detailHistoryActive;
       methodologyHistoryActive = false;
       detailHistoryActive = false;
+      aboutHistoryActive = false;
       // Restore the FULL home feed WITHOUT destroying #detailScreen content (so a
       // later FORWARD can re-show the detail). The old renderResults([]) wiped it —
       // replaced with showScreen("home") + clearCurrentReportContext() (un-narrow the
