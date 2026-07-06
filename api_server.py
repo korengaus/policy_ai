@@ -415,13 +415,17 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
 
 
 @app.get("/history", response_model=HistoryResponse)
-def history(limit: int = 20) -> HistoryResponse:
+def history(limit: int = 20, domain: Optional[str] = None) -> HistoryResponse:
     # PERF-2: the homepage card list only needs lightweight columns, so this
     # uses the slim reader (heavy JSON body columns dropped) to cut the ~16MB
     # response. The DETAIL view still fetches the full row via GET /history/{id}
     # (get_result_by_id), which is unchanged.
+    # STABLE-TABS S1: optional ?domain=<d> scopes the recent feed to one domain
+    # (id-DESC, same slim shape) so a stable category tab can load its cards even
+    # when they're outside the recent-100 window. domain=None → byte-identical to
+    # the original 전체 feed. Read-only; no verdict field touched.
     try:
-        results = get_recent_results_slim(limit=limit)
+        results = get_recent_results_slim(limit=limit, domain=domain)
     except Exception:
         logger.exception("Failed to load analysis history")
         raise HTTPException(status_code=500, detail="failed to load history")

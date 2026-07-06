@@ -419,7 +419,7 @@ def get_recent_results(limit: int = 20):
     return []
 
 
-def get_recent_results_slim(limit: int = 20):
+def get_recent_results_slim(limit: int = 20, domain=None):
     # PERF-2: slim list projection for GET /history — same PG-primary
     # error handling as get_recent_results, but reads only the lightweight
     # columns the homepage card list needs (the heavy JSON body columns are
@@ -442,7 +442,9 @@ def get_recent_results_slim(limit: int = 20):
         raise
     if pg_enabled:
         try:
-            pg_rows = read_recent_analysis_results_slim(safe_limit)
+            # STABLE-TABS S1: thread the optional domain filter through. When
+            # domain is None the call is byte-identical to today (전체 feed).
+            pg_rows = read_recent_analysis_results_slim(safe_limit, domain)
         except Exception:
             log.error(
                 "get_recent_results_slim PG read failed",

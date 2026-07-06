@@ -1406,7 +1406,9 @@ _SLIM_LIST_COLUMNS = (
 )
 
 
-def read_recent_analysis_results_slim(limit: int = 20) -> Optional[list]:
+def read_recent_analysis_results_slim(
+    limit: int = 20, domain: Optional[str] = None,
+) -> Optional[list]:
     """Like :func:`read_recent_analysis_results` but SELECTs only the
     lightweight columns the homepage card list needs (see
     ``_SLIM_LIST_COLUMNS``), dropping the heavy JSON body columns.
@@ -1427,8 +1429,16 @@ def read_recent_analysis_results_slim(limit: int = 20) -> Optional[list]:
     columns = [analysis_results_table.c[name] for name in _SLIM_LIST_COLUMNS]
     try:
         with engine.connect() as conn:
+            stmt = sa.select(*columns)
+            # STABLE-TABS S1: optional domain-scoped feed. Added ONLY when
+            # `domain` is truthy, so the no-domain 전체 path stays byte-identical.
+            # A domain value absent from the table yields an empty result (no
+            # error). Read-only filter on the display-metadata `domain` column —
+            # never a verdict field.
+            if domain:
+                stmt = stmt.where(analysis_results_table.c.domain == domain)
             rows = conn.execute(
-                sa.select(*columns)
+                stmt
                 .order_by(analysis_results_table.c.id.desc())
                 .limit(safe_limit)
             ).all()
