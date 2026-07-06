@@ -2536,11 +2536,13 @@
     /* DESIGN-C3h-3: the always-on hero "<domain> · 오늘의 검증" eyebrow (.hero-today-label)
        was REMOVED — it was a fixed hero label, not a real today signal. Real today
        cards now carry the per-card .card-today-badge instead. */
-    /* DESIGN-C2c: the domain now leads the headline via the eyebrow above, so hide
-       the redundant .card-domain badge ON THE HERO ONLY. The alert badge
-       (.card-watch), freshness, review badge, and all other elements stay. */
+    /* DESIGN-C2c: the domain badge WAS hidden on the hero (redundant with the old
+       hero eyebrow). FEED-POLISH: the eyebrow was removed (DESIGN-C3h-3), so the
+       hero had NO domain signal at all — restore the .card-domain chip (icon +
+       label) so the hero shows its domain line-icon consistently with every feed
+       card. Inherits the base .card-domain inline-flex (icon + label as one unit). */
     .topic-card--hero .card-domain {
-      display: none;
+      display: inline-flex;
     }
     .topic-card--hero .topic-card-title {
       /* DESIGN-C2b → DESIGN-C3g: hero headline 2.4rem → 3.0rem so it clearly
@@ -2790,12 +2792,15 @@
        Sizing/stroke here; the per-domain tint comes from the inline color the
        card builder sets (symbols use stroke:currentColor;fill:none). */
     .domain-icon {
-      width: 14px;
-      height: 14px;
+      width: 16px;
+      height: 16px;
       flex: none;
+      vertical-align: -3px;
       stroke: currentColor;
       fill: none;
-      stroke-width: 1.5;
+      /* FEED-POLISH: 1.5 → 2 for a stronger, more legible line at feed scale
+         (still calm/professional — heavier, not loud). */
+      stroke-width: 2;
       stroke-linecap: round;
       stroke-linejoin: round;
     }
