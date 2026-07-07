@@ -119,6 +119,45 @@ def _serialize_json_value(value) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+def _strip_raw_text_for_storage(source_candidates):
+    """DB-RECLAIM 2b — drop the heavy ``raw_text`` body from each candidate
+    dict BEFORE it is serialized into the stored ``source_candidates`` column.
+
+    ``raw_text`` (full official-document bodies, ~60% of each blob) is read by
+    NO live path: the frontend uses only the ``raw_text_available`` boolean
+    (main.js:1237,1678), api_server never reads ``raw_text``, and the pipeline
+    can regenerate it. This is STORAGE-ONLY: the trim operates on a shallow
+    per-candidate COPY, so the live in-request objects (matching / evidence
+    compute) and the in-memory job-report payload keep ``raw_text`` intact
+    (LESSON-13 — the strip lands on the object that actually reaches the DB,
+    not a discarded copy, and never mutates the source list).
+
+    KEPT verbatim: ``raw_text_available`` (derived from whether ``raw_text``
+    was present when that key is absent), ``official_body_length``,
+    ``official_matched_sentences``, all scores/classification, url/title/
+    publisher — every field the app reads. Only the ``raw_text`` body string
+    is removed.
+
+    Non-list inputs (None / already-serialized str) are returned unchanged;
+    the historical-row strip (2c) handles values already stored as JSON text.
+    """
+    if not isinstance(source_candidates, list):
+        return source_candidates
+    trimmed = []
+    for candidate in source_candidates:
+        if not isinstance(candidate, dict):
+            trimmed.append(candidate)
+            continue
+        had_raw_text = bool(candidate.get("raw_text"))
+        copy = {k: v for k, v in candidate.items() if k != "raw_text"}
+        # Preserve the boolean the frontend reads even if it was only
+        # implied by the presence of raw_text on this candidate.
+        if "raw_text_available" not in copy:
+            copy["raw_text_available"] = had_raw_text
+        trimmed.append(copy)
+    return trimmed
+
+
 def result_exists_by_url(original_url: str) -> bool:
     if not original_url:
         return False
@@ -271,8 +310,10 @@ def save_analysis_result(result: dict, query: str):
             or result.get("normalized_claims")
         ),
         _serialize_json_value(
-            verification_card.get("source_candidates")
-            or result.get("source_candidates")
+            _strip_raw_text_for_storage(
+                verification_card.get("source_candidates")
+                or result.get("source_candidates")
+            )
         ),
         _serialize_json_value(
             verification_card.get("source_queries")
