@@ -815,28 +815,10 @@
       white-space: nowrap;
     }
 
-    .topic-badge {
-      background: #e0e7ff;
-      color: #3730a3;
-    }
-
     .alert-watch { background: var(--orange); }
     .alert-low { background: var(--gray); }
     .alert-medium { background: var(--blue); }
     .alert-high { background: var(--red); }
-
-    /* VISUAL-REDESIGN: freshness badge had no rule (white-on-white). Give it the
-       verification-green tint so 🔥 새로 부상한 이슈 is readable. Overrides the
-       base .badge white text via the cascade (same specificity, declared later). */
-    .freshness-badge {
-      background: var(--verify-soft);
-      color: var(--verify);
-      border: 1px solid var(--verify);
-    }
-
-    .ai-status-badge {
-      font-weight: 700;
-    }
     .ai-status-active { background: #15803d; }
     .ai-status-inactive { background: #475569; }
     .ai-status-error { background: #b45309; }
@@ -1330,23 +1312,6 @@
       margin-top: 8px;
     }
 
-    .news-nav {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin: 12px 0 16px;
-    }
-
-    .news-nav span {
-      border: 1px solid #dbeafe;
-      border-radius: 999px;
-      background: #f8fafc;
-      color: var(--brand);
-      padding: 7px 11px;
-      font-size: 12px;
-      font-weight: 900;
-    }
-
     /* DESIGN-DETAIL-4b FIX 1: 상세 검증 정보 sub-heading — serif, secondary scale,
        token color (was 17px/900 sans #111827). */
     .news-section-title {
@@ -1363,105 +1328,12 @@
       margin-top: 6px;
     }
 
-    .public-hero {
-      border: 1px solid #dbeafe;
-      border-radius: 14px;
-      background: linear-gradient(180deg, #ffffff 0%, #eff6ff 100%);
-      box-shadow: var(--shadow);
-      margin-bottom: 16px;
-      padding: 22px;
-    }
-
-    .public-hero-top {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 16px;
-    }
-
     .public-eyebrow {
       color: var(--brand);
       font-size: 0.923rem;
       font-weight: 700;
       letter-spacing: 0.02em;
       margin-bottom: 8px;
-    }
-
-    .public-hero h2 {
-      margin: 0;
-      color: var(--ink);
-      font-size: clamp(24px, 3.2vw, 32px);
-      line-height: 1.22;
-      letter-spacing: -0.01em;
-      font-weight: 800;
-    }
-
-    .public-hero p {
-      max-width: 720px;
-      margin: 10px 0 0;
-      color: #475569;
-      font-size: 15px;
-      line-height: 1.65;
-    }
-
-    .trust-pill {
-      display: inline-flex;
-      align-items: center;
-      border: 1px solid var(--verify);
-      border-radius: 999px;
-      background: var(--verify-soft);
-      color: var(--verify);
-      padding: 8px 12px;
-      font-size: 12px;
-      font-weight: 700;
-      white-space: nowrap;
-    }
-
-    .hero-actions {
-      display: flex;
-      align-items: flex-end;
-      flex-direction: column;
-      gap: 10px;
-    }
-
-    .methodology-link {
-      display: inline-flex;
-      align-items: center;
-      min-height: 36px;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      background: var(--paper);
-      color: var(--brand);
-      padding: 8px 13px;
-      font-size: 13px;
-      font-weight: 600;
-      text-decoration: none;
-      white-space: nowrap;
-    }
-
-    .methodology-link:hover {
-      background: var(--verify-soft);
-    }
-
-    /* DISPLAY-CATEGORY B-1 — brain-map entry placeholder (mirrors the
-       methodology link; inert until the news-graph page ships). */
-    .brain-map-link {
-      display: inline-flex;
-      align-items: center;
-      min-height: 36px;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      background: var(--paper);
-      color: var(--brand);
-      padding: 8px 13px;
-      font-size: 13px;
-      font-weight: 600;
-      text-decoration: none;
-      white-space: nowrap;
-    }
-
-    .brain-map-link:hover {
-      background: var(--verify-soft);
     }
 
     /* DISPLAY-CATEGORY B-1 — dynamic per-domain homepage sections. */
@@ -2188,52 +2060,6 @@
       color: var(--muted);
       font-weight: 600;
     }
-
-    /* CONTENT-HONESTY: "tickedin 소개" (About) section — un-boxed, thin top rule,
-       mirroring the site's section aesthetic (same layout tokens as .corrections).
-       Replaced the fabricated corrections list. */
-    .about-section {
-      margin: 24px 0 16px;
-      padding-top: 18px;
-      border-top: 1px solid var(--line);
-    }
-    .about-section-head {
-      display: flex;
-      align-items: baseline;
-      gap: 10px;
-      flex-wrap: wrap;
-      margin-bottom: 12px;
-    }
-    .about-section-head h2 {
-      margin: 0;
-      color: var(--ink);
-      font-size: 1.308rem;
-      line-height: 1.25;
-      font-weight: 700;
-      font-family: 'Nanum Myeongjo', 'Apple SD Gothic Neo', 'Pretendard', serif;
-    }
-    .about-section-sub {
-      margin: 0;
-      color: var(--muted);
-      font-size: 0.92rem;
-      line-height: 1.45;
-    }
-    .about-body {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      max-width: 760px;
-    }
-    .about-body p {
-      margin: 0;
-      color: var(--ink);
-      font-size: 0.94rem;
-      line-height: 1.7;
-    }
-    .about-body strong {
-      color: var(--brand-ink);
-      font-weight: 700;
-    }
     .corrections {
       margin: 24px 0 16px;
       padding-top: 18px;
@@ -2258,62 +2084,6 @@
       color: var(--muted);
       font-size: 0.92rem;
       line-height: 1.45;
-    }
-    .corrections-list {
-      list-style: none;
-      margin: 0;
-      padding: 0;
-    }
-    .corrections-row {
-      display: flex;
-      align-items: flex-start;
-      gap: 14px;
-      padding: 12px 0;
-      border-top: 1px solid var(--line);
-    }
-    .corrections-row:first-child {
-      border-top: none;
-    }
-    .corrections-date {
-      flex: 0 0 auto;
-      color: var(--muted);
-      font-size: 0.92rem;
-      font-weight: 700;
-      line-height: 1.4;
-    }
-    .corrections-body {
-      flex: 1 1 auto;
-      min-width: 0;
-      display: flex;
-      flex-direction: column;
-      gap: 3px;
-    }
-    .corrections-title {
-      color: var(--ink);
-      font-size: 0.95rem;
-      font-weight: 700;
-      line-height: 1.4;
-    }
-    .corrections-note {
-      color: var(--muted);
-      font-size: 0.86rem;
-      line-height: 1.55;
-    }
-    /* Reuses the existing card-pill family (cf. .card-source-head): brand tint
-       background + brand text + 999px pill. */
-    .corrections-badge {
-      flex: 0 0 auto;
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      color: var(--brand);
-      background: rgba(30, 95, 216, 0.10);
-      border-radius: 999px;
-      padding: 2px 10px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      line-height: 1.3;
-      white-space: nowrap;
     }
 
     .section-heading {
@@ -3082,10 +2852,6 @@
       font-weight: 800;
     }
 
-    .platform-tools {
-      margin-top: 18px;
-    }
-
     /* DESIGN-DETAIL-4 STEP 4: 근거와 출처 요약 un-boxed (was a #f8fbff tinted box) —
        flat section with a thin top rule; inner source cards stay lightly bordered. */
     .public-source-section {
@@ -3836,16 +3602,6 @@
       font-weight: 700;
     }
 
-    .decision-summary {
-      margin: 14px 0 10px;
-      border-left: 4px solid #cbd5e1;
-      padding: 10px 12px;
-      background: #f8fafc;
-      color: #334155;
-      line-height: 1.55;
-      font-size: 14px;
-    }
-
     /* DESIGN-DETAIL-4 STEP 4: the AI 종합 검증 판단 residual card un-boxed to a flat
        section with a thin top rule (was a bordered paper box). */
     .verification-card {
@@ -3984,10 +3740,6 @@
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 10px;
-    }
-
-    .verification-grid.legacy-expanded {
-      display: none;
     }
 
     .verification-item {
@@ -4202,13 +3954,6 @@
       margin-bottom: 8px;
     }
 
-    .normalized-grid {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 8px;
-      font-size: 13px;
-    }
-
     .source-candidate-list {
       display: grid;
       gap: 10px;
@@ -4279,21 +4024,6 @@
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 8px;
-      font-size: 13px;
-    }
-
-    .source-reliability-summary {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 8px;
-      margin: 8px 0 12px;
-    }
-
-    .source-reliability-tile {
-      border: 1px solid #e5e7eb;
-      border-radius: 8px;
-      background: #fff;
-      padding: 9px;
       font-size: 13px;
     }
 
@@ -4528,8 +4258,8 @@
       font-size: 18px;
     }
 
-    /* LABEL-1b STEP 3: divider-list rows (was bordered white cards) — mirrors
-       .corrections-row: thin var(--line) top rule, no box, vertical padding only. */
+    /* LABEL-1b STEP 3: divider-list rows (was bordered white cards) —
+       thin var(--line) top rule, no box, vertical padding only. */
     .history-row {
       display: grid;
       grid-template-columns: 52px 1fr auto;
@@ -4561,8 +4291,7 @@
       background: #eff6ff;
     }
 
-    /* LABEL-1c STEP 1: the #N index — quiet muted (was #334155/900), matching the
-       .corrections-date tone. */
+    /* LABEL-1c STEP 1: the #N index — quiet muted (was #334155/900). */
     .history-id {
       color: var(--muted);
       font-weight: 700;
@@ -4575,7 +4304,7 @@
       line-height: 1.55;
     }
 
-    /* LABEL-1c STEP 1: saved-analysis title — modest emphasis matching .corrections-title
+    /* LABEL-1c STEP 1: saved-analysis title — modest emphasis
        (0.95rem/700/--ink), NOT the old heavy bold-tag look. Only the title <strong>
        (the .history-meta below carries no <strong>). */
     .history-row strong {
@@ -4766,10 +4495,6 @@
         padding-left: 0;
       }
 
-      .normalized-grid {
-        grid-template-columns: 1fr 1fr;
-      }
-
       /* DESIGN-DETAIL-4: the 4-up verdict indicator row goes 2-up on narrow screens. */
       .verdict-indicators {
         grid-template-columns: 1fr 1fr;
@@ -4780,19 +4505,9 @@
         grid-template-columns: 1fr;
       }
 
-      .source-reliability-summary {
-        grid-template-columns: 1fr 1fr;
-      }
-
       .report-actions {
         align-items: stretch;
         flex-direction: column;
-      }
-
-      /* DESIGN-C3b: let the corrections row wrap so the badge drops below the
-         date+title on narrow screens instead of overflowing. */
-      .corrections-row {
-        flex-wrap: wrap;
       }
 
       /* DESIGN-C3c: footer stacks — brand block above, link columns reflow to a
@@ -4813,12 +4528,6 @@
       }
 
       .topbar {
-        align-items: flex-start;
-        flex-direction: column;
-      }
-
-      .public-hero-top,
-      .hero-actions {
         align-items: flex-start;
         flex-direction: column;
       }
@@ -4859,8 +4568,6 @@
        is cramped on very narrow phones. Collapse them to a single column.
        Additive only; 820px stays the primary breakpoint. */
     @media (max-width: 480px) {
-      .normalized-grid,
-      .source-reliability-summary,
       .evidence-extraction-summary,
       .evidence-snippet-grid,
       .pipeline-debug-grid,
@@ -7283,16 +6990,6 @@
       return { label: "없음", className: "debug-missing" };
     }
 
-    function renderDebugBadge(label, ok, count) {
-      const state = debugState(ok, count);
-      return `
-        <div class="evidence-extraction-tile">
-          <span class="label">${escapeHtml(label)}</span><br>
-          <span class="debug-status ${state.className}">${state.label}</span>
-          <div class="evidence-source-meta">개수 ${escapeHtml(count ?? "-")}</div>
-        </div>
-      `;
-    }
 
     function renderPipelineDebugSummary(summary) {
       const data = summary || {};
@@ -7604,25 +7301,6 @@
       reportActionsEl.style.display = safeResults.length ? "flex" : "none";
     }
 
-    function selectedIssueExplanation(result, metrics) {
-      if (!result) {
-        return "관심 있는 이슈의 상세 보기를 누르거나 검색어를 입력하면 검증 리포트가 표시됩니다.";
-      }
-      const decision = result.final_decision || {};
-      const verification = result.verification_card || result || {};
-      const debug = verification.debug_summary || result.debug_summary || {};
-      const officialStatus = officialStatusLabel(result);
-      if (officialStatus === "공식 근거 확인") {
-        return "아래 리포트는 이 이슈에 대해 수집된 기사, 공식 자료, 주장 단위 분석을 바탕으로 생성된 검증 결과입니다.";
-      }
-      if (officialStatus === "공식 출처 확인 필요" || officialStatus === "공식 본문 확인 제한") {
-        return "공식기관 후보는 확인됐지만 상세 본문 검증이 제한되어 있어, 기사 근거와 추가 확인 필요성을 함께 보여줍니다.";
-      }
-      if (Number(debug.evidence_matching_count || debug.direct_evidence_count || 0) > 0) {
-        return "공식 상세 근거가 충분하지 않은 경우에도 관련 기사와 근거 문장을 분리해 검증 초안을 제공합니다.";
-      }
-      return decision.decision_summary || "현재 확보된 요약 정보만 표시됩니다. 상세 검증은 분석 실행 후 더 풍부하게 제공됩니다.";
-    }
 
     function renderSelectedIssueIntro(results, selectedIndex = null) {
       if (!selectedIssueIntroEl) return;
@@ -7950,12 +7628,6 @@
       };
     }
 
-    function topicCardsFromHistory(records) {
-      return (records || []).flatMap((record) => {
-        const results = getHistoryResults(record);
-        return results.slice(0, 2).map((result, index) => topicCardFromResult(result, index, "history", record));
-      }).slice(0, 6);
-    }
 
     function currentTopicCards(preferredResults) {
       const currentResults = Array.isArray(preferredResults) && preferredResults.length
@@ -8009,21 +7681,6 @@
       return list;
     }
 
-    // HOMEPAGE-TIERED: shared 더보기/접기 button state for a tier.
-    //   loadMore visible while shown < total; collapse visible while shown > initial.
-    function updateTierButtons(loadMoreEl, collapseEl, shown, total, initial) {
-      if (loadMoreEl) {
-        if (shown < total) {
-          loadMoreEl.hidden = false;
-          loadMoreEl.textContent = `더 보기 (${shown}/${total})`;
-        } else {
-          loadMoreEl.hidden = true;
-        }
-      }
-      if (collapseEl) {
-        collapseEl.hidden = !(shown > initial);
-      }
-    }
 
     // HOMEPAGE-TIERED: single card renderer with a full/concise branch.
     //   opts.detailed=true  (TIER 1) → summary + reason + 4-tile meta
@@ -9575,19 +9232,6 @@
       return Number.isFinite(parsed) ? parsed : fallback;
     }
 
-    function scoreTrustDescription(score) {
-      const value = numberValue(score, -1);
-      if (value >= 75) {
-        return "높음: 현재 확인된 근거와 출처 연결성이 비교적 탄탄합니다.";
-      }
-      if (value >= 45) {
-        return "보통: 참고할 근거는 있으나 공식 확인이나 세부 맥락이 더 필요합니다.";
-      }
-      if (value >= 0) {
-        return "낮음: 공식 상세 근거 또는 직접 일치 근거가 부족해 보수적으로 읽어야 합니다.";
-      }
-      return "자료 부족: 점수 산정에 필요한 근거가 충분하지 않습니다.";
-    }
 
     // DISPLAY-HONESTY (①): the SAME genuine-official predicate the "공식 근거 확인" /
     // "공식자료 참고" box uses (officialStatusLabel, ~L1908): the persisted
@@ -10147,13 +9791,6 @@
       return "직접적인 반박 근거는 확인되지 않았습니다.";
     }
 
-    function contradictionLabel(summary) {
-      const text = contradictionExplanation(summary);
-      if (text.includes("상충되는")) return "상충 근거 확인";
-      if (text.includes("상충 가능성")) return "상충 가능성";
-      if (text.includes("부족")) return "근거 부족";
-      return "반박 근거 없음";
-    }
 
     function alertReasonBullets(level, decision, confidence, impact, quality, sourceReliabilitySummary, contradictionSummary, debugSummary) {
       const finalScore = numberValue(decision?.final_score ?? confidence?.policy_confidence_score, 0);
@@ -10253,17 +9890,6 @@
       ];
     }
 
-    function renderKeyTakeaways(context) {
-      const bullets = decisionReasonBullets(context, 4);
-      return `
-        <section class="takeaway-panel">
-          <div class="takeaway-title">핵심 요약</div>
-          <ul class="takeaway-list">
-            ${bullets.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
-          </ul>
-        </section>
-      `;
-    }
 
     function renderReadingGuide(context) {
       const officialText = officialVerificationExplanation(context.sourceReliabilitySummary, context.debugSummary);
@@ -10501,16 +10127,7 @@
       `;
     }
 
-    function officialSummaryTone(officialState) {
-      const status = officialState?.officialEvidenceStatus || "not_found";
-      if (status === "direct_support") return "positive";
-      if (status === "partial_support") return "neutral";
-      return "warning";
-    }
 
-    function reviewSummaryTone(value) {
-      return String(value || "").includes("필요") ? "warning" : "positive";
-    }
 
     // DESIGN-DETAIL-4 STEP 3a: renderVerificationSummaryCard (the 9-tile 검증 결과
     // 요약 카드) was REMOVED. Every tile duplicated data shown elsewhere: 최종 판정 →
@@ -10928,17 +10545,6 @@
       return String(value);
     }
 
-    function getTopSourceForReport(result) {
-      const verification = result?.verification_card || result || {};
-      const reliability = verification.source_reliability_summary || {};
-      const evidenceSource = Array.isArray(verification.evidence_sources)
-        ? verification.evidence_sources[0]
-        : null;
-      return {
-        title: reliability.top_source_title || evidenceSource?.title || "정보 없음",
-        url: reliability.top_source_url || evidenceSource?.url || "",
-      };
-    }
 
     function getEvidenceSummaryForReport(result) {
       const verification = result?.verification_card || result || {};

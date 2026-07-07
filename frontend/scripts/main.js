@@ -1502,16 +1502,6 @@
       return { label: "없음", className: "debug-missing" };
     }
 
-    function renderDebugBadge(label, ok, count) {
-      const state = debugState(ok, count);
-      return `
-        <div class="evidence-extraction-tile">
-          <span class="label">${escapeHtml(label)}</span><br>
-          <span class="debug-status ${state.className}">${state.label}</span>
-          <div class="evidence-source-meta">개수 ${escapeHtml(count ?? "-")}</div>
-        </div>
-      `;
-    }
 
     function renderPipelineDebugSummary(summary) {
       const data = summary || {};
@@ -1823,25 +1813,6 @@
       reportActionsEl.style.display = safeResults.length ? "flex" : "none";
     }
 
-    function selectedIssueExplanation(result, metrics) {
-      if (!result) {
-        return "관심 있는 이슈의 상세 보기를 누르거나 검색어를 입력하면 검증 리포트가 표시됩니다.";
-      }
-      const decision = result.final_decision || {};
-      const verification = result.verification_card || result || {};
-      const debug = verification.debug_summary || result.debug_summary || {};
-      const officialStatus = officialStatusLabel(result);
-      if (officialStatus === "공식 근거 확인") {
-        return "아래 리포트는 이 이슈에 대해 수집된 기사, 공식 자료, 주장 단위 분석을 바탕으로 생성된 검증 결과입니다.";
-      }
-      if (officialStatus === "공식 출처 확인 필요" || officialStatus === "공식 본문 확인 제한") {
-        return "공식기관 후보는 확인됐지만 상세 본문 검증이 제한되어 있어, 기사 근거와 추가 확인 필요성을 함께 보여줍니다.";
-      }
-      if (Number(debug.evidence_matching_count || debug.direct_evidence_count || 0) > 0) {
-        return "공식 상세 근거가 충분하지 않은 경우에도 관련 기사와 근거 문장을 분리해 검증 초안을 제공합니다.";
-      }
-      return decision.decision_summary || "현재 확보된 요약 정보만 표시됩니다. 상세 검증은 분석 실행 후 더 풍부하게 제공됩니다.";
-    }
 
     function renderSelectedIssueIntro(results, selectedIndex = null) {
       if (!selectedIssueIntroEl) return;
@@ -2169,12 +2140,6 @@
       };
     }
 
-    function topicCardsFromHistory(records) {
-      return (records || []).flatMap((record) => {
-        const results = getHistoryResults(record);
-        return results.slice(0, 2).map((result, index) => topicCardFromResult(result, index, "history", record));
-      }).slice(0, 6);
-    }
 
     function currentTopicCards(preferredResults) {
       const currentResults = Array.isArray(preferredResults) && preferredResults.length
@@ -2228,21 +2193,6 @@
       return list;
     }
 
-    // HOMEPAGE-TIERED: shared 더보기/접기 button state for a tier.
-    //   loadMore visible while shown < total; collapse visible while shown > initial.
-    function updateTierButtons(loadMoreEl, collapseEl, shown, total, initial) {
-      if (loadMoreEl) {
-        if (shown < total) {
-          loadMoreEl.hidden = false;
-          loadMoreEl.textContent = `더 보기 (${shown}/${total})`;
-        } else {
-          loadMoreEl.hidden = true;
-        }
-      }
-      if (collapseEl) {
-        collapseEl.hidden = !(shown > initial);
-      }
-    }
 
     // HOMEPAGE-TIERED: single card renderer with a full/concise branch.
     //   opts.detailed=true  (TIER 1) → summary + reason + 4-tile meta
@@ -3794,19 +3744,6 @@
       return Number.isFinite(parsed) ? parsed : fallback;
     }
 
-    function scoreTrustDescription(score) {
-      const value = numberValue(score, -1);
-      if (value >= 75) {
-        return "높음: 현재 확인된 근거와 출처 연결성이 비교적 탄탄합니다.";
-      }
-      if (value >= 45) {
-        return "보통: 참고할 근거는 있으나 공식 확인이나 세부 맥락이 더 필요합니다.";
-      }
-      if (value >= 0) {
-        return "낮음: 공식 상세 근거 또는 직접 일치 근거가 부족해 보수적으로 읽어야 합니다.";
-      }
-      return "자료 부족: 점수 산정에 필요한 근거가 충분하지 않습니다.";
-    }
 
     // DISPLAY-HONESTY (①): the SAME genuine-official predicate the "공식 근거 확인" /
     // "공식자료 참고" box uses (officialStatusLabel, ~L1908): the persisted
@@ -4366,13 +4303,6 @@
       return "직접적인 반박 근거는 확인되지 않았습니다.";
     }
 
-    function contradictionLabel(summary) {
-      const text = contradictionExplanation(summary);
-      if (text.includes("상충되는")) return "상충 근거 확인";
-      if (text.includes("상충 가능성")) return "상충 가능성";
-      if (text.includes("부족")) return "근거 부족";
-      return "반박 근거 없음";
-    }
 
     function alertReasonBullets(level, decision, confidence, impact, quality, sourceReliabilitySummary, contradictionSummary, debugSummary) {
       const finalScore = numberValue(decision?.final_score ?? confidence?.policy_confidence_score, 0);
@@ -4472,17 +4402,6 @@
       ];
     }
 
-    function renderKeyTakeaways(context) {
-      const bullets = decisionReasonBullets(context, 4);
-      return `
-        <section class="takeaway-panel">
-          <div class="takeaway-title">핵심 요약</div>
-          <ul class="takeaway-list">
-            ${bullets.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
-          </ul>
-        </section>
-      `;
-    }
 
     function renderReadingGuide(context) {
       const officialText = officialVerificationExplanation(context.sourceReliabilitySummary, context.debugSummary);
@@ -4720,16 +4639,7 @@
       `;
     }
 
-    function officialSummaryTone(officialState) {
-      const status = officialState?.officialEvidenceStatus || "not_found";
-      if (status === "direct_support") return "positive";
-      if (status === "partial_support") return "neutral";
-      return "warning";
-    }
 
-    function reviewSummaryTone(value) {
-      return String(value || "").includes("필요") ? "warning" : "positive";
-    }
 
     // DESIGN-DETAIL-4 STEP 3a: renderVerificationSummaryCard (the 9-tile 검증 결과
     // 요약 카드) was REMOVED. Every tile duplicated data shown elsewhere: 최종 판정 →
@@ -5147,17 +5057,6 @@
       return String(value);
     }
 
-    function getTopSourceForReport(result) {
-      const verification = result?.verification_card || result || {};
-      const reliability = verification.source_reliability_summary || {};
-      const evidenceSource = Array.isArray(verification.evidence_sources)
-        ? verification.evidence_sources[0]
-        : null;
-      return {
-        title: reliability.top_source_title || evidenceSource?.title || "정보 없음",
-        url: reliability.top_source_url || evidenceSource?.url || "",
-      };
-    }
 
     function getEvidenceSummaryForReport(result) {
       const verification = result?.verification_card || result || {};
