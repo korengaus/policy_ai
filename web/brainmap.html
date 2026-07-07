@@ -87,7 +87,21 @@
     margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px 16px;
     font-size: 12.5px; color: var(--slate); align-items: center;
   }
-  .legend .key { display: inline-flex; align-items: center; gap: 6px; }
+  /* BRAINMAP-FILTER: legend keys are interactive filter toggles. They read as
+     calm tappable chips (site tokens), with a clear active state. Clicking a
+     domain isolates its constellation; "전체 보기" restores all. */
+  .legend .key {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: inherit; font-size: 12.5px; color: var(--slate);
+    background: transparent; border: 1px solid transparent; border-radius: 999px;
+    padding: 3px 10px; cursor: pointer; line-height: 1.15;
+    transition: background .12s, border-color .12s, color .12s;
+  }
+  .legend .key:hover { background: var(--paper); border-color: var(--line); color: var(--ink); }
+  .legend .key:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+  .legend .key.active {
+    background: #eef4ff; border-color: var(--brand); color: var(--brand-ink); font-weight: 700;
+  }
   .legend .dot {
     width: 10px; height: 10px; border-radius: 50%; display: inline-block;
   }
@@ -176,6 +190,11 @@
   var labelSpots = [];      // top-cluster label placements
   var hoverNode = null;
 
+  // BRAINMAP-FILTER: client-side domain filter over the already-loaded nodes
+  // (no new fetch, no data change). null = show all; {type:'domain', value}
+  // isolates one domain; {type:'market'} isolates market_commercial nodes.
+  var activeFilter = null;
+
   // View transform (pan/zoom). Screen = world * scale + offset. Initial
   // {1, 0, 0} is byte-identical to the original static fit-to-viewport view.
   // `positions` / `labelSpots` remain the WORLD layer; this rides on top so
@@ -194,6 +213,13 @@
     return DOMAIN_COLORS[domain] || FALLBACK_COLOR;
   }
 
+  // BRAINMAP-FILTER: is this node in the active filter's set? (all -> always).
+  function isActive(n) {
+    if (!activeFilter) return true;
+    if (activeFilter.type === "market") return n.content_nature === "market_commercial";
+    return (n.domain || "기타-미분류") === activeFilter.value;
+  }
+
   function buildLegend(nodes) {
     var counts = {};
     nodes.forEach(function (n) {
@@ -201,12 +227,18 @@
       counts[d] = (counts[d] || 0) + 1;
     });
     var order = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; });
-    var html = order.map(function (d) {
+    // BRAINMAP-FILTER: each key is a filter toggle. "전체 보기" (active by
+    // default) restores all; a domain key isolates its constellation; the
+    // hollow market key isolates 시장·시세 nodes. Palette hex unchanged.
+    var html = '<button type="button" class="key key-all active" data-filter="all">전체 보기</button>';
+    html += order.map(function (d) {
       var name = DOMAIN_KO[d] || d;
-      return '<span class="key"><span class="dot" style="background:' + colorFor(d) + '"></span>' +
-             name + "</span>";
+      return '<button type="button" class="key" data-filter="domain" data-domain="' + escapeHtml(d) + '">' +
+             '<span class="dot" style="background:' + colorFor(d) + '"></span>' +
+             escapeHtml(name) + "</button>";
     }).join("");
-    html += '<span class="key"><span class="dot hollow"></span>시장·시세 소식(빈 점)</span>';
+    html += '<button type="button" class="key" data-filter="market">' +
+            '<span class="dot hollow"></span>시장·시세 소식(빈 점)</button>';
     document.getElementById("legend").innerHTML = html;
   }
 
@@ -241,7 +273,7 @@
       var m = Math.max(1, members.length);
       var title = c.label_title || "";
       if (title.length > 20) title = title.slice(0, 20) + "…";
-      return { x: cx / m, y: cy / m, title: title, spread: c.size_label };
+      return { cluster_id: c.cluster_id, x: cx / m, y: cy / m, title: title, spread: c.size_label };
     });
   }
 
@@ -250,6 +282,10 @@
     var h = canvas.height / (window.devicePixelRatio || 1);
     ctx.clearRect(0, 0, w, h);
 
+    // BRAINMAP-FILTER: when a domain is isolated, draw only edges whose BOTH
+    // endpoints are in the active set (cross-domain edges are hidden).
+    var filtering = activeFilter !== null;
+
     // Edges first — thin, low-alpha. (Line width stays constant in screen px.)
     ctx.lineWidth = 0.7;
     ctx.strokeStyle = "rgba(90, 101, 119, 0.16)";
@@ -257,15 +293,33 @@
     graph.edges.forEach(function (e) {
       var a = nodeById[e.src], b = nodeById[e.dst];
       if (!a || !b) return;
+      if (filtering && !(isActive(a) && isActive(b))) return;
       var pa = positions[a._i], pb = positions[b._i];
       ctx.moveTo(toScreenX(pa.px), toScreenY(pa.py));
       ctx.lineTo(toScreenX(pb.px), toScreenY(pb.py));
     });
     ctx.stroke();
 
+    // BRAINMAP-FILTER: when filtering, draw the non-matching nodes first as a
+    // faint gray underlay — the selected domain pops while its place in the
+    // whole map stays visible (dim, not hide, to keep spatial context).
+    if (filtering) {
+      ctx.fillStyle = "#94a3b8";
+      graph.nodes.forEach(function (n, i) {
+        if (isActive(n)) return;
+        var p = positions[i];
+        ctx.globalAlpha = 0.10;
+        ctx.beginPath();
+        ctx.arc(toScreenX(p.px), toScreenY(p.py), 1.8, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      ctx.globalAlpha = 1;
+    }
+
     // Nodes on top. Clustered nodes slightly larger; market_commercial hollow.
     // Radii are constant screen px (positions transform, sizes do not).
     graph.nodes.forEach(function (n, i) {
+      if (filtering && !isActive(n)) return;
       var p = positions[i];
       var clustered = n.cluster_id !== null && n.cluster_id !== undefined;
       var r = clustered ? 3.4 : 2.1;
@@ -296,10 +350,23 @@
       ctx.stroke();
     }
 
+    // BRAINMAP-FILTER: when filtering, only label clusters that still have a
+    // visible (active) member.
+    var activeClusters = null;
+    if (filtering) {
+      activeClusters = {};
+      graph.nodes.forEach(function (n) {
+        if (isActive(n) && n.cluster_id !== null && n.cluster_id !== undefined) {
+          activeClusters[n.cluster_id] = true;
+        }
+      });
+    }
+
     // Always-on labels for the biggest clusters — stored spread label VERBATIM.
     // Font stays constant screen size; only the anchor point transforms.
     ctx.textAlign = "center";
     labelSpots.forEach(function (s) {
+      if (filtering && !activeClusters[s.cluster_id]) return;
       var lx = toScreenX(s.x), ly = toScreenY(s.y);
       ctx.font = "600 12px sans-serif";
       ctx.lineWidth = 3;
@@ -317,7 +384,10 @@
   // Hit test in SCREEN space so the radius stays a constant ~9px at any zoom.
   function nearestNode(mx, my) {
     var best = null, bestD = HIT_RADIUS * HIT_RADIUS;
+    var filtering = activeFilter !== null;
     for (var i = 0; i < graph.nodes.length; i++) {
+      // BRAINMAP-FILTER: hover/click only apply to visible (active) nodes.
+      if (filtering && !isActive(graph.nodes[i])) continue;
       var dx = toScreenX(positions[i].px) - mx, dy = toScreenY(positions[i].py) - my;
       var d = dx * dx + dy * dy;
       if (d <= bestD) { bestD = d; best = graph.nodes[i]; }
@@ -390,6 +460,39 @@
     draw();
   }
 
+  // BRAINMAP-FILTER: legend click = set/toggle the domain filter (delegated).
+  // Clicking the already-active filter (or "전체 보기") restores all. Zoom/pan
+  // is untouched — filtering only changes which nodes are drawn/dimmed.
+  function onLegendClick(ev) {
+    var btn = ev.target.closest(".key");
+    if (!btn) return;
+    var kind = btn.getAttribute("data-filter");
+    var next = null;
+    if (kind === "domain") next = { type: "domain", value: btn.getAttribute("data-domain") };
+    else if (kind === "market") next = { type: "market" };
+    // Toggle off when re-clicking the active filter -> back to "전체 보기".
+    if (next && activeFilter && next.type === activeFilter.type &&
+        (next.type !== "domain" || next.value === activeFilter.value)) {
+      next = null;
+    }
+    activeFilter = next;
+    updateLegendActive();
+    hoverNode = null;
+    tooltip.style.display = "none";
+    draw();
+  }
+
+  function updateLegendActive() {
+    var keys = document.querySelectorAll("#legend .key");
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i], kind = k.getAttribute("data-filter"), on = false;
+      if (!activeFilter) on = (kind === "all");
+      else if (activeFilter.type === "market") on = (kind === "market");
+      else on = (kind === "domain" && k.getAttribute("data-domain") === activeFilter.value);
+      if (on) k.classList.add("active"); else k.classList.remove("active");
+    }
+  }
+
   function onClick(ev) {
     // A drag past the threshold was a pan, not a click — do not navigate.
     if (dragDist > CLICK_MOVE_THRESHOLD) { dragDist = 0; return; }
@@ -414,6 +517,7 @@
     (graph.clusters || []).forEach(function (c) { clusterById[c.cluster_id] = c; });
     statusEl.style.display = "none";
     buildLegend(graph.nodes);
+    document.getElementById("legend").addEventListener("click", onLegendClick);
     layout();
     draw();
     canvas.style.cursor = "grab";
