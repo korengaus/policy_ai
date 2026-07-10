@@ -4736,6 +4736,49 @@
       );
     }
 
+    // SPREAD-TIMELINE Slice 2 — fetch + render the circulation annotation
+    // into the card detail's placeholder. CIRCULATION ONLY (유통 규모), never
+    // a verdict: no truth-probability, no gauge, no verdict styling. Every
+    // non-happy path renders NOTHING, silently: found:false, outlet_count<2
+    // (a 1-outlet cluster can't be distinguished from a not-yet-rebuilt
+    // graph, so no "단독 보도" claim), missing/invalid id, fetch/parse
+    // failure. The honesty line inside the section is MANDATORY copy.
+    function spreadSpanPhrase(spanDays) {
+      if (spanDays === 0) return "같은 날 집중 보도";
+      if (spanDays === 1) return "하루 사이 확산";
+      return `${spanDays}일에 걸쳐 확산`;
+    }
+
+    async function loadSpreadAnnotations() {
+      const placeholders = document.querySelectorAll(".spread-section[data-spread-id]");
+      for (const section of placeholders) {
+        const id = Number(section.getAttribute("data-spread-id"));
+        if (!Number.isInteger(id) || id <= 0) continue;
+        try {
+          const response = await fetch(`${API_BASE}/api/spread/${encodeURIComponent(id)}`);
+          if (!response.ok) continue;
+          const data = await response.json();
+          const outletCount = Number(data?.cluster?.outlet_count);
+          if (!data?.found || !Number.isFinite(outletCount) || outletCount < 2) continue;
+          const timeline = data.timeline || {};
+          const firstAt = typeof timeline.first_at === "string" ? timeline.first_at.slice(0, 10) : "";
+          const spanDays = Number(timeline.span_days);
+          const timelineLine = Number(timeline.dated_members) > 0 && firstAt && Number.isFinite(spanDays)
+            ? `<div class="spread-timeline-line">최초 보도 ${escapeHtml(firstAt)} · ${escapeHtml(spreadSpanPhrase(spanDays))}</div>`
+            : "";
+          section.innerHTML = `
+            <h3>이슈 확산 현황</h3>
+            <div>이 주장과 유사한 내용이 ${escapeHtml(outletCount)}개 매체에서 보도되었습니다.</div>
+            ${timelineLine}
+            <div class="reader-note">확산 정보는 유통 규모를 보여줄 뿐, 사실 여부에 대한 검증이 아닙니다.</div>
+          `;
+          section.hidden = false;
+        } catch (error) {
+          // fail-silent: spread info is optional context, never an error state
+        }
+      }
+    }
+
     function renderResults(results, focusIndex = selectedResultIndex) {
       if (!results.length) {
         metricsEl.style.display = "none";
@@ -4954,6 +4997,13 @@
             <!-- STEP 2 item 5: 근거와 출처 요약. -->
             ${renderPublicSourceCards(result)}
 
+            <!-- SPREAD-TIMELINE Slice 2: circulation annotation placeholder
+                 (유통 정보만 — 판정 아님). Stays hidden until /api/spread/{id}
+                 returns found + outlet_count>=2; found:false / singleton /
+                 fetch failure all render NOTHING (fail-silent). Detail view
+                 only, and only when the card knows its analysis id. -->
+            ${hasFocus && Number(result.result_id) > 0 ? `<section class="public-source-section spread-section" data-spread-id="${Number(result.result_id)}" hidden></section>` : ""}
+
             <!-- Reading guide kept, collapsed (content unchanged). -->
             ${renderCollapsibleSection("이 리포트는 이렇게 읽으면 됩니다", renderReadingGuide(userContext), false, "처음 보는 분을 위한 안내입니다. 판정 단계·신뢰도·공식 출처·근거를 어떻게 읽으면 되는지 설명합니다.")}
 
@@ -4993,6 +5043,9 @@
           </article>
         `;
       }).join("");
+      // SPREAD-TIMELINE Slice 2: hydrate the detail card's spread placeholder
+      // after the innerHTML pass. Fire-and-forget; internally fail-silent.
+      loadSpreadAnnotations();
     }
 
     function renderHistory(rows) {
