@@ -239,7 +239,9 @@ class V2EndToEndFlowTests(unittest.TestCase):
                         ):
                             enq = self.client.post(
                                 "/v2/analyze",
-                                json={"query": "DSR", "max_news": 2},
+                                # SEARCH-FIX Slice B: CJK guard requires
+                                # Hangul/CJK; the stubbed report stays "DSR".
+                                json={"query": "DSR 규제", "max_news": 2},
                             )
                             job_id = enq.json()["job_id"]
                             self._execute_pending_jobs_via_simpleworker()
@@ -321,7 +323,9 @@ class PreexistingEndpointsByteIdenticalTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("REDIS_URL", None)
             r = self.client.post(
-                "/v2/analyze", json={"query": "test", "max_news": 1},
+                # SEARCH-FIX Slice B: Korean query so the request reaches the
+                # Redis-unavailable check (503) instead of the CJK guard's 400.
+                "/v2/analyze", json={"query": "금리 정책", "max_news": 1},
             )
             self.assertEqual(r.status_code, 503)
 

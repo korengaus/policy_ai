@@ -290,7 +290,9 @@ class ApiServerRouteTests(unittest.TestCase):
         with _TempDBScope() as scope:
             api_server = _reload_api_server(scope)
             client = TestClient(api_server.app)
-            resp = client.post("/jobs/analyze", json={"query": "q", "max_news": 1})
+            # SEARCH-FIX Slice B: HTTP analyze queries must contain Hangul/CJK
+            # (the pre-analysis garbage guard) — "청년 정책" instead of "q".
+            resp = client.post("/jobs/analyze", json={"query": "청년 정책", "max_news": 1})
             self.assertEqual(resp.status_code, 200)
             body = resp.json()
             self.assertEqual(body["job_status"], "queued")
@@ -434,12 +436,13 @@ class ApiServerRouteTests(unittest.TestCase):
         with _TempDBScope() as scope:
             api_server = _reload_api_server(scope)
             client = TestClient(api_server.app)
-            resp = client.post("/analyze", json={"query": "q", "max_news": 1})
+            # SEARCH-FIX Slice B: Korean query so the CJK guard passes.
+            resp = client.post("/analyze", json={"query": "청년 정책", "max_news": 1})
             self.assertEqual(resp.status_code, 200)
             body = resp.json()
             self.assertEqual(body["status"], "ok")
             self.assertEqual(len(body["results"]), 1)
-            self.assertEqual(body["results"][0]["title"], "Result for q")
+            self.assertEqual(body["results"][0]["title"], "Result for 청년 정책")
             # Phase 2 M3: /analyze must surface result_id so the frontend can
             # rehydrate the row from /history/{result_id} without storing the
             # full payload in localStorage.
@@ -452,7 +455,8 @@ class ApiServerRouteTests(unittest.TestCase):
         with _TempDBScope() as scope:
             api_server = _reload_api_server(scope)
             client = TestClient(api_server.app)
-            analyze_resp = client.post("/analyze", json={"query": "q", "max_news": 1})
+            # SEARCH-FIX Slice B: Korean query so the CJK guard passes.
+            analyze_resp = client.post("/analyze", json={"query": "청년 정책", "max_news": 1})
             self.assertEqual(analyze_resp.status_code, 200)
             result_id = analyze_resp.json()["results"][0]["result_id"]
             self.assertIsNotNone(result_id)
@@ -463,7 +467,7 @@ class ApiServerRouteTests(unittest.TestCase):
             self.assertEqual(detail["status"], "ok")
             self.assertIsNotNone(detail["result"])
             self.assertEqual(detail["result"]["id"], result_id)
-            self.assertEqual(detail["result"]["query"], "q")
+            self.assertEqual(detail["result"]["query"], "청년 정책")
 
     def test_invalid_request_returns_400(self):
         from fastapi.testclient import TestClient
@@ -476,7 +480,9 @@ class ApiServerRouteTests(unittest.TestCase):
                 400,
             )
             self.assertEqual(
-                client.post("/jobs/analyze", json={"query": "q", "max_news": 0}).status_code,
+                # SEARCH-FIX Slice B: Korean query so this case keeps testing
+                # the max_news validation (not the earlier-firing CJK guard).
+                client.post("/jobs/analyze", json={"query": "청년 정책", "max_news": 0}).status_code,
                 400,
             )
 

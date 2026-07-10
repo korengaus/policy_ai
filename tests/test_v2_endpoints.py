@@ -170,7 +170,9 @@ class V2AnalyzeEndpointTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"REDIS_URL": _FAKE_URL}, clear=False):
             with mock.patch.object(job_queue, "_redis_factory", _fake_factory):
                 response = self.client.post(
-                    "/v2/analyze", json={"query": "test", "max_news": 0},
+                    # SEARCH-FIX Slice B: Korean query so this keeps testing
+                    # max_news validation (not the earlier-firing CJK guard).
+                    "/v2/analyze", json={"query": "금리 정책", "max_news": 0},
                 )
         self.assertEqual(response.status_code, 400)
 
@@ -205,7 +207,8 @@ class V2JobStatusEndpointTests(unittest.TestCase):
             with mock.patch.object(job_queue, "_redis_factory", _fake_factory):
                 enqueue = self.client.post(
                     "/v2/analyze",
-                    json={"query": "DSR", "max_news": 1},
+                    # SEARCH-FIX Slice B: CJK guard requires Hangul/CJK.
+                    json={"query": "DSR 규제", "max_news": 1},
                 )
                 self.assertEqual(enqueue.status_code, 202)
                 job_id = enqueue.json()["job_id"]
@@ -295,7 +298,8 @@ class V2StreamEndpointTests(unittest.TestCase):
             with mock.patch.object(job_queue, "_redis_factory", _fake_factory):
                 # Enqueue a real job (it will stay queued).
                 enqueue = self.client.post(
-                    "/v2/analyze", json={"query": "stream-test", "max_news": 1},
+                    # SEARCH-FIX Slice B: CJK guard requires Hangul/CJK.
+                    "/v2/analyze", json={"query": "스트림 테스트", "max_news": 1},
                 )
                 job_id = enqueue.json()["job_id"]
                 # Patch the stream's max-seconds so we don't wait 600s.
