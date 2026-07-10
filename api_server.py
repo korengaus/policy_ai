@@ -2119,3 +2119,165 @@ def review_audit_packet(
         raise HTTPException(status_code=404, detail="review task not found")
     decisions = list_review_decisions(task_id)
     return review_workflow.build_review_audit_packet(task, decisions)
+
+
+# ---------------------------------------------------------------------------
+# FADED-CLAIMS Slice 2 — the semi-auto review layer over the
+# faded_claim_candidates table (populated by scripts/generate_faded_candidates
+# .py). The dry-run proved thresholds cannot separate genuinely-faded claims
+# from CONCLUDED events (a successful 61-outlet MOU ranks #1 at any
+# threshold), so a human approve/dismiss gate is mandatory before anything
+# shows publicly.
+#
+#   * The two /review/faded-candidates* routes are ADMIN-GATED via the same
+#     require_admin session dependency as every other /review/* route — no
+#     new auth, no weakened gating.
+#   * GET /api/faded-claims (public) serves APPROVED rows ONLY — the
+#     status='approved' bind is the only query it can run; pending/dismissed
+#     can never leak. The mandatory honesty framing is baked into the payload
+#     so no consumer can omit it.
+#   * VERDICT-ISOLATED: spread/date/title + curation status only. The
+#     approve/dismiss status is curation metadata, never a verdict; no
+#     verdict field is read or written anywhere here.
+# ---------------------------------------------------------------------------
+_FADED_FRAMING = (
+    "이 목록은 후속 보도가 끊긴 사실만 보여줍니다. 주장의 진위나 정책의 "
+    "추진·성패에 대한 판단이 아니며, 후속 보도가 저희 수집망 밖에 "
+    "있었을 수도 있습니다."
+)
+_FADED_REVIEW_STATUSES = ("pending", "approved", "dismissed")
+_FADED_SET_STATUSES = ("approved", "dismissed")
+
+
+def _fetch_faded_rows(status: str):
+    """Seam: candidate rows for one status, score desc. [] on PG disabled or
+    table missing (the generator creates it on its first real run)."""
+    import sqlalchemy as sa
+    from sqlalchemy.exc import ProgrammingError
+
+    import postgres_storage
+
+    engine = postgres_storage.get_engine()
+    if engine is None:
+        return []
+    stmt = sa.text(
+        "SELECT id, cluster_stable_id, representative_analysis_id, title, "
+        "outlet_count, first_at, last_at, silence_days, marker_hit, score, "
+        "status, reviewed_at, generated_at "
+        "FROM faded_claim_candidates WHERE status = :status "
+        "ORDER BY score DESC, id"
+    )
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(stmt, {"status": status}).fetchall()
+    except ProgrammingError:
+        return []
+    return [dict(row._mapping) for row in rows]
+
+
+def _set_faded_status(candidate_id: int, status: str, reviewed_at: str) -> bool:
+    """Seam: set one candidate's curation status. True iff a row changed."""
+    import sqlalchemy as sa
+    from sqlalchemy.exc import ProgrammingError
+
+    import postgres_storage
+
+    engine = postgres_storage.get_engine()
+    if engine is None:
+        return False
+    stmt = sa.text(
+        "UPDATE faded_claim_candidates "
+        "SET status = :status, reviewed_at = :reviewed_at "
+        "WHERE id = :candidate_id"
+    )
+    try:
+        with engine.begin() as conn:
+            result = conn.execute(stmt, {
+                "status": status,
+                "reviewed_at": reviewed_at,
+                "candidate_id": candidate_id,
+            })
+    except ProgrammingError:
+        return False
+    return bool(result.rowcount)
+
+
+@app.get("/review/faded-candidates")
+def list_faded_candidates(
+    status: str = "pending",
+    _: None = Depends(require_admin),
+) -> dict:
+    """Operator shortlist for the 30-second judgment: pending by default;
+    ?status=approved|dismissed for auditing past decisions. Read-only."""
+    wanted = (status or "pending").strip().lower()
+    if wanted not in _FADED_REVIEW_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail="status must be one of pending/approved/dismissed",
+        )
+    try:
+        candidates = _fetch_faded_rows(wanted)
+    except Exception:
+        logger.exception("Failed to list faded candidates")
+        candidates = []
+    return {"status": "ok", "requested_status": wanted, "candidates": candidates}
+
+
+class FadedStatusRequest(BaseModel):
+    status: str
+
+
+@app.post("/review/faded-candidates/{candidate_id}/status")
+def set_faded_candidate_status(
+    candidate_id: int,
+    body: FadedStatusRequest,
+    _: None = Depends(require_admin),
+) -> dict:
+    """The operator's approve/dismiss judgment. Only those two values are
+    accepted; reviewed_at is stamped now (UTC). Curation metadata only."""
+    wanted = (body.status or "").strip().lower()
+    if wanted not in _FADED_SET_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail="status must be 'approved' or 'dismissed'",
+        )
+    reviewed_at = datetime.now(timezone.utc).isoformat()
+    try:
+        changed = _set_faded_status(candidate_id, wanted, reviewed_at)
+    except Exception:
+        logger.exception("Failed to set faded candidate status")
+        raise HTTPException(status_code=500, detail="failed to update candidate")
+    if not changed:
+        raise HTTPException(status_code=404, detail="candidate not found")
+    return {
+        "status": "ok",
+        "id": candidate_id,
+        "new_status": wanted,
+        "reviewed_at": reviewed_at,
+    }
+
+
+@app.get("/api/faded-claims")
+def faded_claims() -> Response:
+    """PUBLIC read: APPROVED faded claims only, slim fields + the mandatory
+    honesty framing baked into the payload. Empty/error -> {claims: [],
+    framing} at HTTP 200, never 500 (the brainmap/spread/weekly posture)."""
+    payload = {"claims": [], "framing": _FADED_FRAMING}
+    try:
+        for row in _fetch_faded_rows("approved"):
+            payload["claims"].append({
+                "representative_analysis_id": row.get("representative_analysis_id"),
+                "title": row.get("title") or "",
+                "outlet_count": row.get("outlet_count"),
+                "first_at": row.get("first_at"),
+                "last_at": row.get("last_at"),
+                "silence_days": row.get("silence_days"),
+            })
+    except Exception:
+        logger.exception("Failed to load faded claims")
+        payload["claims"] = []
+    return Response(
+        content=json.dumps(payload, ensure_ascii=False),
+        media_type="application/json",
+        headers={"Cache-Control": "max-age=120"},
+    )
