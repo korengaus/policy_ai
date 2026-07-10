@@ -119,6 +119,48 @@ def _serialize_json_value(value) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+def _normalize_published_at(value):
+    """SPREAD-F1B — normalize an article_published_at value (ISO-8601 from
+    naver_api, RFC-1123 from google_rss) into a uniform ISO-8601 UTC string
+    ("+00:00" offset, so lexicographic order = chronological, matching
+    created_at). Unparseable/absent -> None: the published_at column stays
+    NULL and the raw value stays untouched inside debug_summary."""
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if text.endswith("Z"):  # pre-3.11 fromisoformat can't parse a Z suffix
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).isoformat()
+    except ValueError:
+        pass
+    try:
+        # RFC-1123 fallback — REUSES the proven provider helper (returns ""
+        # when unparseable, never raises). Lazy import: providers.* must not
+        # become a database.py module-load dependency.
+        from providers.naver_search import _pubdate_to_iso
+
+        return _pubdate_to_iso(text) or None
+    except Exception:  # noqa: BLE001 — normalization must never break a save
+        return None
+
+
+def _extract_published_at(verification_card: dict, result: dict):
+    """SPREAD-F1B — pull article_published_at from the SAME debug_summary the
+    save path serializes (LESSON-13: the verification_card copy wins). Only
+    trusted-source rows carry the key (main.py adds it for google_rss /
+    naver_api only), so fallback-source rows return None -> NULL."""
+    debug = verification_card.get("debug_summary") or result.get("debug_summary")
+    if not isinstance(debug, dict):
+        return None
+    return _normalize_published_at(debug.get("article_published_at"))
+
+
 def _strip_raw_text_for_storage(source_candidates):
     """DB-RECLAIM 2b — drop the heavy ``raw_text`` body from each candidate
     dict BEFORE it is serialized into the stored ``source_candidates`` column.
@@ -363,6 +405,11 @@ def save_analysis_result(result: dict, query: str):
         # None when CONTENT_NATURE_ENABLED is off or classification failed.
         # LOCKSTEP with _ANALYSIS_RESULTS_COLUMN_ORDER below.
         result.get("content_nature"),
+        # SPREAD-F1B — normalized article publish date (metadata only; never a
+        # verdict field). Extracted from the same debug_summary serialized
+        # above; None (NULL) for fallback-source / dateless rows.
+        # LOCKSTEP with _ANALYSIS_RESULTS_COLUMN_ORDER below.
+        _extract_published_at(verification_card, result),
     )
 
     # M12.0d Stage 3c-3: build the Postgres mirror payload once. The
@@ -386,6 +433,8 @@ def save_analysis_result(result: dict, query: str):
         "domain",
         # NOISE1-A — must stay in lockstep with the values tuple above.
         "content_nature",
+        # SPREAD-F1B — must stay in lockstep with the values tuple above.
+        "published_at",
     )
     row_dict = dict(zip(_ANALYSIS_RESULTS_COLUMN_ORDER, values))
 

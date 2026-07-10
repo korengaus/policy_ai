@@ -285,6 +285,16 @@ analysis_results_table = sa.Table(
     # ALTERs it in. NULL until classified (OBSERVE mode; existing rows stay NULL
     # until a separate later backfill).
     sa.Column("content_nature", sa.Text),
+    # SPREAD-F1B — article publish date promoted out of the debug_summary TEXT
+    # blob (nullable METADATA; normalized ISO-8601 UTC TEXT so lexicographic
+    # order = chronological, matching created_at — deliberately NOT
+    # timestamptz, keeping the SQLite dialect branch safe). Set at save time
+    # from the trusted-source article_published_at; never by the verdict path.
+    # create_all does NOT add this to an existing live table, so
+    # _ensure_analysis_results_columns ALTERs it in. NULL when no trusted
+    # publish date exists (existing rows stay NULL until the operator runs
+    # scripts/backfill_published_at.py).
+    sa.Column("published_at", sa.Text),
 )
 
 
@@ -688,6 +698,10 @@ _ANALYSIS_RESULTS_ADDED_COLUMNS: tuple = (
     # NOISE1-A — content-nature category label (nullable metadata). Additive
     # ALTER only; _align_serial_sequences / _INT_PK_MIRROR_TABLES unaffected.
     ("content_nature", "TEXT"),
+    # SPREAD-F1B — normalized ISO-8601 UTC publish date (nullable metadata).
+    # Additive ALTER only; plain TEXT on BOTH dialects (the SQLite branch
+    # runs the same DDL fragment).
+    ("published_at", "TEXT"),
 )
 
 
