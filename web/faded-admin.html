@@ -73,6 +73,15 @@
     font-family: inherit; font-size: 12.5px; font-weight: 700; padding: 6px 14px;
     border-radius: var(--radius-sm); border: 1px solid var(--line); cursor: pointer;
   }
+  /* Slice 4a: AI recommendation line — neutral brand chip, review aid only
+     (never red/green; the human 승인/기각 click stays mandatory). */
+  .ai-line { margin-top: 7px; font-size: 12.5px; color: var(--slate); line-height: 1.5; }
+  .ai-chip {
+    display: inline-block; background: #eef4ff; color: var(--brand-ink);
+    border: 1px solid var(--brand); border-radius: 999px; padding: 1px 9px;
+    font-weight: 700; font-size: 11.5px; margin-right: 6px;
+  }
+  .ai-chip.none { background: var(--paper); color: var(--muted); border-color: var(--line); }
   .btn-approve { background: var(--brand); border-color: var(--brand); color: #fff; }
   .btn-approve:hover { background: var(--brand-ink); }
   .btn-dismiss { background: var(--paper); color: var(--slate); }
@@ -140,6 +149,23 @@
     if (item.score !== undefined && item.score !== null) meta.appendChild(el("span", null, "점수 " + item.score));
     if (item.reviewed_at) meta.appendChild(el("span", null, "검토 " + String(item.reviewed_at).slice(0, 10)));
     main.appendChild(meta);
+
+    // Slice 4a: the AI's first-pass recommendation — a review aid the
+    // operator confirms or overrides; it never publishes anything itself.
+    var aiLine = el("div", "ai-line");
+    var rec = item.ai_recommendation;
+    if (rec === "approve" || rec === "dismiss") {
+      aiLine.appendChild(el("span", "ai-chip",
+        "AI 추천: " + (rec === "approve" ? "승인" : "기각")));
+      var reasonText = String(item.ai_reason || "").trim();
+      if (typeof item.ai_confidence === "number") {
+        reasonText += " (확신도 " + Math.round(item.ai_confidence * 100) + "%)";
+      }
+      aiLine.appendChild(el("span", null, reasonText));
+    } else {
+      aiLine.appendChild(el("span", "ai-chip none", "AI 추천: 없음"));
+    }
+    main.appendChild(aiLine);
     row.appendChild(main);
 
     if (currentTab === "pending") {
@@ -201,6 +227,22 @@
           return;
         }
         setStatus("");
+        // Slice 4a: pre-group the pending queue — approve-recommended first,
+        // then dismiss-recommended, then unjudged; score-sorted within each
+        // group. Grouping is a reading order only; every row still needs the
+        // operator's explicit 승인/기각 click.
+        if (currentTab === "pending") {
+          var groupOf = function (item) {
+            if (item.ai_recommendation === "approve") return 0;
+            if (item.ai_recommendation === "dismiss") return 1;
+            return 2;
+          };
+          items = items.slice().sort(function (a, b) {
+            var ga = groupOf(a), gb = groupOf(b);
+            if (ga !== gb) return ga - gb;
+            return (Number(b.score) || 0) - (Number(a.score) || 0);
+          });
+        }
         items.forEach(function (item, index) {
           list.appendChild(renderRow(item, index));
         });

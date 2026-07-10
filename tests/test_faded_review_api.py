@@ -23,7 +23,9 @@ PENDING_ROWS = [
      "title": "청년 지원금 도입 검토", "outlet_count": 8,
      "first_at": "2026-05-20T00:00:00+00:00", "last_at": "2026-06-01T00:00:00+00:00",
      "silence_days": 40, "marker_hit": True, "score": 36.9,
-     "status": "pending", "reviewed_at": None, "generated_at": "g"},
+     "status": "pending", "reviewed_at": None, "generated_at": "g",
+     "ai_recommendation": "approve", "ai_reason": "도입 예고 후 후속 없음",
+     "ai_confidence": 0.85, "ai_judged_at": "2026-07-11T00:00:00+00:00"},
 ]
 APPROVED_ROWS = [
     {"id": 2, "cluster_stable_id": "bbb", "representative_analysis_id": 202,
@@ -31,7 +33,9 @@ APPROVED_ROWS = [
      "first_at": "2026-05-01T00:00:00+00:00", "last_at": "2026-05-15T00:00:00+00:00",
      "silence_days": 57, "marker_hit": True, "score": 48.5,
      "status": "approved", "reviewed_at": "2026-07-10T00:00:00+00:00",
-     "generated_at": "g"},
+     "generated_at": "g",
+     "ai_recommendation": "approve", "ai_reason": "대책 예고 후 후속 없음",
+     "ai_confidence": 0.9, "ai_judged_at": "2026-07-11T00:00:00+00:00"},
 ]
 
 
@@ -75,7 +79,7 @@ class AdminGatingTests(_ClientMixin, unittest.TestCase):
 
 class ReviewListTests(_AdminOverrideMixin, unittest.TestCase):
     def test_pending_list_default(self):
-        with patch.object(api_server, "_fetch_faded_rows",
+        with patch.object(api_server, "_fetch_faded_admin_rows",
                           return_value=list(PENDING_ROWS)) as seam:
             response = self.client.get("/review/faded-candidates")
         self.assertEqual(response.status_code, 200)
@@ -85,8 +89,18 @@ class ReviewListTests(_AdminOverrideMixin, unittest.TestCase):
         self.assertEqual(body["candidates"][0]["score"], 36.9)
         seam.assert_called_once_with("pending")
 
+    def test_admin_payload_includes_ai_fields(self):
+        # Slice 4a: the ADMIN list carries the AI recommendation (review aid).
+        with patch.object(api_server, "_fetch_faded_admin_rows",
+                          return_value=list(PENDING_ROWS)):
+            body = self.client.get("/review/faded-candidates").json()
+        candidate = body["candidates"][0]
+        self.assertEqual(candidate["ai_recommendation"], "approve")
+        self.assertEqual(candidate["ai_reason"], "도입 예고 후 후속 없음")
+        self.assertEqual(candidate["ai_confidence"], 0.85)
+
     def test_status_param_for_auditing(self):
-        with patch.object(api_server, "_fetch_faded_rows",
+        with patch.object(api_server, "_fetch_faded_admin_rows",
                           return_value=list(APPROVED_ROWS)) as seam:
             response = self.client.get("/review/faded-candidates",
                                        params={"status": "approved"})
@@ -99,7 +113,7 @@ class ReviewListTests(_AdminOverrideMixin, unittest.TestCase):
         self.assertEqual(response.status_code, 400)
 
     def test_db_error_returns_empty_not_500(self):
-        with patch.object(api_server, "_fetch_faded_rows",
+        with patch.object(api_server, "_fetch_faded_admin_rows",
                           side_effect=RuntimeError("boom")):
             response = self.client.get("/review/faded-candidates")
         self.assertEqual(response.status_code, 200)
@@ -163,10 +177,16 @@ class PublicFadedClaimsTests(_ClientMixin, unittest.TestCase):
         self.assertEqual(claim["representative_analysis_id"], 202)
         self.assertEqual(claim["outlet_count"], 12)
         self.assertEqual(claim["silence_days"], 57)
-        # Slim public shape: no curation/internal fields leak.
+        # Slim public shape: no curation/internal fields leak — including the
+        # Slice-4a AI recommendation fields (operator-side review aid ONLY;
+        # the fixture row carries them, the public payload must not).
         self.assertNotIn("status", claim)
         self.assertNotIn("reviewed_at", claim)
         self.assertNotIn("score", claim)
+        self.assertNotIn("ai_recommendation", claim)
+        self.assertNotIn("ai_reason", claim)
+        self.assertNotIn("ai_confidence", claim)
+        self.assertNotIn("ai_judged_at", claim)
 
     def test_framing_always_present(self):
         with patch.object(api_server, "_fetch_faded_rows", return_value=[]):

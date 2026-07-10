@@ -2175,6 +2175,38 @@ def _fetch_faded_rows(status: str):
     return [dict(row._mapping) for row in rows]
 
 
+def _fetch_faded_admin_rows(status: str):
+    """ADMIN seam (Slice 4a): rows INCLUDING the ai_* recommendation fields —
+    operator-side review aid only; the public route never uses this seam.
+    Falls back to the base seam when the ai_* columns don't exist yet (the
+    window between deploy and the generator's first --judge run), so the
+    admin page keeps working either way."""
+    import sqlalchemy as sa
+    from sqlalchemy.exc import ProgrammingError
+
+    import postgres_storage
+
+    engine = postgres_storage.get_engine()
+    if engine is None:
+        return []
+    stmt = sa.text(
+        "SELECT id, cluster_stable_id, representative_analysis_id, title, "
+        "outlet_count, first_at, last_at, silence_days, marker_hit, score, "
+        "status, reviewed_at, generated_at, "
+        "ai_recommendation, ai_reason, ai_confidence, ai_judged_at "
+        "FROM faded_claim_candidates WHERE status = :status "
+        "ORDER BY score DESC, id"
+    )
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(stmt, {"status": status}).fetchall()
+    except ProgrammingError:
+        # Table missing entirely OR ai_* columns not added yet — degrade to
+        # the base field set (which itself returns [] when the table is gone).
+        return _fetch_faded_rows(status)
+    return [dict(row._mapping) for row in rows]
+
+
 def _set_faded_status(candidate_id: int, status: str, reviewed_at: str) -> bool:
     """Seam: set one candidate's curation status. True iff a row changed."""
     import sqlalchemy as sa
@@ -2216,7 +2248,10 @@ def list_faded_candidates(
             detail="status must be one of pending/approved/dismissed",
         )
     try:
-        candidates = _fetch_faded_rows(wanted)
+        # Slice 4a: the ADMIN list carries the ai_* recommendation fields
+        # (review aid). The public /api/faded-claims route keeps using the
+        # base seam and its explicit slim field list — ai_* can never leak.
+        candidates = _fetch_faded_admin_rows(wanted)
     except Exception:
         logger.exception("Failed to list faded candidates")
         candidates = []

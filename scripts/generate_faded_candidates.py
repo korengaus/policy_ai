@@ -69,8 +69,10 @@ SELECT_NEWEST_GRAPH_SQL = (
     "ORDER BY id DESC LIMIT 1"
 )
 # Display/date/outlet fields ONLY — deliberately no verdict/score column.
+# (claim_text feeds the Slice-4a topicality judge prompt; a display field.)
 SELECT_ROWS_SQL = (
-    "SELECT id, title, published_at, original_url FROM analysis_results"
+    "SELECT id, title, published_at, original_url, claim_text "
+    "FROM analysis_results"
 )
 
 CREATE_TABLE_SQL = (
@@ -87,7 +89,19 @@ CREATE_TABLE_SQL = (
     "score REAL, "
     "status TEXT DEFAULT 'pending', "
     "reviewed_at TEXT, "
-    "generated_at TEXT)"
+    "generated_at TEXT, "
+    "ai_recommendation TEXT, "
+    "ai_reason TEXT, "
+    "ai_confidence REAL, "
+    "ai_judged_at TEXT)"
+)
+# Slice 4a — the live table predates the ai_* columns; idempotent additive
+# ALTERs bring it up to the def above (script-owned DDL precedent).
+ADD_AI_COLUMNS_SQL = (
+    "ALTER TABLE faded_claim_candidates ADD COLUMN IF NOT EXISTS ai_recommendation TEXT",
+    "ALTER TABLE faded_claim_candidates ADD COLUMN IF NOT EXISTS ai_reason TEXT",
+    "ALTER TABLE faded_claim_candidates ADD COLUMN IF NOT EXISTS ai_confidence REAL",
+    "ALTER TABLE faded_claim_candidates ADD COLUMN IF NOT EXISTS ai_judged_at TEXT",
 )
 SELECT_EXISTING_SQL = (
     "SELECT status, reviewed_at FROM faded_claim_candidates "
@@ -97,10 +111,13 @@ INSERT_SQL = (
     "INSERT INTO faded_claim_candidates "
     "(cluster_stable_id, representative_analysis_id, title, outlet_count, "
     "first_at, last_at, silence_days, marker_hit, score, status, "
-    "reviewed_at, generated_at) "
-    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+    "reviewed_at, generated_at, "
+    "ai_recommendation, ai_reason, ai_confidence, ai_judged_at) "
+    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
 )
-# Refresh MEASURED fields only — status/reviewed_at are deliberately absent.
+# Refresh MEASURED fields only — status/reviewed_at are deliberately absent,
+# and so are the ai_* fields: a HUMAN-JUDGED row freezes what the AI said
+# when the human decided (audit trail).
 UPDATE_SQL = (
     "UPDATE faded_claim_candidates SET "
     "representative_analysis_id = %s, title = %s, outlet_count = %s, "
@@ -108,10 +125,157 @@ UPDATE_SQL = (
     "score = %s, generated_at = %s "
     "WHERE cluster_stable_id = %s"
 )
+# Pending rows additionally refresh the AI recommendation fields.
+UPDATE_PENDING_SQL = (
+    "UPDATE faded_claim_candidates SET "
+    "representative_analysis_id = %s, title = %s, outlet_count = %s, "
+    "first_at = %s, last_at = %s, silence_days = %s, marker_hit = %s, "
+    "score = %s, generated_at = %s, "
+    "ai_recommendation = %s, ai_reason = %s, ai_confidence = %s, "
+    "ai_judged_at = %s "
+    "WHERE cluster_stable_id = %s"
+)
 
 
 def marker_hit(title: str, markers=DEFAULT_MARKERS) -> bool:
     return any(marker in (title or "") for marker in markers)
+
+
+# ---------------------------------------------------------------------------
+# Slice 4a — AI judgment layer (AI RECOMMENDS, human confirms; NEVER
+# auto-publish). One tool-free Sonnet call per candidate classifies the EVENT
+# SHAPE: forward-looking promise/plan with no visible follow-up (-> recommend
+# approve) vs a concluded one-time event (-> recommend dismiss). TOPICALITY
+# ONLY — this never judges truth: no verdict column is read, and ai_reason is
+# guarded against truth vocabulary (build_brainmap_graph guard concept).
+# Infra mirrors hot_topics._call_anthropic_pick (lazy Anthropic import,
+# tool-free, fully decoupled from the verdict-path judge — never run_judge /
+# LLMRequest), with the same record_llm_call cost logging. Fail-soft: any
+# error -> ai_* stay None and the candidate still lists (the human gate
+# never depends on the AI).
+# ---------------------------------------------------------------------------
+_JUDGE_MODEL_DEFAULT = "claude-sonnet-4-6"
+_JUDGE_MAX_TOKENS = 256
+# ai_reason must never carry truth vocabulary — the recommendation is about
+# event shape, not veracity.
+AI_REASON_FORBIDDEN = ("검증", "사실", "거짓", "확인됨")
+
+
+def _build_judge_prompt(title: str, claim_text: str) -> str:
+    claim = (claim_text or "").strip()[:200]
+    claim_line = f"주장 요약: {claim}\n" if claim else ""
+    return (
+        "당신은 한국 정책 뉴스의 '보도 흐름'을 분류하는 분석가입니다.\n"
+        f"기사 제목: {title}\n{claim_line}\n"
+        "이 사안은 여러 매체가 보도한 뒤 후속 보도가 관찰되지 않았습니다. "
+        "다음 두 유형 중 어느 쪽인지 판단하세요.\n"
+        "A) 미래를 예고한 약속·계획·발표(도입 예정, 추진 검토 등)인데 후속 소식이 "
+        "없는 경우 → recommendation을 \"approve\"로.\n"
+        "B) 그 자체로 종결된 일회성 사건(협약 체결 완료, 시상식, 조사 완료, 단순 "
+        "통계 발표 등)이라 후속이 원래 없는 경우 → recommendation을 \"dismiss\"로.\n"
+        "주의: 사안의 진위 여부는 판단 대상이 아닙니다. reason에는 보도 흐름의 "
+        "유형만 짧게 쓰고, 진위에 대한 표현은 쓰지 마세요.\n"
+        "출력 형식: 다른 설명 없이 JSON 객체만. "
+        '예: {"recommendation":"dismiss","confidence":0.9,"reason":"협약 체결이 완료된 일회성 사건"}'
+    )
+
+
+def _extract_json_object(text: str):
+    """Robustly extract a JSON object from the model's text (fenced / bare /
+    embedded in prose). Returns dict or None."""
+    if not text:
+        return None
+    candidate = str(text).strip()
+    if candidate.startswith("```"):
+        import re
+        candidate = re.sub(r"^```[a-zA-Z0-9]*\s*", "", candidate)
+        candidate = re.sub(r"\s*```$", "", candidate).strip()
+    try:
+        parsed = json.loads(candidate)
+        if isinstance(parsed, dict):
+            return parsed
+    except (ValueError, TypeError):
+        pass
+    import re
+    match = re.search(r"\{.*\}", str(text), re.DOTALL)
+    if match:
+        try:
+            parsed = json.loads(match.group(0))
+            if isinstance(parsed, dict):
+                return parsed
+        except (ValueError, TypeError):
+            pass
+    return None
+
+
+def reason_vocab_ok(reason: str) -> bool:
+    return not any(word in (reason or "") for word in AI_REASON_FORBIDDEN)
+
+
+def _call_anthropic_judge(prompt: str, model: str):
+    """Tool-free Anthropic call (hot_topics.py:270-285 pattern). May raise;
+    the caller is fail-soft. Isolated so tests can monkeypatch it."""
+    from anthropic import Anthropic  # lazy import
+
+    client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", "").strip())
+    return client.messages.create(
+        model=model,
+        max_tokens=_JUDGE_MAX_TOKENS,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+
+def judge_candidate(candidate: dict, claim_text: str, model: str):
+    """One candidate -> {ai_recommendation, ai_reason, ai_confidence} or None
+    on ANY failure (missing key, network, bad JSON, invalid values, or a
+    truth-vocabulary reason — the guard refuses rather than stores)."""
+    try:
+        if not os.environ.get("ANTHROPIC_API_KEY", "").strip():
+            return None
+        prompt = _build_judge_prompt(candidate.get("title") or "", claim_text)
+        import time as _time
+        start = _time.time()
+        message = _call_anthropic_judge(prompt, model)
+        latency_ms = int((_time.time() - start) * 1000)
+        try:
+            from llm_observability import estimate_cost_usd, record_llm_call
+            usage = getattr(message, "usage", None)
+            input_tokens = int(getattr(usage, "input_tokens", 0) or 0) if usage else 0
+            output_tokens = int(getattr(usage, "output_tokens", 0) or 0) if usage else 0
+            record_llm_call(
+                caller="faded_judge", model=model,
+                input_tokens=input_tokens, output_tokens=output_tokens,
+                estimated_cost_usd=estimate_cost_usd(model, input_tokens, output_tokens),
+                latency_ms=latency_ms, success=True, provider="anthropic",
+            )
+        except Exception:
+            pass  # cost logging is best-effort, never blocks the judgment
+        parts = []
+        for block in getattr(message, "content", None) or []:
+            if str(getattr(block, "type", "") or "") == "text":
+                parts.append(str(getattr(block, "text", "") or ""))
+        parsed = _extract_json_object("\n".join(parts))
+        if not parsed:
+            return None
+        recommendation = str(parsed.get("recommendation") or "").strip().lower()
+        if recommendation not in ("approve", "dismiss"):
+            return None
+        reason = str(parsed.get("reason") or "").strip()[:300]
+        if not reason or not reason_vocab_ok(reason):
+            return None
+        try:
+            confidence = float(parsed.get("confidence"))
+        except (TypeError, ValueError):
+            confidence = None
+        if confidence is not None:
+            confidence = max(0.0, min(1.0, confidence))
+        return {
+            "ai_recommendation": recommendation,
+            "ai_reason": reason,
+            "ai_confidence": confidence,
+        }
+    except Exception:  # noqa: BLE001 — fail-soft; the human gate never depends on AI
+        return None
 
 
 def build_candidates(graph, rows_by_id, today, min_outlets=DEFAULT_MIN_OUTLETS,
@@ -200,13 +364,18 @@ def plan_upsert(existing, candidate):
     """Pure: decide the row this candidate should end up as. ``existing`` is
     None (new cluster) or {"status", "reviewed_at"} from the current table.
     ★Operator work is NEVER lost: an existing status/reviewed_at is preserved
-    verbatim; only the measured numbers refresh."""
+    verbatim; only the measured numbers refresh. Slice 4a: ``refresh_ai`` is
+    True only for new/still-pending rows — a HUMAN-JUDGED row freezes its
+    ai_* fields as the audit of what the AI said when the human decided."""
     if existing is None:
-        return {"action": "insert", "status": "pending", "reviewed_at": None}
+        return {"action": "insert", "status": "pending", "reviewed_at": None,
+                "refresh_ai": True}
+    status = existing.get("status") or "pending"
     return {
         "action": "update",
-        "status": existing.get("status") or "pending",
+        "status": status,
         "reviewed_at": existing.get("reviewed_at"),
+        "refresh_ai": status == "pending",
     }
 
 
@@ -223,6 +392,10 @@ def print_shortlist(candidates):
                  (candidate["last_at"] or "")[:10],
                  candidate["representative_analysis_id"],
                  (candidate["title"] or "")[:70]))
+        if candidate.get("ai_recommendation"):
+            print("        AI 추천: %s — %s"
+                  % ("승인" if candidate["ai_recommendation"] == "approve" else "기각",
+                     (candidate.get("ai_reason") or "")[:80]))
 
 
 # ---------------------------------------------------------------------------
@@ -314,22 +487,38 @@ def run_selftest() -> int:
     fresh = plan_upsert(None, by_sid["ddd"])
     dismissed = plan_upsert({"status": "dismissed", "reviewed_at": "2026-07-02T00:00:00+00:00"},
                             by_sid["aaa"])
+    pending = plan_upsert({"status": "pending", "reviewed_at": None}, by_sid["aaa"])
     e_ok = (kept == {"action": "update", "status": "approved",
-                     "reviewed_at": "2026-07-01T00:00:00+00:00"}
+                     "reviewed_at": "2026-07-01T00:00:00+00:00",
+                     "refresh_ai": False}
             and fresh == {"action": "insert", "status": "pending",
-                          "reviewed_at": None}
-            and dismissed["status"] == "dismissed")
-    print("  [%s] (e) UPSERT preserves operator status/reviewed_at; new -> pending"
-          % ("ok" if e_ok else "xx"))
+                          "reviewed_at": None, "refresh_ai": True}
+            and dismissed["status"] == "dismissed"
+            and dismissed["refresh_ai"] is False
+            and pending["refresh_ai"] is True)
+    print("  [%s] (e) UPSERT preserves operator status/reviewed_at; ai_* refresh "
+          "only while pending" % ("ok" if e_ok else "xx"))
+    # (g) Slice 4a — judge plumbing (offline): JSON extraction, value
+    # validation, and the truth-vocabulary guard on ai_reason.
+    parsed = _extract_json_object(
+        '```json\n{"recommendation":"dismiss","confidence":0.9,'
+        '"reason":"협약 체결이 완료된 일회성 사건"}\n```')
+    g_ok = (parsed and parsed["recommendation"] == "dismiss"
+            and reason_vocab_ok("협약 체결이 완료된 일회성 사건")
+            and not reason_vocab_ok("사실이 아닌 주장")
+            and not reason_vocab_ok("검증되지 않은 발표")
+            and _extract_json_object("no json here") is None)
+    print("  [%s] (g) judge JSON parsing + truth-vocab guard" % ("ok" if g_ok else "xx"))
     blob = json.dumps(shortlist, ensure_ascii=False)
     f_ok = ("verdict" not in blob and "confidence" not in blob
             and "truth" not in blob)
     print("  [%s] (f) candidate payload is verdict-free" % ("ok" if f_ok else "xx"))
 
-    ok = all([a_ok, b_ok, c_ok, d_ok, e_ok, f_ok])
+    ok = all([a_ok, b_ok, c_ok, d_ok, e_ok, f_ok, g_ok])
     print()
     print("SELFTEST: %s" % ("PASS (filter + ranking + dates + outlet fallback "
-                            "+ upsert-preserve + verdict-free)" if ok else "FAIL"))
+                            "+ upsert-preserve + verdict-free + judge "
+                            "plumbing)" if ok else "FAIL"))
     return 0 if ok else 1
 
 
@@ -356,6 +545,10 @@ def main(argv=None) -> int:
     parser.add_argument("--markers", default=",".join(DEFAULT_MARKERS),
                         help="Comma-separated forward-looking title markers "
                              "(score boost only, never a gate).")
+    parser.add_argument("--no-judge", dest="judge", action="store_false",
+                        help="Skip the per-candidate AI recommendation calls "
+                             "(default ON; ~25 short Sonnet calls per run).")
+    parser.set_defaults(judge=True)
     args = parser.parse_args(argv)
 
     if args.selftest:
@@ -398,9 +591,7 @@ def main(argv=None) -> int:
             return 1
         with conn.cursor() as cur:
             cur.execute(SELECT_ROWS_SQL)
-            rows_by_id = {row_id: (title, published_at, original_url)
-                          for row_id, title, published_at, original_url
-                          in cur.fetchall()}
+            rows_by_id = {row[0]: tuple(row[1:]) for row in cur.fetchall()}
 
         shortlist = build_candidates(
             graph, rows_by_id, today,
@@ -408,6 +599,24 @@ def main(argv=None) -> int:
             min_silence_days=args.min_silence_days,
             markers=markers, top_n=args.top_n,
         )
+
+        # Slice 4a — AI recommendation per candidate (fail-soft; the human
+        # gate never depends on it). Runs in dry-run too so the operator can
+        # see the recommendations before any write; skip with --no-judge.
+        if args.judge and shortlist:
+            judge_model = (os.environ.get("ANTHROPIC_MODEL", "").strip()
+                           or _JUDGE_MODEL_DEFAULT)
+            judged = 0
+            for candidate in shortlist:
+                row = rows_by_id.get(candidate["representative_analysis_id"])
+                claim_text = row[3] if row and len(row) > 3 else ""
+                verdict = judge_candidate(candidate, claim_text or "", judge_model)
+                if verdict:
+                    candidate.update(verdict)
+                    judged += 1
+            print("[faded] AI judge: %d/%d candidates judged (model=%s)"
+                  % (judged, len(shortlist), judge_model))
+
         print_shortlist(shortlist)
         print("[faded] graph ref=%s | %d candidate(s)" % (graph_ref, len(shortlist)))
 
@@ -415,9 +624,12 @@ def main(argv=None) -> int:
             print("[faded] DRY-RUN — no CREATE TABLE, no write.")
             return 0
 
+        ai_judged_at = generated_at
         inserted = updated = 0
         with conn.cursor() as cur:
             cur.execute(CREATE_TABLE_SQL)
+            for ddl in ADD_AI_COLUMNS_SQL:
+                cur.execute(ddl)
             for candidate in shortlist:
                 cur.execute(SELECT_EXISTING_SQL,
                             (candidate["cluster_stable_id"],))
@@ -425,6 +637,7 @@ def main(argv=None) -> int:
                 existing = ({"status": row[0], "reviewed_at": row[1]}
                             if row else None)
                 plan = plan_upsert(existing, candidate)
+                has_ai = bool(candidate.get("ai_recommendation"))
                 if plan["action"] == "insert":
                     cur.execute(INSERT_SQL, (
                         candidate["cluster_stable_id"],
@@ -434,11 +647,32 @@ def main(argv=None) -> int:
                         candidate["silence_days"], candidate["marker_hit"],
                         candidate["score"], plan["status"],
                         plan["reviewed_at"], generated_at,
+                        candidate.get("ai_recommendation"),
+                        candidate.get("ai_reason"),
+                        candidate.get("ai_confidence"),
+                        ai_judged_at if has_ai else None,
                     ))
                     inserted += 1
+                elif plan["refresh_ai"]:
+                    # Still pending — refresh measured fields AND the AI
+                    # recommendation; status/reviewed_at untouched.
+                    cur.execute(UPDATE_PENDING_SQL, (
+                        candidate["representative_analysis_id"],
+                        candidate["title"], candidate["outlet_count"],
+                        candidate["first_at"], candidate["last_at"],
+                        candidate["silence_days"], candidate["marker_hit"],
+                        candidate["score"], generated_at,
+                        candidate.get("ai_recommendation"),
+                        candidate.get("ai_reason"),
+                        candidate.get("ai_confidence"),
+                        ai_judged_at if has_ai else None,
+                        candidate["cluster_stable_id"],
+                    ))
+                    updated += 1
                 else:
-                    # Measured fields ONLY — status/reviewed_at preserved by
-                    # never appearing in UPDATE_SQL.
+                    # Human-judged — measured fields ONLY; status/reviewed_at
+                    # AND ai_* frozen (audit of what the AI said at decision
+                    # time) by never appearing in UPDATE_SQL.
                     cur.execute(UPDATE_SQL, (
                         candidate["representative_analysis_id"],
                         candidate["title"], candidate["outlet_count"],

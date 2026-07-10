@@ -105,9 +105,9 @@ class UpsertPreservationTests(unittest.TestCase):
     def test_new_cluster_inserts_pending(self):
         plan = gfc.plan_upsert(None, {"cluster_stable_id": "x"})
         self.assertEqual(plan, {"action": "insert", "status": "pending",
-                                "reviewed_at": None})
+                                "reviewed_at": None, "refresh_ai": True})
 
-    def test_approved_status_survives_rerun(self):
+    def test_approved_status_survives_rerun_and_freezes_ai(self):
         plan = gfc.plan_upsert(
             {"status": "approved", "reviewed_at": "2026-07-01T00:00:00+00:00"},
             {"cluster_stable_id": "x"},
@@ -115,20 +115,103 @@ class UpsertPreservationTests(unittest.TestCase):
         self.assertEqual(plan["action"], "update")
         self.assertEqual(plan["status"], "approved")
         self.assertEqual(plan["reviewed_at"], "2026-07-01T00:00:00+00:00")
+        # Slice 4a: a human-judged row freezes its ai_* fields.
+        self.assertFalse(plan["refresh_ai"])
 
-    def test_dismissed_status_survives_rerun(self):
+    def test_dismissed_status_survives_rerun_and_freezes_ai(self):
         plan = gfc.plan_upsert({"status": "dismissed", "reviewed_at": "t"},
                                {"cluster_stable_id": "x"})
         self.assertEqual(plan["status"], "dismissed")
+        self.assertFalse(plan["refresh_ai"])
+
+    def test_pending_row_refreshes_ai(self):
+        plan = gfc.plan_upsert({"status": "pending", "reviewed_at": None},
+                               {"cluster_stable_id": "x"})
+        self.assertTrue(plan["refresh_ai"])
 
     def test_update_sql_never_touches_status(self):
-        # Belt-and-braces: the UPDATE statement must not name the operator
-        # columns at all.
+        # Belt-and-braces: the frozen-row UPDATE must not name the operator
+        # columns NOR the ai_* audit columns at all.
         self.assertNotIn("status", gfc.UPDATE_SQL)
         self.assertNotIn("reviewed_at", gfc.UPDATE_SQL)
+        self.assertNotIn("ai_", gfc.UPDATE_SQL)
+        # The pending-row UPDATE refreshes ai_* but still never the operator
+        # columns.
+        self.assertIn("ai_recommendation", gfc.UPDATE_PENDING_SQL)
+        self.assertNotIn("status", gfc.UPDATE_PENDING_SQL)
+        self.assertNotIn("reviewed_at =", gfc.UPDATE_PENDING_SQL.replace(
+            "ai_judged_at = %s", ""))
 
     def test_selftest_passes(self):
         self.assertEqual(gfc.run_selftest(), 0)
+
+
+class _FakeBlock:
+    type = "text"
+
+    def __init__(self, text):
+        self.text = text
+
+
+class _FakeMessage:
+    usage = None
+
+    def __init__(self, text):
+        self.content = [_FakeBlock(text)]
+
+
+class AiJudgeTests(unittest.TestCase):
+    """Slice 4a — the topicality judge (mocked Anthropic call; no network)."""
+
+    CANDIDATE = {"title": "청년 지원금 도입 검토",
+                 "representative_analysis_id": 1}
+
+    def _judge(self, reply_text=None, side_effect=None):
+        from unittest.mock import patch
+        import os as _os
+        with patch.dict(_os.environ, {"ANTHROPIC_API_KEY": "test-key"},
+                        clear=False):
+            with patch.object(
+                gfc, "_call_anthropic_judge",
+                side_effect=side_effect,
+                **({} if side_effect else
+                   {"return_value": _FakeMessage(reply_text)}),
+            ):
+                return gfc.judge_candidate(self.CANDIDATE, "청년 지원금", "m")
+
+    def test_valid_reply_stored(self):
+        verdict = self._judge(
+            '{"recommendation":"dismiss","confidence":0.9,'
+            '"reason":"협약 체결이 완료된 일회성 사건"}')
+        self.assertEqual(verdict["ai_recommendation"], "dismiss")
+        self.assertEqual(verdict["ai_confidence"], 0.9)
+        self.assertIn("일회성 사건", verdict["ai_reason"])
+
+    def test_invalid_recommendation_rejected(self):
+        self.assertIsNone(self._judge(
+            '{"recommendation":"publish","confidence":0.9,"reason":"r"}'))
+
+    def test_truth_vocab_reason_rejected(self):
+        self.assertIsNone(self._judge(
+            '{"recommendation":"approve","confidence":0.8,'
+            '"reason":"사실이 아닐 가능성이 높음"}'))
+
+    def test_llm_error_is_failsoft_none(self):
+        self.assertIsNone(self._judge(side_effect=RuntimeError("api down")))
+
+    def test_unparseable_reply_none(self):
+        self.assertIsNone(self._judge("죄송합니다, JSON이 아닙니다."))
+
+    def test_missing_api_key_skips_without_call(self):
+        from unittest.mock import patch
+        import os as _os
+        env = dict(_os.environ)
+        env.pop("ANTHROPIC_API_KEY", None)
+        with patch.dict(_os.environ, env, clear=True):
+            with patch.object(gfc, "_call_anthropic_judge") as call:
+                self.assertIsNone(
+                    gfc.judge_candidate(self.CANDIDATE, "", "m"))
+            call.assert_not_called()
 
 
 if __name__ == "__main__":
