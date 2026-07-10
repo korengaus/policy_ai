@@ -11998,8 +11998,9 @@
       metricsEl.style.display = "none";
       resultsEl.innerHTML = `
         <div class="empty-state">'${escapeHtml(query)}' 관련 기존 분석 ${hits.length}건을 찾았습니다. 제목을 누르면 전체 검증 카드가 열립니다.</div>
-        ${hits.map((hit) => `
+        ${hits.map((hit, index) => `
           <div class="history-row" data-search-hit-id="${Number(hit.result_id) || 0}" role="button" tabindex="0">
+            <div class="history-id">#${escapeHtml(index + 1)}</div>
             <div>
               <strong>${escapeHtml(hit.title || "제목 없음")}</strong>
               <div class="history-meta">
