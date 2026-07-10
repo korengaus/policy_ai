@@ -10490,7 +10490,7 @@
                  returns found + outlet_count>=2; found:false / singleton /
                  fetch failure all render NOTHING (fail-silent). Detail view
                  only, and only when the card knows its analysis id. -->
-            ${hasFocus && Number(result.result_id) > 0 ? `<section class="public-source-section spread-section" data-spread-id="${Number(result.result_id)}" hidden></section>` : ""}
+            ${(hasFocus || displayResults.length === 1) && Number(result.result_id) > 0 ? `<section class="public-source-section spread-section" data-spread-id="${Number(result.result_id)}" hidden></section>` : ""}
 
             <!-- Reading guide kept, collapsed (content unchanged). -->
             ${renderCollapsibleSection("이 리포트는 이렇게 읽으면 됩니다", renderReadingGuide(userContext), false, "처음 보는 분을 위한 안내입니다. 판정 단계·신뢰도·공식 출처·근거를 어떻게 읽으면 되는지 설명합니다.")}
