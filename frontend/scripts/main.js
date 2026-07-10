@@ -4793,6 +4793,140 @@
             </div>`;
     }
 
+    // SHARE-IMAGE Slice 1: the spread payload each card fetched, kept for the
+    // share-image canvas (zero re-fetch at button-click time). Keyed by
+    // result_id; only found+multi-outlet payloads are stored.
+    const spreadDataCache = new Map();
+
+    // SHARE-IMAGE Slice 1 — per-card share image, drawn on an offscreen
+    // canvas ENTIRELY client-side (no server render, no new fetch, no new
+    // font load: the same named-but-system font stack the page uses, so
+    // Korean renders identically — no tofu). CIRCULATION ONLY: the image
+    // carries title + "N개 매체" + dates + the honesty line + wordmark/URL
+    // baked into the pixels — no verdict, no gauge, no red/green. Text and
+    // shapes only (same-origin, canvas stays untainted). Download-only this
+    // slice; navigator.share + sparkline bars are Slice 2.
+    const SHARE_IMAGE_FONTS = 'Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
+    const SHARE_IMAGE_COLORS = {
+      canvas: "#f6f8fb", ink: "#0f172a", slate: "#475569",
+      muted: "#94a3b8", line: "#e2e8f0", brand: "#1e5fd8", brandInk: "#1542a0",
+    };
+
+    // Canvas has no auto-wrap; per-character wrapping is correct for Korean
+    // (no space-delimited words needed). Returns at most maxLines lines,
+    // ellipsizing the last one when the text overflows.
+    function wrapCanvasText(ctx, text, maxWidth, maxLines) {
+      const chars = Array.from(String(text || ""));
+      const lines = [];
+      let line = "";
+      for (let i = 0; i < chars.length; i += 1) {
+        const candidate = line + chars[i];
+        if (line && ctx.measureText(candidate).width > maxWidth) {
+          lines.push(line);
+          line = chars[i];
+          if (lines.length === maxLines) break;
+        } else {
+          line = candidate;
+        }
+      }
+      if (lines.length < maxLines && line) lines.push(line);
+      if ((lines.length === maxLines && line && lines[maxLines - 1] !== line)
+          || chars.length && lines.join("").length < chars.length) {
+        let last = lines[lines.length - 1] || "";
+        while (last && ctx.measureText(last + "…").width > maxWidth) {
+          last = last.slice(0, -1);
+        }
+        lines[lines.length - 1] = last + "…";
+      }
+      return lines;
+    }
+
+    function drawShareImage(title, spreadData) {
+      const width = 1200;
+      const height = 630;
+      const margin = 72;
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      const palette = SHARE_IMAGE_COLORS;
+
+      ctx.fillStyle = palette.canvas;
+      ctx.fillRect(0, 0, width, height);
+      ctx.textBaseline = "alphabetic";
+
+      // Brand row — plain sans wordmark this slice (no webfont dependency).
+      ctx.fillStyle = palette.brand;
+      ctx.font = `800 46px ${SHARE_IMAGE_FONTS}`;
+      ctx.fillText("tickedin", margin, 108);
+      ctx.fillStyle = palette.muted;
+      ctx.font = `600 22px ${SHARE_IMAGE_FONTS}`;
+      ctx.fillText("정책 뉴스, 어디까지 퍼졌는지 확인하세요", margin + 216, 104);
+
+      // Claim title — wrapped, max 3 lines.
+      ctx.fillStyle = palette.ink;
+      ctx.font = `700 50px ${SHARE_IMAGE_FONTS}`;
+      let y = 210;
+      for (const line of wrapCanvasText(ctx, title, width - margin * 2, 3)) {
+        ctx.fillText(line, margin, y);
+        y += 66;
+      }
+      y += 8;
+
+      // Spread facts — only when the card actually has multi-outlet data.
+      const outletCount = Number(spreadData?.cluster?.outlet_count);
+      if (Number.isFinite(outletCount) && outletCount >= 2) {
+        ctx.fillStyle = palette.brandInk;
+        ctx.font = `800 40px ${SHARE_IMAGE_FONTS}`;
+        ctx.fillText(`${outletCount}개 매체에서 보도`, margin, y);
+        y += 54;
+        const timeline = spreadData.timeline || {};
+        const firstAt = typeof timeline.first_at === "string" ? timeline.first_at.slice(0, 10) : "";
+        const spanDays = Number(timeline.span_days);
+        if (Number(timeline.dated_members) > 0 && firstAt && Number.isFinite(spanDays)) {
+          ctx.fillStyle = palette.slate;
+          ctx.font = `500 28px ${SHARE_IMAGE_FONTS}`;
+          ctx.fillText(`최초 보도 ${firstAt} · ${spreadSpanPhrase(spanDays)}`, margin, y);
+          y += 40;
+        }
+      }
+
+      // Footer — honesty line + URL, baked into the pixels.
+      ctx.strokeStyle = palette.line;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(margin, height - 118);
+      ctx.lineTo(width - margin, height - 118);
+      ctx.stroke();
+      ctx.fillStyle = palette.slate;
+      ctx.font = `500 26px ${SHARE_IMAGE_FONTS}`;
+      ctx.fillText("확산 규모를 보여줄 뿐, 사실 여부에 대한 검증이 아닙니다.", margin, height - 66);
+      ctx.fillStyle = palette.brand;
+      ctx.font = `800 28px ${SHARE_IMAGE_FONTS}`;
+      const urlText = "tickedin.org";
+      ctx.fillText(urlText, width - margin - ctx.measureText(urlText).width, height - 66);
+      return canvas;
+    }
+
+    function downloadShareImage(title, resultId) {
+      try {
+        const canvas = drawShareImage(title, spreadDataCache.get(resultId));
+        canvas.toBlob((blob) => {
+          if (!blob) return;
+          const url = URL.createObjectURL(blob);
+          const anchor = document.createElement("a");
+          anchor.href = url;
+          anchor.download = `tickedin-${resultId || "card"}.png`;
+          document.body.appendChild(anchor);
+          anchor.click();
+          anchor.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }, "image/png");
+      } catch (error) {
+        // fail-silent: the share image is optional; the card must never break
+      }
+    }
+
     async function loadSpreadAnnotations() {
       const placeholders = document.querySelectorAll(".spread-section[data-spread-id]");
       for (const section of placeholders) {
@@ -4804,6 +4938,7 @@
           const data = await response.json();
           const outletCount = Number(data?.cluster?.outlet_count);
           if (!data?.found || !Number.isFinite(outletCount) || outletCount < 2) continue;
+          spreadDataCache.set(id, data);
           const timeline = data.timeline || {};
           const firstAt = typeof timeline.first_at === "string" ? timeline.first_at.slice(0, 10) : "";
           const spanDays = Number(timeline.span_days);
@@ -5048,7 +5183,8 @@
                  returns found + outlet_count>=2; found:false / singleton /
                  fetch failure all render NOTHING (fail-silent). Detail view
                  only, and only when the card knows its analysis id. -->
-            ${(hasFocus || displayResults.length === 1) && Number(result.result_id) > 0 ? `<section class="public-source-section spread-section" data-spread-id="${Number(result.result_id)}" hidden></section>` : ""}
+            ${(hasFocus || displayResults.length === 1) && Number(result.result_id) > 0 ? `<section class="public-source-section spread-section" data-spread-id="${Number(result.result_id)}" hidden></section>
+            <div class="report-error-link"><button type="button" class="secondary" data-share-image="${Number(result.result_id)}" data-share-title="${title}">이미지로 공유</button></div>` : ""}
 
             <!-- Reading guide kept, collapsed (content unchanged). -->
             ${renderCollapsibleSection("이 리포트는 이렇게 읽으면 됩니다", renderReadingGuide(userContext), false, "처음 보는 분을 위한 안내입니다. 판정 단계·신뢰도·공식 출처·근거를 어떻게 읽으면 되는지 설명합니다.")}
@@ -6589,6 +6725,17 @@
         renderAnalyzeOffer(query);
       }
     }
+
+    // SHARE-IMAGE Slice 1: delegated handler for the per-card share button
+    // (injected via innerHTML in the detail render, so direct binding won't
+    // survive re-renders). Fail-silent inside downloadShareImage.
+    resultsEl.addEventListener("click", (event) => {
+      const shareButton = event.target.closest("[data-share-image]");
+      if (!shareButton) return;
+      const resultId = Number(shareButton.getAttribute("data-share-image"));
+      const shareTitle = shareButton.getAttribute("data-share-title") || "";
+      downloadShareImage(shareTitle, resultId);
+    });
 
     analyzeBtn.addEventListener("click", searchFirst);
     historyBtn.addEventListener("click", loadHistory);
