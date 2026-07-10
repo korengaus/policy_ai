@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>사라진 주장 검토 — tickedin 운영</title>
+<!--
+  FADED-CLAIMS Slice 3 (PAGE 1) — OPERATOR review tool, hand-authored (NOT
+  build_index-managed; zero index-pin risk — brainmap/weekly precedent).
+  Calls the ADMIN endpoints (/review/faded-candidates + POST .../status),
+  which are session-gated by require_admin: the page relies entirely on the
+  operator's existing logged-in session cookie riding same-origin requests —
+  NO auth is built here, NO credential is embedded. A logged-out visitor
+  gets 401 and a "관리자 로그인이 필요합니다" notice.
+  The operator's job (semi-auto gate): approve GENUINE fades (widely covered,
+  then no follow-up), dismiss CONCLUDED events (a succeeded MOU, an award
+  ceremony, a completed census). Judgment is curation only — never a verdict.
+  Self-contained: inline CSS + JS, no CDN. API strings render via textContent.
+-->
+<style>
+  :root {
+    --ink: #0f172a; --slate: #475569; --muted: #94a3b8; --line: #e2e8f0;
+    --paper: #ffffff; --canvas: #f6f8fb; --brand: #1e5fd8; --brand-ink: #1542a0;
+    --shadow: 0 8px 24px rgba(15, 23, 42, 0.06); --radius-sm: 9px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--canvas); color: var(--ink); min-height: 100vh;
+    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+  }
+  header.tool-head { background: var(--paper); border-bottom: 1px solid var(--line); padding: 16px 24px 18px; }
+  .brand-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 10px; }
+  .brand {
+    display: inline-flex; align-items: center; gap: 8px; color: var(--ink); text-decoration: none;
+    font-family: 'Noto Serif KR', 'Nanum Myeongjo', 'Apple SD Gothic Neo', serif;
+    font-size: 21px; font-weight: 700; letter-spacing: -0.01em;
+  }
+  .brand img { width: 1.25em; height: 1.25em; object-fit: contain; }
+  .brand-page-label { color: var(--muted); font-size: 13px; font-weight: 600; padding-left: 12px; border-left: 1px solid var(--line); }
+  .tool-home { margin-left: auto; font-size: 13px; font-weight: 600; color: var(--brand-ink); text-decoration: none; }
+  .tool-home:hover { text-decoration: underline; }
+  .tool-title { font-size: 20px; font-weight: 800; letter-spacing: -0.02em; }
+  .tool-sub { margin-top: 6px; font-size: 13px; line-height: 1.55; color: var(--slate); }
+  .tabs { margin-top: 12px; display: flex; gap: 8px; }
+  .tabs button {
+    font-family: inherit; font-size: 12.5px; font-weight: 600; padding: 5px 13px;
+    border: 1px solid var(--line); border-radius: 999px; background: var(--paper);
+    color: var(--slate); cursor: pointer;
+  }
+  .tabs button.active { background: #eef4ff; border-color: var(--brand); color: var(--brand-ink); font-weight: 700; }
+  main.tool-body { max-width: 980px; margin: 0 auto; padding: 20px 20px 48px; }
+  #status { color: var(--slate); font-size: 14.5px; text-align: center; padding: 40px 20px; }
+  .cand {
+    display: flex; gap: 14px; align-items: flex-start;
+    background: var(--paper); border: 1px solid var(--line);
+    border-radius: var(--radius-sm); box-shadow: var(--shadow);
+    padding: 13px 15px; margin-bottom: 10px;
+  }
+  .cand.done { opacity: 0.45; }
+  .cand-rank {
+    flex: 0 0 auto; width: 32px; height: 32px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: #eef4ff; color: var(--brand-ink); font-weight: 800; font-size: 13.5px;
+  }
+  .cand-main { flex: 1 1 auto; min-width: 0; }
+  .cand-title { color: var(--ink); text-decoration: none; font-size: 14.5px; font-weight: 700; line-height: 1.45; }
+  .cand-title:hover { color: var(--brand-ink); text-decoration: underline; }
+  .cand-meta { margin-top: 5px; display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--slate); }
+  .chip { background: #eef4ff; color: var(--brand-ink); border-radius: 999px; padding: 1px 9px; font-weight: 700; }
+  .cand-actions { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; }
+  .cand-actions button {
+    font-family: inherit; font-size: 12.5px; font-weight: 700; padding: 6px 14px;
+    border-radius: var(--radius-sm); border: 1px solid var(--line); cursor: pointer;
+  }
+  .btn-approve { background: var(--brand); border-color: var(--brand); color: #fff; }
+  .btn-approve:hover { background: var(--brand-ink); }
+  .btn-dismiss { background: var(--paper); color: var(--slate); }
+  .btn-dismiss:hover { color: var(--ink); border-color: var(--muted); }
+  .cand-note { font-size: 11.5px; color: var(--muted); text-align: center; }
+</style>
+</head>
+<body>
+<header class="tool-head">
+  <div class="brand-row">
+    <a class="brand" href="/" aria-label="tickedin 홈으로"><img src="/web/assets/favicon-180.png" alt="" aria-hidden="true">tickedin</a>
+    <span class="brand-page-label">운영 · 사라진 주장 검토</span>
+    <a class="tool-home" href="/">← 홈으로</a>
+  </div>
+  <div class="tool-title">후속 보도가 끊긴 주장 — 후보 검토</div>
+  <p class="tool-sub">
+    탐지 규칙이 찾은 후보입니다. 제목을 눌러 카드와 확산 타임라인을 확인한 뒤,
+    <strong>진짜 후속이 끊긴 주장만 승인</strong>하고 <strong>정상적으로 종결된 사안(성사된 협약·시상·완료된 조사 등)은 기각</strong>하세요.
+    승인된 항목만 공개 페이지(/web/faded.html)에 표시됩니다. 이 판단은 큐레이션이며 진위 판정이 아닙니다.
+  </p>
+  <div class="tabs" role="tablist">
+    <button type="button" data-tab="pending" class="active">검토 대기</button>
+    <button type="button" data-tab="approved">승인됨</button>
+    <button type="button" data-tab="dismissed">기각됨</button>
+  </div>
+</header>
+<main class="tool-body">
+  <div id="status">불러오는 중…</div>
+  <div id="list"></div>
+</main>
+<script>
+(function () {
+  "use strict";
+  var currentTab = "pending";
+
+  function el(tag, className, text) {
+    var node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined && text !== null) node.textContent = String(text);
+    return node;
+  }
+  function setStatus(text) {
+    var status = document.getElementById("status");
+    status.style.display = text ? "block" : "none";
+    status.textContent = text || "";
+  }
+
+  function renderRow(item, index) {
+    var row = el("div", "cand");
+    row.appendChild(el("span", "cand-rank", "#" + (index + 1)));
+
+    var main = el("div", "cand-main");
+    var link = el("a", "cand-title", item.title || "(제목 없음)");
+    var rid = Number(item.representative_analysis_id);
+    link.href = rid > 0 ? "/?result_id=" + encodeURIComponent(rid) : "/";
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    main.appendChild(link);
+
+    var meta = el("div", "cand-meta");
+    if (Number(item.outlet_count) > 0) meta.appendChild(el("span", "chip", Number(item.outlet_count) + "개 매체"));
+    if (Number(item.silence_days) > 0) meta.appendChild(el("span", null, Number(item.silence_days) + "일째 후속 없음"));
+    if (item.last_at) meta.appendChild(el("span", null, "마지막 보도 " + String(item.last_at).slice(0, 10)));
+    if (item.marker_hit) meta.appendChild(el("span", null, "예고형 제목"));
+    if (item.score !== undefined && item.score !== null) meta.appendChild(el("span", null, "점수 " + item.score));
+    if (item.reviewed_at) meta.appendChild(el("span", null, "검토 " + String(item.reviewed_at).slice(0, 10)));
+    main.appendChild(meta);
+    row.appendChild(main);
+
+    if (currentTab === "pending") {
+      var actions = el("div", "cand-actions");
+      var note = el("div", "cand-note", "");
+      var approve = el("button", "btn-approve", "승인");
+      var dismiss = el("button", "btn-dismiss", "기각");
+      approve.type = "button";
+      dismiss.type = "button";
+      function judge(status) {
+        approve.disabled = true;
+        dismiss.disabled = true;
+        note.textContent = "저장 중…";
+        fetch("/review/faded-candidates/" + encodeURIComponent(item.id) + "/status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: status }),
+        })
+          .then(function (response) {
+            if (!response.ok) throw new Error("http " + response.status);
+            row.classList.add("done");
+            note.textContent = status === "approved" ? "승인됨" : "기각됨";
+          })
+          .catch(function () {
+            approve.disabled = false;
+            dismiss.disabled = false;
+            note.textContent = "실패 — 다시 시도하세요";
+          });
+      }
+      approve.addEventListener("click", function () { judge("approved"); });
+      dismiss.addEventListener("click", function () { judge("dismissed"); });
+      actions.appendChild(approve);
+      actions.appendChild(dismiss);
+      actions.appendChild(note);
+      row.appendChild(actions);
+    }
+    return row;
+  }
+
+  function load() {
+    setStatus("불러오는 중…");
+    var list = document.getElementById("list");
+    list.textContent = "";
+    fetch("/review/faded-candidates?status=" + encodeURIComponent(currentTab))
+      .then(function (response) {
+        if (response.status === 401) {
+          setStatus("관리자 로그인이 필요합니다. 운영자 계정으로 로그인한 뒤 이 페이지를 다시 여세요.");
+          throw new Error("unauthorized");
+        }
+        if (!response.ok) throw new Error("http " + response.status);
+        return response.json();
+      })
+      .then(function (data) {
+        var items = (data && data.candidates) || [];
+        if (!items.length) {
+          setStatus(currentTab === "pending"
+            ? "검토 대기 중인 후보가 없습니다. (생성기를 실행하면 채워집니다)"
+            : "해당 상태의 항목이 없습니다.");
+          return;
+        }
+        setStatus("");
+        items.forEach(function (item, index) {
+          list.appendChild(renderRow(item, index));
+        });
+      })
+      .catch(function (error) {
+        if (String(error && error.message) !== "unauthorized") {
+          setStatus("목록을 불러오지 못했습니다. 잠시 후 다시 시도하세요.");
+        }
+      });
+  }
+
+  document.querySelectorAll(".tabs button").forEach(function (button) {
+    button.addEventListener("click", function () {
+      document.querySelectorAll(".tabs button").forEach(function (b) { b.classList.remove("active"); });
+      button.classList.add("active");
+      currentTab = button.getAttribute("data-tab") || "pending";
+      load();
+    });
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>

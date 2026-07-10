@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>후속 보도가 끊긴 주장 — tickedin</title>
+<!--
+  FADED-CLAIMS Slice 3 (PAGE 2) — PUBLIC page, hand-authored (NOT
+  build_index-managed; zero index-pin risk — brainmap/weekly precedent).
+  Fetches GET /api/faded-claims, which serves OPERATOR-APPROVED rows only.
+  CIRCULATION/TIME ONLY: what this page states is that observed coverage
+  stopped — NEVER that a claim is false or a policy failed/was abandoned.
+  The mandatory framing arrives in the API payload and renders verbatim;
+  a hardcoded copy backs the empty/error states so the framing is always
+  visible. Self-contained: inline CSS + JS, no CDN, no verdict/gauge/
+  red-green anywhere. API strings render via textContent (never innerHTML).
+-->
+<style>
+  :root {
+    --ink: #0f172a; --slate: #475569; --muted: #94a3b8; --line: #e2e8f0;
+    --paper: #ffffff; --canvas: #f6f8fb; --brand: #1e5fd8; --brand-ink: #1542a0;
+    --shadow: 0 8px 24px rgba(15, 23, 42, 0.06); --radius-sm: 9px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--canvas); color: var(--ink); min-height: 100vh;
+    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+  }
+  header.faded-head { background: var(--paper); border-bottom: 1px solid var(--line); padding: 16px 24px 18px; }
+  .brand-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 10px; }
+  .brand {
+    display: inline-flex; align-items: center; gap: 8px; color: var(--ink); text-decoration: none;
+    font-family: 'Noto Serif KR', 'Nanum Myeongjo', 'Apple SD Gothic Neo', serif;
+    font-size: 21px; font-weight: 700; letter-spacing: -0.01em;
+  }
+  .brand img { width: 1.25em; height: 1.25em; object-fit: contain; }
+  .brand-page-label { color: var(--muted); font-size: 13px; font-weight: 600; padding-left: 12px; border-left: 1px solid var(--line); }
+  .faded-home { margin-left: auto; font-size: 13px; font-weight: 600; color: var(--brand-ink); text-decoration: none; }
+  .faded-home:hover { text-decoration: underline; }
+  .faded-title {
+    font-size: 22px; font-weight: 800; letter-spacing: -0.02em; color: var(--ink);
+    font-family: 'Nanum Myeongjo', 'Apple SD Gothic Neo', 'Pretendard', serif;
+  }
+  /* HONESTY (fixed, always visible): coverage-stopped, NOT a verdict. */
+  .faded-framing {
+    margin-top: 10px; background: #eef4ff; border: 1px solid var(--brand);
+    color: var(--brand-ink); font-size: 12.5px; font-weight: 600; line-height: 1.6;
+    border-radius: var(--radius-sm); padding: 9px 13px; max-width: 760px;
+  }
+  .faded-subtitle { margin-top: 8px; font-size: 13.5px; line-height: 1.55; color: var(--slate); }
+  .faded-subtitle strong { color: var(--ink); font-weight: 700; }
+  main.faded-body { max-width: 860px; margin: 0 auto; padding: 22px 20px 40px; }
+  #status { color: var(--slate); font-size: 15px; text-align: center; padding: 48px 24px; }
+  ol.faded-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+  .faded-item {
+    background: var(--paper); border: 1px solid var(--line);
+    border-radius: var(--radius-sm); box-shadow: var(--shadow);
+    padding: 14px 16px;
+  }
+  .item-title { color: var(--ink); text-decoration: none; font-size: 15.5px; font-weight: 700; line-height: 1.45; display: inline-block; }
+  .item-title:hover { color: var(--brand-ink); text-decoration: underline; }
+  .item-meta { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 12.5px; color: var(--slate); }
+  .outlet-badge { display: inline-flex; align-items: center; background: #eef4ff; color: var(--brand-ink); border-radius: 999px; padding: 2px 10px; font-weight: 700; font-size: 12px; }
+  footer.faded-foot { max-width: 860px; margin: 0 auto; padding: 0 20px 46px; font-size: 12.5px; color: var(--muted); line-height: 1.7; }
+  footer.faded-foot a { color: var(--brand-ink); text-decoration: none; font-weight: 600; }
+  footer.faded-foot a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<header class="faded-head">
+  <div class="brand-row">
+    <a class="brand" href="/" aria-label="tickedin 홈으로"><img src="/web/assets/favicon-180.png" alt="" aria-hidden="true">tickedin</a>
+    <span class="brand-page-label">후속이 끊긴 주장</span>
+    <a class="faded-home" href="/">← 홈으로</a>
+  </div>
+  <div class="faded-title">후속 보도가 끊긴 주장</div>
+  <div class="faded-framing" id="framing">이 목록은 후속 보도가 끊긴 사실만 보여줍니다. 주장의 진위나 정책의 추진·성패에 대한 판단이 아니며, 후속 보도가 저희 수집망 밖에 있었을 수도 있습니다.</div>
+  <p class="faded-subtitle">
+    여러 매체가 보도한 뒤 일정 기간 <strong>후속 보도가 관찰되지 않은</strong> 주장을 모았습니다.
+    운영자가 하나씩 확인해 정상적으로 종결된 사안은 제외한 목록입니다. 제목을 누르면 해당 주장의 검증 카드로 이동합니다.
+  </p>
+</header>
+<main class="faded-body">
+  <div id="status">목록을 불러오는 중…</div>
+  <ol class="faded-list" id="fadedList"></ol>
+</main>
+<footer class="faded-foot" id="foot"></footer>
+<script>
+(function () {
+  "use strict";
+
+  function day(iso) {
+    return (typeof iso === "string" && iso.length >= 10) ? iso.slice(0, 10) : "";
+  }
+  function el(tag, className, text) {
+    var node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined && text !== null) node.textContent = String(text);
+    return node;
+  }
+  function showEmpty() {
+    document.getElementById("status").textContent =
+      "아직 검토를 마친 항목이 없습니다.";
+  }
+
+  function render(claims) {
+    var status = document.getElementById("status");
+    var list = document.getElementById("fadedList");
+    claims.forEach(function (claim) {
+      var li = el("li", "faded-item");
+      var link = el("a", "item-title", claim.title || "(제목 없음)");
+      var rid = Number(claim.representative_analysis_id);
+      link.href = rid > 0 ? "/?result_id=" + encodeURIComponent(rid) : "/";
+      li.appendChild(link);
+
+      var meta = el("div", "item-meta");
+      var outlets = Number(claim.outlet_count);
+      var silence = Number(claim.silence_days);
+      if (outlets > 0 && silence > 0) {
+        meta.appendChild(el("span", "outlet-badge", outlets + "개 매체"));
+        meta.appendChild(el("span", null,
+          outlets + "개 매체가 보도한 뒤 " + silence + "일째 후속 보도 없음"));
+      }
+      var from = day(claim.first_at);
+      var to = day(claim.last_at);
+      if (from && to) meta.appendChild(el("span", null, "보도 기간 " + from + " → " + to));
+      li.appendChild(meta);
+      list.appendChild(li);
+    });
+    status.style.display = "none";
+
+    var foot = document.getElementById("foot");
+    foot.appendChild(el("div", null,
+      "후속 보도 여부는 tickedin 수집망에서 관찰된 보도를 기준으로 합니다."));
+    var mapLine = el("div");
+    var mapLink = el("a", null, "뉴스 연결지도에서 확산 구조 보기 →");
+    mapLink.href = "/web/brainmap.html";
+    mapLine.appendChild(mapLink);
+    foot.appendChild(mapLine);
+  }
+
+  fetch("/api/faded-claims")
+    .then(function (response) {
+      if (!response.ok) throw new Error("http " + response.status);
+      return response.json();
+    })
+    .then(function (data) {
+      // Mandatory framing — the stored string, verbatim (the hardcoded
+      // default above stays when the payload lacks it).
+      if (data && data.framing) {
+        document.getElementById("framing").textContent = data.framing;
+      }
+      var claims = (data && data.claims) || [];
+      if (!claims.length) { showEmpty(); return; }
+      render(claims);
+    })
+    .catch(function () { showEmpty(); });
+})();
+</script>
+</body>
+</html>
