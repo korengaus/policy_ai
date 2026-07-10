@@ -67,7 +67,11 @@ import time
 
 import config
 from llm_observability import estimate_cost_usd, record_llm_call
-from news_collector import OBITUARY_MARKERS, search_google_news_rss_with_meta
+from news_collector import (
+    OBITUARY_MARKERS,
+    fetch_google_news_topic_titles,
+    search_google_news_rss_with_meta,
+)
 from structured_logging import get_logger
 
 
@@ -86,15 +90,20 @@ _EMERGENCY_FALLBACK_SOURCE = "forced_search_fallback"
 # ---------------------------------------------------------------------------
 # Safeguard (c) — policy-domain filter lists. Kept small and LOCAL.
 #
-# ALLOWLIST: a keyword must contain >=1 of these to be considered a policy
-# topic (finance / loan / real-estate / welfare / SMB / tax / regulation).
+# ALLOWLIST (HOTTOPIC-UNBOUND: split domain vs generic — recategorized, no
+# term removed): a keyword must contain >=1 DOMAIN noun to be considered a
+# verifiable policy topic. Generic policy verbs/nouns alone NO LONGER qualify
+# — a seedless section feed surfaces headlines like "반도체 공급 확대" that
+# carry a generic verb (공급) but no policy domain our official-document
+# matching can verify; requiring a domain noun kills that leak while genuine
+# policy keywords virtually always carry one.
 # DENYLIST: a keyword containing ANY of these is dropped (off-topic:
 # election / securities-trading / foreign-market / sports / entertainment),
 # UNIONed with news_collector.OBITUARY_MARKERS (funeral-notice nouns).
-# Rule: survive iff (>=1 ALLOWLIST hit) AND (0 DENYLIST hits). Conservative —
+# Rule: survive iff (>=1 DOMAIN hit) AND (0 DENYLIST hits). Conservative —
 # when allow and deny both hit (e.g. "미국 금리"), deny wins and it is dropped.
 # ---------------------------------------------------------------------------
-_ALLOWLIST = (
+_ALLOWLIST_DOMAIN = (
     # finance / loan / rates
     "금융", "대출", "금리", "가계부채", "DSR", "서민금융", "햇살론",
     "예금", "보험", "신용",
@@ -107,9 +116,17 @@ _ALLOWLIST = (
     "소상공인", "자영업", "중소기업", "상가",
     # tax
     "세제", "세액공제", "세금", "감면", "공제", "과세",
-    # generic policy verbs/nouns
+)
+
+# Generic policy verbs/nouns — kept (documented, unremoved) but deliberately
+# NOT sufficient on their own since HOTTOPIC-UNBOUND; they ride along inside
+# keywords that also carry a domain noun ("부동산 공급 대책").
+_ALLOWLIST_GENERIC = (
     "규제", "정책", "지원", "공급", "대책", "제도", "개편", "시행", "법안", "개정",
 )
+
+# Backward-compat full tuple (domain + generic) for any external reference.
+_ALLOWLIST = _ALLOWLIST_DOMAIN + _ALLOWLIST_GENERIC
 
 _LOCAL_DENYLIST = (
     # election / political personalities
@@ -196,13 +213,14 @@ def _extract_json_array(text: str):
 
 
 def _passes_domain_filter(keyword: str) -> bool:
-    """Safeguard (c): keyword survives iff it matches >=1 allowlist term and 0
-    denylist terms."""
+    """Safeguard (c), HOTTOPIC-UNBOUND tightened: keyword survives iff it
+    matches >=1 DOMAIN noun (a generic policy verb alone no longer qualifies)
+    and 0 denylist terms (deny still wins ties)."""
     if not keyword:
         return False
     if any(marker in keyword for marker in _DENYLIST):
         return False
-    return any(term in keyword for term in _ALLOWLIST)
+    return any(term in keyword for term in _ALLOWLIST_DOMAIN)
 
 
 def _join_text_blocks(content_blocks) -> str:
@@ -263,6 +281,53 @@ def _fetch_candidate_titles() -> list[dict]:
                     "source": item.get("source") or "",
                     "published": item.get("published") or item.get("published_at") or "",
                 }
+            )
+    # HOTTOPIC-UNBOUND — SEEDLESS section/topic feeds merged into the SAME
+    # pool, ONLY when HOT_TOPIC_SECTION_ENABLED (default OFF — ships dormant).
+    # These candidates do NOT depend on our query terms, so topics we never
+    # seeded can surface; the domain-positive filter + the LLM pick downstream
+    # handle the extra off-topic noise a section front page brings. Fail-soft
+    # per topic; ALL logging for this path lives HERE (pin-OUT), never in
+    # news_collector (pin-IN).
+    if config.hot_topic_section_enabled():
+        per_topic = max(1, config.hot_topic_titles_per_seed())
+        for topic in config.hot_topic_section_topics():
+            try:
+                items = fetch_google_news_topic_titles(topic, max_results=per_topic)
+            except Exception as error:  # belt-and-braces; the fetcher already
+                # returns [] on error
+                log.warning(
+                    f"[HotTopics] Section-feed fetch failed for topic '{topic}': {error}",
+                    extra={"topic": topic, "exception_type": type(error).__name__},
+                )
+                continue
+            added = 0
+            for item in items:
+                if (item.get("source") or "") == _EMERGENCY_FALLBACK_SOURCE:
+                    continue
+                title = str(item.get("title") or "").strip()
+                if not title:
+                    continue
+                norm = _normalize(title)
+                if norm in seen:
+                    continue
+                seen.add(norm)
+                added += 1
+                pooled.append(
+                    {
+                        "title": title,
+                        "summary": str(item.get("summary") or "").strip(),
+                        "link": item.get("google_link")
+                        or item.get("original_url")
+                        or item.get("link")
+                        or "",
+                        "source": item.get("source") or "",
+                        "published": item.get("published") or item.get("published_at") or "",
+                    }
+                )
+            log.info(
+                f"[HotTopics] Section feed '{topic}': {added} new candidate titles",
+                extra={"topic": topic, "added": added, "fetched": len(items)},
             )
     return pooled
 

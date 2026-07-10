@@ -466,6 +466,27 @@ def hot_topic_seed_queries() -> list[str]:
     return seeds or list(_DEFAULT_HOT_TOPIC_SEEDS)
 
 
+# HOTTOPIC-UNBOUND — SEEDLESS Google News section/topic feeds merged into the
+# hot-topic candidate pool so topics we never seeded can surface (the seed
+# searches above are bounded by our own query terms). Ships DORMANT
+# (HOT_TOPIC_SECTION_ENABLED default false, mirroring HOT_TOPIC_ENABLED): the
+# operator enables it on Render after watching a few runs. Topic-selection
+# metadata only; never a verdict field.
+_DEFAULT_HOT_TOPIC_SECTION_TOPICS = ("BUSINESS", "NATION")
+
+
+def hot_topic_section_enabled() -> bool:
+    return _env_bool("HOT_TOPIC_SECTION_ENABLED", False)
+
+
+def hot_topic_section_topics() -> list[str]:
+    raw = os.getenv("HOT_TOPIC_SECTION_TOPICS")
+    if raw is None or not raw.strip():
+        return list(_DEFAULT_HOT_TOPIC_SECTION_TOPICS)
+    topics = [part.strip().upper() for part in raw.split(",") if part.strip()]
+    return topics or list(_DEFAULT_HOT_TOPIC_SECTION_TOPICS)
+
+
 _DEFAULT_CORS_ALLOWED_ORIGINS = (
     "https://policy-ai-q5ax.onrender.com",
     "http://localhost:8000",

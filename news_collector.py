@@ -1158,6 +1158,34 @@ def _parse_google_news_rss(rss_url: str):
     return feedparser.parse(body_bytes)
 
 
+def fetch_google_news_topic_titles(topic: str, max_results: int = 10) -> list[dict]:
+    """HOTTOPIC-UNBOUND — SEEDLESS Google News section/topic feed, titles only.
+
+    Unlike :func:`search_google_news_rss_with_meta` this is NOT keyed to any
+    query of ours, so it surfaces topics we never seeded. The M17b
+    query-overlap filter is deliberately NOT applied — there is no query to
+    overlap against. Reuses the existing RSS cache/parse path (the section URL
+    is on the same ``news.google.com`` host the cache allow-list names).
+    Fail-soft: returns ``[]`` on ANY error. Deliberately contains ZERO log
+    call sites (this file is pin-IN for the 331/16 log pins); the caller in
+    ``hot_topics.py`` (pin-OUT) owns all logging for this path.
+    """
+    try:
+        clean_topic = re.sub(r"[^A-Z_]", "", str(topic or "").upper())
+        if not clean_topic:
+            return []
+        count = max(1, min(int(max_results), 30))
+        rss_url = (
+            f"https://news.google.com/rss/headlines/section/topic/"
+            f"{clean_topic}?hl=ko&gl=KR&ceid=KR:ko"
+        )
+        feed = _parse_google_news_rss(rss_url)
+        items = [_entry_to_news(entry) for entry in (getattr(feed, "entries", None) or [])]
+        return [item for item in items if (item.get("title") or "").strip()][:count]
+    except Exception:  # noqa: BLE001 — fail-soft; hot_topics logs, not here
+        return []
+
+
 def search_google_news_rss_with_meta(query: str, max_results: int = 3):
     cached = _cached_news_response(query, max_results)
     if cached is not None:
