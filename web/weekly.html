@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>주간 확산 리포트 — tickedin</title>
+<!--
+  WEEKLY-REPORT Slice 2 — standalone, hand-authored page (NOT
+  build_index-managed; touches none of the index pins — same precedent as
+  web/brainmap.html). Fetches GET /api/weekly-report (the stored snapshot
+  written by scripts/generate_weekly_report.py) and renders the Top-N
+  most-amplified claims of the week. VERDICT-ISOLATED: ranking and display
+  are CIRCULATION (distinct outlet count) only — no truth-probability, no
+  verdict, no gauge, no red/green semantics. Each title links back to its
+  verification card (/?result_id=N) where verification lives.
+  Self-contained: inline CSS + JS, no external lib/CDN. Data is rendered via
+  textContent (never innerHTML) so API strings are display-only.
+-->
+<style>
+  /* Tokens mirrored from the main site's design system (same set as
+     web/brainmap.html) so this standalone page reads as tickedin. */
+  :root {
+    --ink: #0f172a;
+    --slate: #475569;
+    --muted: #94a3b8;
+    --line: #e2e8f0;
+    --paper: #ffffff;
+    --canvas: #f6f8fb;
+    --brand: #1e5fd8;
+    --brand-ink: #1542a0;
+    --shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+    --radius-sm: 9px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+    min-height: 100vh;
+  }
+  header.report-head {
+    background: var(--paper);
+    border-bottom: 1px solid var(--line);
+    padding: 16px 24px 18px;
+  }
+  .brand-row {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .brand {
+    display: inline-flex; align-items: center; gap: 8px;
+    color: var(--ink); text-decoration: none;
+    font-family: 'Noto Serif KR', 'Nanum Myeongjo', 'Apple SD Gothic Neo', serif;
+    font-size: 21px; font-weight: 700; letter-spacing: -0.01em;
+  }
+  .brand img { width: 1.25em; height: 1.25em; object-fit: contain; vertical-align: middle; }
+  .brand-page-label {
+    color: var(--muted); font-size: 13px; font-weight: 600;
+    padding-left: 12px; border-left: 1px solid var(--line);
+  }
+  .report-home {
+    margin-left: auto; font-size: 13px; font-weight: 600;
+    color: var(--brand-ink); text-decoration: none;
+  }
+  .report-home:hover { text-decoration: underline; }
+  .report-title {
+    font-size: 22px; font-weight: 800; letter-spacing: -0.02em; color: var(--ink);
+    font-family: 'Nanum Myeongjo', 'Apple SD Gothic Neo', 'Pretendard', serif;
+  }
+  .report-week { margin-top: 4px; font-size: 13.5px; color: var(--slate); font-weight: 600; }
+  /* HONESTY (fixed, always visible): circulation ranking, NOT verification. */
+  .report-framing {
+    margin-top: 10px; display: inline-block;
+    background: #eef4ff; border: 1px solid var(--brand);
+    color: var(--brand-ink); font-size: 12.5px; font-weight: 700;
+    border-radius: 999px; padding: 4px 12px;
+  }
+  .report-subtitle { margin-top: 8px; font-size: 13.5px; line-height: 1.55; color: var(--slate); }
+  .report-subtitle strong { color: var(--ink); font-weight: 700; }
+  main.report-body { max-width: 860px; margin: 0 auto; padding: 22px 20px 40px; }
+  #status { color: var(--slate); font-size: 15px; text-align: center; padding: 48px 24px; }
+  ol.top-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+  .top-item {
+    display: flex; align-items: flex-start; gap: 14px;
+    background: var(--paper); border: 1px solid var(--line);
+    border-radius: var(--radius-sm); box-shadow: var(--shadow);
+    padding: 14px 16px;
+  }
+  .top-rank {
+    flex: 0 0 auto; width: 34px; height: 34px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: #eef4ff; color: var(--brand-ink);
+    font-weight: 800; font-size: 15px;
+  }
+  .top-main { flex: 1 1 auto; min-width: 0; }
+  .top-title {
+    color: var(--ink); text-decoration: none;
+    font-size: 15.5px; font-weight: 700; line-height: 1.45;
+    display: inline-block;
+  }
+  .top-title:hover { color: var(--brand-ink); text-decoration: underline; }
+  .top-meta {
+    margin-top: 6px; display: flex; flex-wrap: wrap; gap: 8px 14px;
+    align-items: center; font-size: 12.5px; color: var(--slate);
+  }
+  .outlet-badge {
+    display: inline-flex; align-items: center;
+    background: #eef4ff; color: var(--brand-ink);
+    border-radius: 999px; padding: 2px 10px;
+    font-weight: 700; font-size: 12px;
+  }
+  footer.report-foot {
+    max-width: 860px; margin: 0 auto; padding: 0 20px 46px;
+    font-size: 12.5px; color: var(--muted); line-height: 1.7;
+  }
+  footer.report-foot a { color: var(--brand-ink); text-decoration: none; font-weight: 600; }
+  footer.report-foot a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<header class="report-head">
+  <div class="brand-row">
+    <a class="brand" href="/" aria-label="tickedin 홈으로"><img src="/web/assets/favicon-180.png" alt="" aria-hidden="true">tickedin</a>
+    <span class="brand-page-label">주간 리포트</span>
+    <a class="report-home" href="/">← 홈으로</a>
+  </div>
+  <div class="report-title">이번 주 가장 많이 확산된 정책 주장</div>
+  <div class="report-week" id="weekRange"></div>
+  <div class="report-framing" id="framing">확산 규모 기준 · 사실 검증 아님</div>
+  <p class="report-subtitle">
+    이 목록은 여러 매체가 <strong>유사하게 보도한 규모</strong> 순입니다.
+    <strong>사실 여부에 대한 판단이 아닙니다.</strong>
+    제목을 누르면 해당 주장의 검증 카드로 이동합니다.
+  </p>
+</header>
+<main class="report-body">
+  <div id="status">리포트를 불러오는 중…</div>
+  <ol class="top-list" id="topList"></ol>
+</main>
+<footer class="report-foot" id="foot"></footer>
+<script>
+(function () {
+  "use strict";
+
+  function day(iso) {
+    return (typeof iso === "string" && iso.length >= 10) ? iso.slice(0, 10) : "";
+  }
+  function stamp(iso) {
+    if (typeof iso !== "string" || iso.length < 16) return iso || "";
+    return iso.slice(0, 16).replace("T", " ") + " UTC";
+  }
+  function el(tag, className, text) {
+    var node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined && text !== null) node.textContent = String(text);
+    return node;
+  }
+  function showEmpty() {
+    document.getElementById("status").textContent =
+      "이번 주 리포트가 아직 준비되지 않았습니다.";
+  }
+
+  function render(report) {
+    var status = document.getElementById("status");
+    var list = document.getElementById("topList");
+    var top = Array.isArray(report.top) ? report.top : [];
+    if (!top.length) { showEmpty(); return; }
+
+    document.getElementById("weekRange").textContent =
+      day(report.week_start) + " ~ " + day(report.week_end);
+    // Mandatory honesty framing — the stored string, verbatim (the chip's
+    // hardcoded default stays when the payload lacks it).
+    if (report.framing) {
+      document.getElementById("framing").textContent = report.framing;
+    }
+
+    top.forEach(function (item) {
+      var li = el("li", "top-item");
+      li.appendChild(el("span", "top-rank", item.rank));
+
+      var main = el("div", "top-main");
+      var link = el("a", "top-title", item.title || "(제목 없음)");
+      var rid = Number(item.representative_analysis_id);
+      link.href = rid > 0 ? "/?result_id=" + encodeURIComponent(rid) : "/";
+      main.appendChild(link);
+
+      var meta = el("div", "top-meta");
+      var outlets = Number(item.outlet_count);
+      if (outlets > 0) meta.appendChild(el("span", "outlet-badge", outlets + "개 매체"));
+      var from = day(item.window_first_at) || day(item.first_at);
+      var to = day(item.window_last_at) || day(item.last_at);
+      if (from && to) meta.appendChild(el("span", null, "확산 기간 " + from + " → " + to));
+      if (Number(item.window_member_count) > 0) {
+        meta.appendChild(el("span", null, "이번 주 보도 " + Number(item.window_member_count) + "건"));
+      }
+      main.appendChild(meta);
+
+      li.appendChild(main);
+      list.appendChild(li);
+    });
+    status.style.display = "none";
+
+    var foot = document.getElementById("foot");
+    foot.appendChild(el("div", null,
+      "기준 시점: " + stamp(report.graph_generated_at) + " 브레인맵 · "
+      + stamp(report.generated_at) + " 집계"));
+    var mapLine = el("div");
+    var mapLink = el("a", null, "뉴스 연결지도에서 확산 구조 보기 →");
+    mapLink.href = "/web/brainmap.html";
+    mapLine.appendChild(mapLink);
+    foot.appendChild(mapLine);
+  }
+
+  fetch("/api/weekly-report")
+    .then(function (response) {
+      if (!response.ok) throw new Error("http " + response.status);
+      return response.json();
+    })
+    .then(function (data) {
+      if (!data || data.found !== true || !data.report) { showEmpty(); return; }
+      render(data.report);
+    })
+    .catch(function () { showEmpty(); });
+})();
+</script>
+</body>
+</html>
