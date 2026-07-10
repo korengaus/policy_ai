@@ -688,6 +688,77 @@ def _spread_response(payload_json: str) -> Response:
     )
 
 
+# ---------------------------------------------------------------------------
+# WEEKLY-REPORT Slice 1 — read-only weekly "most-amplified claims" snapshots.
+#
+# Serves the STORED payload_json written by scripts/generate_weekly_report.py
+# — no recomputation. Ranking inside the payload is by CIRCULATION
+# (distinct outlet_count) only; it carries the mandatory framing
+# "확산 규모 기준 · 사실 검증 아님" and no verdict/score field of any kind.
+# NEVER 500: no row, table missing (generator hasn't run), PG disabled, or
+# any unexpected failure -> {"found": false} (the brainmap/spread posture).
+# ---------------------------------------------------------------------------
+_WEEKLY_NOT_FOUND_JSON = '{"found": false}'
+
+
+def _load_weekly_report_row(week_start=None):
+    """Newest weekly_reports payload_json (optionally for one week_start).
+    Returns the raw JSON TEXT or None on every expected-empty path."""
+    import sqlalchemy as sa
+    from sqlalchemy.exc import ProgrammingError
+
+    import postgres_storage
+
+    engine = postgres_storage.get_engine()
+    if engine is None:
+        return None
+    if week_start is None:
+        stmt = sa.text(
+            "SELECT payload_json FROM weekly_reports ORDER BY id DESC LIMIT 1"
+        )
+        params = {}
+    else:
+        stmt = sa.text(
+            "SELECT payload_json FROM weekly_reports "
+            "WHERE week_start = :week_start ORDER BY id DESC LIMIT 1"
+        )
+        params = {"week_start": week_start}
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(stmt, params).fetchone()
+    except ProgrammingError:
+        # Table not created yet — the generator creates it on first run.
+        return None
+    return row[0] if row and row[0] else None
+
+
+def _weekly_report_response(week_start=None) -> Response:
+    try:
+        payload_json = _load_weekly_report_row(week_start)
+        if not payload_json:
+            return _spread_response(_WEEKLY_NOT_FOUND_JSON)
+        try:
+            payload = json.loads(payload_json)
+        except (TypeError, ValueError):
+            return _spread_response(_WEEKLY_NOT_FOUND_JSON)
+        return _spread_response(json.dumps(
+            {"found": True, "report": payload}, ensure_ascii=False,
+        ))
+    except Exception:
+        logger.exception("Failed to load weekly report")
+        return _spread_response(_WEEKLY_NOT_FOUND_JSON)
+
+
+@app.get("/api/weekly-report")
+def weekly_report_latest() -> Response:
+    return _weekly_report_response(None)
+
+
+@app.get("/api/weekly-report/{week_start}")
+def weekly_report_for_week(week_start: str) -> Response:
+    return _weekly_report_response(week_start)
+
+
 @app.get("/api/spread/{analysis_id}")
 def spread_annotation(analysis_id: int) -> Response:
     try:
