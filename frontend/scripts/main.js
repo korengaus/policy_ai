@@ -6499,7 +6499,97 @@
       }
     }
 
-    analyzeBtn.addEventListener("click", analyze);
+    // SEARCH-TO-ANALYZE Slice 2 — corpus-first search. The 분석하기 button now
+    // tries GET /api/search over EXISTING cards first: a hit renders an
+    // instant result list (zero LLM cost); a miss shows an opt-in offer that
+    // calls the UNCHANGED analyze() flow (its v2 progress UX preserved).
+    // Honesty: hits show only the existing draft badge (review_status) — no
+    // new ranking, no new label; the offer copy says "no prior analysis
+    // exists", never anything about truth.
+    function renderSearchHits(query, hits) {
+      metricsEl.style.display = "none";
+      resultsEl.innerHTML = `
+        <div class="empty-state">'${escapeHtml(query)}' 관련 기존 분석 ${hits.length}건을 찾았습니다. 제목을 누르면 전체 검증 카드가 열립니다.</div>
+        ${hits.map((hit) => `
+          <div class="history-row" data-search-hit-id="${Number(hit.result_id) || 0}" role="button" tabindex="0">
+            <div>
+              <strong>${escapeHtml(hit.title || "제목 없음")}</strong>
+              <div class="history-meta">
+                ${escapeHtml(hit.snippet || "")}
+                <br>
+                <span class="review-status-badge">검토: ${escapeHtml(reviewerActionStatusLabel(hit.review_status))}</span>
+                ${hit.published_at ? `&nbsp; <span class="label">보도일:</span> ${escapeHtml(String(hit.published_at).slice(0, 10))}` : ""}
+              </div>
+            </div>
+          </div>
+        `).join("")}
+      `;
+      resultsEl.querySelectorAll("[data-search-hit-id]").forEach((row) => {
+        const id = Number(row.getAttribute("data-search-hit-id"));
+        if (!(id > 0)) return;
+        const open = () => { loadServerResultById(id); };
+        row.addEventListener("click", open);
+        row.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            open();
+          }
+        });
+      });
+      pushDetailHistoryState(window.scrollY || 0);
+      showScreen("detail");
+    }
+
+    function renderAnalyzeOffer(query) {
+      metricsEl.style.display = "none";
+      resultsEl.innerHTML = `
+        <div class="empty-state">
+          '${escapeHtml(query)}'에 대한 기존 분석이 없습니다. 지금 분석해드릴까요? (최대 1분)
+          <br><br>
+          <button type="button" class="primary" data-run-analyze-offer>지금 분석하기</button>
+        </div>
+      `;
+      const offerButton = resultsEl.querySelector("[data-run-analyze-offer]");
+      if (offerButton) offerButton.addEventListener("click", analyze);
+      pushDetailHistoryState(window.scrollY || 0);
+      showScreen("detail");
+    }
+
+    async function searchFirst() {
+      const query = queryInput.value.trim();
+      if (!query) {
+        alert("검색어를 입력해주세요.");
+        return;
+      }
+      hideError();
+      hideStatus();
+      v2ResetProgress();
+      v2SetProgressVisible(true);
+      v2UpdateProgress(30, "기존 분석 검색 중…");
+      setBusy(true);
+      let hits = [];
+      try {
+        const response = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(query)}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data && Array.isArray(data.results)) hits = data.results;
+        }
+      } catch (error) {
+        // Search unavailable → fall through to the offer (never auto-run
+        // the paid pipeline, never dead-end).
+      } finally {
+        setBusy(false);
+      }
+      if (hits.length) {
+        v2UpdateProgress(100, `기존 분석 ${hits.length}건을 찾았습니다`);
+        renderSearchHits(query, hits);
+      } else {
+        v2UpdateProgress(100, "기존 분석 없음 — 새 분석을 제안합니다");
+        renderAnalyzeOffer(query);
+      }
+    }
+
+    analyzeBtn.addEventListener("click", searchFirst);
     historyBtn.addEventListener("click", loadHistory);
     copyReportBtn.addEventListener("click", copyReport);
     downloadReportBtn.addEventListener("click", downloadReport);
