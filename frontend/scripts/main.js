@@ -4749,6 +4749,50 @@
       return `${spanDays}일에 걸쳐 확산`;
     }
 
+    // SPREAD-TIMELINE Slice 3 — tiny CSS-bar sparkline of timeline.daily so
+    // the SHAPE of circulation is visible (tall first bar = everyone published
+    // at once). Pure inline-styled divs — no chart lib, no canvas, no new CSS
+    // class rules. Neutral brand color only (never red/green verdict
+    // semantics). Zero-fills missing days between first and last so a gap
+    // renders as an empty slot, not a hidden jump. Returns "" (text-only
+    // section stays) when daily has <2 distinct days or the span is
+    // implausibly long (>60 days).
+    function spreadSparklineHtml(daily) {
+      if (!Array.isArray(daily) || daily.length < 2) return "";
+      const counts = new Map();
+      for (const entry of daily) {
+        const day = typeof entry?.date === "string" ? entry.date.slice(0, 10) : "";
+        const count = Number(entry?.count);
+        if (day && Number.isFinite(count) && count > 0) counts.set(day, count);
+      }
+      if (counts.size < 2) return "";
+      const days = [...counts.keys()].sort();
+      const startMs = Date.parse(`${days[0]}T00:00:00Z`);
+      const endMs = Date.parse(`${days[days.length - 1]}T00:00:00Z`);
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return "";
+      const totalDays = Math.round((endMs - startMs) / 86400000) + 1;
+      if (totalDays < 2 || totalDays > 60) return "";
+      let peak = 0;
+      counts.forEach((count) => { peak = Math.max(peak, count); });
+      if (peak <= 0) return "";
+      const bars = [];
+      for (let i = 0; i < totalDays; i += 1) {
+        const day = new Date(startMs + i * 86400000).toISOString().slice(0, 10);
+        const count = counts.get(day) || 0;
+        const heightPct = count > 0 ? Math.max(6, Math.round((count / peak) * 100)) : 0;
+        bars.push(
+          `<div title="${escapeHtml(day)} · ${escapeHtml(count)}건" style="flex:1 1 0;align-self:flex-end;height:${count > 0 ? heightPct + "%" : "2px"};background:${count > 0 ? "var(--brand)" : "var(--line)"};border-radius:2px 2px 0 0;"></div>`
+        );
+      }
+      return `
+            <div class="spread-sparkline" role="img" aria-label="일별 보도량, 최다 ${escapeHtml(peak)}건" style="display:flex;align-items:flex-end;gap:2px;height:64px;margin:10px 0 2px;">${bars.join("")}</div>
+            <div style="display:flex;justify-content:space-between;font-size:0.78rem;color:var(--muted);margin-bottom:4px;">
+              <span>${escapeHtml(days[0])}</span>
+              <span>최다 ${escapeHtml(peak)}건/일</span>
+              <span>${escapeHtml(days[days.length - 1])}</span>
+            </div>`;
+    }
+
     async function loadSpreadAnnotations() {
       const placeholders = document.querySelectorAll(".spread-section[data-spread-id]");
       for (const section of placeholders) {
@@ -4770,6 +4814,8 @@
             <h3>이슈 확산 현황</h3>
             <div>이 주장과 유사한 내용이 ${escapeHtml(outletCount)}개 매체에서 보도되었습니다.</div>
             ${timelineLine}
+            ${spreadSparklineHtml(timeline.daily)}
+            <div class="spread-map-link"><a href="/web/brainmap.html" target="_blank" rel="noopener noreferrer">브레인맵에서 유사 보도 보기 →</a></div>
             <div class="reader-note">확산 정보는 유통 규모를 보여줄 뿐, 사실 여부에 대한 검증이 아닙니다.</div>
           `;
           section.hidden = false;
