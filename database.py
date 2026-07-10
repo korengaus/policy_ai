@@ -1,6 +1,7 @@
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 from structured_logging import get_logger
 from text_utils import sanitize_data, sanitize_text
@@ -148,6 +149,36 @@ def _normalize_published_at(value):
         return _pubdate_to_iso(text) or None
     except Exception:  # noqa: BLE001 — normalization must never break a save
         return None
+
+
+# SEARCH-FIX Slice B — search-engine hosts whose pages are RESULT LISTS, not
+# articles. The collector's last-resort _emergency_search_item fabricates an
+# "article" pointing at the Naver SERP when all real collection fails
+# (news_collector.py, source="forced_search_fallback"); analyzing it renders
+# an ephemeral card, but persisting it pollutes the corpus. hot_topics.py
+# already skips this source — this gives the save path the same treatment.
+_SERP_FALLBACK_HOSTS = {"search.naver.com", "search.daum.net"}
+
+
+def _is_serp_fallback_result(result: dict) -> bool:
+    """True when the result is SERP-fallback-shaped: its original_url is a
+    search-results page, or its collection_source is the collector's
+    forced_search_fallback. Detection only — the result object is never
+    modified (no verdict field is read or written)."""
+    original_url = result.get("original_url") or ""
+    try:
+        host = (urlparse(original_url).netloc or "").lower()
+    except ValueError:
+        host = ""
+    host = host.rsplit("@", 1)[-1].split(":", 1)[0]
+    if host.startswith("www."):
+        host = host[4:]
+    if host in _SERP_FALLBACK_HOSTS:
+        return True
+    verification_card = result.get("verification_card") or {}
+    debug = verification_card.get("debug_summary") or result.get("debug_summary")
+    return (isinstance(debug, dict)
+            and debug.get("collection_source") == "forced_search_fallback")
 
 
 def _extract_published_at(verification_card: dict, result: dict):
@@ -299,6 +330,24 @@ def save_analysis_result(result: dict, query: str):
     original_url = result.get("original_url")
     if result_exists_by_url(original_url):
         return {"saved": False, "duplicate": True, "id": None}
+
+    # SEARCH-FIX Slice B — save-quality gate. SERP-fallback results (the
+    # collector's fabricated search-results-page "article") are NOT persisted:
+    # the caller still renders the in-memory card to the requesting user, but
+    # nothing is written, so junk never enters the corpus/brain-map/search.
+    # This single site covers every save path (api_server sync + jobs,
+    # pipeline_worker v2, scheduler, backfill_orchestrator). Verdict-isolated:
+    # a persistence refusal only — the result object is unchanged.
+    if _is_serp_fallback_result(result):
+        log.info(
+            "save_analysis_result skipped SERP-fallback result",
+            extra={
+                "function": "save_analysis_result",
+                "original_url": original_url,
+            },
+        )
+        return {"saved": False, "duplicate": False, "id": None,
+                "skipped_low_quality": True}
 
     final_decision = result.get("final_decision") or {}
     policy_confidence = result.get("policy_confidence") or {}

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 import time
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
@@ -277,6 +278,22 @@ def health_queue() -> dict:
         }
 
 
+# SEARCH-FIX Slice B — cheap pre-analysis garbage guard shared by all three
+# analyze endpoints. Policy news is Korean: a query with no Hangul/CJK
+# character ("asdfqwer1234") is rejected with a 400 BEFORE any collector/LLM
+# cost. Known limitation (accepted): rare all-Latin legitimate queries are
+# blocked too — the save-quality gate in database.save_analysis_result is the
+# real backstop; this guard just stops the common garbage case cheaply.
+# Verdict-isolated: an HTTP 400 before the pipeline ever runs.
+_POLICY_QUERY_CJK_RE = re.compile(r"[가-힣぀-ヿ一-鿿]")
+_POLICY_QUERY_MESSAGE = "정책 뉴스와 관련된 검색어를 입력해주세요."
+
+
+def _require_policy_shaped_query(query: str) -> None:
+    if not _POLICY_QUERY_CJK_RE.search(query):
+        raise HTTPException(status_code=400, detail=_POLICY_QUERY_MESSAGE)
+
+
 @app.post("/analyze", response_model=AnalyzeResponse, dependencies=[Depends(analyze_rate_limiter)])
 def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
     query = (request.query or "").strip()
@@ -284,6 +301,7 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
         raise HTTPException(status_code=400, detail="query must not be empty")
     if len(query) > 200:
         raise HTTPException(status_code=400, detail="검색어는 200자 이내로 입력해주세요.")
+    _require_policy_shaped_query(query)
     if request.max_news <= 0:
         raise HTTPException(status_code=400, detail="max_news must be greater than 0")
     # SEC-4 — clamp max_news to [1, 10] so a large value can't multiply
@@ -1224,6 +1242,7 @@ async def jobs_analyze(request: JobCreateRequest) -> JobStatusResponse:
         raise HTTPException(status_code=400, detail="query must not be empty")
     if len(query) > 200:
         raise HTTPException(status_code=400, detail="검색어는 200자 이내로 입력해주세요.")
+    _require_policy_shaped_query(query)
     if request.max_news <= 0:
         raise HTTPException(status_code=400, detail="max_news must be greater than 0")
     # SEC-4 — clamp max_news to [1, 10] (silent; mirrors the timeout_seconds
@@ -1406,6 +1425,7 @@ def v2_analyze(request: AnalyzeRequest) -> V2AnalyzeResponse:
         raise HTTPException(status_code=400, detail="query must not be empty")
     if len(query) > 200:
         raise HTTPException(status_code=400, detail="검색어는 200자 이내로 입력해주세요.")
+    _require_policy_shaped_query(query)
     if request.max_news <= 0:
         raise HTTPException(status_code=400, detail="max_news must be greater than 0")
     # SEC-4 — clamp max_news to [1, 10] (silent). The <=0 guard above still
