@@ -689,6 +689,103 @@ def _spread_response(payload_json: str) -> Response:
 
 
 # ---------------------------------------------------------------------------
+# SEARCH-TO-ANALYZE Slice 1 — read-only corpus text search over EXISTING
+# analysis_results, so a search hit returns instantly with ZERO LLM cost
+# (today the search box runs the full analyze pipeline on every submit; the
+# frontend rewires to try this first in Slice 2).
+#
+# SAFETY:
+#   * READ-ONLY: one parameterized SELECT of display fields (id, title,
+#     claim_text preview, published_at, review_status). NEVER triggers the
+#     analyze pipeline; computes/derives no verdict (review_status is the
+#     existing draft label the UI already shows, passed through as-is).
+#   * INJECTION-SAFE: q is BOUND, never string-formatted into SQL, and ILIKE
+#     wildcards (%/_/\) in q are escaped with ESCAPE '\' so a user typing
+#     "%" cannot match everything.
+#   * NEVER 500: empty/too-short q, no match, PG disabled, or any failure
+#     -> {"results": []} at HTTP 200 (the spread/weekly posture).
+# ---------------------------------------------------------------------------
+_SEARCH_EMPTY_JSON = '{"results": []}'
+_SEARCH_LIMIT = 10
+_SEARCH_MAX_QUERY_CHARS = 200  # mirrors the /analyze 200-char cap
+_SEARCH_SNIPPET_CHARS = 120
+
+
+def _build_search_pattern(q: str) -> str:
+    """Escape LIKE/ILIKE metacharacters in the USER's text (backslash first),
+    then wrap in %...% for substring match. Paired with ESCAPE '\\' in the
+    statement so %/_ typed by a user are literals, never wildcards."""
+    escaped = (q.replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_"))
+    return f"%{escaped}%"
+
+
+def _search_corpus_rows(q: str):
+    """Read-only: newest-first substring match on title OR claim_text.
+    Returns a list of row tuples (id, title, claim_text, published_at,
+    review_status), or [] when PG is disabled. ILIKE is PostgreSQL's
+    case-insensitive LIKE — the live store; ~7.6k rows, so a sequential
+    scan is fine for v1 (a pg_trgm index is the later optimization if the
+    corpus grows 10x)."""
+    import sqlalchemy as sa
+
+    import postgres_storage
+
+    engine = postgres_storage.get_engine()
+    if engine is None:
+        return []
+    stmt = sa.text(
+        "SELECT id, title, claim_text, published_at, review_status "
+        "FROM analysis_results "
+        "WHERE title ILIKE :pattern ESCAPE '\\' "
+        "OR claim_text ILIKE :pattern ESCAPE '\\' "
+        "ORDER BY id DESC LIMIT :row_limit"
+    )
+    with engine.connect() as conn:
+        rows = conn.execute(stmt, {
+            "pattern": _build_search_pattern(q),
+            "row_limit": _SEARCH_LIMIT,
+        }).fetchall()
+    return list(rows)
+
+
+@app.get("/api/search")
+def search_corpus(q: str = "") -> Response:
+    def _empty() -> Response:
+        return Response(
+            content=_SEARCH_EMPTY_JSON,
+            media_type="application/json",
+            headers={"Cache-Control": "no-store"},
+        )
+
+    try:
+        query = (q or "").strip()[:_SEARCH_MAX_QUERY_CHARS]
+        if len(query) < 2:
+            return _empty()
+        results = []
+        for row_id, title, claim_text, published_at, review_status in _search_corpus_rows(query):
+            snippet = (claim_text or "").strip()
+            if len(snippet) > _SEARCH_SNIPPET_CHARS:
+                snippet = snippet[:_SEARCH_SNIPPET_CHARS] + "…"
+            results.append({
+                "result_id": row_id,
+                "title": title or "",
+                "snippet": snippet,
+                "published_at": published_at,
+                "review_status": review_status,
+            })
+        return Response(
+            content=json.dumps({"results": results}, ensure_ascii=False),
+            media_type="application/json",
+            headers={"Cache-Control": "no-store"},
+        )
+    except Exception:
+        logger.exception("Failed to search corpus")
+        return _empty()
+
+
+# ---------------------------------------------------------------------------
 # WEEKLY-REPORT Slice 1 — read-only weekly "most-amplified claims" snapshots.
 #
 # Serves the STORED payload_json written by scripts/generate_weekly_report.py
