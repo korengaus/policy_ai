@@ -3,7 +3,7 @@ import json
 import logging
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
@@ -527,6 +527,185 @@ def brainmap_graph() -> Response:
     except Exception:
         logger.exception("Failed to load brainmap graph")
         raise HTTPException(status_code=500, detail="failed to load brainmap")
+
+
+# ---------------------------------------------------------------------------
+# SPREAD-TIMELINE Slice 1 — read-only spread annotation for ONE analysis id.
+#
+# GET /api/spread/{analysis_id} finds the cluster containing that id in the
+# NEWEST brainmap_graph row and returns a small circulation aggregate:
+# distinct outlet_count (precomputed by scripts/build_brainmap_graph.py —
+# never recomputed here), the cluster's rebuild-stable stable_id, and a
+# publish-date timeline (first/last/span/daily counts) from the members'
+# analysis_results.published_at values.
+#
+# SAFETY / HONESTY:
+#   * READ-ONLY: reads brainmap_graph.graph_json + analysis_results
+#     .published_at only. NO verdict field is read or written (verdict_label
+#     / policy_confidence_score / truth_claim / operator_review_required /
+#     has_genuine_official_support untouched).
+#   * The payload is CIRCULATION metadata only — spread, never 검증. No truth
+#     vocabulary, no probability, no verdict-shaped field.
+#   * NEVER 500: id not clustered, no graph row, table missing, PG disabled,
+#     or any unexpected failure -> {"found": false} (mirrors the brainmap
+#     endpoint's empty-not-error posture).
+#   * The ~441KB graph JSON is parsed ONCE per brainmap_graph row: a
+#     module-level cache keyed by the newest row id (checked with a cheap
+#     SELECT id per request) serves the prebuilt indexes until a rebuild
+#     inserts a newer row.
+# ---------------------------------------------------------------------------
+_SPREAD_NOT_FOUND_JSON = '{"found": false}'
+_SPREAD_CACHE: dict = {"row_id": None, "indexes": None}
+
+
+def _build_spread_indexes(graph: dict) -> dict:
+    """Pure: graph JSON dict -> {clusters: cid->cluster meta,
+    members: cid->[analysis ids], cluster_of: analysis id->cid}.
+    Membership lives on NODES (node.id + node.cluster_id); singleton nodes
+    (cluster_id null) are skipped."""
+    clusters = {}
+    for cluster in graph.get("clusters") or []:
+        cid = cluster.get("cluster_id")
+        if cid is not None:
+            clusters[cid] = cluster
+    members: dict = {}
+    cluster_of: dict = {}
+    for node in graph.get("nodes") or []:
+        cid = node.get("cluster_id")
+        node_id = node.get("id")
+        if cid is None or node_id is None:
+            continue
+        cluster_of[node_id] = cid
+        members.setdefault(cid, []).append(node_id)
+    return {"clusters": clusters, "members": members, "cluster_of": cluster_of}
+
+
+def _load_spread_indexes():
+    """Newest brainmap_graph row -> parsed indexes (module-cached by row id).
+    Returns None on every expected-empty path (PG disabled, table missing,
+    no row, bad JSON) — the route maps None to {"found": false}."""
+    import sqlalchemy as sa
+    from sqlalchemy.exc import ProgrammingError
+
+    import postgres_storage
+
+    engine = postgres_storage.get_engine()
+    if engine is None:
+        return None
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(sa.text(
+                "SELECT id FROM brainmap_graph ORDER BY id DESC LIMIT 1"
+            )).fetchone()
+    except ProgrammingError:
+        return None
+    if not row:
+        return None
+    row_id = row[0]
+    if _SPREAD_CACHE["row_id"] == row_id and _SPREAD_CACHE["indexes"] is not None:
+        return _SPREAD_CACHE["indexes"]
+    with engine.connect() as conn:
+        graph_row = conn.execute(sa.text(
+            "SELECT graph_json FROM brainmap_graph WHERE id = :row_id"
+        ), {"row_id": row_id}).fetchone()
+    if not graph_row or not graph_row[0]:
+        return None
+    try:
+        graph = json.loads(graph_row[0])
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(graph, dict):
+        return None
+    indexes = _build_spread_indexes(graph)
+    _SPREAD_CACHE["row_id"] = row_id
+    _SPREAD_CACHE["indexes"] = indexes
+    return indexes
+
+
+def _fetch_published_at(member_ids):
+    """Read-only: the members' published_at values (may include None — the
+    97.9% backfill leaves genuinely dateless rows NULL). Expanding IN keeps
+    the statement dialect-portable."""
+    if not member_ids:
+        return []
+    import sqlalchemy as sa
+
+    import postgres_storage
+
+    engine = postgres_storage.get_engine()
+    if engine is None:
+        return []
+    stmt = sa.text(
+        "SELECT published_at FROM analysis_results WHERE id IN :ids"
+    ).bindparams(sa.bindparam("ids", expanding=True))
+    with engine.connect() as conn:
+        rows = conn.execute(stmt, {"ids": list(member_ids)}).fetchall()
+    return [row[0] for row in rows]
+
+
+def _build_spread_payload(cluster_meta: dict, member_ids, published_values) -> dict:
+    """Pure aggregate: NULL/empty published_at members are EXCLUDED from the
+    timeline (first/last/span/daily/dated_members) but stay inside the
+    cluster's precomputed outlet_count; they surface as undated_members."""
+    dated = sorted(v for v in published_values if v)
+    daily_counts: dict = {}
+    for value in dated:
+        day = value[:10]
+        daily_counts[day] = daily_counts.get(day, 0) + 1
+    first_at = dated[0] if dated else None
+    last_at = dated[-1] if dated else None
+    span_days = None
+    if dated:
+        span_days = (date.fromisoformat(last_at[:10])
+                     - date.fromisoformat(first_at[:10])).days
+    return {
+        "found": True,
+        "cluster": {
+            "stable_id": cluster_meta.get("stable_id"),
+            "outlet_count": cluster_meta.get("outlet_count"),
+            "size": cluster_meta.get("size"),
+            "size_label": cluster_meta.get("size_label"),
+        },
+        "timeline": {
+            "first_at": first_at,
+            "last_at": last_at,
+            "span_days": span_days,
+            "daily": [{"date": day, "count": count}
+                      for day, count in sorted(daily_counts.items())],
+            "dated_members": len(dated),
+            "undated_members": max(0, len(list(member_ids)) - len(dated)),
+        },
+    }
+
+
+def _spread_response(payload_json: str) -> Response:
+    # The graph regenerates manually/rarely; 5-min client cache mirrors
+    # /api/brainmap.
+    return Response(
+        content=payload_json,
+        media_type="application/json",
+        headers={"Cache-Control": "max-age=300"},
+    )
+
+
+@app.get("/api/spread/{analysis_id}")
+def spread_annotation(analysis_id: int) -> Response:
+    try:
+        indexes = _load_spread_indexes()
+        if indexes is None:
+            return _spread_response(_SPREAD_NOT_FOUND_JSON)
+        # cluster_id 0 is a real cluster — explicit None checks only.
+        cluster_id = indexes["cluster_of"].get(analysis_id)
+        if cluster_id is None:
+            return _spread_response(_SPREAD_NOT_FOUND_JSON)
+        member_ids = indexes["members"].get(cluster_id) or []
+        cluster_meta = indexes["clusters"].get(cluster_id) or {}
+        published_values = _fetch_published_at(member_ids)
+        payload = _build_spread_payload(cluster_meta, member_ids, published_values)
+        return _spread_response(json.dumps(payload, ensure_ascii=False))
+    except Exception:
+        logger.exception("Failed to build spread annotation")
+        return _spread_response(_SPREAD_NOT_FOUND_JSON)
 
 
 class JobCreateRequest(BaseModel):
