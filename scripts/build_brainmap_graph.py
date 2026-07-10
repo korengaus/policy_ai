@@ -21,7 +21,12 @@
 #     untouched. Verdict-isolated.
 #   * HONESTY BOUNDARY baked into the stored artifact: every cluster carries
 #     kind="spread" and size_label="N개 매체 보도 중" (circulating across N
-#     outlets). NO 검증 / confirmed / verified vocabulary anywhere in the
+#     DISTINCT outlets — normalized original_url hosts, so one outlet
+#     publishing twice is ONE 매체; falls back to the member-row count only
+#     when no member URL is usable). Each cluster also carries a
+#     rebuild-stable stable_id (short sha256 of the sorted member row ids)
+#     alongside the positional cluster_id the frontend keys on.
+#     NO 검증 / confirmed / verified vocabulary anywhere in the
 #     generated labels — cluster size is SPREAD, never verification. A big
 #     cluster of a false rumor renders as "widely circulating" only.
 #   * REUSES verbatim: build_embed_text (scripts/embed_backfill.py) and
@@ -38,11 +43,13 @@
 # NO INSERT).
 
 import argparse
+import hashlib
 import json
 import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 # Project root importable when launched as `python scripts/build_brainmap_graph.py`
 # (cwd=project root) without PYTHONPATH=. — mirrors embed_backfill.py. The
@@ -70,10 +77,11 @@ SIM_THRESHOLD = 0.80
 EMBED_PROVIDER = "openai"
 EMBED_MODEL = "text-embedding-3-small"
 
-# Read-only corpus fetch. LOW-MEMORY: only the 5 metadata columns the graph
+# Read-only corpus fetch. LOW-MEMORY: only the 6 metadata columns the graph
 # needs — never source_candidates / debug_summary / any heavy blob.
+# (original_url feeds the distinct-outlet count only; never stored verbatim.)
 SELECT_ROWS_SQL = (
-    "SELECT id, title, domain, content_nature, claim_text "
+    "SELECT id, title, domain, content_nature, claim_text, original_url "
     "FROM analysis_results ORDER BY id"
 )
 # Read-only vector fetch (whole cache page for the provider+model; filtered
@@ -100,6 +108,23 @@ INSERT_SQL = (
 # (Node titles are journalist-written passthrough data; the ban applies to
 # every string THIS script generates: kind, size_label, params.)
 FORBIDDEN_LABEL_VOCAB = ("검증", "confirmed", "verified")
+
+
+def normalize_outlet_host(url):
+    """Outlet identity for the distinct-매체 count: the normalized host of
+    original_url. Lowercase netloc, credentials/port dropped, leading
+    "www." / "m." stripped (m.khan.co.kr -> khan.co.kr, www.yna.co.kr ->
+    yna.co.kr). Missing/unparseable URL -> "" — callers EXCLUDE empties, so
+    a blank URL never counts as an outlet."""
+    try:
+        host = (urlparse(url or "").netloc or "").lower()
+    except ValueError:
+        return ""
+    host = host.rsplit("@", 1)[-1].split(":", 1)[0]
+    for prefix in ("www.", "m.", "www."):
+        if host.startswith(prefix):
+            host = host[len(prefix):]
+    return host
 
 
 # ---------------------------------------------------------------------------
@@ -140,11 +165,14 @@ def _pca_2d(X):
 
 
 def build_graph(ids, titles, domains, content_natures, X,
-                k=KNN_K, sim_threshold=SIM_THRESHOLD):
+                outlet_sets=None, k=KNN_K, sim_threshold=SIM_THRESHOLD):
     """Pure compute: kNN(k) cosine graph -> edges at sim>=threshold ->
     union-find components -> PCA-2D coords -> degree-based cluster labels.
     Returns the graph dict (without generated_at/params — main adds those).
-    `X` is an already-loaded (n, dims) float matrix aligned with `ids`."""
+    `X` is an already-loaded (n, dims) float matrix aligned with `ids`.
+    `outlet_sets` (optional) is a per-node set of normalized outlet hosts
+    aligned with `ids` — feeds the DISTINCT-outlet size_label; when absent
+    the label falls back to the member-row count (legacy behavior)."""
     import numpy as np
 
     n = len(ids)
@@ -187,12 +215,31 @@ def build_graph(ids, titles, domains, content_natures, X,
         # Label = highest-degree node's title (most kNN-connected = most
         # central phrasing); tie-break shortest title, then lowest row id.
         rep = min(members, key=lambda i: (-degree[i], len(titles[i] or ""), ids[i]))
+        # Rebuild-stable identity: short sha256 of the sorted member row ids.
+        # Same membership across rebuilds -> same stable_id. ADDITIVE — the
+        # positional cluster_id above stays for the existing frontend contract.
+        member_row_ids = sorted(ids[i] for i in members)
+        stable_id = hashlib.sha256(
+            ",".join(str(rid) for rid in member_row_ids).encode("utf-8")
+        ).hexdigest()[:12]
+        # HONESTY: "N개 매체" counts DISTINCT normalized outlets, not member
+        # rows — one outlet publishing twice is ONE 매체. Blank hosts are
+        # excluded; if no member has a usable URL, fall back to the member
+        # count (the pre-existing behavior; never inflates vs. it).
+        outlets = set()
+        if outlet_sets:
+            for i in members:
+                outlets.update(outlet_sets[i] or ())
+        outlets.discard("")
+        outlet_count = len(outlets) or len(members)
         clusters.append({
             "cluster_id": cluster_id,
+            "stable_id": stable_id,
             "label_title": titles[rep] or "",
             "size": len(members),
+            "outlet_count": outlet_count,
             # HONESTY: spread ("circulating across N outlets"), never 검증.
-            "size_label": "%d개 매체 보도 중" % len(members),
+            "size_label": "%d개 매체 보도 중" % outlet_count,
             "kind": "spread",
         })
 
@@ -218,7 +265,8 @@ def build_graph(ids, titles, domains, content_natures, X,
 def load_corpus_vectors(conn):
     """Read-only: corpus rows + their title+claim vectors from embedding_cache.
     Key construction is REUSED verbatim (build_embed_text + hash_text_for_cache).
-    Returns (ids, titles, domains, content_natures, vectors, missing_count)."""
+    Returns (ids, titles, domains, content_natures, vectors, outlet_sets,
+    missing_count)."""
     from embed_backfill import build_embed_text
     from semantic_embeddings import hash_text_for_cache
 
@@ -226,10 +274,18 @@ def load_corpus_vectors(conn):
         cur.execute(SELECT_ROWS_SQL)
         rows = cur.fetchall()
     wanted = {}  # text_hash -> first row index (exact-dup texts collapse)
-    for i, (rid, title, domain, cn, claim) in enumerate(rows):
+    # text_hash -> outlet hosts across ALL rows sharing that text (dup-text
+    # rows collapse to one node, but their outlets must still be counted —
+    # a verbatim republication by a second outlet is a second 매체).
+    outlets_by_hash = {}
+    for i, (rid, title, domain, cn, claim, url) in enumerate(rows):
         text = build_embed_text(title, claim)
         if text:
-            wanted.setdefault(hash_text_for_cache(text), i)
+            text_hash = hash_text_for_cache(text)
+            wanted.setdefault(text_hash, i)
+            host = normalize_outlet_host(url)
+            if host:
+                outlets_by_hash.setdefault(text_hash, set()).add(host)
 
     vec_by_hash = {}
     with conn.cursor() as cur:
@@ -243,21 +299,22 @@ def load_corpus_vectors(conn):
                 if isinstance(vec, list) and vec:
                     vec_by_hash[text_hash] = vec
 
-    ids, titles, domains, cns, vectors = [], [], [], [], []
+    ids, titles, domains, cns, vectors, outlet_sets = [], [], [], [], [], []
     for text_hash, i in wanted.items():
         vec = vec_by_hash.get(text_hash)
         if vec is None:
             continue
-        rid, title, domain, cn, _claim = rows[i]
+        rid, title, domain, cn, _claim, _url = rows[i]
         ids.append(rid)
         titles.append(title)
         domains.append(domain)
         cns.append(cn)
         vectors.append(vec)
+        outlet_sets.append(outlets_by_hash.get(text_hash, set()))
     missing = len(wanted) - len(ids)
     print("[brainmap] corpus rows=%d unique texts=%d vectors resolved=%d missing=%d"
           % (len(rows), len(wanted), len(ids), missing))
-    return ids, titles, domains, cns, vectors, missing
+    return ids, titles, domains, cns, vectors, outlet_sets, missing
 
 
 def print_stats(graph):
@@ -352,8 +409,19 @@ def run_selftest() -> int:
              ["외톨이1", "외톨이2"]
     domains = ["d%d" % (i % 3) for i in range(12)]
     cns = ["government_policy"] * 12
+    # Outlet fixture: A carries a mobile+www pair of the SAME outlet plus a
+    # blank URL -> 2 distinct outlets (not 4 rows); B has 3 distinct; C is
+    # ONE outlet published thrice -> 1.
+    urls = [
+        "https://m.khan.co.kr/a", "https://www.khan.co.kr/b",
+        "https://yna.co.kr/c", "",                                      # A
+        "https://a.com/1", "https://b.com/2", "https://c.com/3",       # B
+        "https://one.kr/hub", "https://one.kr/s1", "https://one.kr/s2",  # C
+        "https://solo1.kr/x", "https://solo2.kr/y",                     # singletons
+    ]
+    outlet_sets = [{h for h in (normalize_outlet_host(u),) if h} for u in urls]
 
-    graph = build_graph(ids, titles, domains, cns, vectors, k=3)
+    graph = build_graph(ids, titles, domains, cns, vectors, outlet_sets, k=3)
 
     by_id = {node["id"]: node for node in graph["nodes"]}
     # (a) 3 clusters; the two far-off vectors stay singletons.
@@ -375,10 +443,20 @@ def run_selftest() -> int:
                   if c["cluster_id"] == by_id[8]["cluster_id"])
     c_ok = c_meta["label_title"] == "긴-허브-제목-이지만-최다연결"
     print("  [%s] (c) cluster label = highest-degree node's title" % ("ok" if c_ok else "xx"))
-    # (d) honest size label + kind on every cluster.
-    d_ok = all(c["size_label"] == "%d개 매체 보도 중" % c["size"]
-               and c["kind"] == "spread" for c in graph["clusters"])
-    print("  [%s] (d) size_label='N개 매체 보도 중' + kind='spread'" % ("ok" if d_ok else "xx"))
+    # (d) honest DISTINCT-outlet size label + kind on every cluster:
+    # A = 4 rows but 2 outlets (m./www. same outlet + blank excluded),
+    # B = 3 outlets, C = 3 rows but 1 outlet.
+    a_meta = next(c for c in graph["clusters"]
+                  if c["cluster_id"] == by_id[1]["cluster_id"])
+    b_meta = next(c for c in graph["clusters"]
+                  if c["cluster_id"] == by_id[5]["cluster_id"])
+    d_ok = (all(c["size_label"] == "%d개 매체 보도 중" % c["outlet_count"]
+                and c["kind"] == "spread" for c in graph["clusters"])
+            and a_meta["size"] == 4 and a_meta["outlet_count"] == 2
+            and b_meta["outlet_count"] == 3
+            and c_meta["size"] == 3 and c_meta["outlet_count"] == 1)
+    print("  [%s] (d) size_label counts DISTINCT outlets (A:4rows->2, C:3rows->1)"
+          % ("ok" if d_ok else "xx"))
     # (e) --dry-run writes nothing.
     fake_conn = _FakeWriteConn()
     wrote = maybe_write(fake_conn, "2000-01-01T00:00:00+00:00",
@@ -390,11 +468,30 @@ def run_selftest() -> int:
     f_ok = not any(word in blob for word in FORBIDDEN_LABEL_VOCAB)
     print("  [%s] (f) no 검증/confirmed/verified vocabulary in graph_json"
           % ("ok" if f_ok else "xx"))
+    # (g) outlet normalization: m./www. collapse to the registrable host,
+    # blank excluded.
+    spec_urls = ["https://m.khan.co.kr/a", "https://www.khan.co.kr/b",
+                 "https://yna.co.kr/c", ""]
+    spec_hosts = {normalize_outlet_host(u) for u in spec_urls} - {""}
+    g_ok = spec_hosts == {"khan.co.kr", "yna.co.kr"}
+    print("  [%s] (g) normalize_outlet_host: m./www. -> canonical, blank excluded"
+          % ("ok" if g_ok else "xx"))
+    # (h) stable_id: 12-hex sha256 of the sorted member row ids — identical
+    # on a rebuild with the same membership (A = rows 1,2,3,4).
+    graph2 = build_graph(ids, titles, domains, cns, vectors, outlet_sets, k=3)
+    expect_a = hashlib.sha256(b"1,2,3,4").hexdigest()[:12]
+    h_ok = (a_meta["stable_id"] == expect_a
+            and all(len(c["stable_id"]) == 12 for c in graph["clusters"])
+            and sorted(c["stable_id"] for c in graph["clusters"])
+            == sorted(c["stable_id"] for c in graph2["clusters"]))
+    print("  [%s] (h) stable_id = sha256(sorted member ids)[:12], rebuild-stable"
+          % ("ok" if h_ok else "xx"))
 
-    ok = all([a_ok, b_ok, c_ok, d_ok, e_ok, f_ok])
+    ok = all([a_ok, b_ok, c_ok, d_ok, e_ok, f_ok, g_ok, h_ok])
     print()
-    print("SELFTEST: %s" % ("PASS (clusters + coords + degree label + spread "
-                            "label + dry-run purity + honesty vocab)" if ok else "FAIL"))
+    print("SELFTEST: %s" % ("PASS (clusters + coords + degree label + distinct-"
+                            "outlet label + dry-run purity + honesty vocab + "
+                            "outlet normalization + stable_id)" if ok else "FAIL"))
     return 0 if ok else 1
 
 
@@ -444,11 +541,12 @@ def main(argv=None) -> int:
     print("BUILD-BRAINMAP-GRAPH — k=%d sim>=%.2f embed=title+claim (%s/%s)"
           % (KNN_K, SIM_THRESHOLD, EMBED_PROVIDER, EMBED_MODEL))
     with psycopg.connect(url) as conn:
-        ids, titles, domains, cns, vectors, _missing = load_corpus_vectors(conn)
+        (ids, titles, domains, cns, vectors, outlet_sets,
+         _missing) = load_corpus_vectors(conn)
         if not ids:
             print("[brainmap] no vectors resolved — run scripts/embed_backfill.py first.")
             return 1
-        graph = build_graph(ids, titles, domains, cns, vectors)
+        graph = build_graph(ids, titles, domains, cns, vectors, outlet_sets)
         print_stats(graph)
         # Honesty guard at write time too: refuse to persist if any GENERATED
         # label string carries verdict vocabulary (titles are passthrough).
