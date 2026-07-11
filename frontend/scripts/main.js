@@ -4639,6 +4639,114 @@
       `;
     }
 
+    // ================================================================
+    // REVIEW-ASSIST Slice 1 — "확인 포인트" decision-support block.
+    //
+    // Pure presentation of fields the pipeline ALREADY computed — zero LLM,
+    // zero backend, zero new judgment:
+    //   (1) debug_summary.disagreement_signal (M11.0d-3a, main.py) — shown
+    //       only when agreed === false, framed as a thing to CHECK;
+    //   (2) the best official-source link (source_reliability_summary, same
+    //       field chain buildOfficialEvidenceState reads) — so the reviewer
+    //       can open the cited document and see whether it supports the claim;
+    //   (3) claim ↔ evidence pairs (normalized_claims + evidence_snippets via
+    //       claim_index, the same linkage the advanced evidence list uses).
+    //
+    // HARD CONSTRAINT (badge honesty): this is decision-SUPPORT for the human
+    // "사람 검토됨" review. It must never suggest approve/reject, a leaning,
+    // or a truth conclusion — it reads no verdict field, uses no red/green
+    // semantics, and its copy uses check-verbs only. The words below may not
+    // appear in the block's copy; tests/review_checkpoints.test.js renders
+    // the block and enforces the list. Single sanctioned exception: the
+    // descriptive phrase "판정 불일치", which names the pipeline's INTERNAL
+    // producer disagreement, not a conclusion about the claim.
+    // REVIEW-ASSIST-1 CHECKPOINTS START (markers pinned by tests/review_checkpoints.test.js)
+    const REVIEWER_CHECKPOINT_FORBIDDEN_WORDS = ["추천", "승인", "기각", "검증", "사실", "거짓", "참", "판정"];
+    const REVIEWER_CHECKPOINT_ALLOWED_PHRASE = "판정 불일치";
+
+    function renderReviewerCheckpoints(result) {
+      const verification = result?.verification_card || result || {};
+      const debug = verification.debug_summary || result?.debug_summary || {};
+      const reliability = verification.source_reliability_summary || result?.source_reliability_summary || {};
+      const signal = debug.disagreement_signal || {};
+      const clip = (text, max) => {
+        const s = String(text || "").trim();
+        return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+      };
+      const rows = [];
+
+      // (1) Internal disagreement — only when the pipeline itself recorded
+      // agreed === false. Agreed or absent signal renders nothing (graceful).
+      if (signal.agreed === false) {
+        rows.push(`
+          <div class="plain-section">
+            <h4>확인 필요: 내부 판정 불일치</h4>
+            <div class="score-explain">파이프라인 내부 단계들이 서로 다른 결과를 냈습니다. 근거를 직접 살펴봐 주세요.</div>
+            <div class="score-explain">${escapeHtml(clip(signal.disagreement_description || "", 240))}</div>
+          </div>
+        `);
+      }
+
+      // (2) Official-source original document — click-through so the human
+      // can see whether the cited document supports the claim.
+      const officialUrl = reliability.top_official_detail_url || reliability.official_best_evidence_url || "";
+      if (officialUrl) {
+        const officialTitle = clip(
+          reliability.top_official_detail_title
+            || reliability.official_best_evidence_title
+            || reliability.top_source_title
+            || "공식 문서 열기",
+          120
+        );
+        rows.push(`
+          <div class="plain-section">
+            <h4>확인 포인트: 공식 출처 원문 확인</h4>
+            <div class="score-explain">
+              인용된 공식 문서가 주장을 뒷받침하는지 원문에서 직접 확인해 주세요.
+              <a href="${escapeHtml(safeUrl(officialUrl))}" target="_blank" rel="noopener noreferrer">${escapeHtml(officialTitle)}</a>
+            </div>
+          </div>
+        `);
+      }
+
+      // (3) Claim ↔ evidence pairs — compact (3 claims × 2 snippets max);
+      // reuses the assembled data, no refetch.
+      const rawClaims = verification.normalized_claims || result?.normalized_claims
+        || verification.claims || result?.claims || [];
+      const snippets = verification.evidence_snippets || result?.evidence_snippets || [];
+      const claimTexts = rawClaims
+        .map((claim) => (typeof claim === "string" ? claim : (claim?.claim_text || claim?.text || "")))
+        .filter(Boolean);
+      claimTexts.slice(0, 3).forEach((claimText, index) => {
+        const related = snippets.filter((snippet) => Number(snippet?.claim_index) === index).slice(0, 2);
+        const evidenceHtml = related.length
+          ? related.map((snippet) => {
+              const url = safeUrl(snippet.source_url || "");
+              const label = clip(snippet.source_title || snippet.source_url || "출처", 80);
+              const link = url ? ` <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>` : "";
+              return `<div class="score-explain">근거: ${escapeHtml(clip(snippet.evidence_text || "", 200))}${link}</div>`;
+            }).join("")
+          : '<div class="score-explain">연결된 근거가 없습니다 — 원문에서 직접 확인해 주세요.</div>';
+        rows.push(`
+          <div class="plain-section">
+            <h4>주장 #${index + 1} ↔ 근거 대조</h4>
+            <div class="score-explain">주장: ${escapeHtml(clip(claimText, 200))}</div>
+            ${evidenceHtml}
+        </div>
+        `);
+      });
+
+      if (!rows.length) return "";
+      return `
+        <section class="reviewer-dashboard" data-reviewer-checkpoints>
+          <h3>확인 포인트</h3>
+          <div class="reader-note">아래 항목은 검토자가 직접 살펴볼 지점을 보여줄 뿐, 어떤 결론이나 처리 방향도 제시하지 않습니다. 리뷰 결정은 전적으로 사람의 몫입니다.</div>
+          ${rows.join("")}
+        </section>
+      `;
+    }
+    // REVIEW-ASSIST-1 CHECKPOINTS END
+
 
 
     // DESIGN-DETAIL-4 STEP 3a: renderVerificationSummaryCard (the 9-tile 검증 결과
@@ -5211,6 +5319,7 @@
                 ${escapeHtml(exportClaimText(result))}
               </div>
               ${operatorToolsFlagSet() ? renderReviewerDecisionDashboard(result, userContext) : ""}
+              ${operatorToolsFlagSet() ? renderReviewerCheckpoints(result) : ""}
               ${operatorToolsFlagSet() ? renderReviewerActionCard(result, userContext) : ""}
               <div class="news-section-title">상세 검증 정보</div>
               <div class="reader-note">더 자세한 주장별 근거, 반박 가능성, 표현 방식 점검은 아래 고급 정보에서 펼쳐볼 수 있습니다.</div>
