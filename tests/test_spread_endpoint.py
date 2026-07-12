@@ -154,7 +154,7 @@ class SpreadPureHelperTests(unittest.TestCase):
     def test_build_spread_indexes_tolerates_empty_graph(self):
         indexes = api_server._build_spread_indexes({})
         self.assertEqual(indexes, {"clusters": {}, "members": {},
-                                   "cluster_of": {}})
+                                   "cluster_of": {}, "title_of": {}})
 
     def test_payload_all_undated_members(self):
         payload = api_server._build_spread_payload(

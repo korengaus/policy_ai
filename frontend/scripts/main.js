@@ -5068,6 +5068,37 @@
       }
     }
 
+    // CLUSTER-SURFACE S-a: hydrate the detail card's sibling-coverage placeholder
+    // after the innerHTML pass (mirrors loadSpreadAnnotations). Verdict-free:
+    // titles + /?result_id links + the circulation honesty note only.
+    async function loadClusterMembers() {
+      const placeholders = document.querySelectorAll(".cluster-members-section[data-cluster-id]");
+      for (const section of placeholders) {
+        const id = Number(section.getAttribute("data-cluster-id"));
+        if (!Number.isInteger(id) || id <= 0) continue;
+        try {
+          const response = await fetch(`${API_BASE}/api/cluster/${encodeURIComponent(id)}/members`);
+          if (!response.ok) continue;
+          const data = await response.json();
+          const members = Array.isArray(data?.members) ? data.members : [];
+          if (!data?.found || !members.length) continue;
+          const items = members
+            .filter((m) => Number(m?.analysis_id) > 0)
+            .map((m) => `<li><a href="/?result_id=${encodeURIComponent(Number(m.analysis_id))}">${escapeHtml(m.title || `기사 #${Number(m.analysis_id)}`)}</a></li>`)
+            .join("");
+          if (!items) continue;
+          section.innerHTML = `
+            <h3>이 주장을 보도한 다른 기사들</h3>
+            <ul class="cluster-members-list">${items}</ul>
+            <div class="reader-note">${escapeHtml(data.note || "같은 주장을 다룬 다른 보도 — 검증이 아닙니다")}</div>
+          `;
+          section.hidden = false;
+        } catch (error) {
+          // fail-silent: sibling coverage is optional context, never an error state
+        }
+      }
+    }
+
     function renderResults(results, focusIndex = selectedResultIndex) {
       if (!results.length) {
         metricsEl.style.display = "none";
@@ -5305,6 +5336,15 @@
                  Detail view only, and only when the card knows its analysis id. -->
             ${(hasFocus || displayResults.length === 1) && Number(result.result_id) > 0 ? `<section class="public-source-section spread-section" data-spread-id="${Number(result.result_id)}" hidden></section>` : ""}
 
+            <!-- CLUSTER-SURFACE S-a: sibling-coverage placeholder (같은 클러스터의
+                 다른 보도 — 유통 정보만, 판정 아님), right after the spread section
+                 as part of the layer-2 cluster context. Stays hidden until
+                 /api/cluster/{id}/members returns found + members; found:false /
+                 empty / fetch failure all render NOTHING (fail-silent). Hydrated
+                 AFTER the innerHTML pass by loadClusterMembers() — position-
+                 independent. Same gate as the spread placeholder. -->
+            ${(hasFocus || displayResults.length === 1) && Number(result.result_id) > 0 ? `<section class="public-source-section cluster-members-section" data-cluster-id="${Number(result.result_id)}" hidden></section>` : ""}
+
             <!-- STEP 2 item 3: the news CONTENT lead (the article's own claim quote)
                  + the muted verification note, just under the verdict so the reader
                  sees conclusion → the claim it's about. Each renders only if truthy. -->
@@ -5357,6 +5397,8 @@
       // SPREAD-TIMELINE Slice 2: hydrate the detail card's spread placeholder
       // after the innerHTML pass. Fire-and-forget; internally fail-silent.
       loadSpreadAnnotations();
+      // CLUSTER-SURFACE S-a: hydrate the sibling-coverage placeholder the same way.
+      loadClusterMembers();
     }
 
     function renderHistory(rows) {

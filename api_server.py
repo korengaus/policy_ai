@@ -578,9 +578,12 @@ _SPREAD_CACHE: dict = {"row_id": None, "indexes": None}
 
 def _build_spread_indexes(graph: dict) -> dict:
     """Pure: graph JSON dict -> {clusters: cid->cluster meta,
-    members: cid->[analysis ids], cluster_of: analysis id->cid}.
+    members: cid->[analysis ids], cluster_of: analysis id->cid,
+    title_of: analysis id->node title}.
     Membership lives on NODES (node.id + node.cluster_id); singleton nodes
-    (cluster_id null) are skipped."""
+    (cluster_id null) are skipped for membership. title_of (CLUSTER-SURFACE
+    S-a, additive) keeps each clustered node's display title so the member
+    list can render sibling links without a second graph parse."""
     clusters = {}
     for cluster in graph.get("clusters") or []:
         cid = cluster.get("cluster_id")
@@ -588,6 +591,7 @@ def _build_spread_indexes(graph: dict) -> dict:
             clusters[cid] = cluster
     members: dict = {}
     cluster_of: dict = {}
+    title_of: dict = {}
     for node in graph.get("nodes") or []:
         cid = node.get("cluster_id")
         node_id = node.get("id")
@@ -595,7 +599,9 @@ def _build_spread_indexes(graph: dict) -> dict:
             continue
         cluster_of[node_id] = cid
         members.setdefault(cid, []).append(node_id)
-    return {"clusters": clusters, "members": members, "cluster_of": cluster_of}
+        title_of[node_id] = node.get("title") or ""
+    return {"clusters": clusters, "members": members, "cluster_of": cluster_of,
+            "title_of": title_of}
 
 
 def _load_spread_indexes():
@@ -892,6 +898,66 @@ def spread_annotation(analysis_id: int) -> Response:
     except Exception:
         logger.exception("Failed to build spread annotation")
         return _spread_response(_SPREAD_NOT_FOUND_JSON)
+
+
+# ---------------------------------------------------------------------------
+# CLUSTER-SURFACE S-a — read-only sibling coverage for ONE analysis id.
+#
+# GET /api/cluster/{result_id}/members finds the card's cluster in the NEWEST
+# brainmap_graph (the SAME cached indexes /api/spread uses — no second parse,
+# no rebuild needed) and returns the OTHER member articles' {analysis_id,
+# title} so the card detail can render "이 주장을 보도한 다른 기사들".
+#
+# SAFETY / HONESTY:
+#   * READ-ONLY: stable_id / outlet_count / member ids / node titles ONLY.
+#     NO verdict/score/confidence column anywhere. The payload is sibling
+#     CIRCULATION (같은 주장을 다룬 다른 보도), never 검증 — the note says so.
+#   * NEVER 500: id not clustered, single-member cluster, no graph, PG off,
+#     or any failure -> {"found": false, "members": []} at HTTP 200.
+#   * Node `domain` is the TOPIC domain, not the outlet — deliberately not
+#     surfaced. published_at / outlet host are deferred.
+# ---------------------------------------------------------------------------
+_CLUSTER_MEMBERS_EMPTY_JSON = '{"found": false, "members": []}'
+_CLUSTER_MEMBERS_CAP = 10
+_CLUSTER_MEMBERS_NOTE = "같은 주장을 다룬 다른 보도 — 검증이 아닙니다"
+
+
+@app.get("/api/cluster/{result_id}/members")
+def cluster_members(result_id: int) -> Response:
+    try:
+        indexes = _load_spread_indexes()
+        if indexes is None:
+            return _spread_response(_CLUSTER_MEMBERS_EMPTY_JSON)
+        # cluster_id 0 is a real cluster — explicit None checks only.
+        cluster_id = indexes["cluster_of"].get(result_id)
+        if cluster_id is None:
+            return _spread_response(_CLUSTER_MEMBERS_EMPTY_JSON)
+        member_ids = indexes["members"].get(cluster_id) or []
+        sibling_ids = sorted(
+            mid for mid in member_ids if mid != result_id
+        )[:_CLUSTER_MEMBERS_CAP]
+        if not sibling_ids:
+            return _spread_response(_CLUSTER_MEMBERS_EMPTY_JSON)
+        cluster_meta = indexes["clusters"].get(cluster_id) or {}
+        # .get: a pre-title_of in-process cache entry lacks the key; empty
+        # titles then fall back client-side rather than erroring here.
+        title_of = indexes.get("title_of") or {}
+        payload = {
+            "found": True,
+            "cluster": {
+                "stable_id": cluster_meta.get("stable_id"),
+                "outlet_count": cluster_meta.get("outlet_count"),
+            },
+            "members": [
+                {"analysis_id": mid, "title": title_of.get(mid) or ""}
+                for mid in sibling_ids
+            ],
+            "note": _CLUSTER_MEMBERS_NOTE,
+        }
+        return _spread_response(json.dumps(payload, ensure_ascii=False))
+    except Exception:
+        logger.exception("Failed to build cluster members")
+        return _spread_response(_CLUSTER_MEMBERS_EMPTY_JSON)
 
 
 # ---------------------------------------------------------------------------
