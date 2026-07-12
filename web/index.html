@@ -10581,12 +10581,15 @@
       renderHotTopics(results);
       const hasFocus = Number.isInteger(focusIndex) && results[focusIndex];
       const displayResults = hasFocus ? [results[focusIndex]] : results;
-      // DESIGN-DETAIL-4: on the focused single-card detail, hide the aggregate
-      // 4-tile #metrics strip — its 판정/신뢰도 values are folded into the top
-      // verdict block and over a 1-card context it only restates them. renderMetrics
-      // set #metrics to display:grid just above; we only hide it here. The element/id
-      // is kept, so the non-focused full-results path is unaffected.
-      if (hasFocus) metricsEl.style.display = "none";
+      // DESIGN-DETAIL-4 / CARD-TOPFIX 3a: on ANY single-card detail, hide the
+      // aggregate 4-tile #metrics strip — its 판정/신뢰도 values are folded into
+      // the top verdict block and over a 1-card context it only restates them.
+      // displayResults.length === 1 covers BOTH the focused-history path (hasFocus)
+      // AND the public card-open path (loadServerResultById inflates one id with
+      // selectedResultIndex null, so hasFocus alone missed it). renderMetrics set
+      // #metrics to display:grid just above; we only hide it here. The element/id
+      // is kept, so the multi-card full-report path still shows the strip.
+      if (displayResults.length === 1) metricsEl.style.display = "none";
       renderSelectedIssueIntro(results, hasFocus ? focusIndex : 0);
       resultsEl.innerHTML = displayResults.map((result) => {
         const parts = getResultPipelineParts(result);
@@ -10763,6 +10766,12 @@
               </div>
             </section>
 
+            <!-- CARD-TOPFIX 3b: reading guide MOVED here (was after the spread
+                 placeholder, too late for a first-time reader) — right after the
+                 verdict block, before the dense sections. Kept collapsed,
+                 content unchanged. -->
+            ${renderCollapsibleSection("이 리포트는 이렇게 읽으면 됩니다", renderReadingGuide(userContext), false, "처음 보는 분을 위한 안내입니다. 판정 단계·신뢰도·공식 출처·근거를 어떻게 읽으면 되는지 설명합니다.")}
+
             <!-- STEP 2 item 3: the news CONTENT lead (the article's own claim quote)
                  + the muted verification note, just under the verdict so the reader
                  sees conclusion → the claim it's about. Each renders only if truthy. -->
@@ -10785,9 +10794,6 @@
                  only, and only when the card knows its analysis id. -->
             ${(hasFocus || displayResults.length === 1) && Number(result.result_id) > 0 ? `<section class="public-source-section spread-section" data-spread-id="${Number(result.result_id)}" hidden></section>
             <div class="report-error-link"><button type="button" class="secondary" data-share-image="${Number(result.result_id)}" data-share-title="${title}">이미지로 공유</button></div>` : ""}
-
-            <!-- Reading guide kept, collapsed (content unchanged). -->
-            ${renderCollapsibleSection("이 리포트는 이렇게 읽으면 됩니다", renderReadingGuide(userContext), false, "처음 보는 분을 위한 안내입니다. 판정 단계·신뢰도·공식 출처·근거를 어떻게 읽으면 되는지 설명합니다.")}
 
             <!-- STEP 2 items 6+7: the AI 종합 검증 판단 residual card. STEP 3c removed
                  the duplicate 초안 판정 tile (now led by the top verdict block); kept:
