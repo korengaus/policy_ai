@@ -24,6 +24,9 @@ sqlalchemy
 pgvector==0.3.6
 trafilatura
 uvicorn
+# BRAINMAP-OOM Slice 1 — the Worker now runs scripts/build_brainmap_graph.py
+# (chunked kNN fits the 2GB Worker), which needs numpy. Previously LOCAL-only.
+numpy>=1.26,<3
 
 # M15.0a — Phase 2 async orchestration foundation.
 # rq + redis provide the job queue used by the /health/queue endpoint

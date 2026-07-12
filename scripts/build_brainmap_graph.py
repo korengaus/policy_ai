@@ -9,8 +9,13 @@
 # embedding_vectors' create-on-demand pattern; postgres_storage.py untouched,
 # no Alembic). The /api/brainmap endpoint (2d) reads the newest row.
 #
-# ★RUN LOCATION: Joe's LOCAL machine — numpy is installed locally and is NOT
-# in requirements.txt (deliberately: the Render services never run this).
+# ★RUN LOCATION: LOCAL machine or the Render Worker (BRAINMAP-OOM Slice 1:
+# numpy is now in requirements.txt; blocked top-k + streaming vector load
+# cut peak memory to ~330MB at 7,600 rows / ~620MB at 10k — the old
+# argsort(-S) transients (~925MB on top of everything) OOM-killed the 2GB
+# Worker. The single N×N float32 S matrix remains the dominant term
+# (~1.6GB at 20k rows — revisit blocking the matmul then, which trades
+# ~4e-7 sim bits and therefore possibly a few stable_ids).
 # Point DATABASE_URL at the external Postgres and set USE_POSTGRES_WRITE=true.
 # Takes ~30s for ~2.3k nodes.
 #
@@ -76,6 +81,12 @@ KNN_K = 10
 SIM_THRESHOLD = 0.80
 EMBED_PROVIDER = "openai"
 EMBED_MODEL = "text-embedding-3-small"
+# BRAINMAP-OOM Slice 1: top-k row-block size. Memory-only tunable — the old
+# `np.argsort(-S)` added 2 extra N×N arrays (-S copy + int64 argsort output,
+# ~693MB transient at 7,600 rows) on top of S and OOM-killed the 2GB Worker.
+# The blocked top-k adds only block×N at a time. Any value >=1 produces the
+# bit-IDENTICAL graph (the matmul itself is NOT blocked — see _knn_topk).
+KNN_BLOCK_ROWS = 512
 
 # Read-only corpus fetch. LOW-MEMORY: only the 6 metadata columns the graph
 # needs — never source_candidates / debug_summary / any heavy blob.
@@ -164,6 +175,36 @@ def _pca_2d(X):
     return out
 
 
+def _knn_topk(Xn, kk, block_rows=KNN_BLOCK_ROWS):
+    """BRAINMAP-OOM Slice 1: memory-bounded top-k cosine neighbors.
+
+    Xn is the (n, d) float32 row-normalized matrix. The similarity matrix is
+    computed ONCE with the exact same full `Xn @ Xn.T` + fill_diagonal(-1.0)
+    as the old code — BLAS produces different low-order float bits for a
+    row-block matmul (measured ~4e-7), which would break bit-identity, so
+    the matmul is deliberately NOT blocked. What IS blocked is the old OOM
+    killer: `np.argsort(-S, axis=1)` materialized a full n×n negated copy
+    PLUS a full n×n int64 argsort output (~693MB transient at 7,600 rows on
+    top of S). Here each row block sorts only block_rows×n at a time; per
+    row the full argsort (NOT argpartition) keeps tie order bit-identical.
+    Returns (knn, sims) of shape (n, kk). Peak extra memory beyond S:
+    block_rows×n float32 (-block) + block_rows×n int64 (argsort)."""
+    import numpy as np
+
+    n = Xn.shape[0]
+    S = Xn @ Xn.T
+    np.fill_diagonal(S, -1.0)
+    knn = np.empty((n, kk), dtype=np.int64)
+    sims = np.empty((n, kk), dtype=np.float32)
+    for start in range(0, n, block_rows):
+        stop = min(start + block_rows, n)
+        block = S[start:stop]  # view — no copy
+        order = np.argsort(-block, axis=1)[:, :kk]
+        knn[start:stop] = order
+        sims[start:stop] = np.take_along_axis(block, order, axis=1)
+    return knn, sims
+
+
 def build_graph(ids, titles, domains, content_natures, X,
                 outlet_sets=None, k=KNN_K, sim_threshold=SIM_THRESHOLD):
     """Pure compute: kNN(k) cosine graph -> edges at sim>=threshold ->
@@ -178,20 +219,23 @@ def build_graph(ids, titles, domains, content_natures, X,
     n = len(ids)
     Xn = np.asarray(X, dtype=np.float32)
     Xn = Xn / (np.linalg.norm(Xn, axis=1, keepdims=True) + 1e-12)
-    S = Xn @ Xn.T
-    np.fill_diagonal(S, -1.0)
-    kk = min(k, n - 1)
-    knn = np.argsort(-S, axis=1)[:, :kk]
+    kk = max(0, min(k, n - 1))
+    # BRAINMAP-OOM Slice 1: chunked kNN — same cosine sims, same full-argsort
+    # top-k (incl. tie order), same self-mask (-1.0 on the own index) as the
+    # old full-matrix code, computed in row blocks so peak memory is block×N
+    # instead of 3×N×N. Bit-identity is pinned by tests/test_brainmap_knn_
+    # chunked.py against a full-matrix reference.
+    knn, sims = _knn_topk(Xn, kk)
 
     uf = _UnionFind(n)
     edge_set = {}
     for i in range(n):
-        for j in knn[i]:
-            j = int(j)
-            if S[i, j] >= sim_threshold:
+        for col in range(kk):
+            j = int(knn[i, col])
+            if sims[i, col] >= sim_threshold:
                 uf.union(i, j)
                 key = (i, j) if i < j else (j, i)
-                edge_set.setdefault(key, float(S[i, j]))
+                edge_set.setdefault(key, float(sims[i, col]))
 
     degree = [0] * n
     for (i, j) in edge_set:
@@ -287,17 +331,30 @@ def load_corpus_vectors(conn):
             if host:
                 outlets_by_hash.setdefault(text_hash, set()).add(host)
 
+    # BRAINMAP-OOM Slice 1: STREAM the vector page (fetchmany batches) and
+    # parse each hit straight into a float32 array — the old fetchall() held
+    # every vector_json string (~240MB) AND every parsed Python-float list
+    # (~370MB at 7,600 rows) simultaneously. Same rows, same cursor order,
+    # same first-hit-per-hash rule, same float64->float32 rounding as the old
+    # np.asarray(list, float32) in build_graph — values are identical.
+    import numpy as np
+
     vec_by_hash = {}
     with conn.cursor() as cur:
         cur.execute(SELECT_VECTORS_SQL, (EMBED_PROVIDER, EMBED_MODEL))
-        for text_hash, vector_json in cur.fetchall():
-            if text_hash in wanted and text_hash not in vec_by_hash:
-                try:
-                    vec = json.loads(vector_json)
-                except (TypeError, ValueError):
-                    continue
-                if isinstance(vec, list) and vec:
-                    vec_by_hash[text_hash] = vec
+        while True:
+            batch = cur.fetchmany(500)
+            if not batch:
+                break
+            for text_hash, vector_json in batch:
+                if text_hash in wanted and text_hash not in vec_by_hash:
+                    try:
+                        vec = json.loads(vector_json)
+                    except (TypeError, ValueError):
+                        continue
+                    if isinstance(vec, list) and vec:
+                        vec_by_hash[text_hash] = np.asarray(vec,
+                                                            dtype=np.float32)
 
     ids, titles, domains, cns, vectors, outlet_sets = [], [], [], [], [], []
     for text_hash, i in wanted.items():
