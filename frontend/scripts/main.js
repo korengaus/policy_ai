@@ -6010,7 +6010,12 @@
         claim = "기사 제목과 요약 기준으로 핵심 주장을 추가 확인해야 합니다.";
       }
       const prefix = cautiousClaimPrefix(result);
-      if (prefix && !claim.startsWith(prefix)) {
+      // CARD-CLAIM-QUALITY fix ①: phrase-aware dedup. The title fallback can embed
+      // "…기사 제목과 요약 기준으로 추가 확인이 필요합니다" mid/end of the claim,
+      // which the startsWith check missed → the prefix was glued on a second time
+      // (double hedge). Skip the prefix whenever the hedge phrase already appears
+      // ANYWHERE; the start-strip is kept for a claim that leads with a stale prefix.
+      if (prefix && !claim.startsWith(prefix) && !claim.includes("기사 제목과 요약 기준으로")) {
         claim = `${prefix}${claim.replace(/^(기사 제목과 요약 기준으로는|보도 내용은)\s*/g, "")}`;
       }
       if (!hasDirectOfficialSupport(result) || officialDirectScoreForResult(result) <= 0) {
@@ -6041,31 +6046,9 @@
       return sanitizePublicExportText(context || "추가 확인이 필요한 맥락은 현재 공개 리포트에 구체적으로 표시되지 않았습니다.");
     }
 
-    function fallbackClaimFromTitle(result) {
-      const title = cleanArticleTextForPolicyAnalysis(result?.title || "") || sanitizeDisplayText(result?.title || "");
-      if (!title) return "기사 제목과 요약 기준으로 핵심 주장을 추가 확인해야 합니다.";
-      if (/생보업계|생명보험/.test(title) && /소비자/.test(title)) {
-        const count = (title.match(/\d+\s*개사/) || [""])[0];
-        return `생명보험업계${count ? ` ${count}` : ""}가 소비자 기준의 의사결정 강화를 다짐했다.`;
-      }
-      if (/전세\s*사기|전세사기/.test(title) && /징역/.test(title)) {
-        const amount = (title.match(/\d+\s*억\s*원?대?/) || [""])[0];
-        const prison = (title.match(/징역\s*\d+\s*년/) || ["징역형"])[0];
-        return `전세사기 사건 관련 임대업자가 사기 혐의로 ${prison}${amount ? `을 포함한 ${amount} 사건과 관련해` : ""} 추가 선고를 받았다.`;
-      }
-      if (/금융위|금융위원회/.test(title)) {
-        return `${title.replace(/[“”"']/g, "")}는 금융당국 관련 정책·조치로 추가 확인이 필요한 사안이다.`;
-      }
-      const cleaned = title
-        .replace(/\[[^\]]+\]/g, "")
-        .replace(/[“”"']/g, "")
-        .replace(/\s+/g, " ")
-        .trim();
-      return cleaned.endsWith("다.") || cleaned.endsWith("했다.")
-        ? cleaned
-        : `${cleaned}라는 보도 내용은 기사 제목과 요약 기준으로 추가 확인이 필요하다.`;
-    }
-
+    // CARD-CLAIM-QUALITY fix ①: the earlier duplicate definition of
+    // fallbackClaimFromTitle (cleanArticleTextForPolicyAnalysis-based) was dead —
+    // this later definition shadowed it. Removed; this one is the live path.
     function fallbackClaimFromTitle(result) {
       const title = userFacingReportText(result?.title || "", "")
         .replace(/\[[^\]]+\]/g, "")
