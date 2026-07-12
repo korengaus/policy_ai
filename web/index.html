@@ -7947,6 +7947,10 @@
       // sites) so the sidebar always re-renders together with the feed —
       // including the async post-fetch re-render that first fills the pool.
       renderSidebarRanking();
+      // CLUSTER-SURFACE S-b: repaint the "N개 매체" chips after every grid paint
+      // (innerHTML wiped any prior ones). Fire-and-forget; internally fail-silent,
+      // and the 5-min HTTP cache makes repeat calls cheap.
+      loadClusterSizeChips();
     }
 
     // DESIGN-C3-2: page-number nav for the post-hero grid. prev (‹) / 1..N / next (›).
@@ -10588,6 +10592,45 @@
         } catch (error) {
           // fail-silent: sibling coverage is optional context, never an error state
         }
+      }
+    }
+
+    // CLUSTER-SURFACE S-b: after the home grid paints, ONE batch fetch patches a
+    // small "N개 매체" circulation chip onto cards whose cluster spans >=2 outlets.
+    // Pure post-render DOM patch (the grid markup is untouched); cards without a
+    // returned count get no chip; any failure leaves the feed exactly as rendered.
+    async function loadClusterSizeChips() {
+      try {
+        const cards = document.querySelectorAll(".topic-card[data-topic-record-id]");
+        const byId = new Map();
+        for (const card of cards) {
+          const rid = Number(card.getAttribute("data-topic-record-id"));
+          if (!Number.isInteger(rid) || rid <= 0) continue;
+          if (!byId.has(rid)) byId.set(rid, []);
+          byId.get(rid).push(card);
+        }
+        if (!byId.size) return;
+        const ids = Array.from(byId.keys()).slice(0, 60);
+        const response = await fetch(`${API_BASE}/api/cluster-sizes?ids=${encodeURIComponent(ids.join(","))}`);
+        if (!response.ok) return;
+        const data = await response.json();
+        const sizes = data && data.sizes ? data.sizes : {};
+        for (const [rid, ridCards] of byId) {
+          const count = Number(sizes[rid]);
+          if (!Number.isFinite(count) || count < 2) continue;
+          for (const card of ridCards) {
+            const top = card.querySelector(".topic-card-top");
+            if (!top || top.querySelector(".card-outlet-chip")) continue;
+            const chip = document.createElement("span");
+            // Reuse the quiet .card-domain chip styling; the marker class only
+            // guards against double-patching on overlapping hydrations.
+            chip.className = "card-domain card-outlet-chip";
+            chip.textContent = `${count}개 매체`;
+            top.appendChild(chip);
+          }
+        }
+      } catch (error) {
+        // fail-silent: the circulation chip is optional; the feed must never break
       }
     }
 

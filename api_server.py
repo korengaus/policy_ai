@@ -961,6 +961,57 @@ def cluster_members(result_id: int) -> Response:
 
 
 # ---------------------------------------------------------------------------
+# CLUSTER-SURFACE S-b — read-only BATCH cluster sizes for the home feed.
+#
+# GET /api/cluster-sizes?ids=1,2,3 answers ONE call for the whole visible
+# card grid (the feed must not fire N per-card requests): each id is looked
+# up in the SAME cached spread indexes (cluster_of -> cluster outlet_count).
+# Ids not in the graph — and clusters below 2 outlets, mirroring the spread
+# section's >=2 gate — are simply OMITTED from the map, so the frontend
+# renders no chip for them.
+#
+# SAFETY / HONESTY:
+#   * READ-ONLY: cluster_of + outlet_count ONLY — a pure {id: count} map.
+#     NO verdict/score/confidence column. "N개 매체" is circulation, never 검증.
+#   * NEVER 500: empty/malformed ids, no graph, PG off, any failure ->
+#     {"sizes": {}} at HTTP 200. Ids capped at 60 per call.
+# ---------------------------------------------------------------------------
+_CLUSTER_SIZES_EMPTY_JSON = '{"sizes": {}}'
+_CLUSTER_SIZES_MAX_IDS = 60
+
+
+@app.get("/api/cluster-sizes")
+def cluster_sizes(ids: Optional[str] = None) -> Response:
+    try:
+        parsed = []
+        for token in (ids or "").split(","):
+            token = token.strip()
+            if token.isdigit():  # malformed / negative tokens are ignored
+                parsed.append(int(token))
+        parsed = parsed[:_CLUSTER_SIZES_MAX_IDS]
+        if not parsed:
+            return _spread_response(_CLUSTER_SIZES_EMPTY_JSON)
+        indexes = _load_spread_indexes()
+        if indexes is None:
+            return _spread_response(_CLUSTER_SIZES_EMPTY_JSON)
+        sizes = {}
+        for rid in parsed:
+            # cluster_id 0 is a real cluster — explicit None checks only.
+            cluster_id = indexes["cluster_of"].get(rid)
+            if cluster_id is None:
+                continue
+            cluster_meta = indexes["clusters"].get(cluster_id) or {}
+            outlet_count = cluster_meta.get("outlet_count")
+            if isinstance(outlet_count, int) and outlet_count >= 2:
+                sizes[str(rid)] = outlet_count
+        return _spread_response(json.dumps({"sizes": sizes},
+                                           ensure_ascii=False))
+    except Exception:
+        logger.exception("Failed to build cluster sizes")
+        return _spread_response(_CLUSTER_SIZES_EMPTY_JSON)
+
+
+# ---------------------------------------------------------------------------
 # TRENDING-API Slice 1 — read-only spread-GROWTH Top-N from the
 # brainmap_snapshots time series (§27c passive accumulation).
 #
