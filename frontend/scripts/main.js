@@ -153,6 +153,9 @@
     // SIDEBAR-RANK: 인기 검증 랭킹 list container in the right sidebar (.home-aside).
     const rankListEl = document.getElementById("rankList");
     // SIDEBAR-RANK-B2: weekly-stats panel numbers + range; 제보 input/button.
+    // HOME-TOP5 S5a: 확산 성장 Top 5 sidebar panel (filled from /api/trending).
+    const trendingPanelEl = document.getElementById("trendingPanel");
+    const trendingListEl = document.getElementById("trendingList");
     const statTotalEl = document.getElementById("statTotal");
     const statOfficialEl = document.getElementById("statOfficial");
     const statDraftEl = document.getElementById("statDraft");
@@ -2566,6 +2569,52 @@
     // fill the three numbers + the MM.DD–MM.DD range. REAL counts only (no
     // hardcoded numbers). Fail-quiet: on any error the panel keeps its "–"
     // placeholders and never throws. No write, no live-analysis trigger.
+    // HOME-TOP5 S5a: 확산 성장 Top 5 — one read-only GET /api/trending fetch
+    // (two-snapshot outlet-count growth) fills the sidebar panel. CIRCULATION
+    // only: title + N개 매체 + ↑growth/NEW — no verdict/score/판정, no verdict
+    // color. Fail-quiet (the renderWeeklyStats posture): fetch error or
+    // {trending:[]} (insufficient snapshot history) keeps the panel hidden and
+    // never throws. Rows use plain /?result_id= hrefs, NOT the ranking's
+    // data-topic-*/openTopicCard wiring — a trending representative may be
+    // older than the loaded recent-50 feed pool.
+    async function renderTrendingTop5() {
+      if (!trendingPanelEl || !trendingListEl) return;
+      try {
+        const response = await fetch(`${API_BASE}/api/trending`);
+        if (!response.ok) return;
+        const body = await response.json();
+        const rows = Array.isArray(body?.trending) ? body.trending.slice(0, 5) : [];
+        const items = rows.map((row, i) => {
+          const rid = Number(row?.representative_analysis_id);
+          const title = String(row?.title || "").trim() || (rid > 0 ? `기사 #${rid}` : "");
+          if (!title) return "";
+          const outlets = Number(row?.current_outlet_count);
+          const growth = Number(row?.growth);
+          const badge = row?.is_new ? " · NEW"
+            : (Number.isFinite(growth) && growth > 0 ? ` · ↑${growth}` : "");
+          const meta = Number.isFinite(outlets) && outlets > 0
+            ? `${outlets}개 매체${badge}`
+            : badge.replace(" · ", "");
+          const titleHtml = rid > 0
+            ? `<a class="rank-title" href="/?result_id=${encodeURIComponent(rid)}">${escapeHtml(title)}</a>`
+            : `<span class="rank-title">${escapeHtml(title)}</span>`;
+          return `
+        <li class="rank-row">
+          <span class="rank-num">${i + 1}</span>
+          <div class="rank-body">
+            ${titleHtml}
+            ${meta ? `<span class="rank-domain">${escapeHtml(meta)}</span>` : ""}
+          </div>
+        </li>`;
+        }).filter(Boolean);
+        if (!items.length) return;
+        trendingListEl.innerHTML = items.join("");
+        trendingPanelEl.hidden = false;
+      } catch (error) {
+        // fail-silent: the trending panel is optional; the sidebar must never break
+      }
+    }
+
     async function renderWeeklyStats() {
       if (!statTotalEl && !statOfficialEl && !statDraftEl) return;
       try {
@@ -8685,6 +8734,9 @@
     // SIDEBAR-RANK-B2: fire-and-forget the read-only weekly-stats fetch (fills
     // the 이번 주 검증 현황 numbers; fail-quiet, never blocks init).
     renderWeeklyStats();
+    // HOME-TOP5 S5a: fire-and-forget the read-only trending fetch (fills the
+    // 확산 성장 Top 5 panel; fail-quiet, hidden until rows exist).
+    renderTrendingTop5();
     // M45: asynchronously fill the hot-topic area from the server (GET
     // /history, cron output included). Fire-and-forget so it never blocks
     // synchronous init and never touches renderHistory()/localStorage. A

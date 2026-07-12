@@ -314,6 +314,20 @@
              composite-hotness fallback (no view count). Stays all-domain top-10
              and visible regardless of the active category tab or feed sort.
              Later DESIGN-3B steps add weekly counts / legend / report-input. -->
+        <!-- HOME-TOP5 S5a: 확산 성장 Top 5 — filled by renderTrendingTop5() from
+             the read-only GET /api/trending (two-snapshot outlet-count growth).
+             CIRCULATION only: 제목 + N개 매체 + ↑성장/NEW — no verdict field, no
+             판정 color. Stays [hidden] until the fetch resolves with rows; fetch
+             failure / insufficient snapshot history keep it hidden (fail-quiet,
+             the /stats weekly-panel posture). Reuses the rank-panel classes. -->
+        <section id="trendingPanel" class="rank-panel" aria-label="확산 성장 Top 5" hidden>
+          <div class="rank-panel-heading">
+            <h2>확산 성장 Top 5</h2>
+            <p>여러 매체로 퍼진 정도 · 검증이 아닙니다</p>
+          </div>
+          <ol id="trendingList" class="rank-list"></ol>
+        </section>
+
         <section class="rank-panel" aria-label="인기 검증 랭킹">
           <div class="rank-panel-heading">
             <h2>인기 검증 랭킹</h2>
