@@ -10772,6 +10772,16 @@
                  content unchanged. -->
             ${renderCollapsibleSection("이 리포트는 이렇게 읽으면 됩니다", renderReadingGuide(userContext), false, "처음 보는 분을 위한 안내입니다. 판정 단계·신뢰도·공식 출처·근거를 어떻게 읽으면 되는지 설명합니다.")}
 
+            <!-- SPREAD-TIMELINE Slice 2 / CARD-3LAYER S4a: circulation annotation
+                 placeholder (유통 정보만 — 판정 아님), PROMOTED here as the endgame
+                 layer 2 — prominent right after the verdict/guide block instead of
+                 buried late. Stays hidden until /api/spread/{id} returns found +
+                 outlet_count>=2; found:false / singleton / fetch failure all render
+                 NOTHING (fail-silent). Hydrated AFTER the innerHTML pass by
+                 loadSpreadAnnotations() via [data-spread-id] — position-independent.
+                 Detail view only, and only when the card knows its analysis id. -->
+            ${(hasFocus || displayResults.length === 1) && Number(result.result_id) > 0 ? `<section class="public-source-section spread-section" data-spread-id="${Number(result.result_id)}" hidden></section>` : ""}
+
             <!-- STEP 2 item 3: the news CONTENT lead (the article's own claim quote)
                  + the muted verification note, just under the verdict so the reader
                  sees conclusion → the claim it's about. Each renders only if truthy. -->
@@ -10786,14 +10796,6 @@
 
             <!-- STEP 2 item 5: 근거와 출처 요약. -->
             ${renderPublicSourceCards(result)}
-
-            <!-- SPREAD-TIMELINE Slice 2: circulation annotation placeholder
-                 (유통 정보만 — 판정 아님). Stays hidden until /api/spread/{id}
-                 returns found + outlet_count>=2; found:false / singleton /
-                 fetch failure all render NOTHING (fail-silent). Detail view
-                 only, and only when the card knows its analysis id. -->
-            ${(hasFocus || displayResults.length === 1) && Number(result.result_id) > 0 ? `<section class="public-source-section spread-section" data-spread-id="${Number(result.result_id)}" hidden></section>
-            <div class="report-error-link"><button type="button" class="secondary" data-share-image="${Number(result.result_id)}" data-share-title="${title}">이미지로 공유</button></div>` : ""}
 
             <!-- STEP 2 items 6+7: the AI 종합 검증 판단 residual card. STEP 3c removed
                  the duplicate 초안 판정 tile (now led by the top verdict block); kept:
@@ -10823,6 +10825,10 @@
               <div class="reader-note">더 자세한 주장별 근거, 반박 가능성, 표현 방식 점검은 아래 고급 정보에서 펼쳐볼 수 있습니다.</div>
               ${advancedVerificationDetails}
             </section>
+            <!-- CARD-3LAYER S4a: 이미지로 공유 button — split out of the (moved)
+                 spread placeholder's conditional, byte-identical markup/condition;
+                 stays low near the footer while the spread section sits up top. -->
+            ${(hasFocus || displayResults.length === 1) && Number(result.result_id) > 0 ? `<div class="report-error-link"><button type="button" class="secondary" data-share-image="${Number(result.result_id)}" data-share-title="${title}">이미지로 공유</button></div>` : ""}
             <div class="source-link">
               <a class="source-button" href="${url}" target="_blank" rel="noopener noreferrer">원문 보기</a>
             </div>
