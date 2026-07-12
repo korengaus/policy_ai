@@ -203,6 +203,10 @@
     // for the 오늘의 한 장 hero pick. null until the fetch lands; stays null on
     // failure (the hero then keeps its pre-S5b two-card behavior).
     let trendingHeroRows = null;
+    // SEARCH-ANALYZE S-i (bug b): the last corpus-search results, cached so a
+    // BACK from a card opened off the results can re-render them (the card
+    // overwrote #results in place). {query, hits} or null.
+    let lastSearchHitsCache = null;
     // M45: server-side recent analyses (incl. cron output) used to fill the
     // top hot-topic area when there is no live session search. Populated on
     // load from GET /history; never written to localStorage.
@@ -6924,7 +6928,7 @@
     // Honesty: hits show only the existing draft badge (review_status) — no
     // new ranking, no new label; the offer copy says "no prior analysis
     // exists", never anything about truth.
-    function renderSearchHits(query, hits) {
+    function renderSearchHitsView(query, hits) {
       metricsEl.style.display = "none";
       resultsEl.innerHTML = `
         <div class="empty-state">'${escapeHtml(query)}' 관련 기존 분석 ${hits.length}건을 찾았습니다. 제목을 누르면 전체 검증 카드가 열립니다.</div>
@@ -6946,7 +6950,13 @@
       resultsEl.querySelectorAll("[data-search-hit-id]").forEach((row) => {
         const id = Number(row.getAttribute("data-search-hit-id"));
         if (!(id > 0)) return;
-        const open = () => { loadServerResultById(id); };
+        const open = () => {
+          // SEARCH-ANALYZE S-i (bug b): fresh detail entry ON TOP of the
+          // search entry (the double-push guard only collapses detail→detail,
+          // so search→detail pushes cleanly) — BACK now returns to the results.
+          pushDetailHistoryState(window.scrollY || 0);
+          loadServerResultById(id);
+        };
         row.addEventListener("click", open);
         row.addEventListener("keydown", (event) => {
           if (event.key === "Enter" || event.key === " ") {
@@ -6955,7 +6965,35 @@
           }
         });
       });
-      pushDetailHistoryState(window.scrollY || 0);
+    }
+
+    // SEARCH-ANALYZE S-i (bug b): the search-results view gets its OWN history
+    // entry kind ({tickedinSearch}) instead of the shared detail entry — a card
+    // opened from the results then pushes a detail entry on top, so BACK pops
+    // card → results → home instead of skipping to home. A repeat search from
+    // the results view refreshes the single search entry in place (no stacking).
+    // detailHistoryActive is reused as the "on a tracked non-home entry" flag —
+    // the results render on the detail SCREEN, and the popstate home-branch
+    // already keys on it.
+    function pushSearchHistoryState(scrollY) {
+      if (!window.history || !window.history.pushState) return;
+      const y = (typeof scrollY === "number" && isFinite(scrollY)) ? scrollY : (window.scrollY || 0);
+      try {
+        if (window.history.state && window.history.state.tickedinSearch) {
+          window.history.replaceState({ tickedinSearch: true, scrollY: y }, "", window.location.href);
+        } else {
+          window.history.pushState({ tickedinSearch: true, scrollY: y }, "", window.location.href);
+        }
+        detailHistoryActive = true;
+      } catch (_) {
+        /* history unavailable — the results still render */
+      }
+    }
+
+    function renderSearchHits(query, hits) {
+      lastSearchHitsCache = { query, hits };
+      renderSearchHitsView(query, hits);
+      pushSearchHistoryState(window.scrollY || 0);
       showScreen("detail");
     }
 
@@ -8832,6 +8870,24 @@
         detailHistoryActive = false;
         showScreen("about");  // non-home branch scrolls to top
         return;
+      }
+      // SEARCH-ANALYZE S-i (bug b): entered (BACK from a card) or re-entered
+      // (FORWARD) the search-results entry → RE-RENDER the cached hits (the
+      // card overwrote #results in place, so a visibility toggle isn't enough)
+      // and re-show the detail screen. With the cache gone (page reload), fall
+      // through — the flag check below then leaves the page alone.
+      if (navState && navState.tickedinSearch) {
+        if (lastSearchHitsCache && Array.isArray(lastSearchHitsCache.hits)
+            && lastSearchHitsCache.hits.length) {
+          detailHistoryActive = true;
+          methodologyHistoryActive = false;
+          aboutHistoryActive = false;
+          renderSearchHitsView(lastSearchHitsCache.query, lastSearchHitsCache.hits);
+          showScreen("detail");
+          const searchY = (typeof navState.scrollY === "number") ? navState.scrollY : 0;
+          requestAnimationFrame(() => { window.scrollTo(0, searchY || 0); });
+          return;
+        }
       }
       if (navState && navState.tickedinDetail) {
         // Entered (FORWARD, or a sandwiched BACK) the detail entry → re-SHOW the

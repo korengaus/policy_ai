@@ -649,15 +649,21 @@
     }
 
     .error-box {
+      /* SEARCH-ANALYZE S-i (bug a): the old bordered #fef2f2 block pushed the
+         header/rule down. Now mirrors .status-line's compact absolute overlay
+         (zero flow height, same under-search band, same size/offsets) — the
+         red twin of the green success line. showError/#errorBox untouched. */
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      padding-left: 13px;
+      margin-top: 8px;
       display: none;
-      margin-top: 14px;
-      border: 1px solid #fecaca;
-      border-radius: 8px;
-      background: #fef2f2;
       color: #991b1b;
-      padding: 11px 12px;
-      font-size: 14px;
+      font-size: 13px;
       font-weight: 700;
+      pointer-events: none;
     }
 
     .metrics {
