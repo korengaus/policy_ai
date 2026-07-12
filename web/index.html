@@ -10766,6 +10766,21 @@
               </div>
             </section>
 
+            <!-- CARD-3LAYER S4b: 리뷰 상태 + 사람 검토됨 badge and the fixed honesty
+                 line, HOISTED byte-identical from the verification-card below —
+                 layer 1 shows claim + verdict + status badge + honesty framing
+                 before anything dense. Markup/strings unchanged, only moved. -->
+            <div class="verification-intro">
+              <div class="summary-tile">
+                <span class="label">리뷰 상태</span>
+                <strong>${escapeHtml(formatReviewStatus(verification.review_status))}</strong>
+                ${result.human_reviewed_at ? `<span class="review-status review-approved">${escapeHtml(HUMAN_REVIEWED_LABEL)}</span>` : ""}
+              </div>
+            </div>
+            <div class="reader-note">
+              현재 수집된 기사와 공식 자료 기준의 검증 초안입니다. 절대적 결론이 아니라, 확인 가능한 근거를 바탕으로 한 판단입니다.
+            </div>
+
             <!-- CARD-TOPFIX 3b: reading guide MOVED here (was after the spread
                  placeholder, too late for a first-time reader) — right after the
                  verdict block, before the dense sections. Kept collapsed,
@@ -10804,16 +10819,9 @@
                  COLLAPSED with internals UNTOUCHED — presentation redesign is DETAIL-5. -->
             <section class="verification-card">
               <h3>AI 종합 검증 판단</h3>
-              <div class="reader-note">
-                현재 수집된 기사와 공식 자료 기준의 검증 초안입니다. 절대적 결론이 아니라, 확인 가능한 근거를 바탕으로 한 판단입니다.
-              </div>
-              <div class="verification-intro">
-                <div class="summary-tile">
-                  <span class="label">리뷰 상태</span>
-                  <strong>${escapeHtml(formatReviewStatus(verification.review_status))}</strong>
-                  ${result.human_reviewed_at ? `<span class="review-status review-approved">${escapeHtml(HUMAN_REVIEWED_LABEL)}</span>` : ""}
-                </div>
-              </div>
+              <!-- CARD-3LAYER S4b: the honesty reader-note and the 리뷰 상태 +
+                   사람 검토됨 badge tile moved UP into layer 1 (right after the
+                   verdict block) — a move, not a removal. -->
               <div class="verification-item full">
                 <span class="label">핵심 주장</span><br>
                 ${escapeHtml(exportClaimText(result))}
