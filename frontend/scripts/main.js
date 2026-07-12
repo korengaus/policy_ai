@@ -5509,6 +5509,11 @@
 
     function renderHistory(rows) {
       const records = Array.isArray(rows) ? rows.slice(0, LOCAL_HISTORY_LIMIT) : [];
+      // HOME-EMPTY-HIDE: the 최근 분석 기록 section shows only when records
+      // exist (template starts it [hidden]; the empty state added home length).
+      // Toggled BOTH ways so clearing history re-hides it.
+      const recentSectionEl = historyEl ? historyEl.closest("section.recent-analyses") : null;
+      if (recentSectionEl) recentSectionEl.hidden = !records.length;
       if (!records.length) {
         historyEl.innerHTML = '<div class="empty-state">아직 저장된 분석 기록이 없습니다.</div>';
         renderHotTopics();

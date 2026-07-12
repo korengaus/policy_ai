@@ -657,7 +657,10 @@
          WITHOUT touching the operator .history-card panels above. Kept on the homepage
          in place; still populated by renderHistory(safeReadLocalHistory()) — restyle
          only, no data/populate change. -->
-    <section class="recent-analyses" aria-label="최근 분석 기록">
+    <!-- HOME-EMPTY-HIDE: starts [hidden]; renderHistory() un-hides it only when
+         saved records exist (the always-empty block just added home length).
+         Markup + empty-state string kept byte-identical, display-gated only. -->
+    <section class="recent-analyses" aria-label="최근 분석 기록" hidden>
       <div class="recent-head">
         <h2>최근 분석 기록</h2>
         <button id="clearHistoryBtn" class="history-clear" type="button">전체 기록 삭제</button>
@@ -673,7 +676,11 @@
          message; the structure is ready for real entries later. Reuses the
          existing .corrections* styles + the shared .empty-state. The About
          content moved OUT to its own #aboutScreen page (mirrors 검증 등급 안내). -->
-    <section id="correctionsSection" class="corrections" aria-label="정정·업데이트">
+    <!-- HOME-EMPTY-HIDE: [hidden] until a REAL corrections data source exists —
+         the block is static-empty today (no populate path in main.js) and only
+         added home length. Markup + the honesty strings stay byte-identical for
+         the future corrections feed, which un-hides it. -->
+    <section id="correctionsSection" class="corrections" aria-label="정정·업데이트" hidden>
       <div class="corrections-head">
         <h2>정정·업데이트</h2>
         <p class="corrections-sub">투명한 정정은 신뢰의 일부입니다</p>
