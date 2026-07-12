@@ -5381,6 +5381,15 @@
               <div class="ai-status-note">${escapeHtml(buildAiStatusDescriptor(getResultAiStatus(result).status).note)}</div>
             </div>
 
+            <!-- CARD-AISUMMARY: the 핵심 주장 claim summary MOVED here from the
+                 verification-card (bottom) — the always-read "what's claimed"
+                 now leads layer 1, before the verdict panel. Byte-identical
+                 markup; a move, not a copy. Claim summary, not a verdict. -->
+            <div class="verification-item full">
+              <span class="label">핵심 주장</span><br>
+              ${escapeHtml(exportClaimText(result))}
+            </div>
+
             <!-- DESIGN-DETAIL-4 STEP 1: the consolidated AI VERDICT BLOCK — the first
                  thing the reader sees. Verdict indicators (판정 단계 / AI 초안 판정 /
                  신뢰도 / 공식 출처 상태) as a clean flat row, then the single
@@ -5479,11 +5488,8 @@
               <h3>AI 종합 검증 판단</h3>
               <!-- CARD-3LAYER S4b: the honesty reader-note and the 리뷰 상태 +
                    사람 검토됨 badge tile moved UP into layer 1 (right after the
-                   verdict block) — a move, not a removal. -->
-              <div class="verification-item full">
-                <span class="label">핵심 주장</span><br>
-                ${escapeHtml(exportClaimText(result))}
-              </div>
+                   verdict block); CARD-AISUMMARY moved the 핵심 주장 summary up
+                   under the headline — moves, not removals. -->
               ${operatorToolsFlagSet() ? renderReviewerDecisionDashboard(result, userContext) : ""}
               ${operatorToolsFlagSet() ? renderReviewerCheckpoints(result) : ""}
               ${operatorToolsFlagSet() ? renderReviewerActionCard(result, userContext) : ""}
