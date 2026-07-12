@@ -894,6 +894,226 @@ def spread_annotation(analysis_id: int) -> Response:
         return _spread_response(_SPREAD_NOT_FOUND_JSON)
 
 
+# ---------------------------------------------------------------------------
+# TRENDING-API Slice 1 — read-only spread-GROWTH Top-N from the
+# brainmap_snapshots time series (§27c passive accumulation).
+#
+# GET /api/trending diffs the TWO most recent snapshot batches (batch =
+# all rows sharing one snapshot_date + graph_ref; batches ordered by their
+# newest row id) and ranks clusters by outlet_count growth. Each row is
+# enriched with a display title + representative analysis_id resolved from
+# the NEWEST brainmap_graph (label-title member, min-id fallback — the
+# generate_faded_candidates representative rule).
+#
+# SAFETY / HONESTY:
+#   * READ-ONLY: selects brainmap_snapshots ids/counts/dates and graph_json
+#     title/id fields ONLY. NO verdict field is ever read (verdict_label /
+#     policy_confidence_score / truth_claim untouched) — the payload is
+#     circulation GROWTH metadata, spread, never 검증.
+#   * NEVER 500: fewer than two batches (today's real state: one §27c batch)
+#     -> {"trending": [], "note": "insufficient snapshot history"}; PG
+#     disabled / table missing / any failure -> {"trending": []} — all 200.
+#   * Graph parsed ONCE per brainmap_graph row (module cache keyed by row
+#     id, the _SPREAD_CACHE pattern).
+# ---------------------------------------------------------------------------
+_TRENDING_EMPTY_JSON = '{"trending": []}'
+_TRENDING_DEFAULT_LIMIT = 10  # UI takes the Top 5; return a little headroom.
+_TRENDING_MAX_LIMIT = 20
+_TRENDING_DISPLAY_CACHE: dict = {"row_id": None, "display": None}
+
+
+def _fetch_snapshot_batches():
+    """The two most recent DISTINCT snapshot batches, newest first. Each is
+    {"snapshot_date", "graph_ref", "rows": [(stable_id, outlet_count,
+    member_count), ...]}. Batches are keyed by (snapshot_date, graph_ref) —
+    the append guard's own key — and ordered by MAX(id) so a same-day
+    re-snapshot of a newer build still ranks as 'current'. Returns None on
+    every expected-empty path (PG disabled, table missing)."""
+    import sqlalchemy as sa
+    from sqlalchemy.exc import ProgrammingError
+
+    import postgres_storage
+
+    engine = postgres_storage.get_engine()
+    if engine is None:
+        return None
+    try:
+        with engine.connect() as conn:
+            keys = conn.execute(sa.text(
+                "SELECT snapshot_date, graph_ref, MAX(id) AS max_id "
+                "FROM brainmap_snapshots "
+                "GROUP BY snapshot_date, graph_ref "
+                "ORDER BY max_id DESC LIMIT 2"
+            )).fetchall()
+            batches = []
+            for snapshot_date, graph_ref, _max_id in keys:
+                rows = conn.execute(sa.text(
+                    "SELECT cluster_stable_id, outlet_count, member_count "
+                    "FROM brainmap_snapshots "
+                    "WHERE snapshot_date = :d AND graph_ref = :g"
+                ), {"d": snapshot_date, "g": graph_ref}).fetchall()
+                batches.append({
+                    "snapshot_date": snapshot_date,
+                    "graph_ref": graph_ref,
+                    "rows": [(r[0], r[1], r[2]) for r in rows],
+                })
+    except ProgrammingError:
+        return None
+    return batches
+
+
+def _compute_trending(current_rows, previous_rows, limit):
+    """Pure: two batches of (stable_id, outlet_count, member_count) ->
+    ranked growth entries. A cluster only in 'current' is new (is_new=true,
+    growth = its full outlet_count — a fresh widely-covered cluster is
+    legitimately trending). Clusters only in 'previous' dropped out — not
+    growth. Duplicate stable_ids within a batch (a --force re-append)
+    collapse to the last row."""
+    current = {sid: (outlets, members)
+               for sid, outlets, members in current_rows if sid}
+    previous = {sid: outlets for sid, outlets, _ in previous_rows if sid}
+    entries = []
+    for sid, (outlets, members) in current.items():
+        prev_outlets = previous.get(sid)
+        is_new = prev_outlets is None
+        growth = outlets if is_new else outlets - prev_outlets
+        entries.append({
+            "cluster_stable_id": sid,
+            "representative_analysis_id": None,
+            "title": "",
+            "current_outlet_count": outlets,
+            "previous_outlet_count": prev_outlets,
+            "growth": growth,
+            "is_new": is_new,
+            "member_count": members,
+        })
+    entries.sort(key=lambda e: (-e["growth"], -e["current_outlet_count"],
+                                e["cluster_stable_id"]))
+    return entries[:limit]
+
+
+def _build_trending_display_index(graph: dict) -> dict:
+    """Pure: graph JSON -> {stable_id: {"title", "representative_analysis_id"}}.
+    Title is the cluster's label_title; the representative is the lowest-id
+    member whose node title equals it, min member id otherwise (the
+    generate_faded_candidates rule). Display fields only — no verdict."""
+    members_by_cluster: dict = {}
+    for node in graph.get("nodes") or []:
+        cid = node.get("cluster_id")
+        node_id = node.get("id")
+        if cid is None or node_id is None:
+            continue
+        members_by_cluster.setdefault(cid, []).append(
+            (node_id, node.get("title") or ""))
+    display = {}
+    for cluster in graph.get("clusters") or []:
+        stable_id = cluster.get("stable_id")
+        members = members_by_cluster.get(cluster.get("cluster_id")) or []
+        if not stable_id or not members:
+            continue
+        label_title = cluster.get("label_title") or ""
+        representative_id = min(mid for mid, _ in members)
+        if label_title:
+            for mid, title in sorted(members):
+                if title == label_title:
+                    representative_id = mid
+                    break
+        display[stable_id] = {
+            "title": label_title,
+            "representative_analysis_id": representative_id,
+        }
+    return display
+
+
+def _load_trending_display_index():
+    """Newest brainmap_graph row -> stable_id display map (module-cached by
+    row id, mirroring _load_spread_indexes). None on every expected-empty
+    path — trending rows then ship without title/representative."""
+    import sqlalchemy as sa
+    from sqlalchemy.exc import ProgrammingError
+
+    import postgres_storage
+
+    engine = postgres_storage.get_engine()
+    if engine is None:
+        return None
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(sa.text(
+                "SELECT id FROM brainmap_graph ORDER BY id DESC LIMIT 1"
+            )).fetchone()
+    except ProgrammingError:
+        return None
+    if not row:
+        return None
+    row_id = row[0]
+    if (_TRENDING_DISPLAY_CACHE["row_id"] == row_id
+            and _TRENDING_DISPLAY_CACHE["display"] is not None):
+        return _TRENDING_DISPLAY_CACHE["display"]
+    with engine.connect() as conn:
+        graph_row = conn.execute(sa.text(
+            "SELECT graph_json FROM brainmap_graph WHERE id = :row_id"
+        ), {"row_id": row_id}).fetchone()
+    if not graph_row or not graph_row[0]:
+        return None
+    try:
+        graph = json.loads(graph_row[0])
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(graph, dict):
+        return None
+    display = _build_trending_display_index(graph)
+    _TRENDING_DISPLAY_CACHE["row_id"] = row_id
+    _TRENDING_DISPLAY_CACHE["display"] = display
+    return display
+
+
+@app.get("/api/trending")
+def trending_growth(limit: Optional[str] = None) -> Response:
+    try:
+        # Defensive parse: ?limit=abc falls back to the default instead of a
+        # validation error — this endpoint answers 200 for every input.
+        try:
+            n = int(limit) if limit is not None else _TRENDING_DEFAULT_LIMIT
+        except (TypeError, ValueError):
+            n = _TRENDING_DEFAULT_LIMIT
+        n = max(1, min(n, _TRENDING_MAX_LIMIT))
+
+        batches = _fetch_snapshot_batches()
+        if not batches:
+            return _spread_response(_TRENDING_EMPTY_JSON)
+        if len(batches) < 2:
+            only = batches[0]
+            return _spread_response(json.dumps({
+                "trending": [],
+                "window": {
+                    "current_date": only["snapshot_date"],
+                    "previous_date": None,
+                    "graph_ref": only["graph_ref"],
+                },
+                "note": "insufficient snapshot history",
+            }, ensure_ascii=False))
+        current, previous = batches[0], batches[1]
+        entries = _compute_trending(current["rows"], previous["rows"], n)
+        display = _load_trending_display_index() or {}
+        for entry in entries:
+            info = display.get(entry["cluster_stable_id"]) or {}
+            entry["title"] = info.get("title") or ""
+            entry["representative_analysis_id"] = info.get(
+                "representative_analysis_id")
+        return _spread_response(json.dumps({
+            "trending": entries,
+            "window": {
+                "current_date": current["snapshot_date"],
+                "previous_date": previous["snapshot_date"],
+                "graph_ref": current["graph_ref"],
+            },
+        }, ensure_ascii=False))
+    except Exception:
+        logger.exception("Failed to build trending growth ranking")
+        return _spread_response(_TRENDING_EMPTY_JSON)
+
+
 class JobCreateRequest(BaseModel):
     query: str
     max_news: int = 3
