@@ -150,8 +150,6 @@
     // DESIGN-C3h-2: per-domain grouped sections container (filled on the 전체 tab only).
     const feedDomainSectionsEl = document.getElementById("feedDomainSections");
     const verifyHowEl = document.getElementById("verifyHowSection");
-    // SIDEBAR-RANK: 인기 검증 랭킹 list container in the right sidebar (.home-aside).
-    const rankListEl = document.getElementById("rankList");
     // SIDEBAR-RANK-B2: weekly-stats panel numbers + range; 제보 input/button.
     // HOME-TOP5 S5a: 확산 성장 Top 5 sidebar panel (filled from /api/trending).
     const trendingPanelEl = document.getElementById("trendingPanel");
@@ -201,6 +199,10 @@
     let currentPage = 1;
     let activeTopicKey = "";
     let selectedResultIndex = null;
+    // HOME-TOP5 S5b: the S5a /api/trending rows, cached by renderTrendingTop5
+    // for the 오늘의 한 장 hero pick. null until the fetch lands; stays null on
+    // failure (the hero then keeps its pre-S5b two-card behavior).
+    let trendingHeroRows = null;
     // M45: server-side recent analyses (incl. cron output) used to fill the
     // top hot-topic area when there is no live session search. Populated on
     // load from GET /history; never written to localStorage.
@@ -2339,9 +2341,27 @@
     // same sort (default 뜨는순) so ranking is consistent: tier-1 = global top,
     // tier-2 = ranks beyond the tier-1 cut. Nothing disappears — an item that
     // misses the tier-1 cut shows in tier-2 (and ranks high under its domain tab).
+    // HOME-TOP5 S5b: resolve the #1 trending cluster's representative card from
+    // the loaded server pool (the renderRecentViewed resolution). Returns null
+    // when the trending fetch hasn't landed / is empty / the representative is
+    // older than the recent-50 pool — callers then render the two-card hero.
+    function trendingDailyPickCard() {
+      const rows = Array.isArray(trendingHeroRows) ? trendingHeroRows : [];
+      const rid = Number(rows[0]?.representative_analysis_id);
+      if (!Number.isInteger(rid) || rid <= 0) return null;
+      const idx = serverHotTopicResults.findIndex((r) => Number(r?.result_id) === rid);
+      if (idx < 0) return null;
+      return topicCardFromResult(serverHotTopicResults[idx], idx, "server");
+    }
+
     function renderHotTopics(preferredResults) {
       if (!hotTopicsEl) return;
       const allCards = currentTopicCards(preferredResults);
+      // HOME-TOP5 S5b: 오늘의 한 장 applies ONLY to the genuine 전체 home feed —
+      // never to a domain tab's hero or a search/preferred-results render.
+      const dailyPick = (activeDomain === "전체"
+        && !(Array.isArray(preferredResults) && preferredResults.length))
+        ? trendingDailyPickCard() : null;
       // STABLE-TABS S2: the tab SET is now stable (전체 + all DOMAIN_ORDER), so it
       // no longer depends on the loaded pool — no tabPool derivation needed.
       renderCategoryTabs();
@@ -2376,8 +2396,16 @@
       // DESIGN-C3h-3: the dedicated 오늘의 검증 row was removed — today cards now flow
       // into the normal sorted feed carrying the per-card "오늘 검증" badge (isTodayCard).
       // So the pool excludes ONLY the hero cards (no longer the today cards).
+      // HOME-TOP5 S5b: the grid exclusion follows the ACTUAL hero. With a
+      // resolved 오늘의 한 장 the ONE pick is excluded (matched by key OR
+      // recordId, so a cross-source pool can't double-render it) and the two
+      // 뜨는순 cards flow back into the grid; on fallback the pre-S5b 2-card
+      // exclusion applies unchanged.
       const heroKeys = new Set(hot.slice(0, 2).map((c) => c.key));
-      const poolBase = filtered.filter((c) => !heroKeys.has(c.key));
+      const poolBase = filtered.filter((c) => dailyPick
+        ? !(c.key === dailyPick.key
+            || (c.recordId && String(c.recordId) === String(dailyPick.recordId)))
+        : !heroKeys.has(c.key));
       const poolSorted = sortTopicCards(poolBase, activeSort);
       // DESIGN-C3-2: ONE uniform 3-col grid, PAGE_SIZE (12) cards per page. gridPool =
       // poolSorted (filtered MINUS the 2 hero cards, already sorted by activeSort so the
@@ -2400,12 +2428,20 @@
       const effectivePage = Math.min(Math.max(1, currentPage), totalPages);
       const pageSlice = gridPool.slice((effectivePage - 1) * PAGE_SIZE, effectivePage * PAGE_SIZE);
 
-      // Hero band → #hotTopicsTop (UNCHANGED: hot[0] {hero} + hot[1] {secondary}); the
-      // uniform grid → #hotTopics.topic-card-grid via the ORDINARY card builder
-      // ({detailed:true} only — no hero/secondary), written straight in with NO
-      // .feed-sec-ruled / .latest-checks-row / .feed-list wrappers (the container IS
-      // the 3-col grid now).
-      if (!hot.length) {
+      // Hero band → #hotTopicsTop; the uniform grid → #hotTopics.topic-card-grid
+      // via the ORDINARY card builder ({detailed:true} only — no hero/secondary),
+      // written straight in with NO .feed-sec-ruled / .latest-checks-row /
+      // .feed-list wrappers (the container IS the 3-col grid now).
+      // HOME-TOP5 S5b: with a resolved 오늘의 한 장 the hero is that ONE big card
+      // (the most-CIRCULATED story by spread growth — circulation, never a
+      // verdict; the standard card face keeps its own honest badges). Every
+      // unresolved state falls through to the pre-S5b hero branches unchanged.
+      if (dailyPick) {
+        hotTopicsTopEl.innerHTML = renderTopicCardHtml(dailyPick, { detailed: true, hero: true });
+        hotTopicsEl.innerHTML = pageSlice
+          .map((card) => renderTopicCardHtml(card, { detailed: true }))
+          .join("");
+      } else if (!hot.length) {
         hotTopicsTopEl.innerHTML = "";
         // STABLE-TABS S2: a domain tab whose data is still fetching / failed shows
         // a loading or friendly-error line instead of the generic empty-state.
@@ -2453,11 +2489,8 @@
       if (tier2LoadMoreEl) tier2LoadMoreEl.hidden = true;
       if (tier2CollapseEl) tier2CollapseEl.hidden = true;
 
-      // SIDEBAR-RANK: keep the 인기 검증 랭킹 panel in sync with the feed's data
-      // lifecycle. Called here (rather than at the two renderHotTopics() call
-      // sites) so the sidebar always re-renders together with the feed —
-      // including the async post-fetch re-render that first fills the pool.
-      renderSidebarRanking();
+      // HOME-TOP5 S5b: the 인기 검증 랭킹 sidebar render was retired here (the
+      // S5a 확산 성장 Top 5 panel covers the sidebar-ranking role).
       // CLUSTER-SURFACE S-b: repaint the "N개 매체" chips after every grid paint
       // (innerHTML wiped any prior ones). Fire-and-forget; internally fail-silent,
       // and the 5-min HTTP cache makes repeat calls cheap.
@@ -2499,34 +2532,10 @@
       feedPaginationEl.innerHTML = parts.join("");
     }
 
-    // SIDEBAR-RANK: 인기 검증 랭킹 (1-10). Reuses the SAME loaded card pool and
-    // the SAME composite "hotness" sort as the feed, but always over the
-    // UNFILTERED, all-domain pool with the LITERAL "뜨는순" — so the panel stays
-    // all-domain top-10 and never empties / re-ranks when a category tab is
-    // clicked or the feed's sort is changed. Rows carry the same four
-    // data-topic-* attrs as feed cards, so the delegated listener below reuses
-    // openTopicCard verbatim (detail open + HISTORY-BACK keep working).
-    function renderSidebarRanking() {
-      if (!rankListEl) return;
-      const ranked = sortTopicCards(currentTopicCards(), "뜨는순").slice(0, 10);
-      if (!ranked.length) {
-        rankListEl.innerHTML = "";
-        return;
-      }
-      rankListEl.innerHTML = ranked.map((card, i) => `
-        <li class="rank-row" data-topic-key="${escapeHtml(card.key)}" data-topic-source="${escapeHtml(card.source)}" data-topic-index="${escapeHtml(card.index)}" data-topic-record-id="${escapeHtml(card.recordId)}">
-          <span class="rank-num">${i + 1}</span>
-          <div class="rank-body">
-            <span class="rank-domain">${escapeHtml(domainDisplayLabel(cardDomainKey(card)))}</span>
-            <span class="rank-title">${escapeHtml(card.title)}</span>
-            <span class="rank-verdict">
-              <span class="verdict-dot" style="background:${verdictDotColor(card.verdictLabel)}"></span>
-              <span class="rank-verdict-text">판정 ${escapeHtml(verdictLabelKo(card.verdictLabel))}</span>
-            </span>
-          </div>
-        </li>
-      `).join("");
-    }
+    // HOME-TOP5 S5b: renderSidebarRanking (인기 검증 랭킹 1-10) was RETIRED —
+    // the S5a 확산 성장 Top 5 panel covers the sidebar-ranking role, without
+    // the old rows' verdict dots. The .rank-* classes stay in main.css for the
+    // trending panel and 최근 본 검증 rows.
 
     // RECENT-VIEWED: render the "최근 본 검증" strip on the detail screen. Reads the
     // stored result_ids, EXCLUDES the currently-open id, resolves each against the
@@ -2584,6 +2593,11 @@
         if (!response.ok) return;
         const body = await response.json();
         const rows = Array.isArray(body?.trending) ? body.trending.slice(0, 5) : [];
+        // HOME-TOP5 S5b: cache the rows for the 오늘의 한 장 hero pick and
+        // repaint the (idempotent) home render now that trending has landed —
+        // it falls back to the two-card hero whenever the pick can't resolve.
+        trendingHeroRows = rows;
+        if (rows.length) renderHotTopics();
         const items = rows.map((row, i) => {
           const rid = Number(row?.representative_analysis_id);
           const title = String(row?.title || "").trim() || (rid > 0 ? `기사 #${rid}` : "");
@@ -7445,16 +7459,8 @@
         openTopicCard(card);
       });
     }
-    // SIDEBAR-RANK: the 인기 검증 랭킹 rows carry the same data-topic-* attrs as
-    // feed cards, so this delegated listener reuses openTopicCard verbatim — the
-    // same three open branches + pushDetailHistoryState (HISTORY-BACK) fire.
-    if (rankListEl) {
-      rankListEl.addEventListener("click", (event) => {
-        const card = event.target.closest("[data-topic-source]");
-        if (!card) return;
-        openTopicCard(card);
-      });
-    }
+    // HOME-TOP5 S5b: the #rankList delegated click listener was retired with
+    // the 인기 검증 랭킹 panel (the trending panel uses plain hrefs).
     // RECENT-VIEWED: the strip items carry the same data-topic-* attrs as feed/sidebar
     // rows, so this delegated listener reuses openTopicCard verbatim (re-opens detail +
     // records the click + pushDetailHistoryState). Same closest() pattern as above.

@@ -308,12 +308,8 @@
       </div>
 
       <aside class="home-aside" aria-label="검증 사이드바">
-        <!-- SIDEBAR-RANK: 인기 검증 랭킹 (1-10). #rankList is filled by
-             renderSidebarRanking() from the SAME loaded card pool as the feed
-             (sortTopicCards(currentTopicCards(),"뜨는순").slice(0,10)) — an honest
-             composite-hotness fallback (no view count). Stays all-domain top-10
-             and visible regardless of the active category tab or feed sort.
-             Later DESIGN-3B steps add weekly counts / legend / report-input. -->
+        <!-- Sidebar panels: 확산 성장 Top 5 (S5a) + 이번 주 검증 현황. The old
+             인기 검증 랭킹 panel was retired in HOME-TOP5 S5b. -->
         <!-- HOME-TOP5 S5a: 확산 성장 Top 5 — filled by renderTrendingTop5() from
              the read-only GET /api/trending (two-snapshot outlet-count growth).
              CIRCULATION only: 제목 + N개 매체 + ↑성장/NEW — no verdict field, no
@@ -328,13 +324,10 @@
           <ol id="trendingList" class="rank-list"></ol>
         </section>
 
-        <section class="rank-panel" aria-label="인기 검증 랭킹">
-          <div class="rank-panel-heading">
-            <h2>인기 검증 랭킹</h2>
-            <p>지금 주목 · 최근 검증 기준</p>
-          </div>
-          <ol id="rankList" class="rank-list"></ol>
-        </section>
+        <!-- HOME-TOP5 S5b: the 인기 검증 랭킹 panel was RETIRED — the 확산 성장
+             Top 5 panel above now fills the sidebar-ranking role (and, unlike
+             the old rank rows, carries no verdict dot). The .rank-* CSS classes
+             stay: the trending panel and 최근 본 검증 reuse them. -->
 
         <!-- SIDEBAR-RANK-B2: 이번 주 검증 현황 — REAL rolling-7-day counts from the
              read-only GET /stats (renderWeeklyStats fills #statTotal/#statOfficial/
