@@ -103,15 +103,34 @@ class DomainClassifierTests(unittest.TestCase):
         self._patch(boom)
         self.assertEqual(dc.classify_domain("title", None), "기타-미분류")
 
-    def test_label_set_is_the_ten_taxonomy(self):
-        self.assertEqual(len(dc.LABELS), 10)
-        for expected in ("finance", "realestate", "기타-미분류"):
+    def test_label_set_is_the_eleven_taxonomy(self):
+        # DOMAIN-LABEL 2a: education joined as the 11th label; the fallback
+        # stays LAST and the original 10 are all still present.
+        self.assertEqual(len(dc.LABELS), 11)
+        for expected in ("finance", "realestate", "education", "기타-미분류"):
             self.assertIn(expected, dc.LABELS)
+        self.assertEqual(dc.LABELS[-1], "기타-미분류")
+
+    def test_education_label(self):
+        # DOMAIN-LABEL 2a: a clearly-education input classifies as education
+        # when the (mocked) LLM answers it.
+        self._patch(lambda prompt, model, key: _Msg("education"))
+        self.assertEqual(
+            dc.classify_domain("2028학년도 대학입시제도 개편 시안 설명회",
+                               "교육부가 대입 개편 시안을 공개했다"),
+            "education",
+        )
+
+    def test_prompt_describes_education(self):
+        prompt = dc._build_domain_prompt("아무 제목", None)
+        self.assertIn("- education:", prompt)
+        self.assertIn("교육", prompt)
 
     def test_parse_label_unit(self):
         self.assertEqual(dc._parse_label("finance"), "finance")
         self.assertEqual(dc._parse_label('"welfare"'), "welfare")
         self.assertEqual(dc._parse_label("Label: SMB"), "SMB")
+        self.assertEqual(dc._parse_label("Label: education"), "education")
         self.assertEqual(dc._parse_label("nothing here"), "기타-미분류")
 
 

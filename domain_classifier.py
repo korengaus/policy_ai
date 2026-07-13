@@ -1,8 +1,8 @@
 """CLASSIFY-2a: forward domain classification (tool-free Sonnet, metadata-only).
 
 Promotes the CLASSIFY-PROBE logic (scripts/classify_probe.py) into a production
-module. Assigns each analysis row a SINGLE domain label from a fixed 10-label
-taxonomy. The label is METADATA: it is persisted beside ``topic`` and consumed
+module. Assigns each analysis row a SINGLE domain label from a fixed 11-label
+taxonomy (DOMAIN-LABEL 2a added education). The label is METADATA: it is persisted beside ``topic`` and consumed
 by category UI later — it NEVER feeds any verdict/scoring field.
 
 Auth/call convention mirrors hot_topics.py / llm_judge.py: lazy
@@ -27,11 +27,14 @@ from llm_observability import estimate_cost_usd, record_llm_call
 log = get_logger(__name__)
 
 
-# Fixed domain taxonomy (the CLASSIFY-PROBE / CLASSIFY-1 set). 기타-미분류 is the
-# explicit fallback for genuinely ambiguous / none-fit rows.
+# Fixed domain taxonomy (the CLASSIFY-PROBE / CLASSIFY-1 set; DOMAIN-LABEL 2a
+# added education — the gap probe measured 709 education rows piled in the
+# fallback, 69% of the 미분류 pool). 기타-미분류 is the explicit fallback for
+# genuinely ambiguous / none-fit rows and stays LAST.
 LABELS = [
     "finance", "welfare", "agriculture", "labor", "health",
-    "environment", "SMB", "realestate", "statistics", "기타-미분류",
+    "environment", "SMB", "realestate", "statistics", "education",
+    "기타-미분류",
 ]
 
 # The fallback label returned on ANY failure / ambiguity (never raises).
@@ -63,6 +66,9 @@ def _build_domain_prompt(title: str, claim_text: str | None) -> str:
         "- environment: 환경/탄소/에너지/기후/온실가스\n"
         "- SMB: 소상공인/자영업/중소기업\n"
         "- statistics: 통계청 지표/물가지수/고용률/실업률 (statistics as the subject)\n"
+        "- education: 교육/대입/수능/입시/학교/교육청/대학/교육부 정책 "
+        "(education policy incl. its budget — an education-budget story is "
+        "education, not finance; pick the dominant frame)\n"
         "- 기타-미분류: use ONLY if none of the above clearly fits\n\n"
         "Reply with ONLY the single label token, nothing else.\n\n"
         f"Title: {title or ''}\n"
