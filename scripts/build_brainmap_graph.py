@@ -120,6 +120,17 @@ INSERT_SQL = (
 # every string THIS script generates: kind, size_label, params.)
 FORBIDDEN_LABEL_VOCAB = ("검증", "confirmed", "verified")
 
+# SYNDICATION-STAT B5d 2a — spread-structure metric (verdict-isolated, same
+# category as outlet_count). Threshold 0.95 was probe-confirmed (the >=0.95
+# title+claim pairs read as near-identical phrasing; NOT 0.90). The framing is
+# DESCRIPTIVE circulation structure only — never "복붙/베낌", never
+# truth-implying — and must join honesty_guard's whitelists at 2b exposure.
+SYNDICATION_SIM_THRESHOLD = 0.95
+SYNDICATION_FRAMING = "첫 보도와 제목·주장 문구가 거의 동일"
+# Anchor publish dates come from the SPREAD-F1B column (same verdict-free
+# SELECT generate_weekly_report.py uses; ~96% fill, min-id fallback).
+SELECT_PUBLISHED_SQL = "SELECT id, published_at FROM analysis_results"
+
 
 def normalize_outlet_host(url):
     """Outlet identity for the distinct-매체 count: the normalized host of
@@ -205,8 +216,20 @@ def _knn_topk(Xn, kk, block_rows=KNN_BLOCK_ROWS):
     return knn, sims
 
 
+def _syndication_anchor(members, ids, published_ats):
+    """The cluster's earliest member (the 'first report' anchor): min by
+    (published_at, row id) over dated members; min row id when none are dated
+    (published_ats absent/None entries). ISO-UTC strings compare correctly."""
+    dated = [(published_ats[i], ids[i], i) for i in members
+             if published_ats and published_ats[i]]
+    if dated:
+        return min(dated)[2]
+    return min(members, key=lambda i: ids[i])
+
+
 def build_graph(ids, titles, domains, content_natures, X,
-                outlet_sets=None, k=KNN_K, sim_threshold=SIM_THRESHOLD):
+                outlet_sets=None, k=KNN_K, sim_threshold=SIM_THRESHOLD,
+                published_ats=None):
     """Pure compute: kNN(k) cosine graph -> edges at sim>=threshold ->
     union-find components -> PCA-2D coords -> degree-based cluster labels.
     Returns the graph dict (without generated_at/params — main adds those).
@@ -276,6 +299,25 @@ def build_graph(ids, titles, domains, content_natures, X,
                 outlets.update(outlet_sets[i] or ())
         outlets.discard("")
         outlet_count = len(outlets) or len(members)
+        # SYNDICATION-STAT B5d 2a — additive spread-structure fields. Anchor =
+        # earliest member; NEAR tier = distinct outlets whose title+claim
+        # cosine vs the anchor >= 0.95 (anchor's own outlet counts; cosine is
+        # the dot of the already-normalized Xn rows — no new embed spend);
+        # EXACT tier = the anchor node's own outlet set (identical title+claim
+        # texts were already collapsed into one node with their outlets
+        # unioned in load_corpus_vectors' outlets_by_hash). Circulation
+        # structure only — no verdict field involved.
+        anchor = _syndication_anchor(members, ids, published_ats)
+        near_outlets = set()
+        exact_outlets = set()
+        if outlet_sets:
+            for i in members:
+                sim = 1.0 if i == anchor else float(Xn[anchor] @ Xn[i])
+                if sim >= SYNDICATION_SIM_THRESHOLD:
+                    near_outlets.update(outlet_sets[i] or ())
+            near_outlets.discard("")
+            exact_outlets = set(outlet_sets[anchor] or ())
+            exact_outlets.discard("")
         clusters.append({
             "cluster_id": cluster_id,
             "stable_id": stable_id,
@@ -285,6 +327,11 @@ def build_graph(ids, titles, domains, content_natures, X,
             # HONESTY: spread ("circulating across N outlets"), never 검증.
             "size_label": "%d개 매체 보도 중" % outlet_count,
             "kind": "spread",
+            "anchor_analysis_id": ids[anchor],
+            "near_anchor_outlet_count": len(near_outlets),
+            "exact_same_text_outlet_count": len(exact_outlets),
+            "syndication_sim_threshold": SYNDICATION_SIM_THRESHOLD,
+            "syndication_framing": SYNDICATION_FRAMING,
         })
 
     coords = _pca_2d(Xn)
@@ -544,11 +591,55 @@ def run_selftest() -> int:
     print("  [%s] (h) stable_id = sha256(sorted member ids)[:12], rebuild-stable"
           % ("ok" if h_ok else "xx"))
 
-    ok = all([a_ok, b_ok, c_ok, d_ok, e_ok, f_ok, g_ok, h_ok])
+    # SYNDICATION-STAT B5d 2a — (i)-(k): anchor + near/exact tiers.
+    # Dates: A's id=2 is earliest (date-based anchor); B is undated (min-id
+    # fallback -> 5); C's hub id=8 is earliest. Sims vs anchor: A's members
+    # all >= 0.995 (near-copies); C's spokes are 0.82 < 0.95 (independent).
+    published_ats = ["2026-07-02", "2026-07-01", "2026-07-03", None,
+                     None, None, None,
+                     "2026-07-01", "2026-07-02", None,
+                     None, None]
+    graph_synd = build_graph(ids, titles, domains, cns, vectors, outlet_sets,
+                             k=3, published_ats=published_ats)
+    synd_by_id = {n["id"]: n for n in graph_synd["nodes"]}
+    a_synd = next(c for c in graph_synd["clusters"]
+                  if c["cluster_id"] == synd_by_id[1]["cluster_id"])
+    b_synd = next(c for c in graph_synd["clusters"]
+                  if c["cluster_id"] == synd_by_id[5]["cluster_id"])
+    c_synd = next(c for c in graph_synd["clusters"]
+                  if c["cluster_id"] == synd_by_id[8]["cluster_id"])
+    i_ok = (a_synd["anchor_analysis_id"] == 2
+            and a_synd["near_anchor_outlet_count"] == 2
+            and a_synd["exact_same_text_outlet_count"] == 1)
+    print("  [%s] (i) dated anchor (id=2) + near tier counts OUTLETS "
+          "(4 rows -> 2) + exact tier = anchor's collapsed outlets"
+          % ("ok" if i_ok else "xx"))
+    j_ok = (b_synd["anchor_analysis_id"] == 5
+            and b_synd["near_anchor_outlet_count"] == 3
+            and c_synd["anchor_analysis_id"] == 8
+            and c_synd["near_anchor_outlet_count"] == 1
+            and c_synd["exact_same_text_outlet_count"] == 1)
+    print("  [%s] (j) undated -> min-id anchor; spokes at 0.82 stay OUT of "
+          "the 0.95 near tier (independent reporting)" % ("ok" if j_ok else "xx"))
+    k_ok = (all(c["syndication_sim_threshold"] == SYNDICATION_SIM_THRESHOLD
+                and c["syndication_framing"] == SYNDICATION_FRAMING
+                and "near_anchor_outlet_count" in c
+                and "exact_same_text_outlet_count" in c
+                for c in graph_synd["clusters"])
+            and all("near_anchor_outlet_count" in c
+                    for c in graph["clusters"])  # present without dates too
+            and not any(word in SYNDICATION_FRAMING
+                        for word in FORBIDDEN_LABEL_VOCAB))
+    print("  [%s] (k) threshold+framing on every cluster (default build too); "
+          "framing carries no forbidden vocab" % ("ok" if k_ok else "xx"))
+
+    ok = all([a_ok, b_ok, c_ok, d_ok, e_ok, f_ok, g_ok, h_ok,
+              i_ok, j_ok, k_ok])
     print()
     print("SELFTEST: %s" % ("PASS (clusters + coords + degree label + distinct-"
                             "outlet label + dry-run purity + honesty vocab + "
-                            "outlet normalization + stable_id)" if ok else "FAIL"))
+                            "outlet normalization + stable_id + syndication "
+                            "anchor/near/exact tiers)" if ok else "FAIL"))
     return 0 if ok else 1
 
 
@@ -603,11 +694,20 @@ def main(argv=None) -> int:
         if not ids:
             print("[brainmap] no vectors resolved — run scripts/embed_backfill.py first.")
             return 1
-        graph = build_graph(ids, titles, domains, cns, vectors, outlet_sets)
+        # SYNDICATION-STAT B5d 2a — anchor publish dates (verdict-free SELECT;
+        # kept out of load_corpus_vectors so its 7-tuple contract is untouched).
+        with conn.cursor() as cur:
+            cur.execute(SELECT_PUBLISHED_SQL)
+            published_by_id = {row_id: value for row_id, value in cur.fetchall()}
+        published_ats = [published_by_id.get(rid) for rid in ids]
+        graph = build_graph(ids, titles, domains, cns, vectors, outlet_sets,
+                            published_ats=published_ats)
         print_stats(graph)
         # Honesty guard at write time too: refuse to persist if any GENERATED
         # label string carries verdict vocabulary (titles are passthrough).
-        generated_strings = [c["size_label"] + c["kind"] for c in graph["clusters"]]
+        generated_strings = [
+            c["size_label"] + c["kind"] + (c.get("syndication_framing") or "")
+            for c in graph["clusters"]]
         if any(word in s for s in generated_strings for word in FORBIDDEN_LABEL_VOCAB):
             print("[brainmap] HONESTY GUARD tripped — generated labels carry "
                   "verdict vocabulary; refusing to write.")
