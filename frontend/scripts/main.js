@@ -279,12 +279,15 @@
       SMB: "소상공인",
       realestate: "부동산",
       statistics: "통계",
+      education: "교육",
       "기타-미분류": "기타",
     };
-    // Canonical tab/section order (matches domain_classifier.LABELS).
+    // Canonical tab/section order (matches domain_classifier.LABELS — education
+    // joined as the 11th label in DOMAIN-LABEL 2a, before the fallback).
     const DOMAIN_ORDER = [
       "finance", "welfare", "agriculture", "labor", "health",
-      "environment", "SMB", "realestate", "statistics", "기타-미분류",
+      "environment", "SMB", "realestate", "statistics", "education",
+      "기타-미분류",
     ];
     // TAB-ORDER: FIXED category-tab display order — corpus volume DESCENDING (from
     // a one-time GROUP BY: welfare 582 / realestate 468 / agriculture 368 /
@@ -294,8 +297,11 @@
     // SEPARATE from DOMAIN_ORDER (which stays canonical, still driving the per-domain
     // sections + any keyed use) so this reorder touches ONLY the tab render. Every
     // entry is a real user category; the tab CLICK/fetch (English-key) is unchanged.
+    // DOMAIN-LABEL 2c: education inserted FIRST per the same volume-descending
+    // rule — the 2b re-classify moved 758 rows to education, the largest domain
+    // (welfare was 582 at the original GROUP BY). Existing relative order kept.
     const TAB_ORDER = [
-      "welfare", "realestate", "agriculture", "finance", "SMB",
+      "education", "welfare", "realestate", "agriculture", "finance", "SMB",
       "environment", "labor", "health", "statistics", "기타-미분류",
     ];
     // DESIGN-C3h-2: static per-domain section subtitles (display-only UI copy; no
@@ -310,6 +316,7 @@
       SMB: "소상공인 정책 뉴스 검증",
       agriculture: "농업·농촌 정책 뉴스 검증",
       statistics: "공식 통계·지표 검증",
+      education: "교육 정책 뉴스 검증",
       "기타-미분류": "기타 정책 뉴스 검증",
     };
     // Normalize a card's domain to a comparison key. Missing/empty domain falls
@@ -334,6 +341,7 @@
       SMB: "#6b46c1",
       realestate: "#b83280",
       statistics: "#4a5568",
+      education: "#4c51bf",
       "기타-미분류": "#98a2b3",
     };
     const DOMAIN_ICON_FALLBACK_COLOR = "#98a2b3";
@@ -349,6 +357,7 @@
       SMB: "dom-smb",
       realestate: "dom-realestate",
       statistics: "dom-statistics",
+      education: "dom-education",
       "기타-미분류": "dom-etc",
     };
     // CARD-ICONS: the domain line-icon markup for a card. DOMAIN metadata only —

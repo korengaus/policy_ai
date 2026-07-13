@@ -4603,6 +4603,7 @@
     <symbol id="dom-smb" viewBox="0 0 24 24"><path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7"/><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="M15 22v-4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v4"/><path d="M2 7h20"/><path d="M22 7v3a2 2 0 0 1-2 2 2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 16 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 12 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 8 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 4 12a2 2 0 0 1-2-2V7"/></symbol>
     <symbol id="dom-realestate" viewBox="0 0 24 24"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></symbol>
     <symbol id="dom-statistics" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></symbol>
+    <symbol id="dom-education" viewBox="0 0 24 24"><path d="M21.42 10.922a1 1 0 0 0-.019-1.838L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.832l8.57 3.908a2 2 0 0 0 1.66 0z"/><path d="M22 10v6"/><path d="M6 12.5V16a6 3 0 0 0 12 0v-3.5"/></symbol>
     <symbol id="dom-etc" viewBox="0 0 24 24"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/></symbol>
     <!-- ABOUT-ICONS: general Lucide (MIT) OUTLINE section icons for the About +
          methodology page headings (ic-*, distinct from the dom-* domain icons).
@@ -5791,12 +5792,15 @@
       SMB: "소상공인",
       realestate: "부동산",
       statistics: "통계",
+      education: "교육",
       "기타-미분류": "기타",
     };
-    // Canonical tab/section order (matches domain_classifier.LABELS).
+    // Canonical tab/section order (matches domain_classifier.LABELS — education
+    // joined as the 11th label in DOMAIN-LABEL 2a, before the fallback).
     const DOMAIN_ORDER = [
       "finance", "welfare", "agriculture", "labor", "health",
-      "environment", "SMB", "realestate", "statistics", "기타-미분류",
+      "environment", "SMB", "realestate", "statistics", "education",
+      "기타-미분류",
     ];
     // TAB-ORDER: FIXED category-tab display order — corpus volume DESCENDING (from
     // a one-time GROUP BY: welfare 582 / realestate 468 / agriculture 368 /
@@ -5806,8 +5810,11 @@
     // SEPARATE from DOMAIN_ORDER (which stays canonical, still driving the per-domain
     // sections + any keyed use) so this reorder touches ONLY the tab render. Every
     // entry is a real user category; the tab CLICK/fetch (English-key) is unchanged.
+    // DOMAIN-LABEL 2c: education inserted FIRST per the same volume-descending
+    // rule — the 2b re-classify moved 758 rows to education, the largest domain
+    // (welfare was 582 at the original GROUP BY). Existing relative order kept.
     const TAB_ORDER = [
-      "welfare", "realestate", "agriculture", "finance", "SMB",
+      "education", "welfare", "realestate", "agriculture", "finance", "SMB",
       "environment", "labor", "health", "statistics", "기타-미분류",
     ];
     // DESIGN-C3h-2: static per-domain section subtitles (display-only UI copy; no
@@ -5822,6 +5829,7 @@
       SMB: "소상공인 정책 뉴스 검증",
       agriculture: "농업·농촌 정책 뉴스 검증",
       statistics: "공식 통계·지표 검증",
+      education: "교육 정책 뉴스 검증",
       "기타-미분류": "기타 정책 뉴스 검증",
     };
     // Normalize a card's domain to a comparison key. Missing/empty domain falls
@@ -5846,6 +5854,7 @@
       SMB: "#6b46c1",
       realestate: "#b83280",
       statistics: "#4a5568",
+      education: "#4c51bf",
       "기타-미분류": "#98a2b3",
     };
     const DOMAIN_ICON_FALLBACK_COLOR = "#98a2b3";
@@ -5861,6 +5870,7 @@
       SMB: "dom-smb",
       realestate: "dom-realestate",
       statistics: "dom-statistics",
+      education: "dom-education",
       "기타-미분류": "dom-etc",
     };
     // CARD-ICONS: the domain line-icon markup for a card. DOMAIN metadata only —
