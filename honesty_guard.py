@@ -88,13 +88,15 @@ GENERATED_LABEL_FIELDS = frozenset({"size_label", "kind"})
 # Fixed honest framing copy, whitelisted BYTE-EXACT. The weekly framing
 # deliberately contains 검증 inside a negation; the faded framing carries 진위.
 # Any drift from these exact bytes is a violation (I5_FRAMING_DRIFT).
-# AUTHORITATIVE SOURCES (sync-pinned): scripts/generate_weekly_report.FRAMING_TEXT
-# and api_server._FADED_FRAMING.
+# AUTHORITATIVE SOURCES (sync-pinned): scripts/generate_weekly_report.FRAMING_TEXT,
+# api_server._FADED_FRAMING, and scripts/build_brainmap_graph.SYNDICATION_FRAMING
+# (B5d 2b — the spread-structure syndication line exposed via /api/spread).
 FRAMING_WHITELIST = frozenset({
     "확산 규모 기준 · 사실 검증 아님",
     "이 목록은 후속 보도가 끊긴 사실만 보여줍니다. 주장의 진위나 정책의 "
     "추진·성패에 대한 판단이 아니며, 후속 보도가 저희 수집망 밖에 "
     "있었을 수도 있습니다.",
+    "첫 보도와 제목·주장 문구가 거의 동일",
 })
 _FRAMING_FIELD = "framing"
 

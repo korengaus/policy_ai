@@ -266,11 +266,28 @@ class SyncWithAuthoritativeSourcesTests(unittest.TestCase):
 
     def test_framing_whitelist_matches_sources_byte_exact(self):
         import api_server
+        import build_brainmap_graph
         import generate_weekly_report
         self.assertEqual(
             honesty_guard.FRAMING_WHITELIST,
             frozenset({generate_weekly_report.FRAMING_TEXT,
-                       api_server._FADED_FRAMING}))
+                       api_server._FADED_FRAMING,
+                       build_brainmap_graph.SYNDICATION_FRAMING}))
+
+    def test_syndication_framing_whitelisted_and_vocab_clean(self):
+        # B5d 2b: the syndication framing is exposed via /api/spread — it must
+        # be byte-exact whitelisted AND carry no forbidden truth vocab (it is
+        # descriptive spread structure, never 복붙/베낌/truth-implying).
+        import build_brainmap_graph
+        framing = build_brainmap_graph.SYNDICATION_FRAMING
+        self.assertIn(framing, honesty_guard.FRAMING_WHITELIST)
+        for word in honesty_guard.FORBIDDEN_LABEL_VOCAB:
+            self.assertNotIn(word, framing)
+        for word in ("복붙", "베낌", "베꼈", "표절"):
+            self.assertNotIn(word, framing)
+        # A payload carrying it under the "framing" key passes I5.
+        ok, violations = validate_payload({"framing": framing})
+        self.assertTrue(ok, violations)
 
 
 class VerdictIsolationTests(unittest.TestCase):

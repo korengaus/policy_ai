@@ -817,6 +817,14 @@ def _build_spread_payload(cluster_meta: dict, member_ids, published_values) -> d
             "outlet_count": cluster_meta.get("outlet_count"),
             "size": cluster_meta.get("size"),
             "size_label": cluster_meta.get("size_label"),
+            # SYNDICATION-STAT B5d 2b — additive spread-structure fields
+            # computed at graph build (B5d 2a); .get() keeps pre-2a graph
+            # rows null-safe (fields absent -> null, never a crash). The
+            # framing is the byte-exact honesty_guard-whitelisted string.
+            "near_anchor_outlet_count": cluster_meta.get("near_anchor_outlet_count"),
+            "exact_same_text_outlet_count": cluster_meta.get("exact_same_text_outlet_count"),
+            "syndication_sim_threshold": cluster_meta.get("syndication_sim_threshold"),
+            "syndication_framing": cluster_meta.get("syndication_framing"),
         },
         "timeline": {
             "first_at": first_at,

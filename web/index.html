@@ -10636,9 +10636,23 @@
           const timelineLine = Number(timeline.dated_members) > 0 && firstAt && Number.isFinite(spanDays)
             ? `<div class="spread-timeline-line">최초 보도 ${escapeHtml(firstAt)} · ${escapeHtml(spreadSpanPhrase(spanDays))}</div>`
             : "";
+          // SYNDICATION-STAT B5d 2b: spread-structure line (circulation only,
+          // never a verdict/color). Renders ONLY when near_anchor_outlet_count
+          // >= 2 — a count of 1 is just the earliest report itself, and the
+          // field is absent (null) on pre-2a graph rows. Wording is the honest
+          // descriptive framing ("문구가 거의 동일") — never 복붙/베낌.
+          const nearCount = Number(data?.cluster?.near_anchor_outlet_count);
+          const exactCount = Number(data?.cluster?.exact_same_text_outlet_count);
+          const exactNote = Number.isFinite(exactCount) && exactCount >= 2
+            ? ` (이 중 ${escapeHtml(exactCount)}개 매체는 문구가 완전히 같습니다.)`
+            : "";
+          const syndicationLine = Number.isFinite(nearCount) && nearCount >= 2
+            ? `<div class="spread-syndication-line">이 중 ${escapeHtml(nearCount)}개 매체는 첫 보도와 제목·주장 문구가 거의 동일합니다.${exactNote}</div>`
+            : "";
           section.innerHTML = `
             <h3>이슈 확산 현황</h3>
             <div>이 주장과 유사한 내용이 ${escapeHtml(outletCount)}개 매체에서 보도되었습니다.</div>
+            ${syndicationLine}
             ${timelineLine}
             ${spreadSparklineHtml(timeline.daily)}
             <div class="spread-map-link"><a href="/web/brainmap.html" target="_blank" rel="noopener noreferrer">브레인맵에서 유사 보도 보기 →</a></div>
