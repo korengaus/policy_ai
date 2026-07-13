@@ -1,6 +1,6 @@
 # SPINE-A1a — weekly automation spine: run the track-record chain unattended
-# in HARD order embed -> build -> snapshot -> report (steps 2..5; NO ingest/
-# backfill step 1). STOP-ON-FAILURE: a non-zero exit or exception in any step
+# in HARD order embed -> build -> snapshot -> report -> prediction-log
+# (steps 2..6; NO ingest/backfill step 1). STOP-ON-FAILURE: a non-zero exit or exception in any step
 # aborts the rest, because every later step reads what an earlier step wrote
 # (snapshot & report SELECT the NEWEST brainmap_graph, so they MUST run after
 # build). A DB-size precheck skips the whole run (fail-SAFE) when Postgres is
@@ -70,11 +70,14 @@ DEFAULT_DB_PLAN_SIZE_BYTES = 10 * 1024 ** 3
 # Skip the run when used fraction >= this. Fail-SAFE margin below 100%.
 DEFAULT_DB_SIZE_SKIP_FRACTION = 0.90
 
-# The four children, in the ONE legal order. Each entry: (step#, label, script
-# filename, extra-argv builder). embed/build take only the mode flags; report
-# also forwards the optional window flags. NO step 1 (ingest/backfill).
+# The five children, in the ONE legal order. embed/build take only the mode
+# flags; report also forwards the optional window flags. NO step 1 (ingest/
+# backfill). prediction_log_weekly (B4 Phase 2b) is deliberately LAST: it
+# consumes the snapshot batches + graph, and a track-record logging failure
+# must never abort the already-completed user-facing report.
 _CHILDREN = ("embed_backfill.py", "build_brainmap_graph.py",
-             "snapshot_brainmap_growth.py", "generate_weekly_report.py")
+             "snapshot_brainmap_growth.py", "generate_weekly_report.py",
+             "prediction_log_weekly.py")
 
 
 def normalize_db_url(raw_url):
@@ -296,7 +299,8 @@ def run_chain(steps, runner):
 
 def _plan_steps(dry_run, selftest, week_start, week_end, top_n):
     labels = ("embed_backfill", "build_brainmap_graph",
-              "snapshot_brainmap_growth", "generate_weekly_report")
+              "snapshot_brainmap_growth", "generate_weekly_report",
+              "prediction_log_weekly")
     steps = []
     for i, (script_name, label) in enumerate(zip(_CHILDREN, labels), start=1):
         argv = build_child_argv(script_name, dry_run, selftest,
@@ -309,8 +313,8 @@ def run_weekly(dry_run, week_start=None, week_end=None, top_n=None):
     """The --mode weekly orchestration: precheck -> chain -> notify. Returns
     a process exit code (0 ok, non-zero on skip/failure)."""
     mode_tag = "DRY-RUN" if dry_run else "REAL"
-    print("WEEKLY-SPINE — mode=weekly (%s): embed -> build -> snapshot -> report"
-          % mode_tag)
+    print("WEEKLY-SPINE — mode=weekly (%s): embed -> build -> snapshot -> "
+          "report -> prediction-log" % mode_tag)
 
     skip, reason = db_precheck(dry_run)
     if skip:
@@ -453,9 +457,10 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="weekly_spine",
         description="Weekly automation spine: run embed -> build -> snapshot "
-                    "-> report in hard order, stop-on-failure, with a DB-size "
-                    "precheck and ntfy success/failure hooks. Orchestration "
-                    "only — raises no verdict.",
+                    "-> report -> prediction-log in hard order, "
+                    "stop-on-failure, with a DB-size precheck and ntfy "
+                    "success/failure hooks. Orchestration only — raises no "
+                    "verdict.",
     )
     parser.add_argument("--mode", choices=["weekly"], default="weekly",
                         help="Chain to run. Only 'weekly' (steps 2..5, NO "
