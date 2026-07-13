@@ -11564,6 +11564,43 @@
       return needsHumanReviewForResult(result) ? "기사 제목과 요약 기준으로는 " : "보도 내용은 ";
     }
 
+    // CARD-CLAIM-QUALITY A2 ② — quote-lead detection + wrapper strip (DISPLAY
+    // ONLY). Mirrors the measured probe heuristic (scripts/claim_quality_size_
+    // probe.py): a quote-lead is a reported-speech ARTICLE sentence ("X 회장은
+    // '…'고 말했다") that claim_extractor picked as the top sentence, so it renders
+    // as a body dump instead of a clean 핵심 주장 (measured 839 rows / 11%). The
+    // fix only SELECTs a cleaner existing field or TRIMS the wrapper — it never
+    // rewrites, summarizes, or fabricates.
+    const CLAIM_QUOTE_CHARS = "\"'“”‘’＂「」『』";
+    const CLAIM_SAID_VERBS = /(말했다|밝혔다|강조했다|설명했다|전했다|덧붙였다|지적했다|주장했다|당부했다|약속했다|다짐했다)/;
+    const CLAIM_SPEAKER_LEAD = /[가-힣]{2,}\s*(회장|장관|위원장|대표|총리|청장|처장|사장|부총리|의원|대통령)\s*[은는이가]/;
+    const CLAIM_QUOTED_SPAN = new RegExp(
+      "[" + CLAIM_QUOTE_CHARS + "]([^" + CLAIM_QUOTE_CHARS + "]{6,})[" + CLAIM_QUOTE_CHARS + "]", "g");
+
+    function claimIsQuoteLead(text) {
+      const value = String(text || "");
+      if (!value) return false;
+      const quoteCount = [...value].filter((ch) => CLAIM_QUOTE_CHARS.includes(ch)).length;
+      const hasQuote = quoteCount >= 2;
+      const said = CLAIM_SAID_VERBS.test(value);
+      const speaker = CLAIM_SPEAKER_LEAD.test(value);
+      return (hasQuote && (said || speaker)) || (speaker && said);
+    }
+
+    function stripQuoteLeadWrapper(text) {
+      const value = String(text || "");
+      let best = "";
+      let match;
+      CLAIM_QUOTED_SPAN.lastIndex = 0;
+      while ((match = CLAIM_QUOTED_SPAN.exec(value)) !== null) {
+        const inner = (match[1] || "").trim();
+        if (inner.length > best.length) best = inner;
+      }
+      // Only accept a substantial quoted statement (the reported content); a
+      // short quoted term is not a claim -> "" signals "no clean strip".
+      return best.length >= 10 ? best : "";
+    }
+
     function buildReviewerSafeClaim(result) {
       const verification = result?.verification_card || result || {};
       const candidates = [
@@ -11575,6 +11612,29 @@
         .map((item) => sanitizeClaimText(item, result))
         .filter((item) => item && claimLooksAlignedWithResult(result, item));
       let claim = candidates[0] || sanitizeClaimText(fallbackClaimFromTitle(result), result);
+      // CARD-CLAIM-QUALITY A2 ②: only when the resolved claim is a quote-lead,
+      // (a) prefer the structured normalized claim (contentLead's source, when
+      // the detail payload carries it) if it is clean + aligned + not itself a
+      // quote-lead, else (b) strip the wrapper to the quoted statement. If
+      // neither yields clean aligned text, keep the original (a quote lead is
+      // still truthful). CLEAN claims skip this block entirely (byte-identical).
+      if (claim && claimIsQuoteLead(claim)) {
+        const normalized = Array.isArray(verification.normalized_claims)
+          ? verification.normalized_claims
+          : (Array.isArray(result?.normalized_claims) ? result.normalized_claims : []);
+        const normalizedText = sanitizeClaimText(
+          (normalized[0] && normalized[0].claim_text) || "", result);
+        if (normalizedText
+            && !claimIsQuoteLead(normalizedText)
+            && claimLooksAlignedWithResult(result, normalizedText)) {
+          claim = normalizedText;
+        } else {
+          const stripped = sanitizeClaimText(stripQuoteLeadWrapper(claim), result);
+          if (stripped && claimLooksAlignedWithResult(result, stripped)) {
+            claim = stripped;
+          }
+        }
+      }
       if (!claim) {
         claim = "기사 제목과 요약 기준으로 핵심 주장을 추가 확인해야 합니다.";
       }
