@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 from contextlib import asynccontextmanager
@@ -35,6 +36,9 @@ from db.postgres import (
     is_dual_write_enabled,
     is_postgres_enabled,
 )
+# HONESTY-GUARD B3 Phase 3 — pure structural validator (stdlib-only,
+# import-side-effect-free; see honesty_guard.py + _honesty_guard_b3_design.md).
+import honesty_guard
 import job_manager
 from main import analyze_pipeline
 from rate_limit import analyze_rate_limiter
@@ -169,6 +173,130 @@ async def request_id_middleware(request, call_next):
         return response
     finally:
         reset_request_id(token)
+
+
+# ---------------------------------------------------------------------------
+# HONESTY-GUARD B3 Phase 3 — response-boundary honesty middleware.
+#
+# DEFAULT OFF (HONESTY_GUARD_MODE unset/"off" = pure no-op passthrough: the
+# body is never parsed, never buffered — zero live behavior change). Modes:
+#   off     -> passthrough (committed default; this slice ships dormant)
+#   report  -> validate outgoing JSON; on violation LOG rule+path ONLY (never
+#              the payload text) and return the ORIGINAL bytes unchanged.
+#              Fail-OPEN: any guard/validator error passes the response through.
+#   enforce -> fail-CLOSED: on violation (or a guard error that prevents
+#              validation) return a generic 500 + ntfy; never leak the payload.
+#
+# Scope guards: acts ONLY on application/json responses with a known,
+# sane content-length — SSE (/v2/jobs/{id}/stream, text/event-stream),
+# static files, HTML, and unknown-length/huge bodies pass through UNTOUCHED
+# and are never buffered. A passing payload is re-wrapped from the EXACT
+# buffered bytes with the EXACT original raw headers (no re-serialization,
+# byte-identical to no-middleware).
+#
+# The middleware never mutates a payload and raises no verdict (the validator
+# only CHECKS — see honesty_guard.py). api_server.py is pin-OUT (not in
+# MIGRATED_FILES), so these log sites do not move the 331/16 log pins.
+# ---------------------------------------------------------------------------
+
+_HONESTY_GUARD_MODES = ("off", "report", "enforce")
+# Never buffer a body larger than this (validation skipped, response passes
+# through untouched). Card payloads are far below it.
+_HONESTY_GUARD_MAX_BYTES = 5 * 1024 * 1024
+
+
+def _honesty_guard_mode() -> str:
+    raw = (os.environ.get("HONESTY_GUARD_MODE") or "off").strip().lower()
+    if raw not in _HONESTY_GUARD_MODES:
+        # Unrecognized value: safest interpretation is the committed default.
+        logger.warning("honesty-guard: unrecognized HONESTY_GUARD_MODE=%r -> off", raw)
+        return "off"
+    return raw
+
+
+def _honesty_notify(title: str, message: str) -> None:
+    """weekly_spine ntfy pattern: NTFY_URL > NTFY_TOPIC (ntfy.sh), print/log
+    fallback when unset, best-effort — a notify failure never affects the
+    response. Used only by report(optional)/enforce, never in off."""
+    endpoint = (os.environ.get("NTFY_URL") or "").strip()
+    if not endpoint:
+        topic = (os.environ.get("NTFY_TOPIC") or "").strip()
+        endpoint = "https://ntfy.sh/%s" % topic if topic else ""
+    if not endpoint:
+        logger.warning("honesty-guard notify (NTFY_* unset): %s | %s", title, message)
+        return
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            endpoint, data=message.encode("utf-8"),
+            headers={"Title": title, "Priority": "high"}, method="POST",
+        )
+        urllib.request.urlopen(req, timeout=5).read()
+    except Exception:  # noqa: BLE001 — notify must never break a response
+        logger.warning("honesty-guard notify send failed: %s | %s", title, message)
+
+
+def _honesty_blocked_response():
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"error": "response blocked"}, status_code=500)
+
+
+@app.middleware("http")
+async def honesty_guard_middleware(request, call_next):
+    response = await call_next(request)
+    mode = _honesty_guard_mode()
+    if mode == "off":
+        return response
+
+    # Scope: JSON bodies only. SSE (text/event-stream), HTML, static files
+    # and anything else stream through untouched — never buffered.
+    content_type = (response.headers.get("content-type") or "").lower()
+    if not content_type.startswith("application/json"):
+        return response
+    # Unknown-length (chunked/streaming) or oversized bodies: never buffer.
+    length = response.headers.get("content-length") or ""
+    if not length.isdigit() or int(length) > _HONESTY_GUARD_MAX_BYTES:
+        return response
+
+    # Buffer ONCE; every non-blocking path below re-wraps these exact bytes
+    # with the exact original raw headers (incl. duplicate Set-Cookie pairs)
+    # — byte-identical, no double-serialization.
+    chunks = []
+    async for chunk in response.body_iterator:
+        chunks.append(chunk)
+    body = b"".join(chunks)
+    rebuilt = Response(content=body, status_code=response.status_code)
+    rebuilt.raw_headers = list(response.headers.raw)
+
+    try:
+        ok, violations = honesty_guard.validate_payload(json.loads(body))
+    except Exception:  # noqa: BLE001 — guard errors must not break report mode
+        if mode == "enforce":
+            # Fail-CLOSED: cannot prove the payload honest.
+            logger.exception("honesty-guard: validation error in enforce mode "
+                             "-> blocking %s", request.url.path)
+            _honesty_notify("honesty-guard BLOCKED (guard error)",
+                            "endpoint=%s (validation error)" % request.url.path)
+            return _honesty_blocked_response()
+        logger.exception("honesty-guard: validation error (report) -> "
+                         "passing response through for %s", request.url.path)
+        return rebuilt
+
+    if ok:
+        return rebuilt
+
+    # Violation. Log rule + JSON path ONLY — never the payload text, never
+    # the violation `detail` (it may embed payload values).
+    summary = [{"rule": v.get("rule"), "path": v.get("path")}
+               for v in violations[:20]]
+    logger.warning("honesty-guard violation: mode=%s endpoint=%s count=%d "
+                   "rules=%s", mode, request.url.path, len(violations), summary)
+    if mode == "report":
+        return rebuilt  # observe only: never block, never mutate
+    _honesty_notify(
+        "honesty-guard BLOCKED",
+        "endpoint=%s violations=%s" % (request.url.path, summary))
+    return _honesty_blocked_response()
 
 
 app.mount("/web", StaticFiles(directory="web"), name="web")
