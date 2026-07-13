@@ -7,8 +7,17 @@
 # claim_extractor.extract_verifiable_claims — NOT an LLM-normalized rewrite),
 # so a quote-lead top sentence reads as a body dump straight from claim_text.
 #
-# Buckets on the STORED claim_text (the primary render source):
-#   EMPTY      — claim_text blank -> card falls to claims[0]/summary/title
+# SCHEMA NOTE (probe-fix): the physical PG `analysis_results` table does NOT
+# reliably carry a top-level `claim_text` column (it predates that column and
+# is not in postgres_storage's additive-ensure list — a bare SELECT of it fails
+# with UndefinedColumn). The rendered claim follows the SAME chain the frontend
+# buildReviewerSafeClaim uses: `claim_text` (plain text) -> `claims`[0] (a
+# JSON-serialized list of strings, database.py:396). This probe DETECTS which of
+# those columns physically exist (information_schema), selects only those, and
+# resolves the effective claim in Python — robust to whichever the live table has.
+#
+# Buckets on the RESOLVED claim (claim_text, else claims[0]):
+#   EMPTY      — no claim resolves -> card falls to summary/title
 #                (the deepest ② fallback path).
 #   QUOTE_LEAD — a direct-quote body sentence ("…회장은 '…'" / 「」/ curly
 #                quotes with a said-verb) -> the ② body-dump look.
@@ -26,6 +35,7 @@
 # Keyset pagination. Never prints DATABASE_URL. pin-OUT scripts/*.
 
 import collections
+import json
 import os
 import re
 import sys
@@ -40,10 +50,33 @@ try:
 except Exception:
     pass
 
-SELECT_SQL = (
-    "SELECT id, title, claim_text FROM analysis_results "
-    "WHERE id > %s ORDER BY id LIMIT 1000"
+# Claim-bearing columns, in the frontend's resolution order. The probe uses
+# whichever of these physically exist on the live table.
+CLAIM_COLUMNS = ("claim_text", "claims")
+
+DETECT_COLUMNS_SQL = (
+    "SELECT column_name FROM information_schema.columns "
+    "WHERE table_name = 'analysis_results' AND column_name = ANY(%s)"
 )
+
+
+def resolve_claim(row, cols):
+    """The rendered 핵심 주장 source, mirroring buildReviewerSafeClaim's chain:
+    claim_text (plain text) -> claims[0] (JSON list of strings). `row` is a dict
+    of the selected columns; missing/odd JSON yields '' (counts as EMPTY)."""
+    text = (row.get("claim_text") or "").strip() if "claim_text" in cols else ""
+    if text:
+        return text
+    if "claims" in cols and row.get("claims"):
+        try:
+            parsed = json.loads(row["claims"])
+        except (TypeError, ValueError):
+            parsed = None
+        if isinstance(parsed, list):
+            for item in parsed:
+                if isinstance(item, str) and item.strip():
+                    return item.strip()
+    return ""
 
 MAX_LEN = 220  # the frontend limitClaimSentences cap AND claim_extractor's cap.
 
@@ -96,15 +129,35 @@ def main() -> int:
     last_id = 0
     print("CLAIM-QUALITY SIZE PROBE — SELECT-only\n")
     with psycopg.connect(url) as conn:
+        # Detect which claim-bearing columns physically exist (the live PG table
+        # may lack claim_text — a bare SELECT of it would UndefinedColumn-fail).
+        with conn.cursor() as cur:
+            cur.execute(DETECT_COLUMNS_SQL, (list(CLAIM_COLUMNS),))
+            present = [r[0] for r in cur.fetchall()]
+        cols = [c for c in CLAIM_COLUMNS if c in present]
+        if not cols:
+            print("Neither claim_text nor claims exists on analysis_results — "
+                  "cannot measure claim quality. Columns checked: %s"
+                  % (CLAIM_COLUMNS,))
+            return 1
+        print("Resolving claim from columns: %s\n" % cols)
+        select_cols = ", ".join(["id", "title"] + cols)
+        select_sql = ("SELECT %s FROM analysis_results "
+                      "WHERE id > %%s ORDER BY id LIMIT 1000" % select_cols)
+        col_index = {name: 2 + i for i, name in enumerate(cols)}
+
         while True:
             with conn.cursor() as cur:
-                cur.execute(SELECT_SQL, (last_id,))
+                cur.execute(select_sql, (last_id,))
                 rows = cur.fetchall()
             if not rows:
                 break
-            for rid, title, claim in rows:
+            for row in rows:
+                rid, title = row[0], row[1]
                 last_id = max(last_id, rid)
                 total += 1
+                claim = resolve_claim(
+                    {name: row[idx] for name, idx in col_index.items()}, cols)
                 if claim:
                     lengths.append(len(claim))
                 tags = bucket(claim)
