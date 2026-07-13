@@ -76,6 +76,27 @@ SELECT_DRYRUN_SQL = (
 # Read-only remaining-work count (printed in the summary).
 COUNT_NULL_SQL = "SELECT count(*) FROM analysis_results WHERE domain IS NULL"
 
+# ---------------------------------------------------------------------------
+# DOMAIN-LABEL 2b — additive RE-CLASSIFY target: the 기타-미분류 fallback pool.
+# Now that 'education' exists (2a), rows the classifier previously fell back on
+# can be re-labeled. The guard `AND domain = '기타-미분류'` means a row that
+# already carries a REAL label is NEVER overwritten. Unlike the NULL path,
+# BOTH modes paginate by keyset (`id > last_id`): a row the classifier AGAIN
+# labels 기타-미분류 stays in the target set, so relying on the UPDATE to
+# shrink the set (the NULL path's loop) would refetch it forever. A row moved
+# to a real label leaves the pool -> re-runs skip it (idempotent); a re-run
+# after interruption simply advances past already-moved ids (resumable).
+# ---------------------------------------------------------------------------
+MISC_LABEL = "기타-미분류"
+UPDATE_MISC_SQL = ("UPDATE analysis_results SET domain = %s "
+                   "WHERE id = %s AND domain = '기타-미분류'")
+SELECT_MISC_SQL = (
+    "SELECT id, title, claim_text FROM analysis_results "
+    "WHERE domain = '기타-미분류' AND id > %s ORDER BY id LIMIT %s"
+)
+COUNT_MISC_SQL = ("SELECT count(*) FROM analysis_results "
+                  "WHERE domain = '기타-미분류'")
+
 
 def _normalize_url(raw_url: str) -> str:
     """Mirror scripts/classify_probe.py: psycopg wants a plain libpq URL, not the
@@ -85,18 +106,23 @@ def _normalize_url(raw_url: str) -> str:
 
 
 def _classify_batch(conn, classify, limit, remaining_cap, dry_run, counts,
-                    batch_no, last_id):
-    """Fetch up to `limit` NULL-domain rows, classify each, and (unless dry-run)
+                    batch_no, last_id, reclassify_misc=False):
+    """Fetch up to `limit` target rows, classify each, and (unless dry-run)
     write ONLY the domain column via the guarded UPDATE. Commits once at the end
     of the batch. Returns (processed, max_id_seen) — the caller advances the
-    dry-run id cursor with max_id_seen.
+    id cursor with max_id_seen (used by dry-run, and ALWAYS by misc mode).
 
     `remaining_cap` (or None) caps how many rows this batch may process so a
     --max-rows total is honored. `counts` is a Counter mutated with the assigned
-    labels for the final summary.
+    labels for the final summary. `reclassify_misc` switches the target from
+    `domain IS NULL` to `domain = '기타-미분류'` (DOMAIN-LABEL 2b): keyset
+    pagination in BOTH modes, and a row re-labeled 기타-미분류 is SKIPPED
+    (no-op write avoided; the keyset advances past it).
     """
     with conn.cursor() as cur:
-        if dry_run:
+        if reclassify_misc:
+            cur.execute(SELECT_MISC_SQL, (last_id, limit))
+        elif dry_run:
             cur.execute(SELECT_DRYRUN_SQL, (last_id, limit))
         else:
             cur.execute(SELECT_SQL, (limit,))
@@ -112,11 +138,20 @@ def _classify_batch(conn, classify, limit, remaining_cap, dry_run, counts,
             # classify_domain NEVER raises — failures/unparseable → 기타-미분류.
             label = classify(title, claim_text)
             counts[label] += 1
-            if not dry_run:
+            if dry_run:
+                print("  [dry-run] id=%s %s -> %s"
+                      % (rid,
+                         MISC_LABEL if reclassify_misc else "(NULL)",
+                         label))
+            elif reclassify_misc:
+                if label != MISC_LABEL:
+                    # domain-ONLY write, guarded to the fallback pool — a row
+                    # with a real label is never overwritten.
+                    cur.execute(UPDATE_MISC_SQL, (label, rid))
+                # label == 기타-미분류: leave it; keyset advances past it.
+            else:
                 # domain-ONLY write, guarded by IS NULL (idempotent/concurrent-safe).
                 cur.execute(UPDATE_SQL, (label, rid))
-            else:
-                print("  [dry-run] id=%s would set domain=%s" % (rid, label))
             processed += 1
             if rid > max_id:
                 max_id = rid
@@ -128,14 +163,17 @@ def _classify_batch(conn, classify, limit, remaining_cap, dry_run, counts,
     return processed, max_id
 
 
-def run_backfill(conn, classify, batch, max_rows, dry_run):
+def run_backfill(conn, classify, batch, max_rows, dry_run,
+                 reclassify_misc=False):
     """Drive the batched backfill against an already-open connection `conn`.
     `classify` is injected (the real classify_domain in main) so tests can pass a
-    fake; `conn` is injected so tests can pass a fake connection with no DB."""
+    fake; `conn` is injected so tests can pass a fake connection with no DB.
+    `reclassify_misc=True` targets the 기타-미분류 pool instead of NULLs
+    (DOMAIN-LABEL 2b) — see _classify_batch."""
     counts = collections.Counter()
     total = 0
     batch_no = 0
-    last_id = 0  # dry-run id cursor (ignored in real mode)
+    last_id = 0  # id cursor (dry-run always; misc mode always)
     while True:
         if max_rows is not None and total >= max_rows:
             break
@@ -150,7 +188,7 @@ def run_backfill(conn, classify, batch, max_rows, dry_run):
         batch_no += 1
         processed, last_id = _classify_batch(
             conn, classify, this_limit, remaining_cap, dry_run, counts, batch_no,
-            last_id,
+            last_id, reclassify_misc=reclassify_misc,
         )
         if processed == 0:
             break
@@ -159,11 +197,12 @@ def run_backfill(conn, classify, batch, max_rows, dry_run):
               % (batch_no, processed, total,
                  "  ~$%.3f" % (total * ROUGH_COST_PER_ROW)))
 
-    # Re-query remaining NULLs for the summary (read-only).
+    # Re-query remaining target rows for the summary (read-only).
     with conn.cursor() as cur:
-        cur.execute(COUNT_NULL_SQL)
-        remaining_null = cur.fetchone()[0]
+        cur.execute(COUNT_MISC_SQL if reclassify_misc else COUNT_NULL_SQL)
+        remaining = cur.fetchone()[0]
 
+    moved = total - counts.get(MISC_LABEL, 0)
     # ---- Final summary -----------------------------------------------------
     print()
     print("=== SUMMARY%s ===" % (" (DRY-RUN — no writes)" if dry_run else ""))
@@ -171,13 +210,19 @@ def run_backfill(conn, classify, batch, max_rows, dry_run):
     print("  labels assigned:")
     for label, n in counts.most_common():
         print("      %-14s %d" % (label, n))
-    print("  fell to 기타-미분류             : %d" % counts.get("기타-미분류", 0))
-    print("  rows still domain IS NULL      : %d%s"
-          % (remaining_null, "  (dry-run: nothing written)" if dry_run else ""))
+    if reclassify_misc:
+        print("  moved to a real label          : %d" % moved)
+        print("  stayed 기타-미분류             : %d" % counts.get(MISC_LABEL, 0))
+        print("  rows still 기타-미분류 (DB)    : %d%s"
+              % (remaining, "  (dry-run: nothing written)" if dry_run else ""))
+    else:
+        print("  fell to 기타-미분류             : %d" % counts.get("기타-미분류", 0))
+        print("  rows still domain IS NULL      : %d%s"
+              % (remaining, "  (dry-run: nothing written)" if dry_run else ""))
     print("  rough estimated spend          : ~$%.3f" % (total * ROUGH_COST_PER_ROW))
     print()
     print("[Safety] Wrote ONLY the `domain` column via "
-          "`%s`." % UPDATE_SQL)
+          "`%s`." % (UPDATE_MISC_SQL if reclassify_misc else UPDATE_SQL))
     print("         No verdict/scoring/matcher field touched; tool-free; "
           "no secrets printed.")
     return total
@@ -195,6 +240,10 @@ def main(argv=None) -> int:
                         help="Optional total cap for this run. Default: drain all NULLs.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Classify and print would-be labels; SKIP the UPDATE.")
+    parser.add_argument("--reclassify-misc", action="store_true",
+                        help="DOMAIN-LABEL 2b: target domain='기타-미분류' rows "
+                             "instead of NULLs (re-classify the fallback pool; "
+                             "never overwrites a real label).")
     args = parser.parse_args(argv)
 
     # --- Env guard: NO DB connect / NO API call when creds are absent. --------
@@ -218,12 +267,14 @@ def main(argv=None) -> int:
         return 2
 
     print("CLASSIFY-2b backfill — tool-free Sonnet domain labels (domain column only)")
-    print("  batch=%d  max_rows=%s  dry_run=%s"
+    print("  batch=%d  max_rows=%s  dry_run=%s  target=%s"
           % (args.limit, args.max_rows if args.max_rows is not None else "all",
-             args.dry_run))
+             args.dry_run,
+             "기타-미분류 (re-classify)" if args.reclassify_misc else "domain IS NULL"))
     print()
     with psycopg.connect(url) as conn:
-        run_backfill(conn, classify_domain, args.limit, args.max_rows, args.dry_run)
+        run_backfill(conn, classify_domain, args.limit, args.max_rows,
+                     args.dry_run, reclassify_misc=args.reclassify_misc)
     return 0
 
 

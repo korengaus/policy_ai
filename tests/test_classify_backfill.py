@@ -158,5 +158,145 @@ class BackfillSafetyTests(unittest.TestCase):
         self.assertEqual(sum(1 for r in store if r["domain"] is None), 6)
 
 
+class _MiscFakeCursor:
+    """DOMAIN-LABEL 2b fake: emulates BOTH targets. Enforces the misc guard —
+    an UPDATE only mutates a row whose current domain == 기타-미분류."""
+
+    def __init__(self, store):
+        self._store = store
+        self._fetch = None
+
+    def execute(self, sql, params=None):
+        s = " ".join(sql.split())
+        if s.startswith("SELECT id, title, claim_text"):
+            if "domain = '기타-미분류'" in s:
+                last_id, limit = params
+                rows = [r for r in self._store
+                        if r["domain"] == "기타-미분류" and r["id"] > last_id]
+            elif "AND id >" in s:
+                last_id, limit = params
+                rows = [r for r in self._store
+                        if r["domain"] is None and r["id"] > last_id]
+            else:
+                limit = params[0]
+                rows = [r for r in self._store if r["domain"] is None]
+            rows.sort(key=lambda r: r["id"])
+            self._fetch = [(r["id"], r["title"], r["claim_text"])
+                           for r in rows[:limit]]
+        elif s.startswith("UPDATE analysis_results SET domain"):
+            label, rid = params
+            for r in self._store:
+                if r["id"] != rid:
+                    continue
+                if "domain = '기타-미분류'" in s:
+                    if r["domain"] == "기타-미분류":   # the misc guard
+                        r["domain"] = label
+                elif r["domain"] is None:              # the NULL guard
+                    r["domain"] = label
+            self._fetch = None
+        elif s.startswith("SELECT count(*)"):
+            if "기타-미분류" in s:
+                self._fetch = [(sum(1 for r in self._store
+                                    if r["domain"] == "기타-미분류"),)]
+            else:
+                self._fetch = [(sum(1 for r in self._store
+                                    if r["domain"] is None),)]
+        else:
+            raise AssertionError("unexpected SQL: %s" % s)
+
+    def fetchall(self):
+        return list(self._fetch or [])
+
+    def fetchone(self):
+        return self._fetch[0]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class _MiscFakeConn(_FakeConn):
+    def cursor(self):
+        return _MiscFakeCursor(self._store)
+
+
+class ReclassifyMiscTests(unittest.TestCase):
+    """DOMAIN-LABEL 2b — the additive 기타-미분류 re-classify target."""
+
+    def test_misc_update_sql_is_domain_only_with_misc_guard(self):
+        sql = bf.UPDATE_MISC_SQL
+        self.assertIn("SET domain =", sql)
+        self.assertIn("AND domain = '기타-미분류'", sql)
+        for forbidden in (
+            "verdict_label", "policy_alert_level", "verdict_confidence",
+            "review_status", "truth_claim", "operator_review_required",
+            "policy_confidence_score", "risk_level",
+        ):
+            self.assertNotIn(forbidden, sql)
+
+    @staticmethod
+    def _classify(title, claim_text=None):
+        if "입시" in (title or "") or "교육" in (title or ""):
+            return "education"
+        if "복지" in (title or ""):
+            return "welfare"
+        return "기타-미분류"
+
+    def _store(self):
+        return [
+            {"id": 1, "title": "전세 대책", "claim_text": "c", "domain": "realestate"},
+            {"id": 2, "title": "대학입시 개편", "claim_text": "c", "domain": "기타-미분류"},
+            {"id": 3, "title": "복지 지원 확대", "claim_text": "c", "domain": "기타-미분류"},
+            {"id": 4, "title": "동네 축제 소식", "claim_text": "c", "domain": "기타-미분류"},
+            {"id": 5, "title": "라벨 없음", "claim_text": "c", "domain": None},
+        ]
+
+    def test_misc_run_moves_labels_never_touches_real_or_null(self):
+        store = self._store()
+        conn = _MiscFakeConn(store)
+        total = bf.run_backfill(conn, self._classify, batch=2, max_rows=None,
+                                dry_run=False, reclassify_misc=True)
+        self.assertEqual(total, 3)                       # only the misc pool
+        self.assertEqual(store[0]["domain"], "realestate")  # real label untouched
+        self.assertEqual(store[1]["domain"], "education")
+        self.assertEqual(store[2]["domain"], "welfare")
+        self.assertEqual(store[3]["domain"], "기타-미분류")  # stays, no crash
+        self.assertIsNone(store[4]["domain"])            # NULL pool untouched
+
+    def test_misc_rerun_is_idempotent_and_terminates(self):
+        store = self._store()
+        conn = _MiscFakeConn(store)
+        bf.run_backfill(conn, self._classify, batch=2, max_rows=None,
+                        dry_run=False, reclassify_misc=True)
+        # Second run: only the one still-misc row is re-processed; the keyset
+        # cursor passes it and the run terminates (no infinite refetch).
+        total2 = bf.run_backfill(conn, self._classify, batch=2, max_rows=None,
+                                 dry_run=False, reclassify_misc=True)
+        self.assertEqual(total2, 1)
+        self.assertEqual(store[3]["domain"], "기타-미분류")
+
+    def test_misc_dry_run_writes_nothing(self):
+        store = self._store()
+        conn = _MiscFakeConn(store)
+        total = bf.run_backfill(conn, self._classify, batch=50, max_rows=None,
+                                dry_run=True, reclassify_misc=True)
+        self.assertEqual(total, 3)
+        self.assertEqual([r["domain"] for r in store],
+                         ["realestate", "기타-미분류", "기타-미분류",
+                          "기타-미분류", None])
+        self.assertEqual(conn.commits, 0)
+
+    def test_null_path_unchanged_by_flag_default(self):
+        # The original NULL-target behavior with the default flag value.
+        store = [{"id": 1, "title": "복지 지원", "claim_text": "c", "domain": None}]
+        conn = _MiscFakeConn(store)
+        total = bf.run_backfill(conn, self._classify, batch=50, max_rows=None,
+                                dry_run=False)
+        self.assertEqual(total, 1)
+        self.assertEqual(store[0]["domain"], "welfare")
+
+
 if __name__ == "__main__":
     unittest.main()
