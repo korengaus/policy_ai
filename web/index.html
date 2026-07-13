@@ -4622,15 +4622,17 @@
     <symbol id="ic-message" viewBox="0 0 24 24"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></symbol>
   </svg>
   <div class="page">
-    <!-- DESIGN-3A: top utility bar. STATIC placeholders only — live date/counts
-         are wired in DESIGN-3B. CONTENT-HONESTY: About now anchors the real
+    <!-- DESIGN-3A: top utility bar. CONTENT-HONESTY: About now anchors the real
          "tickedin 소개" section (#about); Contact opens the real contact email
          (same as 제보하기); the dead "News" link was removed (no content yet).
-         No JS is bound in this row. -->
+         HOME-SECTION-FIX A1: the utility-counts are now wired from the read-only
+         GET /stats (이번 주 업데이트 = 7-day total, 검증 진행 = AI-draft
+         remainder) — the label is "이번 주" (not "오늘") because /stats is a
+         rolling 7-day window; showing that as "today" would overclaim. -->
     <div class="utility-bar">
       <div class="utility-left">
         <span class="utility-brand-tag">2026 · 검증 인프라</span>
-        <span class="utility-counts">오늘 업데이트 <strong class="utility-count-num">—</strong>건 · 검증 진행 <strong class="utility-count-num">—</strong>건</span>
+        <span class="utility-counts">이번 주 업데이트 <strong class="utility-count-num" id="utilityUpdateCount">—</strong>건 · 검증 진행 <strong class="utility-count-num" id="utilityProgressCount">—</strong>건</span>
       </div>
       <nav class="utility-right" aria-label="사이트 메뉴">
         <a class="utility-link" href="#about">About</a>
@@ -5671,6 +5673,11 @@
     const statOfficialEl = document.getElementById("statOfficial");
     const statDraftEl = document.getElementById("statDraft");
     const statRangeEl = document.getElementById("statRange");
+    // HOME-SECTION-FIX A1: the top utility-bar counts (were static "—" dashes).
+    // Fed by the SAME read-only GET /stats the sidebar panel uses — the 7-day
+    // window total + the AI-draft (검증 진행) remainder. No new backend field.
+    const utilityUpdateCountEl = document.getElementById("utilityUpdateCount");
+    const utilityProgressCountEl = document.getElementById("utilityProgressCount");
     const reportClaimInputEl = document.getElementById("reportClaimInput");
     const reportClaimBtnEl = document.getElementById("reportClaimBtn");
     const categoryTabsEl = document.getElementById("categoryTabs");
@@ -5732,6 +5739,14 @@
     const domainResultsCache = new Map();
     let domainLoadingKey = null;
     let domainFetchErrorKey = null;
+    // HOME-SECTION-FIX A1: per-domain cache for the home 분야별 sections. The
+    // sections used to filter the GLOBAL recent-50 pool (allCards), so a domain
+    // whose rows are older than that window showed 0–1 cards (보건 showed 1;
+    // education, all re-classified from old rows, showed none). Each section now
+    // draws its OWN top rows from GET /history?domain=<key> — the same read-only
+    // endpoint the tabs use. Display only; no localStorage.
+    const domainSectionCache = new Map();
+    const domainSectionLoading = new Set();
     // ===== M29-A1 — pin-safe display label maps =====
     const ALERT_LABELS = {
       WATCH: "관찰",
@@ -7840,10 +7855,15 @@
     // renderTopicCardHtml + sortTopicCards verbatim (no card-render change). Returns
     // an innerHTML string (""→ no sections). Duplicates with the top feed are
     // allowed (top = 전체 인기/최신; sections = browse-by-category).
-    function renderDomainSections(cards) {
-      const list = Array.isArray(cards) ? cards : [];
+    function renderDomainSections() {
+      // HOME-SECTION-FIX A1: source each section from its OWN per-domain fetch
+      // (domainSectionCache), not the global recent pool — so every domain with
+      // rows gets a section and its real top-3 (fixes 보건=1 and missing 교육).
       return DOMAIN_ORDER.map((d) => {
-        const domainCards = list.filter((c) => cardDomainKey(c) === d);
+        const results = domainSectionCache.get(d);
+        if (!results || !results.length) return "";
+        const domainCards = results.map((result, index) =>
+          topicCardFromResult(result, index, "server"));
         if (!domainCards.length) return "";
         const label = domainDisplayLabel(d);
         const top3 = sortTopicCards(domainCards, "뜨는순").slice(0, 3);
@@ -8003,7 +8023,11 @@
       // emptied (shells preserved for C3-2). renderDomainSections stays 전체-only (C3-3
       // handles gating); #verifyHowSection is untouched.
       if (activeDomain === "전체") {
-        if (feedDomainSectionsEl) feedDomainSectionsEl.innerHTML = renderDomainSections(allCards);
+        // HOME-SECTION-FIX A1: kick off (idempotent) per-domain prefetch, then
+        // render whatever has landed. Each fetch repaints the sections as it
+        // resolves, so all domains fill in without blocking the feed.
+        ensureDomainSectionsLoaded();
+        if (feedDomainSectionsEl) feedDomainSectionsEl.innerHTML = renderDomainSections();
       } else {
         if (feedDomainSectionsEl) feedDomainSectionsEl.innerHTML = "";
       }
@@ -8165,6 +8189,15 @@
         if (statTotalEl) statTotalEl.textContent = String(body.total ?? "–");
         if (statOfficialEl) statOfficialEl.textContent = String(body.official ?? "–");
         if (statDraftEl) statDraftEl.textContent = String(body.draft ?? "–");
+        // HOME-SECTION-FIX A1: wire the top utility-bar counts from the same
+        // payload — 이번 주 업데이트 = total (7-day window), 검증 진행 = draft
+        // (the AI-draft remainder). Fail-quiet leaves the "—" if /stats errors.
+        if (utilityUpdateCountEl && Number.isFinite(Number(body.total))) {
+          utilityUpdateCountEl.textContent = String(body.total);
+        }
+        if (utilityProgressCountEl && Number.isFinite(Number(body.draft))) {
+          utilityProgressCountEl.textContent = String(body.draft);
+        }
         if (statRangeEl && body.range_start && body.range_end) {
           // ISO YYYY-MM-DD → MM.DD; fall back to the raw strings if malformed.
           const mmdd = (iso) => {
@@ -12043,6 +12076,27 @@
         }
         if (activeDomain === domainKey) renderHotTopics();
       });
+    }
+
+    // HOME-SECTION-FIX A1: ensure every DOMAIN_ORDER domain has its top rows
+    // cached for the home 분야별 sections, then repaint. Fire-and-forget and
+    // fail-quiet: a domain that errors just has no section (never blocks the
+    // others). Reuses getServerDomainAnalyses — the SAME read-only /history
+    // adapter the tabs use. A small limit gives 뜨는순 a real pool to rank while
+    // keeping the per-domain payloads light. Repaint writes ONLY the sections
+    // container (never calls renderHotTopics), so there is no re-entrancy loop.
+    function ensureDomainSectionsLoaded() {
+      for (const domainKey of DOMAIN_ORDER) {
+        if (domainSectionCache.has(domainKey) || domainSectionLoading.has(domainKey)) continue;
+        domainSectionLoading.add(domainKey);
+        getServerDomainAnalyses(domainKey, 12).then((results) => {
+          domainSectionLoading.delete(domainKey);
+          if (results !== null) domainSectionCache.set(domainKey, results);
+          if (activeDomain === "전체" && feedDomainSectionsEl) {
+            feedDomainSectionsEl.innerHTML = renderDomainSections();
+          }
+        });
+      }
     }
 
     // After a V2 job finishes, the SSE "completed" event carries the

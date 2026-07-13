@@ -74,15 +74,17 @@
     <symbol id="ic-message" viewBox="0 0 24 24"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></symbol>
   </svg>
   <div class="page">
-    <!-- DESIGN-3A: top utility bar. STATIC placeholders only — live date/counts
-         are wired in DESIGN-3B. CONTENT-HONESTY: About now anchors the real
+    <!-- DESIGN-3A: top utility bar. CONTENT-HONESTY: About now anchors the real
          "tickedin 소개" section (#about); Contact opens the real contact email
          (same as 제보하기); the dead "News" link was removed (no content yet).
-         No JS is bound in this row. -->
+         HOME-SECTION-FIX A1: the utility-counts are now wired from the read-only
+         GET /stats (이번 주 업데이트 = 7-day total, 검증 진행 = AI-draft
+         remainder) — the label is "이번 주" (not "오늘") because /stats is a
+         rolling 7-day window; showing that as "today" would overclaim. -->
     <div class="utility-bar">
       <div class="utility-left">
         <span class="utility-brand-tag">2026 · 검증 인프라</span>
-        <span class="utility-counts">오늘 업데이트 <strong class="utility-count-num">—</strong>건 · 검증 진행 <strong class="utility-count-num">—</strong>건</span>
+        <span class="utility-counts">이번 주 업데이트 <strong class="utility-count-num" id="utilityUpdateCount">—</strong>건 · 검증 진행 <strong class="utility-count-num" id="utilityProgressCount">—</strong>건</span>
       </div>
       <nav class="utility-right" aria-label="사이트 메뉴">
         <a class="utility-link" href="#about">About</a>
