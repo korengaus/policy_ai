@@ -1,0 +1,4 @@
+{
+  "_readme": "TOPIC-ALERT v0 registered keywords. Operator-editable: each keyword fires an internal ntfy alert when a cluster whose label/member titles contain it SURGES between the two newest brainmap_snapshots batches (growth >= 2 outlets, or newly appeared with >= 3 outlets). Matching is casefolded substring, same as the B2B briefing filter. Alerts are spread-only (verdict-free); duplicates are suppressed per (keyword, cluster, snapshot_date).",
+  "keywords": ["최저임금", "가계대출", "전세", "기초연금", "부동산 PF"]
+}
