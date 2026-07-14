@@ -140,9 +140,15 @@ def _span_days(first_at, last_at):
 def filter_entries_for_customer(entries, lookup, profile):
     """Preserve build_report's ranking order; keep entries relevant to the
     profile. relevance = domain_match OR keyword_match; then the
-    content_nature keep-list gates on the REPRESENTATIVE node's label."""
+    content_nature keep-list gates on the REPRESENTATIVE node's label;
+    then the OPTIONAL exclude_keywords negative filter (2b): a cluster
+    tripping an exclude term is dropped UNLESS it also matched a positive
+    keyword — an explicit customer interest beats a broad exclusion, so
+    genuinely-relevant crossover clusters survive. Absent/empty
+    exclude_keywords = prior behavior exactly."""
     domains = set(profile.get("domains") or [])
     keywords = [k for k in (profile.get("keywords") or []) if k]
+    exclude_keywords = [k for k in (profile.get("exclude_keywords") or []) if k]
     natures = set(profile.get("content_nature") or [])
     kept = []
     for entry in entries:
@@ -168,6 +174,12 @@ def filter_entries_for_customer(entries, lookup, profile):
             )
             if rep_nature not in natures:
                 continue
+        excluded = any(
+            any(exkw.casefold() in (h or "").casefold() for h in haystacks)
+            for exkw in exclude_keywords
+        )
+        if excluded and not matched_keywords:
+            continue
         kept.append((entry, cluster, matched_domains, matched_keywords))
     return kept
 
@@ -413,6 +425,24 @@ def run_selftest() -> int:
     d_ok = set(kept_ids({"domains": ["welfare"], "keywords": ["재건축"],
                          "content_nature": []})) == {"aaaaaaaaaaaa", "dddddddddddd"}
 
+    # (i) 2b exclude: A matches only via the finance domain (member id=2) and
+    # trips exclude 재건축 with NO positive-keyword hit -> DROPPED; B stays.
+    i_ok = kept_ids({"domains": ["finance"], "keywords": ["기준금리"],
+                     "exclude_keywords": ["재건축"], "content_nature": []}
+                    ) == ["bbbbbbbbbbbb"]
+    # (ii) 2b crossover survives: A trips exclude 규제 BUT also matches the
+    # positive keyword 재건축 -> KEPT (explicit interest beats exclusion).
+    ii_ok = kept_ids({"domains": [], "keywords": ["재건축"],
+                      "exclude_keywords": ["규제"], "content_nature": []}
+                     ) == ["aaaaaaaaaaaa"]
+    # (iii) backward compat: absent vs empty exclude_keywords are identical
+    # (and match the pre-2b result from check (a)).
+    iii_ok = (kept_ids({"domains": ["realestate"], "keywords": [],
+                        "content_nature": []})
+              == kept_ids({"domains": ["realestate"], "keywords": [],
+                           "exclude_keywords": [], "content_nature": []})
+              == ["aaaaaaaaaaaa", "cccccccccccc"])
+
     # (e)-(h) on a produced data dict + HTML.
     profile = {"id": "selftest", "display_name": "셀프테스트",
                "domains": ["realestate", "finance", "welfare"], "keywords": [],
@@ -441,7 +471,9 @@ def run_selftest() -> int:
 
     checks = {"a_domain": a_ok, "b_keyword": b_ok, "c_nature_gate": c_ok,
               "d_or_union": d_ok, "e_syndication": e_ok, "f_honesty": f_ok,
-              "g_vocab": g_ok, "h_no_truth_field": h_ok}
+              "g_vocab": g_ok, "h_no_truth_field": h_ok,
+              "i_exclude_drops": i_ok, "ii_crossover_kept": ii_ok,
+              "iii_backward_compat": iii_ok}
     for name, ok in checks.items():
         print("  %-18s %s" % (name, "ok" if ok else "FAIL"))
     if not f_ok:

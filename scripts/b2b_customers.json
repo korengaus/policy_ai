@@ -1,5 +1,5 @@
 {
-  "_readme": "B2B-BRIEFING v0 customer profiles. Operator-editable. Each profile: id (file-name slug), display_name, domains (EXACT domain_classifier.py LABELS keys: finance/welfare/agriculture/labor/health/environment/SMB/realestate/statistics/education), keywords (substring-matched against cluster label_title + member titles), content_nature (keep-list gate on the representative node: government_policy/market_commercial/mixed_or_unclear; empty list = no gate). Relevance = domain OR keyword match; a profile needs at least one of the two.",
+  "_readme": "B2B-BRIEFING customer profiles. Operator-editable. Each profile: id (file-name slug), display_name, domains (EXACT domain_classifier.py LABELS keys: finance/welfare/agriculture/labor/health/environment/SMB/realestate/statistics/education), keywords (substring-matched against cluster label_title + member titles), exclude_keywords (OPTIONAL negative filter: drop a cluster matching one of these UNLESS it also matches a positive keyword — crossover survives; empty/absent = no exclusion), content_nature (keep-list gate on the representative node: government_policy/market_commercial/mixed_or_unclear; empty list = no gate). Relevance = domain OR keyword match; a profile needs at least one of the two.",
   "customers": [
     {
       "id": "realestate_assoc",
@@ -13,13 +13,14 @@
       "display_name": "금융 IR팀 (샘플)",
       "domains": ["finance"],
       "keywords": ["기준금리", "가계대출", "예대금리", "금융위", "은행"],
+      "exclude_keywords": ["규제지역", "LTV", "재건축", "재개발", "분양가상한", "토지거래허가", "청년주택", "공급대책"],
       "content_nature": ["government_policy", "mixed_or_unclear"]
     },
     {
       "id": "welfare_labor_pr",
       "display_name": "복지·노동 PR팀 (샘플)",
       "domains": ["welfare", "labor"],
-      "keywords": ["최저임금", "기초연금", "고용", "노동시간"],
+      "keywords": ["최저임금", "기초연금", "고용률", "일자리", "노동시간"],
       "content_nature": ["government_policy", "mixed_or_unclear"]
     }
   ]
