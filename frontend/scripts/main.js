@@ -7430,6 +7430,27 @@
         goHome();
       });
     }
+    // FOOTER-CLEANUP A3: the footer 도메인 column links carry [data-domain] (the raw
+    // English enum: real_estate/finance/welfare/labor). A click switches the home feed
+    // to that domain via the SAME sequence a category-tab click uses (clear context,
+    // reset progress, showScreen home, setActiveDomain) — no new nav path. They are
+    // <a href="#"> so preventDefault the anchor jump. Delegated on .footer-links;
+    // closest("a[data-domain]") ignores the #about/#methodology anchors in the same
+    // nav (those are handled by their per-href init handlers above).
+    const footerLinksEl = document.querySelector(".footer-links");
+    if (footerLinksEl) {
+      footerLinksEl.addEventListener("click", (event) => {
+        const link = event.target.closest("a[data-domain]");
+        if (!link) return;
+        event.preventDefault();
+        clearCurrentReportContext();
+        hideStatus();
+        v2ResetProgress();
+        showScreen("home");
+        setActiveDomain(link.dataset.domain || "전체");
+        window.scrollTo(0, 0);
+      });
+    }
     // DESIGN-UNIFY: "맨 위로" — smooth scroll to the top of the (long) detail screen.
     const scrollTopLinkEl = document.getElementById("scrollTopLink");
     if (scrollTopLinkEl) {

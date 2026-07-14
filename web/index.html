@@ -5457,8 +5457,9 @@
     <!-- DESIGN-C3c: 3-column footer expansion. The four original lines (운영자 /
          연락처 / © / the AI-draft disclaimer) are PRESERVED verbatim below in
          .footer-meta + .footer-bottom. Real on-page targets are wired (#methodology,
-         #correctionsSection, mailto); pages that don't exist yet are href="#"
-         placeholders with a title="준비 중" hover (no visible label change). We do
+         #correctionsSection, #about, mailto, and the 도메인 column → setActiveDomain).
+         The 2 legally-expected policy links (개인정보처리방침 · 청소년보호정책) stay
+         href="#" title="준비 중" placeholders — pages built before launch. We do
          NOT adopt the mockup's business-registration / real-name / verify@ fields.
          Reuses existing tokens + the header brand mark (.logo-tick). -->
     <footer class="site-footer">
@@ -5470,10 +5471,10 @@
         <nav class="footer-links" aria-label="푸터 링크">
           <div class="footer-col">
             <div class="footer-col-head">도메인</div>
-            <a href="#" title="준비 중">부동산</a>
-            <a href="#" title="준비 중">금융</a>
-            <a href="#" title="준비 중">복지</a>
-            <a href="#" title="준비 중">노동</a>
+            <a href="#" data-domain="real_estate">부동산</a>
+            <a href="#" data-domain="finance">금융</a>
+            <a href="#" data-domain="welfare">복지</a>
+            <a href="#" data-domain="labor">노동</a>
           </div>
           <div class="footer-col">
             <div class="footer-col-head">검증</div>
@@ -5481,15 +5482,12 @@
             <a href="#correctionsSection">정정·업데이트</a>
             <a href="/web/weekly.html">주간 리포트</a>
             <a href="/web/faded.html">후속 끊긴 주장</a>
-            <a href="#" title="준비 중">등급 안내</a>
-            <a href="#" title="준비 중">이의 제기</a>
+            <a href="#methodology">등급 안내</a>
           </div>
           <div class="footer-col">
             <div class="footer-col-head">회사</div>
-            <a href="#" title="준비 중">About</a>
+            <a href="#about">About</a>
             <a href="mailto:contact@tickedin.org">Contact</a>
-            <a href="#" title="준비 중">News</a>
-            <a href="#" title="준비 중">채용</a>
           </div>
         </nav>
       </div>
@@ -5504,7 +5502,6 @@
         <p class="footer-copy">© 2026 tickedin. All rights reserved.</p>
         <nav class="footer-policy" aria-label="정책 링크">
           <a href="#" title="준비 중">개인정보처리방침</a>
-          <a href="#" title="준비 중">운영원칙</a>
           <a href="#methodology">검증 방법론</a>
           <a href="#" title="준비 중">청소년보호정책</a>
         </nav>
@@ -12943,6 +12940,27 @@
     if (footerBrandEl) {
       footerBrandEl.addEventListener("click", () => {
         goHome();
+      });
+    }
+    // FOOTER-CLEANUP A3: the footer 도메인 column links carry [data-domain] (the raw
+    // English enum: real_estate/finance/welfare/labor). A click switches the home feed
+    // to that domain via the SAME sequence a category-tab click uses (clear context,
+    // reset progress, showScreen home, setActiveDomain) — no new nav path. They are
+    // <a href="#"> so preventDefault the anchor jump. Delegated on .footer-links;
+    // closest("a[data-domain]") ignores the #about/#methodology anchors in the same
+    // nav (those are handled by their per-href init handlers above).
+    const footerLinksEl = document.querySelector(".footer-links");
+    if (footerLinksEl) {
+      footerLinksEl.addEventListener("click", (event) => {
+        const link = event.target.closest("a[data-domain]");
+        if (!link) return;
+        event.preventDefault();
+        clearCurrentReportContext();
+        hideStatus();
+        v2ResetProgress();
+        showScreen("home");
+        setActiveDomain(link.dataset.domain || "전체");
+        window.scrollTo(0, 0);
       });
     }
     // DESIGN-UNIFY: "맨 위로" — smooth scroll to the top of the (long) detail screen.
