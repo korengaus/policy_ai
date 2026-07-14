@@ -5099,7 +5099,7 @@
       return lines;
     }
 
-    function drawShareImage(title, spreadData) {
+    function drawShareImage(title, spreadData, officialLabel = "") {
       const width = 1200;
       const height = 630;
       const margin = 72;
@@ -5149,6 +5149,20 @@
         }
       }
 
+      // SHARE-IMAGE-FILL A7: 공식 근거 상태 — drawn on ALL cards, reusing the
+      // detail header's officialStatusLabel (closed source-status vocabulary,
+      // never a truth verdict). On spread-less cards it fills the otherwise
+      // empty middle band; on spread cards it complements the lines above.
+      // SINGLE neutral slate — no status-based color (color must not imply a
+      // verdict). Same 28px tier as the 최초 보도 sub-line.
+      if (officialLabel) {
+        y += 14;
+        ctx.fillStyle = palette.slate;
+        ctx.font = `500 28px ${SHARE_IMAGE_FONTS}`;
+        ctx.fillText(`공식 근거 상태: ${officialLabel}`, margin, y);
+        y += 40;
+      }
+
       // Footer — honesty line + URL, baked into the pixels.
       ctx.strokeStyle = palette.line;
       ctx.lineWidth = 2;
@@ -5166,9 +5180,9 @@
       return canvas;
     }
 
-    function downloadShareImage(title, resultId) {
+    function downloadShareImage(title, resultId, officialLabel = "") {
       try {
-        const canvas = drawShareImage(title, spreadDataCache.get(resultId));
+        const canvas = drawShareImage(title, spreadDataCache.get(resultId), officialLabel);
         canvas.toBlob((blob) => {
           if (!blob) return;
           const url = URL.createObjectURL(blob);
@@ -5603,7 +5617,7 @@
             <!-- CARD-3LAYER S4a: 이미지로 공유 button — split out of the (moved)
                  spread placeholder's conditional, byte-identical markup/condition;
                  stays low near the footer while the spread section sits up top. -->
-            ${(hasFocus || displayResults.length === 1) && Number(result.result_id) > 0 ? `<div class="report-error-link"><button type="button" class="secondary" data-share-image="${Number(result.result_id)}" data-share-title="${title}">이미지로 공유</button></div>` : ""}
+            ${(hasFocus || displayResults.length === 1) && Number(result.result_id) > 0 ? `<div class="report-error-link"><button type="button" class="secondary" data-share-image="${Number(result.result_id)}" data-share-title="${title}" data-share-official="${escapeHtml(officialStatusLabel(result))}">이미지로 공유</button></div>` : ""}
             <div class="source-link">
               <a class="source-button" href="${url}" target="_blank" rel="noopener noreferrer">원문 보기</a>
             </div>
@@ -7227,7 +7241,10 @@
       if (!shareButton) return;
       const resultId = Number(shareButton.getAttribute("data-share-image"));
       const shareTitle = shareButton.getAttribute("data-share-title") || "";
-      downloadShareImage(shareTitle, resultId);
+      // SHARE-IMAGE-FILL A7: the render bakes the card's officialStatusLabel into
+      // the button so the canvas can draw the same source-status line.
+      const shareOfficial = shareButton.getAttribute("data-share-official") || "";
+      downloadShareImage(shareTitle, resultId, shareOfficial);
     });
 
     analyzeBtn.addEventListener("click", searchFirst);
