@@ -5000,11 +5000,11 @@
         const count = counts.get(day) || 0;
         const heightPct = count > 0 ? Math.max(6, Math.round((count / peak) * 100)) : 0;
         bars.push(
-          `<div title="${escapeHtml(day)} · ${escapeHtml(count)}건" style="flex:1 1 0;align-self:flex-end;height:${count > 0 ? heightPct + "%" : "2px"};background:${count > 0 ? "var(--brand)" : "var(--line)"};border-radius:2px 2px 0 0;"></div>`
+          `<div title="${escapeHtml(day)} · ${escapeHtml(count)}건" style="flex:1 1 0;max-width:14px;align-self:flex-end;height:${count > 0 ? heightPct + "%" : "2px"};background:${count > 0 ? "var(--brand)" : "var(--line)"};border-radius:2px 2px 0 0;"></div>`
         );
       }
       return `
-            <div class="spread-sparkline" role="img" aria-label="일별 보도량, 최다 ${escapeHtml(peak)}건" style="display:flex;align-items:flex-end;gap:2px;height:64px;margin:10px 0 2px;">${bars.join("")}</div>
+            <div class="spread-sparkline" role="img" aria-label="일별 보도량, 최다 ${escapeHtml(peak)}건" style="display:flex;align-items:flex-end;justify-content:flex-start;gap:2px;height:48px;margin:10px 0 2px;">${bars.join("")}</div>
             <div style="display:flex;justify-content:space-between;font-size:0.78rem;color:var(--muted);margin-bottom:4px;">
               <span>${escapeHtml(days[0])}</span>
               <span>최다 ${escapeHtml(peak)}건/일</span>

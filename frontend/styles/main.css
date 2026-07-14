@@ -1639,6 +1639,14 @@
       -webkit-box-orient: vertical;
       overflow: hidden;
     }
+    /* SPREAD-GRAPH-POLISH A5: the 확산 성장 Top5 title is an <a> (the 인기 랭킹 title
+       is a <span>), so the global a:hover underline (above) added an extra underline
+       there. Suppress it so the anchor hovers identically to the span — the shared
+       .rank-row:hover background tint + .rank-title→--brand-ink still apply. */
+    a.rank-title,
+    a.rank-title:hover {
+      text-decoration: none;
+    }
     .rank-verdict {
       display: flex;
       align-items: center;
