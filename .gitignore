@@ -23,3 +23,7 @@ node_modules/
 #   - web/index.html               IS committed (it's the deployed page)
 # Nothing else under frontend/ is auto-generated, so no new ignore rules
 # are required.
+
+# B2B-BRIEFING v0 — per-customer generated briefings (scripts/b2b_briefing.py
+# output; local artifacts, never committed).
+b2b_briefings/
