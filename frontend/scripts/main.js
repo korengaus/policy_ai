@@ -4992,26 +4992,27 @@
     // class rules. Neutral brand color only (never red/green verdict
     // semantics). Zero-fills missing days between first and last so a gap
     // renders as an empty slot, not a hidden jump. Returns "" (text-only
-    // section stays) when daily has <2 distinct days or the span is
-    // implausibly long (>60 days).
+    // section stays) only for truly bad data: no dated days, unparseable
+    // dates, an implausibly long span (>60 days), or peak<=0.
     function spreadSparklineHtml(daily) {
-      if (!Array.isArray(daily) || daily.length < 2) return "";
+      if (!Array.isArray(daily) || !daily.length) return "";
       const counts = new Map();
       for (const entry of daily) {
         const day = typeof entry?.date === "string" ? entry.date.slice(0, 10) : "";
         const count = Number(entry?.count);
         if (day && Number.isFinite(count) && count > 0) counts.set(day, count);
       }
-      // DETAIL-CLEANUP A6: require >=3 distinct dated days (was >=2) — a 1–2-day
-      // spike is fully described by the text line ("최초 보도 {date} · 하루 사이
-      // 확산") and 1–2 lone bars read as a broken chart.
-      if (counts.size < 3) return "";
+      // SPARKLINE-PRESENT A6b: the hide-when-small guards (<3 distinct days, <2-day
+      // span) are GONE — the centered shrink-wrapped plot below looks balanced at
+      // any size, so every dated cluster (>=1 day) renders. Fail-silent stays for
+      // truly bad data only: no dated days, unparseable dates, >60-day span, peak<=0.
+      if (!counts.size) return "";
       const days = [...counts.keys()].sort();
       const startMs = Date.parse(`${days[0]}T00:00:00Z`);
       const endMs = Date.parse(`${days[days.length - 1]}T00:00:00Z`);
       if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return "";
       const totalDays = Math.round((endMs - startMs) / 86400000) + 1;
-      if (totalDays < 2 || totalDays > 60) return "";
+      if (totalDays < 1 || totalDays > 60) return "";
       let peak = 0;
       counts.forEach((count) => { peak = Math.max(peak, count); });
       if (peak <= 0) return "";
@@ -5020,16 +5021,33 @@
         const day = new Date(startMs + i * 86400000).toISOString().slice(0, 10);
         const count = counts.get(day) || 0;
         const heightPct = count > 0 ? Math.max(6, Math.round((count / peak) * 100)) : 0;
+        // flex-basis 12px gives each bar real intrinsic width (so the shrink-wrapped
+        // plot's width = bar count × ~14px incl. gap); min-width:0 lets 60 bars still
+        // compress into a narrow container instead of overflowing.
         bars.push(
-          `<div title="${escapeHtml(day)} · ${escapeHtml(count)}건" style="flex:1 1 0;max-width:14px;align-self:flex-end;height:${count > 0 ? heightPct + "%" : "2px"};background:${count > 0 ? "var(--brand)" : "var(--line)"};border-radius:2px 2px 0 0;"></div>`
+          `<div title="${escapeHtml(day)} · ${escapeHtml(count)}건" style="flex:1 1 12px;max-width:14px;min-width:0;align-self:flex-end;height:${count > 0 ? heightPct + "%" : "2px"};background:${count > 0 ? "var(--brand)" : "var(--line)"};border-radius:2px 2px 0 0;"></div>`
         );
       }
-      return `
-            <div class="spread-sparkline" role="img" aria-label="일별 보도량, 최다 ${escapeHtml(peak)}건" style="display:flex;align-items:flex-end;justify-content:flex-start;gap:2px;height:48px;margin:10px 0 2px;">${bars.join("")}</div>
-            <div style="display:flex;justify-content:space-between;font-size:0.78rem;color:var(--muted);margin-bottom:4px;">
+      // Adaptive labels: 1 dated day = a point, shown honestly as ONE centered bar
+      // with a single "{date} · {N}건" label; 2+ days keep first / 최다 / last, but
+      // the row now spans the PLOT (min-width:max-content, centered), so the dates
+      // sit under the actual first/last bars instead of the container edges.
+      const labelRow = counts.size === 1
+        ? `<div style="text-align:center;font-size:0.78rem;color:var(--muted);">${escapeHtml(days[0])} · ${escapeHtml(counts.get(days[0]))}건</div>`
+        : `<div style="display:flex;justify-content:space-between;gap:12px;min-width:max-content;align-self:center;font-size:0.78rem;color:var(--muted);">
               <span>${escapeHtml(days[0])}</span>
               <span>최다 ${escapeHtml(peak)}건/일</span>
               <span>${escapeHtml(days[days.length - 1])}</span>
+            </div>`;
+      // One shrink-wrapped plot (bars + labels), centered in the section: its width
+      // = bar count × ≤16px capped at 100%, so 2–5 days form a compact centered
+      // cluster and 30–60 days fill the width exactly as before.
+      return `
+            <div style="text-align:center;margin:10px 0 4px;">
+              <div class="spread-sparkline" role="img" aria-label="일별 보도량, 최다 ${escapeHtml(peak)}건" style="display:inline-flex;flex-direction:column;gap:2px;max-width:100%;vertical-align:bottom;">
+                <div style="display:flex;align-items:flex-end;justify-content:center;gap:2px;height:48px;">${bars.join("")}</div>
+                ${labelRow}
+              </div>
             </div>`;
     }
 
