@@ -10756,7 +10756,7 @@
             ${syndicationLine}
             ${timelineLine}
             ${spreadSparklineHtml(timeline.daily)}
-            <div class="spread-map-link"><a href="/web/brainmap.html" target="_blank" rel="noopener noreferrer">브레인맵에서 유사 보도 보기 →</a></div>
+            <div class="spread-map-link"><a href="/web/brainmap.html?focus=${encodeURIComponent(id)}" target="_blank" rel="noopener noreferrer">브레인맵에서 유사 보도 보기 →</a></div>
             <div class="reader-note">확산 정보는 유통 규모를 보여줄 뿐, 사실 여부에 대한 검증이 아닙니다.</div>
           `;
           section.hidden = false;

@@ -534,6 +534,34 @@
     canvas.addEventListener("dblclick", resetView);
     var resetBtn = document.getElementById("resetView");
     if (resetBtn) resetBtn.addEventListener("click", resetView);
+    // BRAINMAP-HOVER A8: ?focus=<result_id> (from the card's 브레인맵에서 유사
+    // 보도 보기 link) lands centered + hovered on that card's node, reusing the
+    // existing view/hoverNode/draw machinery. Node ids ARE result ids (see
+    // onClick). Fail-silent when the id is absent or not in the graph (old
+    // card / rebuilt graph) — the map just shows the default view.
+    try {
+      var focusId = new URLSearchParams(window.location.search).get("focus");
+      var focusNode = focusId !== null ? nodeById[focusId] : null;
+      if (focusNode) {
+        var rect = canvas.parentElement.getBoundingClientRect();
+        var fw = Math.max(320, rect.width), fh = Math.max(280, rect.height);
+        var fp = positions[focusNode._i];
+        view.scale = 2.5;
+        view.offsetX = fw / 2 - fp.px * view.scale;
+        view.offsetY = fh / 2 - fp.py * view.scale;
+        hoverNode = focusNode;
+        draw();
+        // Same tooltip markup onMove builds, anchored beside the centered node.
+        var fspread = "";
+        if (focusNode.cluster_id !== null && focusNode.cluster_id !== undefined && clusterById[focusNode.cluster_id]) {
+          fspread = '<div class="tip-spread">' + clusterById[focusNode.cluster_id].size_label + "</div>";
+        }
+        tooltip.innerHTML = escapeHtml(focusNode.title || "(제목 없음)") + fspread;
+        tooltip.style.display = "block";
+        tooltip.style.left = Math.max(4, Math.min(fw / 2 + 14, fw - 330)) + "px";
+        tooltip.style.top = (fh / 2 + 14) + "px";
+      }
+    } catch (e) { /* focus is optional — never break the map */ }
     // Resize: re-fit the world layer to the new viewport; preserve the
     // current pan/zoom transform on top (a sensible, non-jarring default).
     window.addEventListener("resize", function () { layout(); draw(); });
