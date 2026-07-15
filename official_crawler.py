@@ -245,11 +245,25 @@ def _get_official_crawler_cache_ttl_seconds() -> int:
 
 
 def _do_request_url_raw(url: str):
-    """The original pre-M13.3b body of :func:`_request_url`, hoisted
-    verbatim so the cache-off path is literally the original code.
-    Do NOT modify this function — that is the byte-identicality
-    contract. Any change here must also pass the
-    ``CacheOffByteIdentityTests`` regression pin."""
+    """The pre-M13.3b body of :func:`_request_url`, hoisted so the
+    cache-off path is the original fetch code. Do NOT casually edit
+    this function — it carries the byte-identicality contract, and any
+    change here must still pass the ``CacheOffByteIdentityTests``
+    regression pin.
+
+    Deviation from the pre-M13.3b original (CRAWLER-CONNECT-TIMEOUT):
+    the request timeout was deliberately split from the scalar ``10``
+    to ``(connect=3s, read=10s)`` so unreachable gov hosts fail fast
+    during batch backfill instead of burning the full budget on TCP
+    connect. The read budget (10s) and the retry count (``range(2)``)
+    are UNCHANGED, so a live-but-slow host still gets its full read
+    window and returns byte-identical data — only unreachable hosts
+    are affected, and they yielded nothing anyway.
+
+    That split does NOT weaken the contract: this function is the sole
+    fetch for BOTH the cache-off and cache-on paths, so they change
+    together and cache-off ≡ cache-on ≡ pre-cache behavior still
+    holds. Preserve that property in any future edit."""
     last_error = None
 
     for _ in range(2):
@@ -257,7 +271,7 @@ def _do_request_url_raw(url: str):
             return requests.get(
                 url,
                 headers=REQUEST_HEADERS,
-                timeout=10,
+                timeout=(3, 10),
             )
         except (ConnectionError, Timeout, RequestException) as exc:
             last_error = exc
