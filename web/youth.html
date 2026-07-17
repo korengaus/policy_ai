@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>청소년보호정책 — tickedin</title>
+<!--
+  MOBILE-POLISH I — standalone, hand-authored legal page (NOT build_index-managed;
+  touches none of the index pins — same precedent as web/brainmap.html and
+  web/weekly.html). Replaces the footer's href="#" title="준비 중" placeholder.
+  Served by the existing app.mount("/web", StaticFiles) — no routing change.
+  Fully static: inline CSS, no JS, no fetch, no external lib/CDN.
+  Styling mirrors web/privacy.html (same token set + doc-* classes).
+-->
+<style>
+  :root {
+    --ink: #0f172a;
+    --slate: #475569;
+    --muted: #94a3b8;
+    --line: #e2e8f0;
+    --paper: #ffffff;
+    --canvas: #f6f8fb;
+    --brand: #1e5fd8;
+    --brand-ink: #1542a0;
+    --radius-sm: 9px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+    min-height: 100vh;
+  }
+  header.doc-head {
+    background: var(--paper);
+    border-bottom: 1px solid var(--line);
+    padding: 16px 24px 18px;
+  }
+  .brand-row {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .brand {
+    display: inline-flex; align-items: center; gap: 8px;
+    color: var(--ink); text-decoration: none;
+    font-family: 'Noto Serif KR', 'Nanum Myeongjo', 'Apple SD Gothic Neo', serif;
+    font-size: 21px; font-weight: 700; letter-spacing: -0.01em;
+  }
+  .brand img { width: 1.25em; height: 1.25em; object-fit: contain; vertical-align: middle; }
+  .brand-page-label {
+    color: var(--muted); font-size: 13px; font-weight: 600;
+    padding-left: 12px; border-left: 1px solid var(--line);
+  }
+  .doc-home {
+    margin-left: auto; font-size: 13px; font-weight: 600;
+    color: var(--brand-ink); text-decoration: none;
+  }
+  .doc-home:hover { text-decoration: underline; }
+  .doc-title {
+    font-size: 22px; font-weight: 800; letter-spacing: -0.02em; color: var(--ink);
+    font-family: 'Nanum Myeongjo', 'Apple SD Gothic Neo', 'Pretendard', serif;
+  }
+  .doc-date { margin-top: 4px; font-size: 13.5px; color: var(--slate); font-weight: 600; }
+  main.doc-body { max-width: 760px; margin: 0 auto; padding: 22px 20px 40px; }
+  section.doc-section {
+    background: var(--paper); border: 1px solid var(--line);
+    border-radius: var(--radius-sm); padding: 18px 20px; margin-bottom: 12px;
+  }
+  h2 {
+    font-size: 15.5px; font-weight: 800; color: var(--ink);
+    letter-spacing: -0.01em; margin-bottom: 8px;
+  }
+  p { font-size: 14px; line-height: 1.75; color: var(--slate); }
+  p + p { margin-top: 8px; }
+  ul { margin: 8px 0 0 18px; }
+  li { font-size: 14px; line-height: 1.75; color: var(--slate); }
+  strong { color: var(--ink); font-weight: 700; }
+  a { color: var(--brand-ink); text-decoration: none; font-weight: 600; }
+  a:hover { text-decoration: underline; }
+  footer.doc-foot {
+    max-width: 760px; margin: 0 auto; padding: 0 20px 46px;
+    font-size: 12.5px; color: var(--muted); line-height: 1.7;
+  }
+</style>
+</head>
+<body>
+<header class="doc-head">
+  <div class="brand-row">
+    <a class="brand" href="/" aria-label="tickedin 홈으로"><img src="/web/assets/favicon-180.png" alt="" aria-hidden="true">tickedin</a>
+    <span class="brand-page-label">청소년보호정책</span>
+    <a class="doc-home" href="/">← 홈으로</a>
+  </div>
+  <div class="doc-title">청소년보호정책</div>
+  <div class="doc-date">시행일: 2026년 7월 17일</div>
+</header>
+<main class="doc-body">
+
+  <section class="doc-section">
+    <h2>1. 기본 방침</h2>
+    <p>
+      tickedin(이하 "서비스")은 공개된 1차 자료와 공식 출처를 기준으로 정책 뉴스 속 주장을
+      검증하는 사이트입니다. 서비스는 청소년이 안전하게 이용할 수 있는 환경을 만들기 위해
+      <strong>청소년유해매체물을 제공하지 않으며</strong>, 관련 법령을 준수합니다.
+    </p>
+  </section>
+
+  <section class="doc-section">
+    <h2>2. 게시물의 성격</h2>
+    <p>
+      서비스가 다루는 내용은 <strong>정책 뉴스에 대한 사실 검증</strong>에 한정됩니다.
+      음란·폭력·사행성 등 청소년에게 유해한 내용, 성인 인증이 필요한 내용은 제공하지
+      않습니다. 서비스는 이용자가 자유롭게 글을 등록하는 게시판을 운영하지 않으므로,
+      이용자 게시물을 통한 유해정보 유통 경로가 존재하지 않습니다.
+    </p>
+  </section>
+
+  <section class="doc-section">
+    <h2>3. 유해정보에 대한 조치</h2>
+    <p>
+      서비스 내에 청소년에게 유해한 내용이 확인되는 경우, 운영자는 이를 지체 없이 확인하여
+      삭제하거나 접근을 차단합니다. 검증 대상인 뉴스 원문으로 연결되는 외부 링크는 해당
+      매체가 관리하는 영역이며, 서비스가 그 내용을 통제하지는 않습니다.
+    </p>
+  </section>
+
+  <section class="doc-section">
+    <h2>4. 신고 및 상담 창구</h2>
+    <p>
+      청소년에게 유해한 내용을 발견하셨거나 관련 문의가 있으신 경우
+      <a href="mailto:contact@tickedin.org">contact@tickedin.org</a>로 알려주시기 바랍니다.
+      접수된 내용은 확인 후 필요한 조치를 취하고, 요청하신 경우 처리 결과를 회신합니다.
+    </p>
+  </section>
+
+  <section class="doc-section">
+    <h2>5. 청소년보호 책임자</h2>
+    <p>
+      성명: tickedin 운영자<br>
+      연락처: <a href="mailto:contact@tickedin.org">contact@tickedin.org</a>
+    </p>
+    <p>
+      서비스의 규모상 청소년보호 책임자는 운영자가 겸임합니다. 청소년보호와 관련한 신고·
+      문의는 위 연락처로 접수해 주시기 바랍니다.
+    </p>
+  </section>
+
+  <section class="doc-section">
+    <h2>6. 정책의 변경</h2>
+    <p>
+      이 정책의 내용이 추가·삭제·수정되는 경우 변경 사항을 이 페이지에 게시하고 시행일을
+      갱신합니다.
+    </p>
+  </section>
+
+</main>
+<footer class="doc-foot">
+  © 2026 tickedin · 문의 <a href="mailto:contact@tickedin.org">contact@tickedin.org</a> ·
+  <a href="/web/privacy.html">개인정보처리방침</a>
+</footer>
+</body>
+</html>

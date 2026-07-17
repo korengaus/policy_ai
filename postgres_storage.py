@@ -1473,7 +1473,8 @@ def read_weekly_verification_stats(cutoff_iso: str) -> Optional[dict]:
     Counts analysis_results rows with ``created_at >= cutoff_iso`` (created_at is
     stored as ISO-8601 TEXT, so a lexicographic ``>=`` is a correct time window).
 
-    Returns ``{"total": int, "official": int}`` where ``official`` reuses the
+    Returns ``{"total": int, "official": int, "cumulative_total": int}`` where
+    ``official`` reuses the
     PERSISTED ``source_reliability_summary["has_genuine_official_support"]``
     boolean (NOT a re-derived predicate), with the SAME old-row fallback the
     frontend uses (``debug_summary.official_body_matches > 0``). The boolean
@@ -1481,6 +1482,12 @@ def read_weekly_verification_stats(cutoff_iso: str) -> Optional[dict]:
     Python — no Postgres-only ``::jsonb`` cast (keeps the SQLite test path
     portable). The week's row volume is small (~100s), so a window SELECT +
     Python count is cheap.
+
+    MOBILE-POLISH B — ``cumulative_total`` is the UNBOUNDED corpus ``COUNT(*)``
+    (no window, no filter), for the header banner's "누적 검증" figure. Pure row
+    metadata: no verdict path, no honesty predicate, no schema change. Counted in
+    SQL rather than in Python because — unlike the 7-day window — the full table
+    must never be pulled into memory.
 
     Contract mirrors the slim reader: ``None`` → engine not built; a dict
     (possibly zeroed) when Postgres is authoritative; raises on SQL error.
@@ -1497,6 +1504,9 @@ def read_weekly_verification_stats(cutoff_iso: str) -> Optional[dict]:
                     t.debug_summary,
                 ).where(t.created_at >= cutoff_iso)
             ).all()
+            cumulative_total = conn.execute(
+                sa.select(sa.func.count()).select_from(analysis_results_table)
+            ).scalar()
     except SQLAlchemyError as exc:
         log.error(
             "read_weekly_verification_stats failed: %s", exc, exc_info=True,
@@ -1520,7 +1530,11 @@ def read_weekly_verification_stats(cutoff_iso: str) -> Optional[dict]:
                 genuine = False
         if genuine:
             official += 1
-    return {"total": total, "official": official}
+    return {
+        "total": total,
+        "official": official,
+        "cumulative_total": int(cumulative_total or 0),
+    }
 
 
 def _safe_json_obj(value) -> dict:

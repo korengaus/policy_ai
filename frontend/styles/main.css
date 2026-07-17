@@ -4260,7 +4260,15 @@
       background: var(--surface-soft);
     }
 
-    .history-row:first-child {
+    /* MOBILE-POLISH K — renderSearchHitsView injects its .empty-state header as
+       #results' FIRST child, so the first .history-row there is :nth-child(2) and
+       this exemption never matched: the row kept its border-top and drew a second
+       full-width rule 14px (the .results grid gap) under the header's own dashed
+       bottom border, reading as a collision once the header wraps. Exempt a row
+       that directly follows the header too. Global — the selector was wrong at
+       every width, not just on mobile. */
+    .history-row:first-child,
+    .empty-state + .history-row {
       border-top: none;
       margin-top: 0;
     }
@@ -4538,6 +4546,124 @@
 
       .history-actions {
         grid-column: 1 / -1;
+      }
+
+      /* MOBILE-POLISH A — the px flex-basis on .topbar .panel (flex:1 1 440px)
+         and .footer-brand-zone (flex:1 1 280px) was written for a ROW container.
+         Both containers flip to flex-direction:column in this block, where basis
+         sizes the MAIN axis = HEIGHT — and with an auto-height single-line
+         container there is no negative free space, so flex-shrink never engages
+         and the item locks to that basis as a height. Result: a 440px-tall search
+         box around ~44px of content (the void reads as the home gap under the
+         search AND the search-results gap, since .topbar sits outside #homeScreen)
+         and a 280px-tall footer brand zone. Re-specify the basis as auto here so
+         each sizes to its content; align-self:stretch restores the full-width
+         cross-axis sizing that .topbar's align-items:flex-start would otherwise
+         shrink-to-fit, and the desktop 620px cap is lifted now that the search box
+         is a stacked full-width row. Also fixes .status-line / #v2ProgressWrap
+         (anchored to .panel's bottom edge) painting ~440px down through the tabs
+         row. Desktop rules are untouched. */
+      .topbar .panel {
+        flex-basis: auto;
+        max-width: none;
+        align-self: stretch;
+      }
+      .footer-brand-zone {
+        flex-basis: auto;
+      }
+
+      /* MOBILE-POLISH D — .utility-right has no flex-wrap, so its 6 items form one
+         unbreakable line whose min-content width (~330-360px + 5×18px of gap)
+         exceeds the ~349px content box at 377px: the items could only compress or
+         overflow, which is the cramped/broken look. The only wrap came from the
+         parent .utility-bar dropping the whole nav to a second row. Let the nav
+         wrap internally and tighten the gap, so the 6 links resolve into two tidy
+         rows. Each wrapped .utility-bar line holds a single item, so its
+         justify-content:space-between leaves the nav left-aligned. */
+      .utility-bar {
+        gap: 8px;
+      }
+      .utility-right {
+        flex-wrap: wrap;
+        gap: 10px 14px;
+      }
+
+      /* MOBILE-POLISH E — .category-tabs' 20px gap is tuned for the 1280px page
+         and is disproportionate at 377px, where 13 variable-width Korean labels
+         wrap into ragged rows. Tighten to a consistent row/column gap. The black
+         rule (.domain-tabs-row::before) is absolutely positioned at top:8px OF THE
+         ROW BOX with a 10/2 padding split calibrated for the single-line desktop
+         case; once the row wraps that geometry no longer holds and the rule lands
+         inside the tab band while 검증 등급 안내 (pushed onto its own wrapped line)
+         sits on the dotted ::after. Open up the row padding on both ends so the
+         tabs clear the black rule and the link clears the dotted one. */
+      .domain-tabs-row {
+        gap: 10px;
+        padding: 18px 0 10px;
+      }
+      .domain-tabs-row .category-tabs {
+        flex: 1 1 100%;
+        gap: 10px 16px;
+      }
+      .category-tab {
+        padding: 6px 0;
+        font-size: 1rem;
+      }
+
+      /* MOBILE-POLISH C — move 확산 성장 Top 5 (#trendingPanel) up to just below
+         the hero (#hotTopicsTop) and above the sorted list. #trendingPanel's
+         parent .home-aside is display:block, so `order` on it is inert; and the
+         nearest common ancestor .home-shell has only two children (.home-main /
+         .home-aside) with both the hero and the list buried in the SAME sibling,
+         so reordering the shell can only move the whole aside. Dissolving both
+         wrappers with display:contents promotes their children to direct grid
+         items of .home-shell, at which point `order` works. display:contents
+         removes the boxes from LAYOUT only — the nodes stay in the DOM, so the
+         .home-main card-open event delegation is unaffected.
+         EVERY direct child of both wrappers needs an explicit order — an
+         unlisted one defaults to order:0 and jumps above the hero — and
+         minmax(0,1fr) replaces the min-width:0 protection lost with
+         .home-main's box. The orders below are DOM order with #trendingPanel
+         lifted from the aside into slot 2; adding a child to either wrapper
+         means adding it here too. */
+      .home-shell {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .home-main,
+      .home-aside {
+        display: contents;
+      }
+      #hotTopicsTop {
+        order: 1;
+      }
+      #trendingPanel {
+        order: 2;
+      }
+      .home-main > .feed-sort-row {
+        order: 3;
+      }
+      .home-main > .news-home-section {
+        order: 4;
+      }
+      #verifyHowSection {
+        order: 5;
+      }
+      #feedDomainSections {
+        order: 6;
+      }
+      /* id selector — beats the .news-home-section order:4 above (#tier2Section
+         carries that class too) and keeps 나머지 뉴스 last in the feed. */
+      #tier2Section {
+        order: 7;
+      }
+      .home-aside > .stat-panel {
+        order: 8;
+      }
+      .home-aside > .legend-panel {
+        order: 9;
+      }
+      .home-aside > .report-panel {
+        order: 10;
       }
     }
 

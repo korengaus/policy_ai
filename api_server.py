@@ -586,6 +586,10 @@ class StatsResponse(BaseModel):
     draft: int
     range_start: str
     range_end: str
+    # MOBILE-POLISH B: unbounded corpus COUNT(*) for the header banner's
+    # "누적 검증" figure. Optional so an older/zeroed reader payload degrades to
+    # null rather than erroring — the client hides the 누적 clause when absent.
+    cumulative_total: Optional[int] = None
 
 
 @app.get("/stats", response_model=StatsResponse)
@@ -608,6 +612,12 @@ def stats() -> StatsResponse:
     total = int(counts.get("total", 0))
     official = int(counts.get("official", 0))
     draft = max(0, total - official)
+    # MOBILE-POLISH B: cumulative_total is the unbounded corpus COUNT(*) — the
+    # 누적 검증 figure, distinct from `total` (the rolling 7-day window). Left as
+    # None when the reader didn't supply it, so the client omits the clause
+    # rather than showing a fabricated number.
+    raw_cumulative = counts.get("cumulative_total")
+    cumulative_total = int(raw_cumulative) if raw_cumulative is not None else None
     return StatsResponse(
         status="ok",
         total=total,
@@ -615,6 +625,7 @@ def stats() -> StatsResponse:
         draft=draft,
         range_start=cutoff.date().isoformat(),
         range_end=now.date().isoformat(),
+        cumulative_total=cumulative_total,
     )
 
 

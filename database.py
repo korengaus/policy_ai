@@ -604,8 +604,10 @@ def get_recent_results_slim(limit: int = 20, domain=None):
 def get_weekly_verification_stats(cutoff_iso: str):
     # SIDEBAR-RANK-B2: read-only weekly counts for the homepage sidebar's
     # "이번 주 검증 현황" panel. PG-primary, mirroring get_recent_results_slim's
-    # error/None handling. Returns {"total": int, "official": int}; an empty
-    # dict {"total": 0, "official": 0} when PG is authoritative but engine-None.
+    # error/None handling. Returns {"total", "official", "cumulative_total"};
+    # a zeroed dict when PG is authoritative but engine-None.
+    # MOBILE-POLISH B: cumulative_total is the unbounded corpus COUNT(*) for the
+    # header banner's 누적 검증 figure (row metadata only, no verdict path).
     try:
         from postgres_storage import (
             is_postgres_dual_write_enabled,
@@ -632,8 +634,8 @@ def get_weekly_verification_stats(cutoff_iso: str):
         if pg_stats is not None:
             return pg_stats
         # PG returned None — engine None despite dual-write enabled.
-        return {"total": 0, "official": 0}
-    return {"total": 0, "official": 0}
+        return {"total": 0, "official": 0, "cumulative_total": 0}
+    return {"total": 0, "official": 0, "cumulative_total": 0}
 
 
 def get_result_by_id(result_id: int):

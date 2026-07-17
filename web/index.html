@@ -4296,7 +4296,15 @@
       background: var(--surface-soft);
     }
 
-    .history-row:first-child {
+    /* MOBILE-POLISH K — renderSearchHitsView injects its .empty-state header as
+       #results' FIRST child, so the first .history-row there is :nth-child(2) and
+       this exemption never matched: the row kept its border-top and drew a second
+       full-width rule 14px (the .results grid gap) under the header's own dashed
+       bottom border, reading as a collision once the header wraps. Exempt a row
+       that directly follows the header too. Global — the selector was wrong at
+       every width, not just on mobile. */
+    .history-row:first-child,
+    .empty-state + .history-row {
       border-top: none;
       margin-top: 0;
     }
@@ -4575,6 +4583,124 @@
       .history-actions {
         grid-column: 1 / -1;
       }
+
+      /* MOBILE-POLISH A — the px flex-basis on .topbar .panel (flex:1 1 440px)
+         and .footer-brand-zone (flex:1 1 280px) was written for a ROW container.
+         Both containers flip to flex-direction:column in this block, where basis
+         sizes the MAIN axis = HEIGHT — and with an auto-height single-line
+         container there is no negative free space, so flex-shrink never engages
+         and the item locks to that basis as a height. Result: a 440px-tall search
+         box around ~44px of content (the void reads as the home gap under the
+         search AND the search-results gap, since .topbar sits outside #homeScreen)
+         and a 280px-tall footer brand zone. Re-specify the basis as auto here so
+         each sizes to its content; align-self:stretch restores the full-width
+         cross-axis sizing that .topbar's align-items:flex-start would otherwise
+         shrink-to-fit, and the desktop 620px cap is lifted now that the search box
+         is a stacked full-width row. Also fixes .status-line / #v2ProgressWrap
+         (anchored to .panel's bottom edge) painting ~440px down through the tabs
+         row. Desktop rules are untouched. */
+      .topbar .panel {
+        flex-basis: auto;
+        max-width: none;
+        align-self: stretch;
+      }
+      .footer-brand-zone {
+        flex-basis: auto;
+      }
+
+      /* MOBILE-POLISH D — .utility-right has no flex-wrap, so its 6 items form one
+         unbreakable line whose min-content width (~330-360px + 5×18px of gap)
+         exceeds the ~349px content box at 377px: the items could only compress or
+         overflow, which is the cramped/broken look. The only wrap came from the
+         parent .utility-bar dropping the whole nav to a second row. Let the nav
+         wrap internally and tighten the gap, so the 6 links resolve into two tidy
+         rows. Each wrapped .utility-bar line holds a single item, so its
+         justify-content:space-between leaves the nav left-aligned. */
+      .utility-bar {
+        gap: 8px;
+      }
+      .utility-right {
+        flex-wrap: wrap;
+        gap: 10px 14px;
+      }
+
+      /* MOBILE-POLISH E — .category-tabs' 20px gap is tuned for the 1280px page
+         and is disproportionate at 377px, where 13 variable-width Korean labels
+         wrap into ragged rows. Tighten to a consistent row/column gap. The black
+         rule (.domain-tabs-row::before) is absolutely positioned at top:8px OF THE
+         ROW BOX with a 10/2 padding split calibrated for the single-line desktop
+         case; once the row wraps that geometry no longer holds and the rule lands
+         inside the tab band while 검증 등급 안내 (pushed onto its own wrapped line)
+         sits on the dotted ::after. Open up the row padding on both ends so the
+         tabs clear the black rule and the link clears the dotted one. */
+      .domain-tabs-row {
+        gap: 10px;
+        padding: 18px 0 10px;
+      }
+      .domain-tabs-row .category-tabs {
+        flex: 1 1 100%;
+        gap: 10px 16px;
+      }
+      .category-tab {
+        padding: 6px 0;
+        font-size: 1rem;
+      }
+
+      /* MOBILE-POLISH C — move 확산 성장 Top 5 (#trendingPanel) up to just below
+         the hero (#hotTopicsTop) and above the sorted list. #trendingPanel's
+         parent .home-aside is display:block, so `order` on it is inert; and the
+         nearest common ancestor .home-shell has only two children (.home-main /
+         .home-aside) with both the hero and the list buried in the SAME sibling,
+         so reordering the shell can only move the whole aside. Dissolving both
+         wrappers with display:contents promotes their children to direct grid
+         items of .home-shell, at which point `order` works. display:contents
+         removes the boxes from LAYOUT only — the nodes stay in the DOM, so the
+         .home-main card-open event delegation is unaffected.
+         EVERY direct child of both wrappers needs an explicit order — an
+         unlisted one defaults to order:0 and jumps above the hero — and
+         minmax(0,1fr) replaces the min-width:0 protection lost with
+         .home-main's box. The orders below are DOM order with #trendingPanel
+         lifted from the aside into slot 2; adding a child to either wrapper
+         means adding it here too. */
+      .home-shell {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .home-main,
+      .home-aside {
+        display: contents;
+      }
+      #hotTopicsTop {
+        order: 1;
+      }
+      #trendingPanel {
+        order: 2;
+      }
+      .home-main > .feed-sort-row {
+        order: 3;
+      }
+      .home-main > .news-home-section {
+        order: 4;
+      }
+      #verifyHowSection {
+        order: 5;
+      }
+      #feedDomainSections {
+        order: 6;
+      }
+      /* id selector — beats the .news-home-section order:4 above (#tier2Section
+         carries that class too) and keeps 나머지 뉴스 last in the feed. */
+      #tier2Section {
+        order: 7;
+      }
+      .home-aside > .stat-panel {
+        order: 8;
+      }
+      .home-aside > .legend-panel {
+        order: 9;
+      }
+      .home-aside > .report-panel {
+        order: 10;
+      }
     }
 
     /* MOBILE-1b — ultra-narrow tail (~360–480px). The 820px block above
@@ -4640,7 +4766,13 @@
     <div class="utility-bar">
       <div class="utility-left">
         <span class="utility-brand-tag">2026 · 검증 인프라</span>
-        <span class="utility-counts">이번 주 업데이트 <strong class="utility-count-num" id="utilityUpdateCount">—</strong>건 · 검증 진행 <strong class="utility-count-num" id="utilityProgressCount">—</strong>건</span>
+        <!-- MOBILE-POLISH B: cumulative-first banner — 누적 검증 (the unbounded
+             corpus COUNT(*), new /stats.cumulative_total) then 이번 주 (the rolling
+             7-day count, the existing /stats.total). The 누적 clause starts [hidden]
+             and is revealed by renderWeeklyStats only once a real number lands, so a
+             missing/older payload degrades to the 이번 주 clause alone rather than
+             showing a fabricated total. Replaces the old 검증 진행 (draft) figure. -->
+        <span class="utility-counts"><span id="utilityCumulativeClause" hidden>누적 검증 <strong class="utility-count-num" id="utilityTotalCount">—</strong>건 · </span>이번 주 <strong class="utility-count-num" id="utilityUpdateCount">—</strong>건</span>
       </div>
       <nav class="utility-right" aria-label="사이트 메뉴">
         <a class="utility-link" href="#about">About</a>
@@ -4715,7 +4847,11 @@
       <!-- DESIGN-C3h-1c: the feed SORT control moved OUT of this row to a
            .feed-sort-row just above the feed (adjacent to the sortable list it
            controls). "검증 등급 안내 →" now sits at the right end of the tab row. -->
-      <a class="grade-guide-link" href="#methodology">검증 등급 안내 →</a>
+      <!-- MOBILE-POLISH 2b: repointed #methodology → #gradeLegend. This link says
+           검증 등급 안내 but opened the methodology page, the same conflation G(c)
+           fixed on the footer's 등급 안내; it now lands on the real 검증 등급 legend
+           via the shared show-home-then-scroll handler. -->
+      <a class="grade-guide-link" href="#gradeLegend">검증 등급 안내 →</a>
     </nav>
 
     <!-- DESIGN-DETAIL-2: #homeScreen wraps the home-only view (#metrics through
@@ -4917,7 +5053,10 @@
              the real card labels (officialStatusLabel / verdictDotColor) so the
              legend matches the cards. The 2nd row "공식자료 참고" == the renamed
              non-genuine card label. No data. -->
-        <section class="legend-panel" aria-label="검증 등급 안내">
+        <!-- MOBILE-POLISH G(c): #gradeLegend is the scroll target for the footer's
+             등급 안내 link. The panel lives inside #homeScreen, so the handler shows
+             home first, then scrolls here. -->
+        <section id="gradeLegend" class="legend-panel" aria-label="검증 등급 안내">
           <div class="rank-panel-heading">
             <h2>검증 등급</h2>
           </div>
@@ -5479,10 +5618,24 @@
         <nav class="footer-links" aria-label="푸터 링크">
           <div class="footer-col">
             <div class="footer-col-head">도메인</div>
-            <a href="#" data-domain="real_estate">부동산</a>
-            <a href="#" data-domain="finance">금융</a>
+            <!-- MOBILE-POLISH G(a): data-domain="real_estate" was a BUG — the
+                 canonical enum key is "realestate" (see DOMAIN_LABELS_KO /
+                 DOMAIN_ORDER in main.js), so setActiveDomain("real_estate")
+                 matched no card and 부동산 silently rendered an empty feed.
+                 MOBILE-POLISH G(b): the list was a 4-domain subset; it now
+                 carries all 11 TAB_ORDER domains, in TAB_ORDER sequence so the
+                 footer reads in the same order as the top tabs. -->
+            <a href="#" data-domain="education">교육</a>
             <a href="#" data-domain="welfare">복지</a>
+            <a href="#" data-domain="realestate">부동산</a>
+            <a href="#" data-domain="agriculture">농업</a>
+            <a href="#" data-domain="finance">금융</a>
+            <a href="#" data-domain="SMB">소상공인</a>
+            <a href="#" data-domain="environment">환경</a>
             <a href="#" data-domain="labor">노동</a>
+            <a href="#" data-domain="health">보건</a>
+            <a href="#" data-domain="statistics">통계</a>
+            <a href="#" data-domain="기타-미분류">기타</a>
           </div>
           <div class="footer-col">
             <div class="footer-col-head">검증</div>
@@ -5490,7 +5643,10 @@
             <a href="#correctionsSection">정정·업데이트</a>
             <a href="/web/weekly.html">주간 리포트</a>
             <a href="/web/faded.html">후속 끊긴 주장</a>
-            <a href="#methodology">등급 안내</a>
+            <!-- MOBILE-POLISH G(c): 등급 안내 pointed at #methodology, landing on the
+                 identical page as 검증 방법론 two links up. It now targets the real
+                 legend block (#gradeLegend, the .legend-panel on home). -->
+            <a href="#gradeLegend">등급 안내</a>
           </div>
           <div class="footer-col">
             <div class="footer-col-head">회사</div>
@@ -5509,9 +5665,13 @@
       <div class="footer-bottom">
         <p class="footer-copy">© 2026 tickedin. All rights reserved.</p>
         <nav class="footer-policy" aria-label="정책 링크">
-          <a href="#" title="준비 중">개인정보처리방침</a>
+          <!-- MOBILE-POLISH I: were href="#" title="준비 중" placeholders; now real
+               standalone static pages under the existing /web mount, linked the same
+               way as weekly.html / brainmap.html / faded.html (plain absolute href,
+               no JS interception). -->
+          <a href="/web/privacy.html">개인정보처리방침</a>
           <a href="#methodology">검증 방법론</a>
-          <a href="#" title="준비 중">청소년보호정책</a>
+          <a href="/web/youth.html">청소년보호정책</a>
         </nav>
       </div>
     </footer>
@@ -5679,10 +5839,14 @@
     const statDraftEl = document.getElementById("statDraft");
     const statRangeEl = document.getElementById("statRange");
     // HOME-SECTION-FIX A1: the top utility-bar counts (were static "—" dashes).
-    // Fed by the SAME read-only GET /stats the sidebar panel uses — the 7-day
-    // window total + the AI-draft (검증 진행) remainder. No new backend field.
+    // Fed by the SAME read-only GET /stats the sidebar panel uses.
+    // MOBILE-POLISH B: now cumulative-first — 누적 검증 (cumulative_total, the
+    // unbounded corpus count) then 이번 주 (total, the 7-day window). The old
+    // 검증 진행 (draft) figure was retired from the banner; the sidebar's
+    // #statDraft still shows it, so no number was lost.
     const utilityUpdateCountEl = document.getElementById("utilityUpdateCount");
-    const utilityProgressCountEl = document.getElementById("utilityProgressCount");
+    const utilityTotalCountEl = document.getElementById("utilityTotalCount");
+    const utilityCumulativeClauseEl = document.getElementById("utilityCumulativeClause");
     const reportClaimInputEl = document.getElementById("reportClaimInput");
     const reportClaimBtnEl = document.getElementById("reportClaimBtn");
     const categoryTabsEl = document.getElementById("categoryTabs");
@@ -6004,6 +6168,20 @@
 
     function sanitizeDisplayText(value) {
       return repairMojibake(value).replaceAll("\uFFFD", "").trim();
+    }
+
+    // MOBILE-POLISH F \u2014 DISPLAY-ONLY strip of a leading decorative-marker run
+    // (\u25A0 \u25A1 \u25B6 \u25CF \u25C6 and the rest of the Geometric Shapes block, plus \u2605 \u2606 \u2022 \u203B) and
+    // any whitespace after it. Some outlets prefix a headline with a bullet glyph
+    // that renders as a broken-looking box at the head of a card title. Applied
+    // at render time only \u2014 the stored payload is never mutated, and the strip is
+    // anchored so a marker INSIDE a title survives. Korean/CJK sits well outside
+    // these ranges. Falls back to the unstripped text when a title is nothing but
+    // markers, so a headline can never render blank.
+    const LEADING_TITLE_MARKER_RE = /^[\s\u2022\u203B\u25A0-\u25FF\u2605\u2606]+/;
+    function stripLeadingTitleMarker(value) {
+      const text = sanitizeDisplayText(value);
+      return text.replace(LEADING_TITLE_MARKER_RE, "") || text;
     }
 
     const ARTICLE_NOISE_PATTERNS = [
@@ -7655,7 +7833,13 @@
       // NARRATIVE-3B: card-face summary = wrapper-stripped per-article text, hidden
       // when it collapses to the title (title-derived cards) to avoid duplicating
       // the headline already shown above. Uses the SAME title string the card renders.
-      const cardTitle = publicInstitutionName(result?.title || record?.query || "검증 뉴스");
+      // MOBILE-POLISH F: the display-layer marker strip lands here, the single
+      // point card.title is derived — covering the grid/hero/secondary cards (all
+      // route through renderTopicCardHtml) and the 최근 본 rows at once. The
+      // summary-collapses-to-title compare below reuses this same string, so the
+      // two stay in sync. Trending / detail / search-hits build titles on their
+      // own paths and call the helper directly.
+      const cardTitle = stripLeadingTitleMarker(publicInstitutionName(result?.title || record?.query || "검증 뉴스"));
       const strippedSummary = stripCardFaceWrapper(topSummaryLine(result));
       const summaryNorm = normalizeForCompare(strippedSummary);
       const summaryCollapsesToTitle =
@@ -8173,7 +8357,9 @@
         if (rows.length) renderHotTopics();
         const items = rows.map((row, i) => {
           const rid = Number(row?.representative_analysis_id);
-          const title = String(row?.title || "").trim() || (rid > 0 ? `기사 #${rid}` : "");
+          // MOBILE-POLISH F: trending rows come straight off GET /api/trending,
+          // bypassing topicCardFromResult — strip the leading marker here too.
+          const title = stripLeadingTitleMarker(row?.title) || (rid > 0 ? `기사 #${rid}` : "");
           if (!title) return "";
           const outlets = Number(row?.current_outlet_count);
           const growth = Number(row?.growth);
@@ -8212,14 +8398,20 @@
         if (statTotalEl) statTotalEl.textContent = String(body.total ?? "–");
         if (statOfficialEl) statOfficialEl.textContent = String(body.official ?? "–");
         if (statDraftEl) statDraftEl.textContent = String(body.draft ?? "–");
-        // HOME-SECTION-FIX A1: wire the top utility-bar counts from the same
-        // payload — 이번 주 업데이트 = total (7-day window), 검증 진행 = draft
-        // (the AI-draft remainder). Fail-quiet leaves the "—" if /stats errors.
+        // HOME-SECTION-FIX A1 / MOBILE-POLISH B: wire the top utility-bar counts
+        // from the same payload — 이번 주 = total (the 7-day window), 누적 검증 =
+        // cumulative_total (the unbounded corpus count). Fail-quiet leaves the "—"
+        // if /stats errors. The 누적 clause stays hidden unless a real finite
+        // number arrives, so an older payload without the field shows 이번 주 only
+        // rather than a fabricated or dashed-out total.
         if (utilityUpdateCountEl && Number.isFinite(Number(body.total))) {
           utilityUpdateCountEl.textContent = String(body.total);
         }
-        if (utilityProgressCountEl && Number.isFinite(Number(body.draft))) {
-          utilityProgressCountEl.textContent = String(body.draft);
+        if (utilityTotalCountEl && utilityCumulativeClauseEl
+            && body.cumulative_total !== null && body.cumulative_total !== undefined
+            && Number.isFinite(Number(body.cumulative_total))) {
+          utilityTotalCountEl.textContent = String(body.cumulative_total);
+          utilityCumulativeClauseEl.hidden = false;
         }
         if (statRangeEl && body.range_start && body.range_end) {
           // ISO YYYY-MM-DD → MM.DD; fall back to the raw strings if malformed.
@@ -10890,7 +11082,9 @@
           quality,
           level,
         } = parts;
-        const title = escapeHtml(publicInstitutionName(result.title || "제목 없음"));
+        // MOBILE-POLISH F: strip before escaping (the detail header builds its own
+        // title; this var also feeds data-share-title for the share image).
+        const title = escapeHtml(stripLeadingTitleMarker(publicInstitutionName(result.title || "제목 없음")));
         const url = escapeHtml(safeUrl(result.original_url || "#"));
         const topic = exportTopicLabel(result, currentReportContext?.query || queryInput?.value || "");
         // DETAIL-CLEANUP-V2: topSource*/recommendedAction/sourceTrustScore consts were
@@ -10991,7 +11185,12 @@
         const advancedVerificationDetails = renderCollapsibleSection(
           "고급 검증 정보 보기",
           verificationDetails,
-          false,
+          // MOBILE-POLISH J: the OUTER container opens by default so the rich
+          // analysis is not missed behind a closed summary. Its 8 inner
+          // sub-sections are separate renderCollapsibleSection calls that each
+          // still pass open=false, so they stay individually collapsed (headers
+          // only). The site-wide default at renderCollapsibleSection stays false.
+          true,
           "핵심 판단을 뒷받침하는 주장 추출, 근거 매칭, 반박 검사, 프레이밍 검사, 출처 후보, 내부 점검 정보를 한곳에 모았습니다.",
           // DESIGN-DETAIL-5d FIX 3b: mark the OUTER advanced container so CSS un-boxes
           // only it (not the top-level reader reading-guide, which shares the class).
@@ -12643,7 +12842,7 @@
           <div class="history-row" data-search-hit-id="${Number(hit.result_id) || 0}" role="button" tabindex="0">
             <div class="history-id">#${escapeHtml(index + 1)}</div>
             <div>
-              <strong>${escapeHtml(hit.title || "제목 없음")}</strong>
+              <strong>${escapeHtml(stripLeadingTitleMarker(hit.title) || "제목 없음")}</strong>
               <div class="history-meta">
                 ${escapeHtml(hit.snippet || "")}
                 <br>
@@ -12948,7 +13147,9 @@
     }
     // DESIGN-DETAIL-2: every in-page link to #methodology now OPENS the 검증 방법
     // page via the toggle instead of anchor-scrolling to a now-hidden section
-    // (footer 검증 방법론 ×2, the 검증 방법론 전체 → teaser link, 검증 등급 안내 →).
+    // (footer 검증 방법론 ×2, the 검증 방법론 전체 → teaser link).
+    // MOBILE-POLISH 2b: the tab row's 검증 등급 안내 → link is no longer in that set —
+    // it now targets #gradeLegend (handler below), as the footer's 등급 안내 does.
     // The compact 이렇게 검증합니다 teaser (#verifyHowSection) stays on home; only
     // its "전체 →" link opens the full page.
     document.querySelectorAll('a[href="#methodology"]').forEach((link) => {
@@ -12984,6 +13185,20 @@
         showScreen("about");
       });
     });
+    // MOBILE-POLISH G(c): the footer 등급 안내 link used to share #methodology with
+    // 검증 방법론 (two links up in the same column), so both landed on the identical
+    // page. It now targets the real 검증 등급 legend (#gradeLegend). That panel lives
+    // inside #homeScreen, so a plain anchor jump would do nothing whenever another
+    // screen is showing — switch to home FIRST, then scroll. Mirrors the
+    // methodology/about interception: preventDefault, then an explicit screen swap.
+    document.querySelectorAll('a[href="#gradeLegend"]').forEach((link) => {
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        showScreen("home");
+        const legendEl = document.getElementById("gradeLegend");
+        if (legendEl) legendEl.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
     // DESIGN-DETAIL-2 / DESIGN-UNIFY: restore the FULL home feed and land on home.
     // Shared by the header .brand-home logo AND the footer .footer-brand logo. The
     // detail loaders narrow currentReportContext to the single opened card, so without
@@ -13017,7 +13232,8 @@
       });
     }
     // FOOTER-CLEANUP A3: the footer 도메인 column links carry [data-domain] (the raw
-    // English enum: real_estate/finance/welfare/labor). A click switches the home feed
+    // canonical enum key — realestate/finance/… — as in DOMAIN_LABELS_KO; the column
+    // now lists all 11 TAB_ORDER domains). A click switches the home feed
     // to that domain via the SAME sequence a category-tab click uses (clear context,
     // reset progress, showScreen home, setActiveDomain) — no new nav path. They are
     // <a href="#"> so preventDefault the anchor jump. Delegated on .footer-links;

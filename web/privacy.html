@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>개인정보처리방침 — tickedin</title>
+<!--
+  MOBILE-POLISH I — standalone, hand-authored legal page (NOT build_index-managed;
+  touches none of the index pins — same precedent as web/brainmap.html and
+  web/weekly.html). Replaces the footer's href="#" title="준비 중" placeholder.
+  Served by the existing app.mount("/web", StaticFiles) — no routing change.
+  Fully static: inline CSS, no JS, no fetch, no external lib/CDN.
+  Content is a factual description of what the service actually does today
+  (no accounts, no login, no tracking beyond the newsletter provider). If the
+  service starts collecting anything more, this page must change with it.
+-->
+<style>
+  /* Tokens mirrored from the main site's design system (same set as
+     web/weekly.html / web/brainmap.html) so this standalone page reads as tickedin. */
+  :root {
+    --ink: #0f172a;
+    --slate: #475569;
+    --muted: #94a3b8;
+    --line: #e2e8f0;
+    --paper: #ffffff;
+    --canvas: #f6f8fb;
+    --brand: #1e5fd8;
+    --brand-ink: #1542a0;
+    --radius-sm: 9px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+    min-height: 100vh;
+  }
+  header.doc-head {
+    background: var(--paper);
+    border-bottom: 1px solid var(--line);
+    padding: 16px 24px 18px;
+  }
+  .brand-row {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .brand {
+    display: inline-flex; align-items: center; gap: 8px;
+    color: var(--ink); text-decoration: none;
+    font-family: 'Noto Serif KR', 'Nanum Myeongjo', 'Apple SD Gothic Neo', serif;
+    font-size: 21px; font-weight: 700; letter-spacing: -0.01em;
+  }
+  .brand img { width: 1.25em; height: 1.25em; object-fit: contain; vertical-align: middle; }
+  .brand-page-label {
+    color: var(--muted); font-size: 13px; font-weight: 600;
+    padding-left: 12px; border-left: 1px solid var(--line);
+  }
+  .doc-home {
+    margin-left: auto; font-size: 13px; font-weight: 600;
+    color: var(--brand-ink); text-decoration: none;
+  }
+  .doc-home:hover { text-decoration: underline; }
+  .doc-title {
+    font-size: 22px; font-weight: 800; letter-spacing: -0.02em; color: var(--ink);
+    font-family: 'Nanum Myeongjo', 'Apple SD Gothic Neo', 'Pretendard', serif;
+  }
+  .doc-date { margin-top: 4px; font-size: 13.5px; color: var(--slate); font-weight: 600; }
+  main.doc-body { max-width: 760px; margin: 0 auto; padding: 22px 20px 40px; }
+  section.doc-section {
+    background: var(--paper); border: 1px solid var(--line);
+    border-radius: var(--radius-sm); padding: 18px 20px; margin-bottom: 12px;
+  }
+  h2 {
+    font-size: 15.5px; font-weight: 800; color: var(--ink);
+    letter-spacing: -0.01em; margin-bottom: 8px;
+  }
+  p { font-size: 14px; line-height: 1.75; color: var(--slate); }
+  p + p { margin-top: 8px; }
+  ul { margin: 8px 0 0 18px; }
+  li { font-size: 14px; line-height: 1.75; color: var(--slate); }
+  strong { color: var(--ink); font-weight: 700; }
+  a { color: var(--brand-ink); text-decoration: none; font-weight: 600; }
+  a:hover { text-decoration: underline; }
+  footer.doc-foot {
+    max-width: 760px; margin: 0 auto; padding: 0 20px 46px;
+    font-size: 12.5px; color: var(--muted); line-height: 1.7;
+  }
+</style>
+</head>
+<body>
+<header class="doc-head">
+  <div class="brand-row">
+    <a class="brand" href="/" aria-label="tickedin 홈으로"><img src="/web/assets/favicon-180.png" alt="" aria-hidden="true">tickedin</a>
+    <span class="brand-page-label">개인정보처리방침</span>
+    <a class="doc-home" href="/">← 홈으로</a>
+  </div>
+  <div class="doc-title">개인정보처리방침</div>
+  <div class="doc-date">시행일: 2026년 7월 17일</div>
+</header>
+<main class="doc-body">
+
+  <section class="doc-section">
+    <h2>1. 기본 방침</h2>
+    <p>
+      tickedin(이하 "서비스")은 공개된 1차 자료와 공식 출처를 기준으로 정책 뉴스 속 주장을
+      검증하는 사이트입니다. 서비스는 <strong>회원가입과 로그인 기능을 제공하지 않으며</strong>,
+      이용자를 식별하기 위한 개인정보를 수집하지 않습니다. 검증 결과 열람에는 어떠한
+      개인정보도 필요하지 않습니다.
+    </p>
+  </section>
+
+  <section class="doc-section">
+    <h2>2. 수집하는 개인정보</h2>
+    <p>서비스가 이용자로부터 직접 수집하는 개인정보는 다음에 한정됩니다.</p>
+    <ul>
+      <li>
+        <strong>문의·제보 시 이메일 주소</strong> — 이용자가 contact@tickedin.org로 직접
+        메일을 보낸 경우에 한하며, 문의 답변과 제보 내용 확인 목적으로만 사용합니다.
+      </li>
+      <li>
+        <strong>뉴스레터 구독 시 이메일 주소</strong> — 구독을 신청한 경우에 한합니다
+        (아래 4항 참조).
+      </li>
+    </ul>
+    <p>
+      그 외 이름, 연락처, 주민등록번호 등은 수집하지 않습니다. 서비스는 이용자의 검색어나
+      열람 기록을 개인을 식별하는 형태로 저장하지 않습니다.
+    </p>
+  </section>
+
+  <section class="doc-section">
+    <h2>3. 이용 목적과 보유 기간</h2>
+    <p>
+      수집된 이메일 주소는 <strong>문의 답변, 제보 확인, 뉴스레터 발송</strong> 목적으로만
+      이용합니다. 문의·제보 메일은 처리 완료 후 보관할 필요가 없어지는 시점에 삭제하며,
+      뉴스레터 구독 정보는 구독이 해지되면 삭제합니다.
+    </p>
+  </section>
+
+  <section class="doc-section">
+    <h2>4. 처리 위탁 (뉴스레터)</h2>
+    <p>
+      뉴스레터 발송은 외부 이메일 서비스 제공자인 <strong>스티비(Stibee)</strong>를 통해
+      이루어집니다. 구독을 신청한 경우 이메일 주소가 발송 목적으로 스티비에 저장됩니다.
+      구독 해지는 각 뉴스레터 하단의 수신거부 링크 또는 contact@tickedin.org를 통해
+      언제든 가능합니다.
+    </p>
+  </section>
+
+  <section class="doc-section">
+    <h2>5. 제3자 제공</h2>
+    <p>
+      서비스는 이용자의 개인정보를 <strong>제3자에게 판매하지 않으며</strong>, 위 4항의
+      발송 위탁을 제외하고 제3자에게 제공하지 않습니다. 다만 법령에 따라 수사기관 등이
+      적법한 절차로 요구하는 경우에는 관련 법령을 따릅니다.
+    </p>
+  </section>
+
+  <section class="doc-section">
+    <h2>6. 이용자의 권리</h2>
+    <p>
+      이용자는 자신의 개인정보에 대해 <strong>열람·정정·삭제·처리정지</strong>를 요구할 수
+      있습니다. <a href="mailto:contact@tickedin.org">contact@tickedin.org</a>로 요청하시면
+      지체 없이 처리합니다.
+    </p>
+  </section>
+
+  <section class="doc-section">
+    <h2>7. 개인정보 보호책임자</h2>
+    <p>
+      성명: tickedin 운영자<br>
+      연락처: <a href="mailto:contact@tickedin.org">contact@tickedin.org</a>
+    </p>
+    <p>
+      개인정보 처리와 관련한 문의, 불만, 피해 구제는 위 연락처로 접수해 주시기 바랍니다.
+    </p>
+  </section>
+
+  <section class="doc-section">
+    <h2>8. 방침의 변경</h2>
+    <p>
+      이 방침의 내용이 추가·삭제·수정되는 경우 변경 사항을 이 페이지에 게시하고 시행일을
+      갱신합니다.
+    </p>
+  </section>
+
+</main>
+<footer class="doc-foot">
+  © 2026 tickedin · 문의 <a href="mailto:contact@tickedin.org">contact@tickedin.org</a> ·
+  <a href="/web/youth.html">청소년보호정책</a>
+</footer>
+</body>
+</html>

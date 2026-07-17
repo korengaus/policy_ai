@@ -159,10 +159,14 @@
     const statDraftEl = document.getElementById("statDraft");
     const statRangeEl = document.getElementById("statRange");
     // HOME-SECTION-FIX A1: the top utility-bar counts (were static "—" dashes).
-    // Fed by the SAME read-only GET /stats the sidebar panel uses — the 7-day
-    // window total + the AI-draft (검증 진행) remainder. No new backend field.
+    // Fed by the SAME read-only GET /stats the sidebar panel uses.
+    // MOBILE-POLISH B: now cumulative-first — 누적 검증 (cumulative_total, the
+    // unbounded corpus count) then 이번 주 (total, the 7-day window). The old
+    // 검증 진행 (draft) figure was retired from the banner; the sidebar's
+    // #statDraft still shows it, so no number was lost.
     const utilityUpdateCountEl = document.getElementById("utilityUpdateCount");
-    const utilityProgressCountEl = document.getElementById("utilityProgressCount");
+    const utilityTotalCountEl = document.getElementById("utilityTotalCount");
+    const utilityCumulativeClauseEl = document.getElementById("utilityCumulativeClause");
     const reportClaimInputEl = document.getElementById("reportClaimInput");
     const reportClaimBtnEl = document.getElementById("reportClaimBtn");
     const categoryTabsEl = document.getElementById("categoryTabs");
@@ -484,6 +488,20 @@
 
     function sanitizeDisplayText(value) {
       return repairMojibake(value).replaceAll("\uFFFD", "").trim();
+    }
+
+    // MOBILE-POLISH F \u2014 DISPLAY-ONLY strip of a leading decorative-marker run
+    // (\u25A0 \u25A1 \u25B6 \u25CF \u25C6 and the rest of the Geometric Shapes block, plus \u2605 \u2606 \u2022 \u203B) and
+    // any whitespace after it. Some outlets prefix a headline with a bullet glyph
+    // that renders as a broken-looking box at the head of a card title. Applied
+    // at render time only \u2014 the stored payload is never mutated, and the strip is
+    // anchored so a marker INSIDE a title survives. Korean/CJK sits well outside
+    // these ranges. Falls back to the unstripped text when a title is nothing but
+    // markers, so a headline can never render blank.
+    const LEADING_TITLE_MARKER_RE = /^[\s\u2022\u203B\u25A0-\u25FF\u2605\u2606]+/;
+    function stripLeadingTitleMarker(value) {
+      const text = sanitizeDisplayText(value);
+      return text.replace(LEADING_TITLE_MARKER_RE, "") || text;
     }
 
     const ARTICLE_NOISE_PATTERNS = [
@@ -2135,7 +2153,13 @@
       // NARRATIVE-3B: card-face summary = wrapper-stripped per-article text, hidden
       // when it collapses to the title (title-derived cards) to avoid duplicating
       // the headline already shown above. Uses the SAME title string the card renders.
-      const cardTitle = publicInstitutionName(result?.title || record?.query || "검증 뉴스");
+      // MOBILE-POLISH F: the display-layer marker strip lands here, the single
+      // point card.title is derived — covering the grid/hero/secondary cards (all
+      // route through renderTopicCardHtml) and the 최근 본 rows at once. The
+      // summary-collapses-to-title compare below reuses this same string, so the
+      // two stay in sync. Trending / detail / search-hits build titles on their
+      // own paths and call the helper directly.
+      const cardTitle = stripLeadingTitleMarker(publicInstitutionName(result?.title || record?.query || "검증 뉴스"));
       const strippedSummary = stripCardFaceWrapper(topSummaryLine(result));
       const summaryNorm = normalizeForCompare(strippedSummary);
       const summaryCollapsesToTitle =
@@ -2653,7 +2677,9 @@
         if (rows.length) renderHotTopics();
         const items = rows.map((row, i) => {
           const rid = Number(row?.representative_analysis_id);
-          const title = String(row?.title || "").trim() || (rid > 0 ? `기사 #${rid}` : "");
+          // MOBILE-POLISH F: trending rows come straight off GET /api/trending,
+          // bypassing topicCardFromResult — strip the leading marker here too.
+          const title = stripLeadingTitleMarker(row?.title) || (rid > 0 ? `기사 #${rid}` : "");
           if (!title) return "";
           const outlets = Number(row?.current_outlet_count);
           const growth = Number(row?.growth);
@@ -2692,14 +2718,20 @@
         if (statTotalEl) statTotalEl.textContent = String(body.total ?? "–");
         if (statOfficialEl) statOfficialEl.textContent = String(body.official ?? "–");
         if (statDraftEl) statDraftEl.textContent = String(body.draft ?? "–");
-        // HOME-SECTION-FIX A1: wire the top utility-bar counts from the same
-        // payload — 이번 주 업데이트 = total (7-day window), 검증 진행 = draft
-        // (the AI-draft remainder). Fail-quiet leaves the "—" if /stats errors.
+        // HOME-SECTION-FIX A1 / MOBILE-POLISH B: wire the top utility-bar counts
+        // from the same payload — 이번 주 = total (the 7-day window), 누적 검증 =
+        // cumulative_total (the unbounded corpus count). Fail-quiet leaves the "—"
+        // if /stats errors. The 누적 clause stays hidden unless a real finite
+        // number arrives, so an older payload without the field shows 이번 주 only
+        // rather than a fabricated or dashed-out total.
         if (utilityUpdateCountEl && Number.isFinite(Number(body.total))) {
           utilityUpdateCountEl.textContent = String(body.total);
         }
-        if (utilityProgressCountEl && Number.isFinite(Number(body.draft))) {
-          utilityProgressCountEl.textContent = String(body.draft);
+        if (utilityTotalCountEl && utilityCumulativeClauseEl
+            && body.cumulative_total !== null && body.cumulative_total !== undefined
+            && Number.isFinite(Number(body.cumulative_total))) {
+          utilityTotalCountEl.textContent = String(body.cumulative_total);
+          utilityCumulativeClauseEl.hidden = false;
         }
         if (statRangeEl && body.range_start && body.range_end) {
           // ISO YYYY-MM-DD → MM.DD; fall back to the raw strings if malformed.
@@ -5370,7 +5402,9 @@
           quality,
           level,
         } = parts;
-        const title = escapeHtml(publicInstitutionName(result.title || "제목 없음"));
+        // MOBILE-POLISH F: strip before escaping (the detail header builds its own
+        // title; this var also feeds data-share-title for the share image).
+        const title = escapeHtml(stripLeadingTitleMarker(publicInstitutionName(result.title || "제목 없음")));
         const url = escapeHtml(safeUrl(result.original_url || "#"));
         const topic = exportTopicLabel(result, currentReportContext?.query || queryInput?.value || "");
         // DETAIL-CLEANUP-V2: topSource*/recommendedAction/sourceTrustScore consts were
@@ -5471,7 +5505,12 @@
         const advancedVerificationDetails = renderCollapsibleSection(
           "고급 검증 정보 보기",
           verificationDetails,
-          false,
+          // MOBILE-POLISH J: the OUTER container opens by default so the rich
+          // analysis is not missed behind a closed summary. Its 8 inner
+          // sub-sections are separate renderCollapsibleSection calls that each
+          // still pass open=false, so they stay individually collapsed (headers
+          // only). The site-wide default at renderCollapsibleSection stays false.
+          true,
           "핵심 판단을 뒷받침하는 주장 추출, 근거 매칭, 반박 검사, 프레이밍 검사, 출처 후보, 내부 점검 정보를 한곳에 모았습니다.",
           // DESIGN-DETAIL-5d FIX 3b: mark the OUTER advanced container so CSS un-boxes
           // only it (not the top-level reader reading-guide, which shares the class).
@@ -7123,7 +7162,7 @@
           <div class="history-row" data-search-hit-id="${Number(hit.result_id) || 0}" role="button" tabindex="0">
             <div class="history-id">#${escapeHtml(index + 1)}</div>
             <div>
-              <strong>${escapeHtml(hit.title || "제목 없음")}</strong>
+              <strong>${escapeHtml(stripLeadingTitleMarker(hit.title) || "제목 없음")}</strong>
               <div class="history-meta">
                 ${escapeHtml(hit.snippet || "")}
                 <br>
@@ -7428,7 +7467,9 @@
     }
     // DESIGN-DETAIL-2: every in-page link to #methodology now OPENS the 검증 방법
     // page via the toggle instead of anchor-scrolling to a now-hidden section
-    // (footer 검증 방법론 ×2, the 검증 방법론 전체 → teaser link, 검증 등급 안내 →).
+    // (footer 검증 방법론 ×2, the 검증 방법론 전체 → teaser link).
+    // MOBILE-POLISH 2b: the tab row's 검증 등급 안내 → link is no longer in that set —
+    // it now targets #gradeLegend (handler below), as the footer's 등급 안내 does.
     // The compact 이렇게 검증합니다 teaser (#verifyHowSection) stays on home; only
     // its "전체 →" link opens the full page.
     document.querySelectorAll('a[href="#methodology"]').forEach((link) => {
@@ -7464,6 +7505,20 @@
         showScreen("about");
       });
     });
+    // MOBILE-POLISH G(c): the footer 등급 안내 link used to share #methodology with
+    // 검증 방법론 (two links up in the same column), so both landed on the identical
+    // page. It now targets the real 검증 등급 legend (#gradeLegend). That panel lives
+    // inside #homeScreen, so a plain anchor jump would do nothing whenever another
+    // screen is showing — switch to home FIRST, then scroll. Mirrors the
+    // methodology/about interception: preventDefault, then an explicit screen swap.
+    document.querySelectorAll('a[href="#gradeLegend"]').forEach((link) => {
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        showScreen("home");
+        const legendEl = document.getElementById("gradeLegend");
+        if (legendEl) legendEl.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
     // DESIGN-DETAIL-2 / DESIGN-UNIFY: restore the FULL home feed and land on home.
     // Shared by the header .brand-home logo AND the footer .footer-brand logo. The
     // detail loaders narrow currentReportContext to the single opened card, so without
@@ -7497,7 +7552,8 @@
       });
     }
     // FOOTER-CLEANUP A3: the footer 도메인 column links carry [data-domain] (the raw
-    // English enum: real_estate/finance/welfare/labor). A click switches the home feed
+    // canonical enum key — realestate/finance/… — as in DOMAIN_LABELS_KO; the column
+    // now lists all 11 TAB_ORDER domains). A click switches the home feed
     // to that domain via the SAME sequence a category-tab click uses (clear context,
     // reset progress, showScreen home, setActiveDomain) — no new nav path. They are
     // <a href="#"> so preventDefault the anchor jump. Delegated on .footer-links;

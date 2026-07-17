@@ -84,7 +84,13 @@
     <div class="utility-bar">
       <div class="utility-left">
         <span class="utility-brand-tag">2026 · 검증 인프라</span>
-        <span class="utility-counts">이번 주 업데이트 <strong class="utility-count-num" id="utilityUpdateCount">—</strong>건 · 검증 진행 <strong class="utility-count-num" id="utilityProgressCount">—</strong>건</span>
+        <!-- MOBILE-POLISH B: cumulative-first banner — 누적 검증 (the unbounded
+             corpus COUNT(*), new /stats.cumulative_total) then 이번 주 (the rolling
+             7-day count, the existing /stats.total). The 누적 clause starts [hidden]
+             and is revealed by renderWeeklyStats only once a real number lands, so a
+             missing/older payload degrades to the 이번 주 clause alone rather than
+             showing a fabricated total. Replaces the old 검증 진행 (draft) figure. -->
+        <span class="utility-counts"><span id="utilityCumulativeClause" hidden>누적 검증 <strong class="utility-count-num" id="utilityTotalCount">—</strong>건 · </span>이번 주 <strong class="utility-count-num" id="utilityUpdateCount">—</strong>건</span>
       </div>
       <nav class="utility-right" aria-label="사이트 메뉴">
         <a class="utility-link" href="#about">About</a>
@@ -159,7 +165,11 @@
       <!-- DESIGN-C3h-1c: the feed SORT control moved OUT of this row to a
            .feed-sort-row just above the feed (adjacent to the sortable list it
            controls). "검증 등급 안내 →" now sits at the right end of the tab row. -->
-      <a class="grade-guide-link" href="#methodology">검증 등급 안내 →</a>
+      <!-- MOBILE-POLISH 2b: repointed #methodology → #gradeLegend. This link says
+           검증 등급 안내 but opened the methodology page, the same conflation G(c)
+           fixed on the footer's 등급 안내; it now lands on the real 검증 등급 legend
+           via the shared show-home-then-scroll handler. -->
+      <a class="grade-guide-link" href="#gradeLegend">검증 등급 안내 →</a>
     </nav>
 
     <!-- DESIGN-DETAIL-2: #homeScreen wraps the home-only view (#metrics through
@@ -361,7 +371,10 @@
              the real card labels (officialStatusLabel / verdictDotColor) so the
              legend matches the cards. The 2nd row "공식자료 참고" == the renamed
              non-genuine card label. No data. -->
-        <section class="legend-panel" aria-label="검증 등급 안내">
+        <!-- MOBILE-POLISH G(c): #gradeLegend is the scroll target for the footer's
+             등급 안내 link. The panel lives inside #homeScreen, so the handler shows
+             home first, then scrolls here. -->
+        <section id="gradeLegend" class="legend-panel" aria-label="검증 등급 안내">
           <div class="rank-panel-heading">
             <h2>검증 등급</h2>
           </div>
@@ -923,10 +936,24 @@
         <nav class="footer-links" aria-label="푸터 링크">
           <div class="footer-col">
             <div class="footer-col-head">도메인</div>
-            <a href="#" data-domain="real_estate">부동산</a>
-            <a href="#" data-domain="finance">금융</a>
+            <!-- MOBILE-POLISH G(a): data-domain="real_estate" was a BUG — the
+                 canonical enum key is "realestate" (see DOMAIN_LABELS_KO /
+                 DOMAIN_ORDER in main.js), so setActiveDomain("real_estate")
+                 matched no card and 부동산 silently rendered an empty feed.
+                 MOBILE-POLISH G(b): the list was a 4-domain subset; it now
+                 carries all 11 TAB_ORDER domains, in TAB_ORDER sequence so the
+                 footer reads in the same order as the top tabs. -->
+            <a href="#" data-domain="education">교육</a>
             <a href="#" data-domain="welfare">복지</a>
+            <a href="#" data-domain="realestate">부동산</a>
+            <a href="#" data-domain="agriculture">농업</a>
+            <a href="#" data-domain="finance">금융</a>
+            <a href="#" data-domain="SMB">소상공인</a>
+            <a href="#" data-domain="environment">환경</a>
             <a href="#" data-domain="labor">노동</a>
+            <a href="#" data-domain="health">보건</a>
+            <a href="#" data-domain="statistics">통계</a>
+            <a href="#" data-domain="기타-미분류">기타</a>
           </div>
           <div class="footer-col">
             <div class="footer-col-head">검증</div>
@@ -934,7 +961,10 @@
             <a href="#correctionsSection">정정·업데이트</a>
             <a href="/web/weekly.html">주간 리포트</a>
             <a href="/web/faded.html">후속 끊긴 주장</a>
-            <a href="#methodology">등급 안내</a>
+            <!-- MOBILE-POLISH G(c): 등급 안내 pointed at #methodology, landing on the
+                 identical page as 검증 방법론 two links up. It now targets the real
+                 legend block (#gradeLegend, the .legend-panel on home). -->
+            <a href="#gradeLegend">등급 안내</a>
           </div>
           <div class="footer-col">
             <div class="footer-col-head">회사</div>
@@ -953,9 +983,13 @@
       <div class="footer-bottom">
         <p class="footer-copy">© 2026 tickedin. All rights reserved.</p>
         <nav class="footer-policy" aria-label="정책 링크">
-          <a href="#" title="준비 중">개인정보처리방침</a>
+          <!-- MOBILE-POLISH I: were href="#" title="준비 중" placeholders; now real
+               standalone static pages under the existing /web mount, linked the same
+               way as weekly.html / brainmap.html / faded.html (plain absolute href,
+               no JS interception). -->
+          <a href="/web/privacy.html">개인정보처리방침</a>
           <a href="#methodology">검증 방법론</a>
-          <a href="#" title="준비 중">청소년보호정책</a>
+          <a href="/web/youth.html">청소년보호정책</a>
         </nav>
       </div>
     </footer>
