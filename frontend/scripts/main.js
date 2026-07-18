@@ -6172,12 +6172,80 @@
     // Cut on a SENTENCE boundary when one sits inside the cap (a complete
     // sentence needs no ellipsis), else on a WORD boundary — never mid-word or
     // mid-syllable, which is what read as 문장이 끊김.
+    // CLAIM-DISPLAY-3 — DISPLAY-ONLY polish for claims the OLD splitter severed.
+    // The ~89% of stored rows the positional-safety re-extraction cannot repair
+    // keep their severed text; this only reformats the render string. Stored
+    // claims / claim_text / normalized_claims are untouched, so no claim_index
+    // shifts and evidence_snippets / contradiction_checks / bias_framing_analysis
+    // / source_candidates / source_queries stay correctly attached.
+    const CLAIM_TERMINAL_PUNCT = /[.!?…]$/;
+    const CLAIM_VERB_ENDER = /[다요죠음임됨함]$/;
+    // A Korean sentence never ENDS on a josa/connective — it binds a noun to the
+    // rest of the clause — so one at end-of-string means the text was cut
+    // mid-clause. Ordered longest-first, and this test MUST run BEFORE the
+    // verb-ender test: "보다" ends in 다, so checking the ender first would
+    // "complete" the exact fragment we are trying to catch ("…지난해(1.1%)보다").
+    const CLAIM_DANGLING_JOSA =
+      /(?:이라고|라고|에게|에서|으로|부터|까지|보다|와|과|의|를|을|은|는|로|며|고)$/;
+    // Minimum surviving length for a josa-trim to be worth doing — roughly one
+    // full policy clause. Below it, an awkward tail beats a near-empty claim.
+    const CLAIM_TRIM_FLOOR_CHARS = 40;
+
+    function polishClaimEnding(text) {
+      const value = String(text || "").trim();
+      if (!value) return value;
+      // Already ends cleanly -> BYTE-IDENTICAL. This is what makes the change a
+      // no-op on clean claims, so it composes with re-extraction instead of
+      // fighting it: repaired rows simply stop matching anything below.
+      if (CLAIM_TERMINAL_PUNCT.test(value)) return value;
+
+      if (CLAIM_DANGLING_JOSA.test(value)) {
+        // SEVERED: trim back to the last clean boundary and mark the cut with
+        // "…". Purely subtractive — never adds or alters meaning.
+        // The (?=\s|$) guard is load-bearing: without it the "." inside a decimal
+        // ("지난해(1.1%)보다") reads as a sentence end and the claim gets cut
+        // mid-number to "지난해(1…". Policy claims are dense with decimals.
+        const boundary = /[.!?…](?=\s|$)|[다요죠음임됨함](?=\s)|[,，、·]/g;
+        let lastEnd = 0;
+        let match;
+        while ((match = boundary.exec(value)) !== null) {
+          lastEnd = match.index + match[0].length;
+        }
+        // CLAIM-DISPLAY-3 Phase 2b: an ABSOLUTE floor, not the >=half rule.
+        // The common severed shape is "one complete sentence. + severed
+        // fragment", where the clean boundary sits well before the halfway
+        // point — so a >=half guard declined to trim on exactly the population
+        // this targets, making the fix inert. A floor instead asks the only
+        // question that matters: does enough substantial text survive? Trimming
+        // DISCARDS the severed fragment (incomplete anyway) in favour of a clean
+        // sentence; the "…" honestly signals that more existed.
+        const trimmed = value.slice(0, lastEnd)
+          .replace(/[,，、·\s]+$/, "")
+          .replace(/\.+$/, "")
+          .trim();
+        if (trimmed.length < CLAIM_TRIM_FLOOR_CHARS) return value;
+        return `${trimmed}…`;
+      }
+
+      // COMPLETE sentence missing only its full stop — the old splitter consumed
+      // no punctuation, so a large share of stored claims end "…밝혔다" and are
+      // NOT truncated. A "…" here would falsely mark them as cut off; a bare
+      // period is cosmetic and changes no meaning.
+      if (CLAIM_VERB_ENDER.test(value)) return `${value}.`;
+
+      // Unrecognized shape (headline-style noun ending, etc.) -> leave alone.
+      return value;
+    }
+
     function truncateClaimOnBoundary(text, maxLength) {
       const value = String(text || "");
-      if (value.length <= maxLength) return value;
+      if (value.length <= maxLength) return polishClaimEnding(value);
       const window = value.slice(0, maxLength);
       // Constructed per call: a shared /g regex would carry lastIndex between calls.
-      const sentenceEnd = /[.!?…]|[다요죠음임됨함](?=\s)/g;
+      // CLAIM-DISPLAY-3: same (?=\s|$) decimal guard as polishClaimEnding — this
+      // regex had the identical latent bug, cutting a >cap claim mid-number at
+      // the "." of "1.1%" whenever that fell near the boundary.
+      const sentenceEnd = /[.!?…](?=\s|$)|[다요죠음임됨함](?=\s)/g;
       let lastEnd = 0;
       let match;
       while ((match = sentenceEnd.exec(window)) !== null) {
@@ -6185,7 +6253,9 @@
       }
       // Only honour the sentence boundary if it keeps at least half the budget,
       // otherwise an early period would gut the claim.
-      if (lastEnd >= Math.floor(maxLength / 2)) return window.slice(0, lastEnd).trim();
+      if (lastEnd >= Math.floor(maxLength / 2)) {
+        return polishClaimEnding(window.slice(0, lastEnd).trim());
+      }
       return `${window.replace(/\s+\S*$/, "").trim()}...`;
     }
 
