@@ -1172,7 +1172,7 @@
 
     function renderClaimList(claims) {
       const list = (Array.isArray(claims) ? claims : [])
-        .map((claim) => limitClaimSentences(cleanArticleTextForPolicyAnalysis(claim) || "", 2, 220))
+        .map((claim) => limitClaimSentences(cleanArticleTextForPolicyAnalysis(claim) || "", 2, CLAIM_MAX_CHARS))
         .filter(Boolean);
       if (!list.length) {
         return '<div class="evidence-source-meta">표시할 핵심 주장 목록이 없습니다.</div>';
@@ -1233,7 +1233,7 @@
       const cell = (value) => (String(value ?? "").trim().toLowerCase() === "unknown" ? "미상" : value);
       return `<div class="normalized-claims">${list.map((claim) => `
         <div class="normalized-claim">
-          <div class="normalized-claim-text">${escapeHtml(limitClaimSentences(cleanArticleTextForPolicyAnalysis(claim.claim_text) || "정책 주장 확인 필요", 2, 220))}</div>
+          <div class="normalized-claim-text">${escapeHtml(limitClaimSentences(cleanArticleTextForPolicyAnalysis(claim.claim_text) || "정책 주장 확인 필요", 2, CLAIM_MAX_CHARS))}</div>
           ${advDefList([
             ["주체", cell(claim.actor)],
             ["행동", cell(claim.action)],
@@ -1435,7 +1435,7 @@
         if (!expand) {
           return `<div class="adv-check-item">${headLine}</div>`;
         }
-        const claimText = escapeHtml(limitClaimSentences(cleanArticleTextForPolicyAnalysis(claim || check.claim_text) || "정책 주장 확인 필요", 2, 220));
+        const claimText = escapeHtml(limitClaimSentences(cleanArticleTextForPolicyAnalysis(claim || check.claim_text) || "정책 주장 확인 필요", 2, CLAIM_MAX_CHARS));
         const detail = advDefList([
           ["모순 점수", check.contradiction_score],
           ["사람 검토", check.needs_human_review ? "필요" : "불필요"],
@@ -1537,7 +1537,7 @@
         if (!elevated && !hasFlags) {
           return `<div class="adv-check-item">${headLine}</div>`;
         }
-        const claimText = escapeHtml(limitClaimSentences(cleanArticleTextForPolicyAnalysis(claim || analysis.claim_text) || "정책 주장 확인 필요", 2, 220));
+        const claimText = escapeHtml(limitClaimSentences(cleanArticleTextForPolicyAnalysis(claim || analysis.claim_text) || "정책 주장 확인 필요", 2, CLAIM_MAX_CHARS));
         const detail = advDefList([
           ["프레이밍 수준", analysis.framing_level ? formatFramingLevel(analysis.framing_level) : ""],
           ["프레이밍 점수", analysis.framing_score],
@@ -1654,7 +1654,7 @@
         const bestScore = related.reduce((best, snippet) => Math.max(best, Number(snippet.evidence_quality_score || 0)), 0);
         return `
           <div class="evidence-snippet">
-            <div class="normalized-claim-text">claim #${index + 1}: ${escapeHtml(limitClaimSentences(cleanArticleTextForPolicyAnalysis(claim) || "기사 제목과 요약 기준으로 핵심 주장을 추가 확인해야 합니다.", 2, 220))}</div>
+            <div class="normalized-claim-text">claim #${index + 1}: ${escapeHtml(limitClaimSentences(cleanArticleTextForPolicyAnalysis(claim) || "기사 제목과 요약 기준으로 핵심 주장을 추가 확인해야 합니다.", 2, CLAIM_MAX_CHARS))}</div>
             <div class="evidence-source-meta">
               근거 품질: 강함 ${escapeHtml(strongCount)}, 보통 ${escapeHtml(mediumCount)}, 약함 ${escapeHtml(weakCount)}, 최고 ${escapeHtml(bestScore)}
             </div>
@@ -5424,18 +5424,32 @@
         //    exists we DROP the exportClaimText (claim #1) fallback so the second
         //    line doesn't repeat the first claim; on sparse rows (no contentLead
         //    AND no summary) we keep exportClaimText so something still shows.
-        const contentLeadClaims = (Array.isArray(normalizedClaims) && normalizedClaims.length)
+        // CLAIM-QUALITY FIX 3: contentLead reads the SAME claims/normalized_claims
+        // arrays that 핵심 주장 (above) resolves from, so its first element was
+        // routinely the same sentence rendered twice, adjacently, in the main body.
+        // Drop any lead entry that overlaps the rendered 핵심 주장 — what remains is
+        // the genuinely ADDITIONAL claims #2/#3, so the block only renders when it
+        // says something new. The full arrays still appear in the 고급 검증 정보
+        // collapsible (핵심 주장과 정규화 / 근거 문장), which is that section's job.
+        const heroClaimText = exportClaimText(result);
+        const contentLeadClaims = ((Array.isArray(normalizedClaims) && normalizedClaims.length)
           ? normalizedClaims.slice(0, 3).map((claim) => claim && claim.claim_text).filter(Boolean)
-          : (Array.isArray(claims) ? claims : []).slice(0, 3).filter(Boolean);
+          : (Array.isArray(claims) ? claims : []).slice(0, 3).filter(Boolean))
+          .filter((claim) => !claimTextsOverlap(claim, heroClaimText));
         const contentLead = contentLeadClaims.join(" ");
         // DETAIL-CLEANUP A6: route through userFacingReportText so the raw
         // English reason-code tails (press_release:/weakly_usable/…) that
         // decision_summary can carry are translated/stripped at display —
         // this line previously bypassed the launderer. "" fallback keeps the
         // truthy guard below rendering nothing on sparse rows.
-        const verifyNote = userFacingReportText(cleanConceptKeysForDisplay(contentLead
-          ? (decision.decision_summary || verification.evidence_summary || "")
-          : (decision.decision_summary || verification.evidence_summary || exportClaimText(result))), "");
+        // CLAIM-QUALITY FIX 3: the evidence_summary and exportClaimText fallbacks are
+        // dropped — both re-showed text the main body already carries (근거 요약 in the
+        // 근거 요약과 부족한 맥락 sub-section, and 핵심 주장 directly above). The note
+        // now renders ONLY the distinct judgment line; when a row has no
+        // decision_summary it renders nothing rather than an echo. No data is lost:
+        // evidence_summary is still shown in full in the advanced collapsible.
+        const verifyNote = userFacingReportText(
+          cleanConceptKeysForDisplay(decision.decision_summary || ""), "");
         const verificationDetails = [
           // DISPLAY-CATEGORY ⑩: ② 최종점수 and ③ 초안 신뢰도 are demoted off the
           // headline into the advanced collapsible. Values are PRESERVED, only
@@ -6111,7 +6125,48 @@
         .trim();
     }
 
-    function limitClaimSentences(text, maxSentences = 2, maxLength = 220) {
+    // CLAIM-QUALITY FIX 2: the display cap, raised 220 -> 360 and kept in lockstep
+    // with _CLAIM_MAX_CHARS in claim_extractor.py so the backend and frontend
+    // truncation layers agree instead of each shaving the claim independently.
+    const CLAIM_MAX_CHARS = 360;
+
+    // Cut on a SENTENCE boundary when one sits inside the cap (a complete
+    // sentence needs no ellipsis), else on a WORD boundary — never mid-word or
+    // mid-syllable, which is what read as 문장이 끊김.
+    function truncateClaimOnBoundary(text, maxLength) {
+      const value = String(text || "");
+      if (value.length <= maxLength) return value;
+      const window = value.slice(0, maxLength);
+      // Constructed per call: a shared /g regex would carry lastIndex between calls.
+      const sentenceEnd = /[.!?…]|[다요죠음임됨함](?=\s)/g;
+      let lastEnd = 0;
+      let match;
+      while ((match = sentenceEnd.exec(window)) !== null) {
+        lastEnd = match.index + match[0].length;
+      }
+      // Only honour the sentence boundary if it keeps at least half the budget,
+      // otherwise an early period would gut the claim.
+      if (lastEnd >= Math.floor(maxLength / 2)) return window.slice(0, lastEnd).trim();
+      return `${window.replace(/\s+\S*$/, "").trim()}...`;
+    }
+
+    // CLAIM-QUALITY FIX 3: do two claim strings say the same thing? Compared on
+    // letters/digits/hangul only, so the hedge prefix ("보도 내용은 "), punctuation
+    // and a trailing "..." don't hide a duplicate. Containment (not equality) is
+    // the test because the hero claim is a sanitized/truncated form of the same
+    // sentence. The 20-char floor keeps short stubs from matching everything.
+    function claimTextsOverlap(a, b) {
+      const key = (value) => String(value || "").replace(/[^0-9a-z가-힣]/gi, "").toLowerCase();
+      const left = key(a);
+      const right = key(b);
+      if (!left || !right) return false;
+      const shorter = left.length <= right.length ? left : right;
+      const longer = left.length <= right.length ? right : left;
+      if (shorter.length < 20) return false;
+      return longer.includes(shorter);
+    }
+
+    function limitClaimSentences(text, maxSentences = 2, maxLength = CLAIM_MAX_CHARS) {
       const cleaned = cleanArticleTextForPolicyAnalysis(userFacingReportText(text, "")) || "";
       const sentences = splitArticleSentences(cleaned)
         .map((sentence) => sentence.trim())
@@ -6120,9 +6175,7 @@
       const limited = (sentences.length ? sentences.slice(0, maxSentences).join(" ") : cleaned)
         .replace(/\s+/g, " ")
         .trim();
-      if (limited.length <= maxLength) return limited;
-      const cut = limited.slice(0, maxLength);
-      return `${cut.replace(/\s+\S*$/, "").trim()}...`;
+      return truncateClaimOnBoundary(limited, maxLength);
     }
 
     function claimLooksSuspicious(text) {
@@ -6130,12 +6183,18 @@
       const numberCount = (value.match(/\d+/g) || []).length;
       const commaCount = (value.match(/[,，]/g) || []).length;
       return /사원\s*전원\s*소환|전원\s*소환|\d+\s*개\s*사원|무더기\s*소환/i.test(value)
-        || (value.length > 180 && numberCount >= 4)
+        // CLAIM-QUALITY FIX 2 follow-on: this "long AND number-dense = body dump"
+        // guard was calibrated against the old 220 cap (180/220 ≈ 0.82 of budget).
+        // With the cap at CLAIM_MAX_CHARS=360 the untouched 180 would suppress
+        // ordinary long policy claims — which return "" and fall back to a SHORTER
+        // candidate, re-creating the very problem this change fixes. Rescaled to
+        // the same fraction of the new budget; the heuristic's intent is unchanged.
+        || (value.length > 300 && numberCount >= 4)
         || commaCount >= 4;
     }
 
     function sanitizeClaimText(claimText, result = {}) {
-      let claim = limitClaimSentences(claimText, 2, 220);
+      let claim = limitClaimSentences(claimText, 2, CLAIM_MAX_CHARS);
       if (!claim || isGenericClaimPlaceholder(claim)) return "";
       if (claimLooksSuspicious(claim)) return "";
       if (!hasDirectOfficialSupport(result) || officialDirectScoreForResult(result) <= 0) {
@@ -6143,7 +6202,7 @@
       }
       claim = sanitizePublicExportText(claim);
       if (!claim || isGenericClaimPlaceholder(claim)) return "";
-      return limitClaimSentences(claim, 2, 220);
+      return limitClaimSentences(claim, 2, CLAIM_MAX_CHARS);
     }
 
     function cautiousClaimPrefix(result) {
@@ -6237,7 +6296,7 @@
       if (!hasDirectOfficialSupport(result) || officialDirectScoreForResult(result) <= 0) {
         claim = stripCertaintyWords(claim);
       }
-      return limitClaimSentences(claim, 2, 220);
+      return limitClaimSentences(claim, 2, CLAIM_MAX_CHARS);
     }
 
     function hasContradictionConcern(result) {

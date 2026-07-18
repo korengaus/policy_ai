@@ -92,7 +92,13 @@ def _split_sentences(text: str) -> list[str]:
     for part in parts:
         sentence = part.strip(" -•·\t\r\n")
         sentence = re.sub(r"\s+", " ", sentence)
-        if 18 <= len(sentence) <= 260:
+        # CLAIM-QUALITY FIX 1: the old 260 ceiling silently DROPPED well-formed
+        # long policy sentences at extraction, so a shorter fragment won the
+        # ranking and rendered as a stub 핵심 주장. The ceiling is raised to 400
+        # so it sits ABOVE the 360-char display cap (_CLAIM_MAX_CHARS) — a good
+        # sentence is never rejected at extraction only to be wanted at display.
+        # Lower bound unchanged: <18 chars is still a fragment, not a claim.
+        if 18 <= len(sentence) <= 400:
             sentences.append(sentence)
     return sentences
 
@@ -150,14 +156,41 @@ def _claim_score(sentence: str) -> int:
     return score
 
 
+# CLAIM-QUALITY FIX 2: display/storage cap for a single claim. Raised 220 -> 360
+# and kept in lockstep with limitClaimSentences() in frontend/scripts/main.js so
+# the two independent truncation layers agree instead of each shaving the text.
+_CLAIM_MAX_CHARS = 360
+# Sentence enders: latin punctuation, or a Korean terminal syllable before space.
+_CLAIM_SENTENCE_END = re.compile(r"[.!?…]|[다요죠음임됨함](?=\s)")
+
+
+def _truncate_on_boundary(sentence: str, limit: int) -> str:
+    """Cut at a sentence boundary when possible, else a word boundary.
+
+    The old ``[:217] + "..."`` sliced mid-word/mid-syllable, which is what the
+    reader saw as 문장이 끊김. Prefer the last sentence end inside the cap (a
+    complete sentence needs no ellipsis); fall back to the last whitespace.
+    """
+    if len(sentence) <= limit:
+        return sentence
+    window = sentence[:limit]
+    last_end = 0
+    for match in _CLAIM_SENTENCE_END.finditer(window):
+        last_end = match.end()
+    # Only accept the sentence boundary if it keeps at least half the budget —
+    # otherwise an early period would gut the claim.
+    if last_end >= limit // 2:
+        return window[:last_end].rstrip()
+    head = window.rsplit(" ", 1)[0].rstrip() if " " in window else window.rstrip()
+    return f"{head}..."
+
+
 def _clean_claim(sentence: str) -> str:
     sentence = _normalize_text(sentence)
     sentence = re.sub(r"[^\w\s가-힣.,!?%·…~()\[\]{}<>:;\"'“”‘’/\-+_=|]", "", sentence)
     sentence = _normalize_text(sentence)
     sentence = re.sub(r"^[\"'“”‘’]+|[\"'“”‘’]+$", "", sentence)
-    if len(sentence) > 220:
-        sentence = sentence[:217].rstrip() + "..."
-    return sentence
+    return _truncate_on_boundary(sentence, _CLAIM_MAX_CHARS)
 
 
 def extract_verifiable_claims(
