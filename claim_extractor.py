@@ -82,12 +82,34 @@ def _normalize_text(text: str) -> str:
     return text.strip()
 
 
+# CLAIM-DISPLAY-2 FIX B: the old pattern split on a BARE Korean ender
+# (다|요|죠|음|임|됨|함) + whitespace, with no punctuation required. Ordinary
+# mid-sentence words end in those syllables — 보다, 부터, 이다, 마다 — so a
+# sentence was severed mid-clause and the fragment became the 핵심 주장
+# (verified: "…지난해(1.1%)보다" cut loose as a 47-char stub). A genuine Korean
+# sentence end carries terminal punctuation ("…기록했다."), so require it. The
+# second alternative lets a closing quote/bracket sit between the punctuation
+# and the space ('…말했다." 정부는') without being eaten by the split.
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?？！．])\s+|(?<=[.!?？！．][\"'”’」』)\]])\s+")
+# Retained ONLY as a recall net for bodies with no terminal punctuation at all
+# (some wire copy), where the strict pattern would yield one over-long blob that
+# the length filter drops, leaving zero claims. Never used when the strict split
+# already produces a usable sentence.
+_SENTENCE_SPLIT_LEGACY = re.compile(r"(?<=[.!?다요죠음임됨함])\s+")
+
+
 def _split_sentences(text: str) -> list[str]:
     normalized = _normalize_text(text)
     if not normalized:
         return []
 
-    parts = re.split(r"(?<=[.!?다요죠음임됨함])\s+", normalized)
+    sentences = _collect_sentences(_SENTENCE_SPLIT.split(normalized))
+    if not sentences:
+        sentences = _collect_sentences(_SENTENCE_SPLIT_LEGACY.split(normalized))
+    return sentences
+
+
+def _collect_sentences(parts: list[str]) -> list[str]:
     sentences = []
     for part in parts:
         sentence = part.strip(" -•·\t\r\n")

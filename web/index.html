@@ -11317,7 +11317,19 @@
             <!-- STEP 2 item 3: the news CONTENT lead (the article's own claim quote)
                  + the muted verification note, just under the verdict so the reader
                  sees conclusion → the claim it's about. Each renders only if truthy. -->
-            ${contentLead ? `<div class="report-summary-lead">${escapeHtml(contentLead)}</div>` : ""}
+            <!-- CLAIM-DISPLAY-2 FIX A: this block is claims #2/#3 — the members of
+                 claims[0..2] that SURVIVED the claimTextsOverlap() de-dup, i.e. the
+                 ones that genuinely differ from 핵심 주장 (claim #1) above. Unlabeled,
+                 an anonymous blue-barred paragraph read as a mystery "AI 요약"; it is
+                 not AI-generated at all (same regex-extracted claims column). The
+                 heading reuses the 핵심 주장 markup (.verification-item.full + .label)
+                 so the two read as one family, and sits INSIDE the same contentLead
+                 conditional so it can never orphan when the de-dup empties the block.
+                 Kept as a SIBLING of .report-summary-lead, not a wrapper, so the
+                 report-summary-lead + report-verify-note adjacency rule
+                 (styles/main.css:881) still matches. -->
+            ${contentLead ? `<div class="verification-item full"><span class="label">그 밖의 핵심 주장</span></div>
+            <div class="report-summary-lead">${escapeHtml(contentLead)}</div>` : ""}
             ${verifyNote ? `<div class="report-verify-note">${escapeHtml(verifyNote)}</div>` : ""}
 
             <!-- STEP 2 item 4: 정책 영향 / 소비자 영향 / 금융 시스템 영향 + the
