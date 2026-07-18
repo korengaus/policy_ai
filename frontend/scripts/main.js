@@ -5314,7 +5314,25 @@
         const heightPct = outlets > 0 ? Math.max(6, Math.round((outlets / peak) * 100)) : 0;
         return `<div title="${escapeHtml(day)} · ${escapeHtml(outlets)}개 매체" style="flex:1 1 14px;max-width:18px;min-width:0;align-self:flex-end;height:${outlets > 0 ? heightPct + "%" : "2px"};background:${outlets > 0 ? "var(--brand)" : "var(--line)"};border-radius:2px 2px 0 0;"></div>`;
       });
-      return `<div style="display:flex;gap:2px;height:44px;align-items:flex-end;max-width:${points.length * 20}px;margin:8px 0 4px;">${bars.join("")}</div>`;
+      // TEMPORAL-MAP Phase 4 FIX 2: structure mirrors spreadSparklineHtml so the
+      // two charts read as sibling plots — a centered, shrink-wrapped inline-flex
+      // column (bars + label row), 48px bar row, and a min-width:max-content
+      // label row so the dates sit under the actual first/last bars. Both charts
+      // are fully inline-styled (no CSS class rules exist for either), so this is
+      // markup-only. Middle label is circulation vocab: peak outlet count.
+      const firstDay = timelineDateLabel(points[0]?.date);
+      const lastDay = timelineDateLabel(points[points.length - 1]?.date);
+      return `
+            <div style="text-align:center;margin:10px 0 4px;">
+              <div class="topic-timeline-sparkline" role="img" aria-label="주간 스냅샷별 매체 수, 최다 ${escapeHtml(peak)}개 매체" style="display:inline-flex;flex-direction:column;gap:2px;max-width:100%;vertical-align:bottom;">
+                <div style="display:flex;align-items:flex-end;justify-content:center;gap:2px;height:48px;">${bars.join("")}</div>
+                <div style="display:flex;justify-content:space-between;gap:12px;min-width:max-content;align-self:center;font-size:0.78rem;color:var(--muted);">
+                  <span>${escapeHtml(firstDay)}</span>
+                  <span>최다 ${escapeHtml(peak)}개 매체</span>
+                  <span>${escapeHtml(lastDay)}</span>
+                </div>
+              </div>
+            </div>`;
     }
 
     // TEMPORAL-MAP v1: MM/DD display form of a snapshot date ("2026-07-06" ->
@@ -5337,6 +5355,15 @@
           const points = Array.isArray(data?.points) ? data.points : [];
           // >=2 points required: a single snapshot is not a trajectory.
           if (!data?.found || points.length < 2) continue;
+          // TEMPORAL-MAP Phase 4 FIX 1: VARIANCE GATE. Measured live, 652 of 653
+          // lineages have an identical outlet_count across every snapshot — the
+          // only batches so far span 7/11-7/13, a static 3-day window. A flat
+          // chart sitting beside the varying 이슈 확산 현황 plot reads as broken,
+          // so a trajectory that did not move renders NOTHING (same posture as
+          // found:false). As weekly snapshots accumulate, real movement appears
+          // and the section starts showing on its own — honest at every stage.
+          const outletSeries = points.map((point) => Number(point?.outlets) || 0);
+          if (Math.max(...outletSeries) === Math.min(...outletSeries)) continue;
           const first = points[0];
           const last = points[points.length - 1];
           const firstLabel = timelineDateLabel(first?.date);
