@@ -28,26 +28,30 @@ if str(PROJECT_ROOT) not in sys.path:
 import api_server  # noqa: E402
 
 
-# Synthetic snapshot batches: rows are (stable_id, outlet_count, member_count).
+# Synthetic snapshot batches: rows are (stable_id, outlet_count, member_count,
+# cluster_lineage_id) — TRENDING-FIX added lineage as the cross-time identity.
+# Here each lineage mirrors its stable_id (membership unchanged), so the
+# original ranking expectations hold; the grown-cluster-with-churned-stable_id
+# case is covered separately in TrendingPureHelperTests.
 # growth: ccc +9 (new), aaa +3, ddd +3 (new, tie with aaa -> lower current
 # outlets loses), bbb +1, eee only in previous (dropped out -> excluded).
 CURRENT_BATCH = {
     "snapshot_date": "2026-07-12",
     "graph_ref": 9,
     "rows": [
-        ("aaa111aaa111", 5, 10),
-        ("bbb222bbb222", 4, 6),
-        ("ccc333ccc333", 9, 3),
-        ("ddd444ddd444", 3, 2),
+        ("aaa111aaa111", 5, 10, "aaa111aaa111"),
+        ("bbb222bbb222", 4, 6, "bbb222bbb222"),
+        ("ccc333ccc333", 9, 3, "ccc333ccc333"),
+        ("ddd444ddd444", 3, 2, "ddd444ddd444"),
     ],
 }
 PREVIOUS_BATCH = {
     "snapshot_date": "2026-07-11",
     "graph_ref": 7,
     "rows": [
-        ("aaa111aaa111", 2, 8),
-        ("bbb222bbb222", 3, 6),
-        ("eee555eee555", 6, 4),
+        ("aaa111aaa111", 2, 8, "aaa111aaa111"),
+        ("bbb222bbb222", 3, 6, "bbb222bbb222"),
+        ("eee555eee555", 6, 4, "eee555eee555"),
     ],
 }
 
@@ -162,7 +166,8 @@ class TrendingLimitTests(_ClientMixin, unittest.TestCase):
 
     def test_limit_capped_at_20(self):
         many = {"snapshot_date": "2026-07-12", "graph_ref": 9,
-                "rows": [("sid%02d" % i, i, 1) for i in range(1, 31)]}
+                "rows": [("sid%02d" % i, i, 1, "lin%02d" % i)
+                         for i in range(1, 31)]}
         prev = {"snapshot_date": "2026-07-11", "graph_ref": 7, "rows": []}
         body = self._get("/api/trending?limit=50",
                          batches=[many, prev]).json()
@@ -207,9 +212,40 @@ class TrendingPureHelperTests(unittest.TestCase):
     def test_compute_trending_duplicate_rows_collapse(self):
         # A --force re-append doubles a batch's rows — last one wins.
         entries = api_server._compute_trending(
-            [("aaa", 2, 1), ("aaa", 5, 2)], [("aaa", 1, 1)], 10)
+            [("aaa", 2, 1, "lin"), ("aaa", 5, 2, "lin")],
+            [("aaa", 1, 1, "lin")], 10)
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0]["growth"], 4)
+
+    def test_grown_cluster_same_lineage_not_new(self):
+        # TRENDING-FIX: THE bug being fixed. A cluster that gained members gets
+        # a fresh stable_id (sha256 of the full member set), so keying on
+        # stable_id misreported it as is_new with growth = its whole
+        # outlet_count. Same lineage across batches must mean NOT new, growth
+        # = the outlet DELTA — and the old stable_id must not double-count as
+        # a drop-out entry either.
+        entries = api_server._compute_trending(
+            [("newsid111111", 8, 12, "lin-aaa")],
+            [("oldsid000000", 5, 9, "lin-aaa")], 10)
+        self.assertEqual(len(entries), 1)
+        entry = entries[0]
+        self.assertFalse(entry["is_new"])
+        self.assertEqual(entry["growth"], 3)
+        self.assertEqual(entry["previous_outlet_count"], 5)
+        # Display join stays keyed by the CURRENT batch's stable_id.
+        self.assertEqual(entry["cluster_stable_id"], "newsid111111")
+        self.assertEqual(entry["cluster_lineage_id"], "lin-aaa")
+
+    def test_null_lineage_falls_back_to_stable_id(self):
+        # Pre-backfill rows carry NULL lineage (0 today; kept for robustness):
+        # identity falls back to stable_id per row, so an unchanged cluster
+        # with NULL lineage on both sides still diffs instead of duplicating.
+        entries = api_server._compute_trending(
+            [("aaa", 4, 3, None)], [("aaa", 1, 2, None)], 10)
+        self.assertEqual(len(entries), 1)
+        self.assertFalse(entries[0]["is_new"])
+        self.assertEqual(entries[0]["growth"], 3)
+        self.assertEqual(entries[0]["cluster_lineage_id"], "aaa")
 
     def test_display_index_skips_blank_stable_id(self):
         self.assertNotIn("", FAKE_DISPLAY)

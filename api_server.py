@@ -1189,7 +1189,10 @@ _TRENDING_DISPLAY_CACHE: dict = {"row_id": None, "display": None}
 def _fetch_snapshot_batches():
     """The two most recent DISTINCT snapshot batches, newest first. Each is
     {"snapshot_date", "graph_ref", "rows": [(stable_id, outlet_count,
-    member_count), ...]}. Batches are keyed by (snapshot_date, graph_ref) —
+    member_count, cluster_lineage_id), ...]}. TRENDING-FIX: lineage_id joined
+    the row tuple — it is the durable cross-rebuild identity (stable_id hashes
+    the full member set, so it churns whenever a cluster grows).
+    Batches are keyed by (snapshot_date, graph_ref) —
     the append guard's own key — and ordered by MAX(id) so a same-day
     re-snapshot of a newer build still ranks as 'current'. Returns None on
     every expected-empty path (PG disabled, table missing)."""
@@ -1212,14 +1215,15 @@ def _fetch_snapshot_batches():
             batches = []
             for snapshot_date, graph_ref, _max_id in keys:
                 rows = conn.execute(sa.text(
-                    "SELECT cluster_stable_id, outlet_count, member_count "
+                    "SELECT cluster_stable_id, outlet_count, member_count, "
+                    "cluster_lineage_id "
                     "FROM brainmap_snapshots "
                     "WHERE snapshot_date = :d AND graph_ref = :g"
                 ), {"d": snapshot_date, "g": graph_ref}).fetchall()
                 batches.append({
                     "snapshot_date": snapshot_date,
                     "graph_ref": graph_ref,
-                    "rows": [(r[0], r[1], r[2]) for r in rows],
+                    "rows": [(r[0], r[1], r[2], r[3]) for r in rows],
                 })
     except ProgrammingError:
         return None
@@ -1227,22 +1231,41 @@ def _fetch_snapshot_batches():
 
 
 def _compute_trending(current_rows, previous_rows, limit):
-    """Pure: two batches of (stable_id, outlet_count, member_count) ->
-    ranked growth entries. A cluster only in 'current' is new (is_new=true,
-    growth = its full outlet_count — a fresh widely-covered cluster is
-    legitimately trending). Clusters only in 'previous' dropped out — not
-    growth. Duplicate stable_ids within a batch (a --force re-append)
-    collapse to the last row."""
-    current = {sid: (outlets, members)
-               for sid, outlets, members in current_rows if sid}
-    previous = {sid: outlets for sid, outlets, _ in previous_rows if sid}
+    """Pure: two batches of (stable_id, outlet_count, member_count,
+    cluster_lineage_id) -> ranked growth entries.
+
+    TRENDING-FIX: cross-time identity is the LINEAGE id, not stable_id.
+    stable_id = sha256(full member set), so a cluster that gained one member
+    got a fresh stable_id and was misreported as is_new with growth = its
+    whole outlet_count — exactly the clusters that actually grew were the
+    inflated ones (and their old stable_id was double-counted as a drop-out).
+    lineage_id survives growth (containment-matched at graph build), so:
+      * same lineage in both batches -> growth = outlet DELTA, not is_new,
+        even across stable_id churn;
+      * lineage only in current -> genuinely is_new (full outlet_count — a
+        fresh widely-covered cluster is legitimately trending);
+      * lineage only in previous -> dropped out, excluded.
+    Per-row fallback to stable_id when lineage is NULL (pre-backfill rows;
+    0 today, kept for robustness). Entries RETAIN the current row's stable_id
+    because the display join downstream is keyed by the newest graph's
+    stable_id, which the current batch matches. Within one graph lineage ids
+    are unique by construction (assign_lineage_ids), so keying on lineage
+    collapses safely; duplicate keys within a batch (a --force re-append)
+    collapse to the last row as before."""
+    current = {(lineage or sid): (sid, outlets, members)
+               for sid, outlets, members, lineage in current_rows
+               if lineage or sid}
+    previous = {(lineage or sid): outlets
+                for sid, outlets, _members, lineage in previous_rows
+                if lineage or sid}
     entries = []
-    for sid, (outlets, members) in current.items():
-        prev_outlets = previous.get(sid)
+    for key, (sid, outlets, members) in current.items():
+        prev_outlets = previous.get(key)
         is_new = prev_outlets is None
         growth = outlets if is_new else outlets - prev_outlets
         entries.append({
             "cluster_stable_id": sid,
+            "cluster_lineage_id": key,
             "representative_analysis_id": None,
             "title": "",
             "current_outlet_count": outlets,
