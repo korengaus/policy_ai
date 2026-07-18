@@ -208,7 +208,16 @@
           <div class="hot-topics-sort" aria-label="피드 정렬">
             <label class="hot-topics-sort-label" for="hotTopicsSort">정렬</label>
             <select id="hotTopicsSort" class="hot-topics-sort-select">
-              <option value="뜨는순" selected>뜨는순</option>
+              <!-- SORT-LABEL-HONESTY: the LABEL reads 주목순 because this sort has no
+                   popularity signal — it ranks by alert severity x1000 + freshness +
+                   근거 수준 (sortTopicCards, main.js), which "뜨는순" wrongly implied.
+                   The VALUE stays "뜨는순": the hero band calls
+                   sortTopicCards(filtered, "뜨는순") with a hardcoded literal
+                   (main.js:2484) and activeSort defaults to the same string, so
+                   changing the value would silently drop both into the no-match
+                   branch. Real circulation ranking lives in the sidebar
+                   확산 성장 Top 5 (/api/trending) — a deliberately separate axis. -->
+              <option value="뜨는순" selected>주목순</option>
               <option value="최신순">최신순</option>
               <option value="위험도순">위험도순</option>
               <option value="검토됨 우선">검토됨 우선</option>
