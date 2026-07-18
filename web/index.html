@@ -11914,7 +11914,17 @@
           .replace(/[,，、·\s]+$/, "")
           .replace(/\.+$/, "")
           .trim();
-        if (trimmed.length < CLAIM_TRIM_FLOOR_CHARS) return value;
+        // CLAIM-DISPLAY-3 Phase 3: FRAGMENT-ONLY case. When the claim is a single
+        // severed sentence there is no earlier clause to fall back to — the
+        // boundary scan finds nothing (lastEnd 0) and the old splitter stored
+        // only the fragment ("한은은 … 지난해(1.1%)보다"). Display cannot recover
+        // words that were never stored, so the honest move is to MARK the cut:
+        // a bare "…" reads as an excerpt rather than a glitch. Adds no meaning.
+        // The real repair is re-extraction, which restores the missing clause.
+        // Double-ellipsis is structurally impossible here: the CLAIM_TERMINAL_
+        // PUNCT early-return above already sent any "…"/"."/"!"/"?" ending back
+        // byte-identical before reaching this branch.
+        if (trimmed.length < CLAIM_TRIM_FLOOR_CHARS) return `${value}…`;
         return `${trimmed}…`;
       }
 
