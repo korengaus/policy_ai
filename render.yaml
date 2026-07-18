@@ -23,7 +23,14 @@ services:
         value: "openai"
       - key: EMBEDDING_MODEL
         value: "text-embedding-3-small"
+      # DB-PLAN-SIZE-FIX: STORAGE plan size, not RAM. The old 1073741824 (1GiB)
+      # copied the "Basic-1gb" plan NAME, which denotes RAM — actual storage is
+      # 10GB (autoscaling on). At ~1.19GB used, 1GiB made the spine's 90% size
+      # guard false-trip (116%) and skip the whole weekly run; against the real
+      # 10GiB it is ~11.6%. Kept EXPLICIT (not deleted in favour of the code
+      # default) because weekly_spine.py documents its default as a placeholder
+      # and tells the operator to set the real plan size here.
       - key: DB_PLAN_SIZE_BYTES
-        value: "1073741824"
+        value: "10737418240"
       - key: NTFY_TOPIC
         value: "joepark-cc-9273"
