@@ -34,3 +34,75 @@ services:
         value: "10737418240"
       - key: NTFY_TOPIC
         value: "joepark-cc-9273"
+  # DAILY-COLLECTION — automated daily seed collection (the 42 DEFAULT_QUERIES
+  # x max_news=3, <=126 articles/run upper bound; URL dedup means only NEW
+  # articles are analyzed, so re-runs never reprocess). 21:00 UTC = 06:00 KST
+  # daily — fresh overnight news, 2h clear of weekly-spine (Sun 19:00 UTC /
+  # Mon 04:00 KST). The pipeline it runs is UNCHANGED; this only schedules it.
+  - type: cron
+    name: daily-collection
+    runtime: python
+    # 2GB class: the pipeline's Playwright fallback (official_crawler.py:1046-
+    # 1070 — unconditional for FSC/IBK/BOK + thin-scrape cases) is memory-heavy;
+    # post-OOM standard for pipeline-running services.
+    plan: standard
+    schedule: "0 21 * * *"
+    # Chromium REQUIRED (same build as the web service): the browser fallback
+    # above runs inside analyze_pipeline. weekly-spine's build lacks it only
+    # because the spine never runs the pipeline.
+    buildCommand: pip install -r requirements.txt && python -m playwright install chromium
+    startCommand: python scheduler.py --once
+    envVars:
+      # --- core (required) -------------------------------------------------
+      - key: DATABASE_URL
+        sync: false
+      - key: USE_POSTGRES_WRITE
+        value: "true"
+      # Reasoner (gpt-4o-mini) — ai_reasoner provider default "openai".
+      - key: OPENAI_API_KEY
+        sync: false
+      # Domain + content-nature classifiers run claude-sonnet (and the judge,
+      # when enabled). weekly-spine never calls them, which is why its env
+      # lacks this key. WITHOUT it, classification silently fails.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # --- ships-dark flags that MUST be on for corpus parity ---------------
+      # Both default False in config.py ("no classify call, rows persist with
+      # domain/content_nature=NULL until the operator sets ...=true per
+      # service"). A daily cron without them would fill the corpus with
+      # NULL-domain rows — invisible to the domain tabs and feeds.
+      - key: CLASSIFY_ENABLED
+        value: "true"
+      - key: CONTENT_NATURE_ENABLED
+        value: "true"
+      # --- parity flags: MIRROR THE WORKER'S DASHBOARD ENV BEFORE FIRST RUN -
+      # The values below are the best-known production configuration for the
+      # collection pipeline; the Worker's dashboard-provisioned env is the
+      # authority. Joe: compare and adjust BEFORE the first scheduled run —
+      # a missing provider key degrades official-evidence quality silently.
+      - key: LLM_JUDGE_ENABLED
+        value: "true"
+      - key: NAVER_SEARCH_ENABLED
+        value: "true"
+      - key: NAVER_CLIENT_ID
+        sync: false
+      - key: NAVER_CLIENT_SECRET
+        sync: false
+      - key: POLICY_BRIEFING_ENABLED
+        value: "true"
+      - key: NATIONAL_LAW_ENABLED
+        value: "true"
+      - key: LAW_OC
+        sync: false
+      - key: FSS_ENABLED
+        value: "true"
+      - key: FSS_API_KEY
+        sync: false
+      # Runtime semantic matching + the embedding config weekly-spine uses, so
+      # any runtime-embedded vectors share the same provider/model cache.
+      - key: SEMANTIC_MATCHING_ENABLED
+        value: "true"
+      - key: EMBEDDING_PROVIDER
+        value: "openai"
+      - key: EMBEDDING_MODEL
+        value: "text-embedding-3-small"
