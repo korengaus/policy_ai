@@ -937,6 +937,17 @@
       overflow-wrap: anywhere;
     }
 
+    /* SCORE-CLARITY FIX B: the 근거 수준 caveat. Muted and small so it clarifies
+       the number without competing with it or breaking the 4-tile row height. */
+    .verdict-note {
+      display: block;
+      color: var(--slate);
+      font-size: 11px;
+      font-weight: 500;
+      line-height: 1.4;
+      margin-top: 4px;
+    }
+
     .verdict-reasoning {
       margin-top: 20px;
     }

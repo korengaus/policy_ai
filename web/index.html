@@ -973,6 +973,17 @@
       overflow-wrap: anywhere;
     }
 
+    /* SCORE-CLARITY FIX B: the 근거 수준 caveat. Muted and small so it clarifies
+       the number without competing with it or breaking the 4-tile row height. */
+    .verdict-note {
+      display: block;
+      color: var(--slate);
+      font-size: 11px;
+      font-weight: 500;
+      line-height: 1.4;
+      margin-top: 4px;
+    }
+
     .verdict-reasoning {
       margin-top: 20px;
     }
@@ -6841,7 +6852,11 @@
             return `
               <div class="evidence-source">
                 <div class="evidence-source-title">${titleHtml}</div>
-                <div class="evidence-source-meta">출처 유형: ${sourceType} · 신뢰도: ${score}/5</div>
+                <!-- SCORE-CLARITY FIX C: this IS the genuine 0-5 source grade, so
+                     "/5" stays — but the bare "신뢰도" collided with the claim's
+                     0-100 근거 수준 shown above on the same screen. "출처 신뢰도"
+                     names whose reliability this is: the SOURCE's, not the claim's. -->
+                <div class="evidence-source-meta">출처 유형: ${sourceType} · 출처 신뢰도: ${score}/5</div>
                 <div class="evidence-source-meta">${reason || "출처의 세부 관련성은 추가 확인이 필요합니다."}</div>
               </div>
             `;
@@ -7400,7 +7415,10 @@
         const summaryBits = [
           source.source_type ? formatSourceType(source.source_type) : "",
           publisher,
-          source.reliability_score == null ? "" : `신뢰도 ${source.reliability_score}`,
+          // SCORE-CLARITY FIX C: 0-100 candidate score (see the note above), so it
+          // takes the 근거 수준 label — NOT a bare "신뢰도", which on this same
+          // screen already means the 0-5 source grade. No "/5" here: this is 0-100.
+          source.reliability_score == null ? "" : `근거 수준 ${source.reliability_score}`,
           source.verification_role ? formatVerificationRole(source.verification_role) : "",
         ].filter((b) => b && String(b).trim() && String(b).trim() !== "-");
         const summaryText = summaryBits.length
@@ -7424,8 +7442,11 @@
           ["정책 일치도", source.policy_alignment_score ?? ""],
           ["공식 근거 점수", source.official_evidence_score ?? ""],
           ["공식 실패 사유", source.official_body_failure_reason ? formatDiagnosticText(source.official_body_failure_reason) : ""],
-          ["신뢰도 점수", source.reliability_score == null ? "" : `${source.reliability_score}`],
-          ["신뢰도 등급", source.reliability_level ? formatReliabilityLevel(source.reliability_level) : ""],
+          // SCORE-CLARITY FIX C: same 0-100 candidate score as the summary line
+          // above, so it carries the same 근거 수준 label. The adjacent 등급 is a
+          // source-level grade, kept distinct as 출처 신뢰도 등급.
+          ["근거 수준 점수", source.reliability_score == null ? "" : `${source.reliability_score}`],
+          ["출처 신뢰도 등급", source.reliability_level ? formatReliabilityLevel(source.reliability_level) : ""],
           ["검증 역할", source.verification_role ? formatVerificationRole(source.verification_role) : ""],
           ["도메인", domain || ""],
           ["공개 표시 판단", userFacingReportText(trace.explanation, "")],
@@ -8003,7 +8024,13 @@
           </div>`;
       })();
       const confidenceInline = (card.confidence !== "-" && card.confidence !== null && card.confidence !== undefined)
-        ? `<span class="card-confidence">신뢰도 ${escapeHtml(card.confidence)}</span>`
+        // SCORE-CLARITY FIX A: "신뢰도 88" read as "88% true". The number is
+        // policy_confidence_score — a weighted evidence/signal composite
+        // (policy_confidence.py:155-163) that is hard-clamped to <=20 whenever no
+        // official document was found, REGARDLESS of whether the claim is true.
+        // "근거 수준" names what it measures and cannot be read as a truth
+        // percentage. Label only; the score itself is untouched.
+        ? `<span class="card-confidence">근거 수준 ${escapeHtml(card.confidence)}</span>`
         : "";
       return `
         <article class="topic-card ${opts && opts.hero ? "topic-card--hero " : ""}${opts && opts.secondary ? "topic-card--secondary " : ""}${selected ? "selected" : ""}" data-topic-key="${escapeHtml(card.key)}" data-topic-source="${escapeHtml(card.source)}" data-topic-index="${escapeHtml(card.index)}" data-topic-record-id="${escapeHtml(card.recordId)}">
@@ -10259,8 +10286,11 @@
               ${escapeHtml(formatAlert(context.level))}은 현재 확보된 근거를 기준으로 얼마나 조심해서 봐야 하는지를 뜻합니다.
             </div>
             <div class="reading-guide-card">
-              <strong>신뢰도 점수</strong>
-              ${escapeHtml(confidenceScore)}점은 공식 자료, 기사 근거, 반박 신호를 함께 본 참고 점수입니다.
+              <!-- SCORE-CLARITY FIX A: the reading guide is public (not operator-
+                   gated), so it uses the same 근거 수준 label as the verdict block
+                   it explains, and says outright that it is not a truth verdict. -->
+              <strong>근거 수준</strong>
+              ${escapeHtml(confidenceScore)}점은 공식 자료, 기사 근거, 반박 신호를 함께 본 참고 점수이며, 진위 판정이 아닙니다.
             </div>
             <div class="reading-guide-card">
               <strong>공식 출처 상태</strong>
@@ -11139,10 +11169,13 @@
             "검증 점수 상세",
             advDefList([
               ["최종 점수", finalScore],
-              ["초안 신뢰도", verification.verdict_confidence ?? ""],
+              // SCORE-CLARITY FIX A: verdict_confidence is a straight copy of
+              // policy_confidence_score (main.py:968), so it carries the same
+              // 근거 수준 label rather than a second "신뢰도" reading.
+              ["초안 근거 수준", verification.verdict_confidence ?? ""],
             ]),
             false,
-            "최종 점수와 초안 신뢰도는 화면 상단의 신뢰도 점수를 보조하는 내부 참고 값입니다. 신뢰도 점수와 같을 수 있습니다."
+            "최종 점수와 초안 근거 수준은 화면 상단의 근거 수준을 보조하는 내부 참고 값입니다. 근거 수준과 같을 수 있습니다."
           ),
           renderCollapsibleSection(
             "핵심 주장과 정규화",
@@ -11259,9 +11292,14 @@
                   <span class="verdict-label">AI 초안 판정</span>
                   <span class="verdict-value">${escapeHtml(safeAiDraftVerdictForExport(result))}</span>
                 </div>
+                <!-- SCORE-CLARITY FIX A+B: relabelled 신뢰도 -> 근거 수준 (see the
+                     card-grid note), with a one-line caveat under the value so the
+                     0-100 number cannot be read as a truth percentage. Wording is
+                     aligned with the 내부 참고 값 hint on 검증 점수 상세 below. -->
                 <div class="verdict-indicator">
-                  <span class="verdict-label">신뢰도</span>
+                  <span class="verdict-label">근거 수준</span>
                   <span class="verdict-value">${escapeHtml(confidence.policy_confidence_score ?? "-")}</span>
+                  <span class="verdict-note">수집된 근거의 양이며 진위 판정이 아닙니다</span>
                 </div>
                 <div class="verdict-indicator">
                   <span class="verdict-label">공식 출처 상태</span>
@@ -11293,7 +11331,7 @@
                  placeholder, too late for a first-time reader) — right after the
                  verdict block, before the dense sections. Kept collapsed,
                  content unchanged. -->
-            ${renderCollapsibleSection("이 리포트는 이렇게 읽으면 됩니다", renderReadingGuide(userContext), false, "처음 보는 분을 위한 안내입니다. 판정 단계·신뢰도·공식 출처·근거를 어떻게 읽으면 되는지 설명합니다.")}
+            ${renderCollapsibleSection("이 리포트는 이렇게 읽으면 됩니다", renderReadingGuide(userContext), false, "처음 보는 분을 위한 안내입니다. 판정 단계·근거 수준·공식 출처·근거를 어떻게 읽으면 되는지 설명합니다.")}
 
             <!-- SPREAD-TIMELINE Slice 2 / CARD-3LAYER S4a: circulation annotation
                  placeholder (유통 정보만 — 판정 아님), PROMOTED here as the endgame
