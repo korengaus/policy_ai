@@ -114,6 +114,11 @@ INSERT_SQL = (
     "INSERT INTO brainmap_graph (generated_at, params_json, graph_json) "
     "VALUES (%s, %s, %s)"
 )
+# STABLE-CLUSTER-ID: read-only fetch of the PREVIOUS build for lineage
+# matching (runs before this build's row is inserted, so newest == previous).
+SELECT_PREV_GRAPH_SQL = (
+    "SELECT graph_json FROM brainmap_graph ORDER BY id DESC LIMIT 1"
+)
 
 # Honesty boundary — vocabulary that must NEVER appear in generated labels.
 # (Node titles are journalist-written passthrough data; the ban applies to
@@ -351,6 +356,90 @@ def build_graph(ids, titles, domains, content_natures, X,
         for (i, j), sim in sorted(edge_set.items())
     ]
     return {"nodes": nodes, "edges": edges, "clusters": clusters}
+
+
+def _member_sets_by_cluster(graph):
+    """Membership lives on NODES (clusters carry no member list — same
+    reconstruction api_server._build_spread_indexes does)."""
+    members = {}
+    for node in (graph or {}).get("nodes") or []:
+        cid = node.get("cluster_id")
+        if cid is not None and node.get("id") is not None:
+            members.setdefault(cid, set()).add(node["id"])
+    return members
+
+
+def assign_lineage_ids(prev_graph, new_graph):
+    """STABLE-CLUSTER-ID — annotate new_graph's clusters with a DURABLE
+    lineage_id, in place. PURE: no DB, no IO (selftest-covered).
+
+    Why stable_id cannot do this: it hashes the FULL member set
+    (sha256(sorted ids)[:12] above), so it changes whenever a cluster gains
+    one member — an idempotency key, not a temporal identity. The probe
+    (temporal_map_probe) measured member overlap across rebuilds at 99.8%
+    1:1 / 0% reshuffle, so overlap IS the reliable identity signal; this
+    function persists it as a key.
+
+    Matching rule (probe-validated threshold 0.5):
+      * CONTAINMENT |prev∩new| / |prev| — NOT Jaccard. The corpus is
+        append-only, so a cluster that doubles keeps containment 1.0 while
+        Jaccard drops to 0.5; Jaccard would break lineage on the strongest
+        growth events, the very thing this exists to track.
+      * Each PREV cluster claims the new cluster with its largest overlap,
+        if containment >= 0.5 (its mutual-best fragment). Each NEW cluster
+        takes the lineage of the LARGEST claiming prev (merge rule); the
+        other claimants' lineages simply stop (no tombstone). Unclaimed new
+        clusters MINT lineage_id := their own stable_id (already a unique
+        12-hex with no semantics). Split: only the best fragment is claimed,
+        so the rest mint — the simplest correct rule at the probe-measured
+        0 splits/merges; revisit if a probe re-run shows real split/merge.
+      * A prev cluster without lineage_id (pre-lineage graph rows) falls
+        back to its stable_id, which is exactly what minting would have
+        assigned it — so backfill-day and first-run are both safe.
+
+    Returns {"carried", "minted", "merged_away"} counts for the build log.
+    Metadata only: no verdict/honesty field is read or written, and a hex id
+    cannot carry FORBIDDEN_LABEL_VOCAB.
+    """
+    new_clusters = (new_graph or {}).get("clusters") or []
+    prev_clusters = (prev_graph or {}).get("clusters") or []
+    prev_members = _member_sets_by_cluster(prev_graph)
+    new_members = _member_sets_by_cluster(new_graph)
+
+    # Each prev cluster claims its best new fragment (containment >= 0.5).
+    claims = {}  # new cluster_id -> list of (prev_size, overlap, prev_cid, lineage)
+    for prev_cluster in prev_clusters:
+        prev_cid = prev_cluster.get("cluster_id")
+        prev_set = prev_members.get(prev_cid) or set()
+        if not prev_set:
+            continue
+        lineage = (prev_cluster.get("lineage_id")
+                   or prev_cluster.get("stable_id") or "")
+        best_new, best_overlap = None, 0
+        for new_cluster in new_clusters:
+            new_cid = new_cluster.get("cluster_id")
+            overlap = len(prev_set & (new_members.get(new_cid) or set()))
+            # Deterministic tie-break: first (lowest) new cluster_id wins.
+            if overlap > best_overlap:
+                best_new, best_overlap = new_cid, overlap
+        if lineage and best_new is not None and best_overlap / len(prev_set) >= 0.5:
+            claims.setdefault(best_new, []).append(
+                (len(prev_set), best_overlap, prev_cid, lineage))
+
+    carried = minted = merged_away = 0
+    for new_cluster in new_clusters:
+        claimants = claims.get(new_cluster.get("cluster_id")) or []
+        if claimants:
+            # Merge rule: the LARGEST contributing prev wins (tie-break larger
+            # overlap, then lowest prev cluster_id — deterministic).
+            claimants.sort(key=lambda c: (-c[0], -c[1], c[2]))
+            new_cluster["lineage_id"] = claimants[0][3]
+            carried += 1
+            merged_away += len(claimants) - 1
+        else:
+            new_cluster["lineage_id"] = new_cluster.get("stable_id") or ""
+            minted += 1
+    return {"carried": carried, "minted": minted, "merged_away": merged_away}
 
 
 def load_corpus_vectors(conn):
@@ -633,13 +722,80 @@ def run_selftest() -> int:
     print("  [%s] (k) threshold+framing on every cluster (default build too); "
           "framing carries no forbidden vocab" % ("ok" if k_ok else "xx"))
 
+    # STABLE-CLUSTER-ID — (l)-(o): lineage assignment on synthetic graphs.
+    def _mini_graph(spec):
+        """spec: {cluster_id: (lineage_or_None, member_ids)} -> minimal graph."""
+        nodes, clusters = [], []
+        for cid, (lineage, member_ids) in spec.items():
+            for member_id in member_ids:
+                nodes.append({"id": member_id, "cluster_id": cid})
+            cluster = {"cluster_id": cid,
+                       "stable_id": hashlib.sha256(
+                           ",".join(str(m) for m in sorted(member_ids))
+                           .encode("utf-8")).hexdigest()[:12]}
+            if lineage:
+                cluster["lineage_id"] = lineage
+            clusters.append(cluster)
+        return {"nodes": nodes, "clusters": clusters}
+
+    # (l) no previous graph -> every cluster mints lineage_id = stable_id.
+    fresh = _mini_graph({0: (None, [1, 2, 3])})
+    stats_l = assign_lineage_ids(None, fresh)
+    l_ok = (stats_l == {"carried": 0, "minted": 1, "merged_away": 0}
+            and fresh["clusters"][0]["lineage_id"]
+            == fresh["clusters"][0]["stable_id"])
+    print("  [%s] (l) no prev graph -> mint lineage_id = stable_id"
+          % ("ok" if l_ok else "xx"))
+    # (m) growth carries lineage even though stable_id churns; a prev cluster
+    # WITHOUT lineage_id (pre-lineage row) falls back to its stable_id; an
+    # unmatched new cluster mints.
+    prev_m = _mini_graph({0: ("lin-aaa", [1, 2, 3, 4]), 1: (None, [7, 8])})
+    grown = _mini_graph({0: (None, [1, 2, 3, 4, 99]),      # containment 1.0
+                         1: (None, [7, 8, 70]),            # containment 1.0
+                         2: (None, [200, 201])})           # brand new
+    stats_m = assign_lineage_ids(prev_m, grown)
+    m_ok = (grown["clusters"][0]["lineage_id"] == "lin-aaa"
+            and grown["clusters"][0]["stable_id"] != "lin-aaa"
+            and grown["clusters"][1]["lineage_id"]
+            == prev_m["clusters"][1]["stable_id"]
+            and grown["clusters"][2]["lineage_id"]
+            == grown["clusters"][2]["stable_id"]
+            and stats_m == {"carried": 2, "minted": 1, "merged_away": 0})
+    print("  [%s] (m) growth carries lineage across stable_id churn; "
+          "pre-lineage prev falls back to stable_id; new cluster mints"
+          % ("ok" if m_ok else "xx"))
+    # (n) split: prev {1,2,3,4} -> {1,2,3} + {4,90}. The mutual-best fragment
+    # (overlap 3, containment 0.75) keeps the lineage; the other mints.
+    split = _mini_graph({0: (None, [1, 2, 3]), 1: (None, [4, 90])})
+    stats_n = assign_lineage_ids(_mini_graph({0: ("lin-split", [1, 2, 3, 4])}),
+                                 split)
+    n_ok = (split["clusters"][0]["lineage_id"] == "lin-split"
+            and split["clusters"][1]["lineage_id"]
+            == split["clusters"][1]["stable_id"]
+            and stats_n == {"carried": 1, "minted": 1, "merged_away": 0})
+    print("  [%s] (n) split: best fragment keeps lineage, the rest mint"
+          % ("ok" if n_ok else "xx"))
+    # (o) merge: prev {1,2} (lin-small) + {3,4,5} (lin-big) -> {1,2,3,4,5}.
+    # The LARGEST contributing prev wins; the smaller lineage stops. A prev
+    # with no >=0.5 containment match ({7,8}) vanishes without a tombstone.
+    merged = _mini_graph({0: (None, [1, 2, 3, 4, 5])})
+    stats_o = assign_lineage_ids(
+        _mini_graph({0: ("lin-small", [1, 2]), 1: ("lin-big", [3, 4, 5]),
+                     2: ("lin-gone", [7, 8])}),
+        merged)
+    o_ok = (merged["clusters"][0]["lineage_id"] == "lin-big"
+            and stats_o == {"carried": 1, "minted": 0, "merged_away": 1})
+    print("  [%s] (o) merge: largest prev's lineage wins; loser + vanished "
+          "lineages just stop" % ("ok" if o_ok else "xx"))
+
     ok = all([a_ok, b_ok, c_ok, d_ok, e_ok, f_ok, g_ok, h_ok,
-              i_ok, j_ok, k_ok])
+              i_ok, j_ok, k_ok, l_ok, m_ok, n_ok, o_ok])
     print()
     print("SELFTEST: %s" % ("PASS (clusters + coords + degree label + distinct-"
                             "outlet label + dry-run purity + honesty vocab + "
                             "outlet normalization + stable_id + syndication "
-                            "anchor/near/exact tiers)" if ok else "FAIL"))
+                            "anchor/near/exact tiers + lineage carry/mint/"
+                            "split/merge)" if ok else "FAIL"))
     return 0 if ok else 1
 
 
@@ -703,6 +859,26 @@ def main(argv=None) -> int:
         graph = build_graph(ids, titles, domains, cns, vectors, outlet_sets,
                             published_ats=published_ats)
         print_stats(graph)
+        # STABLE-CLUSTER-ID — read the PREVIOUS build (this build's row is not
+        # inserted yet) and thread durable lineage ids. First-ever run (table
+        # absent) or unreadable JSON -> prev None -> every cluster mints its
+        # own lineage_id = stable_id. The failed SELECT poisons the psycopg
+        # transaction, so roll back before maybe_write reuses the connection.
+        prev_graph = None
+        try:
+            with conn.cursor() as cur:
+                cur.execute(SELECT_PREV_GRAPH_SQL)
+                prev_row = cur.fetchone()
+            if prev_row and prev_row[0]:
+                prev_graph = json.loads(prev_row[0])
+        except Exception:
+            conn.rollback()
+            prev_graph = None
+        lineage_stats = assign_lineage_ids(prev_graph, graph)
+        print("[brainmap] lineage: carried=%d minted=%d merged_away=%d%s"
+              % (lineage_stats["carried"], lineage_stats["minted"],
+                 lineage_stats["merged_away"],
+                 "" if prev_graph else " (no previous graph — all minted)"))
         # Honesty guard at write time too: refuse to persist if any GENERATED
         # label string carries verdict vocabulary (titles are passthrough).
         generated_strings = [

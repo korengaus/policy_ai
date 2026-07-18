@@ -52,12 +52,27 @@ class ExtractionTests(unittest.TestCase):
         for row in rows:
             self.assertEqual(
                 set(row),
+                # STABLE-CLUSTER-ID: cluster_lineage_id joined the row shape.
                 {"snapshot_date", "graph_ref", "graph_generated_at",
-                 "cluster_stable_id", "outlet_count", "member_count"},
+                 "cluster_stable_id", "outlet_count", "member_count",
+                 "cluster_lineage_id"},
             )
             self.assertEqual(row["snapshot_date"], "2026-07-11")
             self.assertEqual(row["graph_ref"], 7)
             self.assertEqual(row["graph_generated_at"], "g-at")
+
+    def test_lineage_passthrough_and_pre_lineage_null(self):
+        # STABLE-CLUSTER-ID: pre-lineage graphs (no lineage_id key) snapshot
+        # as None; post-lineage graphs pass the id through untouched.
+        rows = sbg.build_snapshot_rows(_graph(), "2026-07-11", 7, "g-at")
+        self.assertTrue(all(r["cluster_lineage_id"] is None for r in rows))
+        graph = _graph()
+        graph["clusters"][0]["lineage_id"] = "lin-000000aa"
+        by_sid = {r["cluster_stable_id"]: r
+                  for r in sbg.build_snapshot_rows(graph, "2026-07-11", 7, "g")}
+        self.assertEqual(by_sid["aaa111aaa111"]["cluster_lineage_id"],
+                         "lin-000000aa")
+        self.assertIsNone(by_sid["bbb222bbb222"]["cluster_lineage_id"])
 
     def test_member_count_falls_back_to_size_without_nodes(self):
         bare = {"clusters": [{"cluster_id": 0, "stable_id": "ccc333ccc333",
@@ -91,8 +106,10 @@ class AppendOnlyTests(unittest.TestCase):
         self.assertEqual(len(forced), 4)
 
     def test_sql_is_append_only(self):
+        # ALTER_ADD_LINEAGE_SQL is ADD COLUMN IF NOT EXISTS — schema-additive.
         for statement in (sbg.SELECT_NEWEST_GRAPH_SQL, sbg.CREATE_TABLE_SQL,
-                          sbg.INSERT_SQL, sbg.SELECT_EXISTING_BATCH_SQL):
+                          sbg.INSERT_SQL, sbg.SELECT_EXISTING_BATCH_SQL,
+                          sbg.ALTER_ADD_LINEAGE_SQL):
             upper = statement.upper()
             self.assertNotIn("UPDATE", upper)
             self.assertNotIn("DELETE", upper)

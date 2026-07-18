@@ -70,13 +70,21 @@ CREATE_TABLE_SQL = (
     "cluster_stable_id TEXT, "
     "outlet_count INTEGER, "
     "member_count INTEGER, "
+    "cluster_lineage_id TEXT, "
     "created_at TEXT)"
+)
+# STABLE-CLUSTER-ID — additive, nullable column for tables created before the
+# lineage change (CREATE IF NOT EXISTS never alters an existing table). Old
+# rows stay NULL until scripts/backfill_cluster_lineage.py threads them.
+ALTER_ADD_LINEAGE_SQL = (
+    "ALTER TABLE brainmap_snapshots "
+    "ADD COLUMN IF NOT EXISTS cluster_lineage_id TEXT"
 )
 INSERT_SQL = (
     "INSERT INTO brainmap_snapshots "
     "(snapshot_date, graph_ref, graph_generated_at, cluster_stable_id, "
-    "outlet_count, member_count, created_at) "
-    "VALUES (%s, %s, %s, %s, %s, %s, %s)"
+    "outlet_count, member_count, cluster_lineage_id, created_at) "
+    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"
 )
 # Exact-duplicate-batch guard only (same graph already snapshotted today).
 # Deliberately NOT a per-cluster upsert key — append-only time series.
@@ -93,6 +101,11 @@ def build_snapshot_rows(graph, snapshot_date, graph_ref, graph_generated_at):
     falling back to the cluster's stored ``size`` when a graph carries no
     node array (defensive; current builds always include nodes). Clusters
     without a stable_id are skipped — a growth series needs a stable key.
+
+    STABLE-CLUSTER-ID: cluster_lineage_id passes through the cluster's
+    lineage_id when the graph carries one (post-lineage builds), else None —
+    pre-lineage graph rows snapshot with a NULL lineage, exactly what the
+    one-time backfill fills in later.
     """
     members_by_cluster = {}
     for node in graph.get("nodes") or []:
@@ -115,6 +128,7 @@ def build_snapshot_rows(graph, snapshot_date, graph_ref, graph_generated_at):
             "cluster_stable_id": stable_id,
             "outlet_count": int(cluster.get("outlet_count") or 0),
             "member_count": int(member_count),
+            "cluster_lineage_id": cluster.get("lineage_id") or None,
         })
     return rows
 
@@ -193,8 +207,20 @@ def run_selftest() -> int:
           and by_sid["bbb222bbb222"]["member_count"] == 2)
     check("row shape complete",
           all(set(r) == {"snapshot_date", "graph_ref", "graph_generated_at",
-                         "cluster_stable_id", "outlet_count", "member_count"}
+                         "cluster_stable_id", "outlet_count", "member_count",
+                         "cluster_lineage_id"}
               for r in rows))
+    # STABLE-CLUSTER-ID: lineage passes through when present; pre-lineage
+    # graphs (no lineage_id key — this synthetic one) snapshot as None.
+    check("lineage None for pre-lineage graphs",
+          all(r["cluster_lineage_id"] is None for r in rows))
+    lineage_graph = _synthetic_graph()
+    lineage_graph["clusters"][0]["lineage_id"] = "lin-000000aa"
+    lineage_rows = build_snapshot_rows(lineage_graph, "2026-07-11", 7, "g-at")
+    lineage_by_sid = {r["cluster_stable_id"]: r for r in lineage_rows}
+    check("lineage passes through when the graph carries it",
+          lineage_by_sid["aaa111aaa111"]["cluster_lineage_id"] == "lin-000000aa"
+          and lineage_by_sid["bbb222bbb222"]["cluster_lineage_id"] is None)
     check("provenance carried",
           all(r["snapshot_date"] == "2026-07-11" and r["graph_ref"] == 7
               and r["graph_generated_at"] == "g-at" for r in rows))
@@ -222,9 +248,10 @@ def run_selftest() -> int:
     store4, wrote4 = append_batch(store2, day2, force=True)
     check("--force appends the duplicate batch", wrote4 and len(store4) == 6)
 
-    # No UPDATE/DELETE/UPSERT in any SQL this script can execute.
+    # No UPDATE/DELETE/UPSERT in any SQL this script can execute. (The lineage
+    # ALTER is ADD COLUMN IF NOT EXISTS — schema-additive, still append-only.)
     sql_constants = (SELECT_NEWEST_GRAPH_SQL, CREATE_TABLE_SQL, INSERT_SQL,
-                     SELECT_EXISTING_BATCH_SQL)
+                     SELECT_EXISTING_BATCH_SQL, ALTER_ADD_LINEAGE_SQL)
     check("append-only SQL (no UPDATE/DELETE/UPSERT statement)",
           not any(keyword in statement.upper()
                   for statement in sql_constants
@@ -301,6 +328,9 @@ def main(argv=None) -> int:
 
         with conn.cursor() as cur:
             cur.execute(CREATE_TABLE_SQL)
+            # STABLE-CLUSTER-ID: additive nullable column for pre-existing
+            # tables; a no-op (IF NOT EXISTS) on fresh ones.
+            cur.execute(ALTER_ADD_LINEAGE_SQL)
             cur.execute(SELECT_EXISTING_BATCH_SQL, (snapshot_date, graph_ref))
             if cur.fetchone() and not args.force:
                 print("[snapshot] graph_ref=%s already snapshotted on %s — "
@@ -311,7 +341,8 @@ def main(argv=None) -> int:
                 cur.execute(INSERT_SQL, (
                     row["snapshot_date"], row["graph_ref"],
                     row["graph_generated_at"], row["cluster_stable_id"],
-                    row["outlet_count"], row["member_count"], created_at,
+                    row["outlet_count"], row["member_count"],
+                    row["cluster_lineage_id"], created_at,
                 ))
         conn.commit()
         print("[snapshot] appended %d brainmap_snapshots rows "
