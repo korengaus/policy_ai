@@ -1108,6 +1108,128 @@ def cluster_members(result_id: int) -> Response:
 
 
 # ---------------------------------------------------------------------------
+# TEMPORAL-MAP v1 — read-only cluster TRAJECTORY for ONE analysis id.
+#
+# GET /api/topic-timeline/{analysis_id} resolves the card's cluster in the
+# NEWEST brainmap_graph (the SAME cached indexes /api/spread uses), reads its
+# durable lineage_id, and returns the lineage's weekly trajectory from
+# brainmap_snapshots: [(snapshot_date, outlets, members), ...]. MEASUREMENT
+# ONLY — factual size/spread over time; readers/experts interpret.
+#
+# SAFETY / HONESTY:
+#   * READ-ONLY: snapshot dates + counts + lineage hex ONLY. NO verdict /
+#     score / sentiment / 여론 field anywhere. Trajectory is circulation
+#     history, never 검증; sequence is never framed as 반박.
+#   * lineage resolution: prefer the graph cluster's lineage_id (present on
+#     builds after STABLE-CLUSTER-ID); FALL BACK to the newest backfilled
+#     brainmap_snapshots row for the cluster's stable_id — the live graph row
+#     may PREDATE the lineage change while its snapshots are already threaded.
+#   * Gates mirror the spread section: singleton (not in cluster_of) /
+#     outlet_count < 2 / no lineage / no points -> {"found": false}.
+#   * NEVER 500: any failure -> {"found": false} at HTTP 200, 5-min cache.
+#   * GROUP BY (snapshot_date, graph_ref) + MAX collapses --force duplicate
+#     batches — same key the snapshot append guard uses.
+# ---------------------------------------------------------------------------
+_TOPIC_TIMELINE_EMPTY_JSON = '{"found": false}'
+
+
+def _fetch_lineage_trajectory(lineage_id: str):
+    """[(snapshot_date, graph_ref, outlets, members), ...] oldest first, or []."""
+    import sqlalchemy as sa
+    from sqlalchemy.exc import ProgrammingError
+
+    import postgres_storage
+
+    engine = postgres_storage.get_engine()
+    if engine is None:
+        return []
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(sa.text(
+                "SELECT snapshot_date, graph_ref, MAX(outlet_count), "
+                "MAX(member_count) FROM brainmap_snapshots "
+                "WHERE cluster_lineage_id = :lineage "
+                "GROUP BY snapshot_date, graph_ref ORDER BY graph_ref ASC"
+            ), {"lineage": lineage_id}).fetchall()
+    except ProgrammingError:
+        return []
+    return [(r[0], r[1], int(r[2] or 0), int(r[3] or 0)) for r in rows]
+
+
+def _resolve_cluster_lineage(cluster_meta: dict):
+    """The cluster's durable lineage id, or None. Graph field first; snapshot
+    fallback for a live graph row built before STABLE-CLUSTER-ID."""
+    lineage = cluster_meta.get("lineage_id")
+    if lineage:
+        return lineage
+    stable_id = cluster_meta.get("stable_id")
+    if not stable_id:
+        return None
+    import sqlalchemy as sa
+    from sqlalchemy.exc import ProgrammingError
+
+    import postgres_storage
+
+    engine = postgres_storage.get_engine()
+    if engine is None:
+        return None
+    try:
+        with engine.connect() as conn:
+            return conn.execute(sa.text(
+                "SELECT cluster_lineage_id FROM brainmap_snapshots "
+                "WHERE cluster_stable_id = :sid "
+                "AND cluster_lineage_id IS NOT NULL "
+                "ORDER BY id DESC LIMIT 1"
+            ), {"sid": stable_id}).scalar()
+    except ProgrammingError:
+        return None
+
+
+def _build_topic_timeline_payload(lineage_id: str, trajectory: list) -> dict:
+    """Pure: trajectory rows -> the timeline payload. Measurement only."""
+    points = [{"date": date, "graph_ref": ref, "outlets": outlets,
+               "members": members}
+              for date, ref, outlets, members in trajectory]
+    outlet_series = [p["outlets"] for p in points]
+    return {
+        "found": True,
+        "lineage_id": lineage_id,
+        "points": points,
+        "first_seen": points[0]["date"] if points else None,
+        "peak_outlets": max(outlet_series) if outlet_series else 0,
+        "latest_delta": (outlet_series[-1] - outlet_series[-2]
+                         if len(outlet_series) >= 2 else 0),
+    }
+
+
+@app.get("/api/topic-timeline/{analysis_id}")
+def topic_timeline(analysis_id: int) -> Response:
+    try:
+        indexes = _load_spread_indexes()
+        if indexes is None:
+            return _spread_response(_TOPIC_TIMELINE_EMPTY_JSON)
+        # cluster_id 0 is a real cluster — explicit None checks only.
+        cluster_id = indexes["cluster_of"].get(analysis_id)
+        if cluster_id is None:
+            return _spread_response(_TOPIC_TIMELINE_EMPTY_JSON)
+        cluster_meta = indexes["clusters"].get(cluster_id) or {}
+        outlet_count = cluster_meta.get("outlet_count")
+        if not isinstance(outlet_count, int) or outlet_count < 2:
+            return _spread_response(_TOPIC_TIMELINE_EMPTY_JSON)
+        lineage_id = _resolve_cluster_lineage(cluster_meta)
+        if not lineage_id:
+            return _spread_response(_TOPIC_TIMELINE_EMPTY_JSON)
+        trajectory = _fetch_lineage_trajectory(lineage_id)
+        if not trajectory:
+            return _spread_response(_TOPIC_TIMELINE_EMPTY_JSON)
+        payload = _build_topic_timeline_payload(lineage_id, trajectory)
+        return _spread_response(json.dumps(payload, ensure_ascii=False))
+    except Exception:
+        logger.exception("Failed to build topic timeline")
+        return _spread_response(_TOPIC_TIMELINE_EMPTY_JSON)
+
+
+# ---------------------------------------------------------------------------
 # CLUSTER-SURFACE S-b — read-only BATCH cluster sizes for the home feed.
 #
 # GET /api/cluster-sizes?ids=1,2,3 answers ONE call for the whole visible

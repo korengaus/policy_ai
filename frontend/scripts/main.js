@@ -5300,6 +5300,73 @@
     // CLUSTER-SURFACE S-a: hydrate the detail card's sibling-coverage placeholder
     // after the innerHTML pass (mirrors loadSpreadAnnotations). Verdict-free:
     // titles + /?result_id links + the circulation honesty note only.
+    // TEMPORAL-MAP v1 — weekly-snapshot trajectory sparkline. One bar per
+    // snapshot point (outlet_count over snapshot dates). Reuses the spread
+    // sparkline's inline-bar styling; no library. Measurement only.
+    function topicTimelineSparklineHtml(points) {
+      if (!Array.isArray(points) || points.length < 2) return "";
+      let peak = 0;
+      for (const point of points) peak = Math.max(peak, Number(point?.outlets) || 0);
+      if (peak <= 0) return "";
+      const bars = points.map((point) => {
+        const outlets = Number(point?.outlets) || 0;
+        const day = typeof point?.date === "string" ? point.date.slice(5, 10) : "";
+        const heightPct = outlets > 0 ? Math.max(6, Math.round((outlets / peak) * 100)) : 0;
+        return `<div title="${escapeHtml(day)} · ${escapeHtml(outlets)}개 매체" style="flex:1 1 14px;max-width:18px;min-width:0;align-self:flex-end;height:${outlets > 0 ? heightPct + "%" : "2px"};background:${outlets > 0 ? "var(--brand)" : "var(--line)"};border-radius:2px 2px 0 0;"></div>`;
+      });
+      return `<div style="display:flex;gap:2px;height:44px;align-items:flex-end;max-width:${points.length * 20}px;margin:8px 0 4px;">${bars.join("")}</div>`;
+    }
+
+    // TEMPORAL-MAP v1: MM/DD display form of a snapshot date ("2026-07-06" ->
+    // "7/6"). Falls back to the raw string when it doesn't parse.
+    function timelineDateLabel(value) {
+      const match = /^\d{4}-(\d{2})-(\d{2})/.exec(String(value || ""));
+      if (!match) return String(value || "");
+      return `${Number(match[1])}/${Number(match[2])}`;
+    }
+
+    async function loadTopicTimeline() {
+      const placeholders = document.querySelectorAll(".topic-timeline-section[data-timeline-id]");
+      for (const section of placeholders) {
+        const id = Number(section.getAttribute("data-timeline-id"));
+        if (!Number.isInteger(id) || id <= 0) continue;
+        try {
+          const response = await fetch(`${API_BASE}/api/topic-timeline/${encodeURIComponent(id)}`);
+          if (!response.ok) continue;
+          const data = await response.json();
+          const points = Array.isArray(data?.points) ? data.points : [];
+          // >=2 points required: a single snapshot is not a trajectory.
+          if (!data?.found || points.length < 2) continue;
+          const first = points[0];
+          const last = points[points.length - 1];
+          const firstLabel = timelineDateLabel(first?.date);
+          const lastLabel = timelineDateLabel(last?.date);
+          const firstOutlets = Number(first?.outlets) || 0;
+          const lastOutlets = Number(last?.outlets) || 0;
+          if (!firstLabel || !lastLabel || firstOutlets <= 0 || lastOutlets <= 0) continue;
+          // Factual direction only (counts up/down/flat) — no sentiment, no
+          // 여론/국민정서, and sequence is never framed as 반박.
+          const delta = Number(data?.latest_delta) || 0;
+          const deltaLine = delta > 0
+            ? `<div class="spread-timeline-line">최근 스냅샷에서 ${escapeHtml(delta)}개 매체 증가</div>`
+            : (delta < 0
+              ? `<div class="spread-timeline-line">최근 스냅샷에서 ${escapeHtml(Math.abs(delta))}개 매체 감소</div>`
+              : "");
+          section.innerHTML = `
+            <h3>확산 추이</h3>
+            <div>${escapeHtml(firstLabel)} ${escapeHtml(firstOutlets)}개 매체 → ${escapeHtml(lastLabel)} ${escapeHtml(lastOutlets)}개 매체</div>
+            ${deltaLine}
+            ${topicTimelineSparklineHtml(points)}
+            <div class="evidence-source-meta">주간 스냅샷 기준 · 최초 관측 ${escapeHtml(timelineDateLabel(data?.first_seen))}</div>
+            <div class="reader-note">확산 추이는 유통 규모의 변화를 보여줄 뿐, 사실 여부에 대한 검증이 아닙니다.</div>
+          `;
+          section.hidden = false;
+        } catch (error) {
+          // fail-silent: trajectory is optional context, never an error state
+        }
+      }
+    }
+
     async function loadClusterMembers() {
       const placeholders = document.querySelectorAll(".cluster-members-section[data-cluster-id]");
       for (const section of placeholders) {
@@ -5661,6 +5728,16 @@
                  independent. Same gate as the spread placeholder. -->
             ${(hasFocus || displayResults.length === 1) && Number(result.result_id) > 0 ? `<section class="public-source-section cluster-members-section" data-cluster-id="${Number(result.result_id)}" hidden></section>` : ""}
 
+            <!-- TEMPORAL-MAP v1: cluster trajectory placeholder (확산 추이 —
+                 유통 정보만, 판정 아님). Hidden until /api/topic-timeline/{id}
+                 returns found + >=2 points; found:false / singleton / single
+                 point / fetch failure all render NOTHING (fail-silent).
+                 Hydrated AFTER the innerHTML pass by loadTopicTimeline() via
+                 [data-timeline-id] — position-independent. Same gate as the
+                 spread placeholder. Measurement only: dates + outlet counts;
+                 no sentiment, no 여론, no verdict vocabulary. -->
+            ${(hasFocus || displayResults.length === 1) && Number(result.result_id) > 0 ? `<section class="public-source-section topic-timeline-section" data-timeline-id="${Number(result.result_id)}" hidden></section>` : ""}
+
             <!-- STEP 2 item 3: the news CONTENT lead (the article's own claim quote)
                  + the muted verification note, just under the verdict so the reader
                  sees conclusion → the claim it's about. Each renders only if truthy. -->
@@ -5724,6 +5801,7 @@
       loadSpreadAnnotations();
       // CLUSTER-SURFACE S-a: hydrate the sibling-coverage placeholder the same way.
       loadClusterMembers();
+      loadTopicTimeline();
     }
 
     function renderHistory(rows) {
