@@ -103,11 +103,13 @@ class DomainClassifierTests(unittest.TestCase):
         self._patch(boom)
         self.assertEqual(dc.classify_domain("title", None), "기타-미분류")
 
-    def test_label_set_is_the_eleven_taxonomy(self):
-        # DOMAIN-LABEL 2a: education joined as the 11th label; the fallback
-        # stays LAST and the original 10 are all still present.
-        self.assertEqual(len(dc.LABELS), 11)
-        for expected in ("finance", "realestate", "education", "기타-미분류"):
+    def test_label_set_is_the_thirteen_taxonomy(self):
+        # DOMAIN-LABEL 2a: education joined as the 11th label. DOMAIN-ADD-
+        # SCITECH-TRADE added scitech + trade as the 12th/13th, inserted BEFORE
+        # the fallback so it still stays LAST; the original 11 remain present.
+        self.assertEqual(len(dc.LABELS), 13)
+        for expected in ("finance", "realestate", "education", "scitech",
+                         "trade", "기타-미분류"):
             self.assertIn(expected, dc.LABELS)
         self.assertEqual(dc.LABELS[-1], "기타-미분류")
 

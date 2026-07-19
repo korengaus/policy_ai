@@ -297,13 +297,17 @@
       realestate: "부동산",
       statistics: "통계",
       education: "교육",
+      scitech: "과학기술",
+      trade: "산업·통상",
       "기타-미분류": "기타",
     };
     // Canonical tab/section order (matches domain_classifier.LABELS — education
-    // joined as the 11th label in DOMAIN-LABEL 2a, before the fallback).
+    // joined as the 11th label in DOMAIN-LABEL 2a, then scitech + trade as the
+    // 12th/13th in DOMAIN-ADD-SCITECH-TRADE, all before the fallback).
     const DOMAIN_ORDER = [
       "finance", "welfare", "agriculture", "labor", "health",
       "environment", "SMB", "realestate", "statistics", "education",
+      "scitech", "trade",
       "기타-미분류",
     ];
     // TAB-ORDER: FIXED category-tab display order — corpus volume DESCENDING (from
@@ -317,9 +321,15 @@
     // DOMAIN-LABEL 2c: education inserted FIRST per the same volume-descending
     // rule — the 2b re-classify moved 758 rows to education, the largest domain
     // (welfare was 582 at the original GROUP BY). Existing relative order kept.
+    // DOMAIN-ADD-SCITECH-TRADE: scitech + trade slotted by the SAME rule using
+    // the expansion dry-run's PROJECTED volumes (scitech ~464 -> just under
+    // realestate 468; trade ~214 -> between finance 317 and SMB 170). Those are
+    // projections from the 미분류 pool, NOT a post-backfill GROUP BY — revisit
+    // this order once the backfill has actually run.
     const TAB_ORDER = [
-      "education", "welfare", "realestate", "agriculture", "finance", "SMB",
-      "environment", "labor", "health", "statistics", "기타-미분류",
+      "education", "welfare", "realestate", "scitech", "agriculture",
+      "finance", "trade", "SMB", "environment", "labor", "health",
+      "statistics", "기타-미분류",
     ];
     // DESIGN-C3h-2: static per-domain section subtitles (display-only UI copy; no
     // per-card data). Keyed by the raw domain key (note "기타-미분류").
@@ -334,6 +344,8 @@
       agriculture: "농업·농촌 정책 뉴스 검증",
       statistics: "공식 통계·지표 검증",
       education: "교육 정책 뉴스 검증",
+      scitech: "과학기술·AI 정책 뉴스 검증",
+      trade: "산업·통상 정책 뉴스 검증",
       "기타-미분류": "기타 정책 뉴스 검증",
     };
     // Normalize a card's domain to a comparison key. Missing/empty domain falls
@@ -359,6 +371,8 @@
       realestate: "#b83280",
       statistics: "#4a5568",
       education: "#4c51bf",
+      scitech: "#0e7490",
+      trade: "#9d174d",
       "기타-미분류": "#98a2b3",
     };
     const DOMAIN_ICON_FALLBACK_COLOR = "#98a2b3";
@@ -375,6 +389,8 @@
       realestate: "dom-realestate",
       statistics: "dom-statistics",
       education: "dom-education",
+      scitech: "dom-scitech",
+      trade: "dom-trade",
       "기타-미분류": "dom-etc",
     };
     // CARD-ICONS: the domain line-icon markup for a card. DOMAIN metadata only —

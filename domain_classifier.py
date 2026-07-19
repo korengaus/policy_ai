@@ -29,11 +29,15 @@ log = get_logger(__name__)
 
 # Fixed domain taxonomy (the CLASSIFY-PROBE / CLASSIFY-1 set; DOMAIN-LABEL 2a
 # added education — the gap probe measured 709 education rows piled in the
-# fallback, 69% of the 미분류 pool). 기타-미분류 is the explicit fallback for
-# genuinely ambiguous / none-fit rows and stays LAST.
+# fallback, 69% of the 미분류 pool). DOMAIN-ADD-SCITECH-TRADE added scitech +
+# trade: the expansion dry-run measured 464 (27.7%) and 214 (12.8%) of the
+# remaining 미분류 pool respectively. 청년 was REJECTED by the same dry-run
+# (single-keyword, bled into labor/welfare). 기타-미분류 is the explicit
+# fallback for genuinely ambiguous / none-fit rows and stays LAST.
 LABELS = [
     "finance", "welfare", "agriculture", "labor", "health",
     "environment", "SMB", "realestate", "statistics", "education",
+    "scitech", "trade",
     "기타-미분류",
 ]
 
@@ -69,6 +73,15 @@ def _build_domain_prompt(title: str, claim_text: str | None) -> str:
         "- education: 교육/대입/수능/입시/학교/교육청/대학/교육부 정책 "
         "(education policy incl. its budget — an education-budget story is "
         "education, not finance; pick the dominant frame)\n"
+        "- scitech: 인공지능(AI)/데이터센터/연구개발(R&D)/정보통신/과학기술/"
+        "우주항공/바이오 정책 (pick this ONLY when science, technology or AI "
+        "industrial policy is the DOMINANT frame — a 반도체/배터리 story framed "
+        "as company financing is finance, and one framed as 중소기업 support is "
+        "SMB)\n"
+        "- trade: 수출/통상/관세/무역/FTA/공급망/대외경제 정책 "
+        "(pick this ONLY when trade, export or customs is the DOMINANT frame, "
+        "not general 경제 — a tariff story is trade, a domestic 금리/세제 story "
+        "stays finance)\n"
         "- 기타-미분류: use ONLY if none of the above clearly fits\n\n"
         "Reply with ONLY the single label token, nothing else.\n\n"
         f"Title: {title or ''}\n"
