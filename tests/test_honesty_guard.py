@@ -311,5 +311,97 @@ class VerdictIsolationTests(unittest.TestCase):
                 "unexpected module-level object %s=%r" % (name, type(obj)))
 
 
+class ViolationPersistBestEffortTests(unittest.TestCase):
+    """HONESTY-GUARD-DB-LOG: the observability insert is BEST-EFFORT.
+
+    The lock: when the DB write fails for ANY reason (no engine, DB down,
+    table missing), a report-mode response must still pass through
+    BYTE-IDENTICAL and with its original status — the observability add must
+    never alter, delay, or break a response. This is the regression that
+    matters, because the insert runs on the already-failing violation path.
+    """
+
+    def _violating_payload(self):
+        # I1: truth_claim must be exactly False. This is a REAL violation, so
+        # the middleware takes the persist path.
+        return {"truth_claim": True, "operator_review_required": True}
+
+    def test_persist_swallows_missing_engine(self):
+        import api_server
+
+        import postgres_storage
+
+        original = postgres_storage.get_engine
+        postgres_storage.get_engine = lambda: None
+        try:
+            # Must return normally (None), never raise.
+            self.assertIsNone(api_server._honesty_persist_violation(
+                "report", "/api/test", [{"rule": "I1", "path": "$"}]))
+        finally:
+            postgres_storage.get_engine = original
+
+    def test_persist_swallows_engine_error(self):
+        import api_server
+
+        def boom():
+            raise RuntimeError("DB down")
+
+        import postgres_storage
+
+        original = postgres_storage.get_engine
+        postgres_storage.get_engine = boom
+        try:
+            self.assertIsNone(api_server._honesty_persist_violation(
+                "report", "/api/test", [{"rule": "I1", "path": "$"}]))
+        finally:
+            postgres_storage.get_engine = original
+
+    def test_report_mode_response_bytes_unchanged_when_persist_fails(self):
+        import json as _json
+        import os
+
+        from fastapi import Response
+        from fastapi.testclient import TestClient
+
+        import api_server
+        import postgres_storage
+
+        payload = self._violating_payload()
+        expected = _json.dumps(payload).encode("utf-8")
+        # Guard against a trivially-passing test: this payload MUST actually
+        # violate, or the middleware never reaches the persist path at all.
+        ok, _violations = validate_payload(payload)
+        self.assertFalse(ok, "test payload must violate to exercise persist")
+
+        # A throwaway route on the real app so the real middleware runs.
+        @api_server.app.get("/__honesty_persist_test__")
+        def _probe():  # pragma: no cover - exercised via TestClient
+            return Response(content=expected,
+                            media_type="application/json")
+
+        def boom():
+            raise RuntimeError("DB down")
+
+        original_env = os.environ.get("HONESTY_GUARD_MODE")
+        original_engine = postgres_storage.get_engine
+        os.environ["HONESTY_GUARD_MODE"] = "report"
+        postgres_storage.get_engine = boom
+        try:
+            with TestClient(api_server.app) as client:
+                resp = client.get("/__honesty_persist_test__")
+            # Report mode: passes through untouched despite the failed insert.
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(resp.content, expected)
+        finally:
+            postgres_storage.get_engine = original_engine
+            if original_env is None:
+                os.environ.pop("HONESTY_GUARD_MODE", None)
+            else:
+                os.environ["HONESTY_GUARD_MODE"] = original_env
+            api_server.app.router.routes = [
+                r for r in api_server.app.router.routes
+                if getattr(r, "path", None) != "/__honesty_persist_test__"]
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -425,6 +425,33 @@ accounts_table = sa.Table(
 )
 
 
+# HONESTY-GUARD-DB-LOG — APPEND-ONLY observability log for honesty-guard
+# violations. New, additive table (created by ensure_schema's create_all; no
+# ALTER needed). Mirrors accounts_table's declaration idioms (shared _metadata,
+# sa.Text columns, ISO-TEXT created_at).
+#
+# WHY: the guard's report mode emits ONE stdout logger.warning per violation and
+# persists nothing, so "was the last week clean?" cannot be answered once Render
+# log retention (~7 days, plan-dependent) rolls over. This table makes the
+# question countable BEFORE HONESTY_GUARD_MODE is ever flipped to enforce.
+#
+# INSERT-ONLY from the app — there is no UPDATE or DELETE code path against it.
+# Deliberately stores NO payload, NO violation `detail`, and NO request/user
+# identifier: it records exactly what the existing log line already records
+# (rule + JSON path + endpoint path), and nothing the log deliberately omits.
+# `endpoint` is request.url.path ONLY (never the query string, where PII hides).
+# Carries NO verdict/scoring field — this is pure observability metadata.
+honesty_violations_table = sa.Table(
+    "honesty_violations", _metadata,
+    sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
+    sa.Column("created_at", sa.Text),
+    sa.Column("mode", sa.Text),
+    sa.Column("endpoint", sa.Text),
+    sa.Column("rule_count", sa.Integer),
+    sa.Column("rules_json", sa.Text),
+)
+
+
 source_fetch_artifacts_table = sa.Table(
     "source_fetch_artifacts", _metadata,
     sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),

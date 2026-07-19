@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
 
 import accounts
@@ -236,6 +237,45 @@ def _honesty_notify(title: str, message: str) -> None:
         logger.warning("honesty-guard notify send failed: %s | %s", title, message)
 
 
+def _honesty_persist_violation(mode: str, endpoint: str, summary: list) -> None:
+    """HONESTY-GUARD-DB-LOG — append ONE row to honesty_violations.
+
+    BEST-EFFORT and side-effect-only: runs inside a Starlette BackgroundTask
+    (i.e. AFTER the response has been sent), so it adds ZERO latency and can
+    never turn into a 500. Every failure path — no engine, DB down, table not
+    yet created by ensure_schema — is swallowed here; the guard's decision was
+    already made and returned before this runs.
+
+    Stores only what the existing violation log line already records: mode,
+    endpoint PATH, rule count, and the capped rule/path summary. Never the
+    payload, never the violation `detail`, never a user identifier.
+    """
+    try:
+        # postgres_storage is imported lazily inside functions throughout this
+        # module (never at module scope) — keep that pattern here.
+        import postgres_storage
+        import sqlalchemy as sa
+
+        engine = postgres_storage.get_engine()
+        if engine is None:
+            return
+
+        with engine.begin() as conn:
+            conn.execute(
+                sa.insert(postgres_storage.honesty_violations_table).values(
+                    created_at=datetime.now(timezone.utc).isoformat(),
+                    mode=mode,
+                    endpoint=endpoint,
+                    rule_count=len(summary),
+                    rules_json=json.dumps(summary, ensure_ascii=False),
+                )
+            )
+    except Exception:  # noqa: BLE001 — observability must never affect a response
+        logger.warning("honesty-guard: violation persist failed for %s "
+                       "(response already sent; guard decision unaffected)",
+                       endpoint)
+
+
 def _honesty_blocked_response():
     from fastapi.responses import JSONResponse
     return JSONResponse({"error": "response blocked"}, status_code=500)
@@ -291,12 +331,22 @@ async def honesty_guard_middleware(request, call_next):
                for v in violations[:20]]
     logger.warning("honesty-guard violation: mode=%s endpoint=%s count=%d "
                    "rules=%s", mode, request.url.path, len(violations), summary)
+    # HONESTY-GUARD-DB-LOG: additive observability ONLY. The DB write is
+    # attached as a BackgroundTask (runs AFTER the response is sent) to
+    # WHICHEVER response this function returns below — report's pass-through
+    # AND enforce's 500 — so both modes are counted. The decision/branching
+    # below is unchanged: this adds a side effect, never a code path.
+    _honesty_task = BackgroundTask(
+        _honesty_persist_violation, mode, request.url.path, summary)
     if mode == "report":
+        rebuilt.background = _honesty_task
         return rebuilt  # observe only: never block, never mutate
     _honesty_notify(
         "honesty-guard BLOCKED",
         "endpoint=%s violations=%s" % (request.url.path, summary))
-    return _honesty_blocked_response()
+    blocked = _honesty_blocked_response()
+    blocked.background = _honesty_task
+    return blocked
 
 
 app.mount("/web", StaticFiles(directory="web"), name="web")
