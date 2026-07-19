@@ -5645,13 +5645,19 @@
                  DOMAIN_ORDER in main.js), so setActiveDomain("real_estate")
                  matched no card and 부동산 silently rendered an empty feed.
                  MOBILE-POLISH G(b): the list was a 4-domain subset; it now
-                 carries all 11 TAB_ORDER domains, in TAB_ORDER sequence so the
-                 footer reads in the same order as the top tabs. -->
+                 carries all 13 TAB_ORDER domains, in TAB_ORDER sequence so the
+                 footer reads in the same order as the top tabs.
+                 FOOTER-DOMAIN-ADD: scitech + trade added here when
+                 DOMAIN-ADD-SCITECH-TRADE missed this hardcoded block (the list
+                 is static HTML, NOT derived from the main.js domain maps — a
+                 new domain must be added here by hand or it silently drifts). -->
             <a href="#" data-domain="education">교육</a>
             <a href="#" data-domain="welfare">복지</a>
             <a href="#" data-domain="realestate">부동산</a>
+            <a href="#" data-domain="scitech">과학기술</a>
             <a href="#" data-domain="agriculture">농업</a>
             <a href="#" data-domain="finance">금융</a>
+            <a href="#" data-domain="trade">산업·통상</a>
             <a href="#" data-domain="SMB">소상공인</a>
             <a href="#" data-domain="environment">환경</a>
             <a href="#" data-domain="labor">노동</a>
@@ -13554,7 +13560,7 @@
     }
     // FOOTER-CLEANUP A3: the footer 도메인 column links carry [data-domain] (the raw
     // canonical enum key — realestate/finance/… — as in DOMAIN_LABELS_KO; the column
-    // now lists all 11 TAB_ORDER domains). A click switches the home feed
+    // now lists all 13 TAB_ORDER domains). A click switches the home feed
     // to that domain via the SAME sequence a category-tab click uses (clear context,
     // reset progress, showScreen home, setActiveDomain) — no new nav path. They are
     // <a href="#"> so preventDefault the anchor jump. Delegated on .footer-links;

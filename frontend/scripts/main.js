@@ -7852,7 +7852,7 @@
     }
     // FOOTER-CLEANUP A3: the footer 도메인 column links carry [data-domain] (the raw
     // canonical enum key — realestate/finance/… — as in DOMAIN_LABELS_KO; the column
-    // now lists all 11 TAB_ORDER domains). A click switches the home feed
+    // now lists all 13 TAB_ORDER domains). A click switches the home feed
     // to that domain via the SAME sequence a category-tab click uses (clear context,
     // reset progress, showScreen home, setActiveDomain) — no new nav path. They are
     // <a href="#"> so preventDefault the anchor jump. Delegated on .footer-links;
