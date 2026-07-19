@@ -2,12 +2,19 @@
 
 Purpose
 -------
-The daily cron (``scheduler.py``) searches a FIXED list of 7 ``DEFAULT_QUERIES``
-and cannot catch breaking / emerging policy issues. This module adds an UPSTREAM
+The daily cron (``scheduler.py``) searches a FIXED list of ``DEFAULT_QUERIES``
+(42 seeds as of DAILY-COLLECTION; it was 7 when this module was written) and
+cannot catch breaking / emerging policy issues. This module adds an UPSTREAM
 keyword-selection layer: once per cron run it (1) fetches fresh external news
 TITLES via the existing ``news_collector`` across a few broad policy seeds, then
 (2) feeds ONLY those titles to a TOOL-FREE Anthropic text call that picks the
-day's top-K hot policy keywords. The survivors are APPENDED to the fixed 7. The
+day's top-K hot policy keywords. The survivors are APPENDED to the fixed seed
+list.
+
+DORMANT BY DEFAULT: ``HOT_TOPIC_ENABLED`` defaults to False (config.py:450), so
+``build_query_list`` returns ``DEFAULT_QUERIES`` unchanged and nothing here runs
+or costs anything until an operator flips the flag on Render. This module is a
+SEED SOURCE for collection — it does not measure or display "hotness". The
 downstream verification (``analyze_pipeline`` -> verdict -> judge -> card ->
 FRESHNESS badge) is reused UNCHANGED. The LLM here is a pure upstream selector,
 fully decoupled from the verdict-path judge (never calls ``run_judge``, never
