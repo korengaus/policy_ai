@@ -1643,7 +1643,7 @@
       color: var(--ink);
       font-size: 1.231rem;
       line-height: 1.25;
-      font-weight: 600;   /* FONT-WEIGHT-FIX: 700 read too heavy in Pretendard */
+      font-weight: 500;   /* FONT-WEIGHT-FIX-2: sidebar headings lighter still */
     }
     .rank-panel-heading p {
       margin: 3px 0 0;
@@ -2014,7 +2014,7 @@
       color: var(--ink);
       font-size: 1.38rem;
       line-height: 1.25;
-      font-weight: 600;   /* FONT-WEIGHT-FIX */
+      font-weight: 500;   /* FONT-WEIGHT-FIX-2: 600 still read heavy in Pretendard */
     }
     /* VERIFY-STEPS-REDESIGN: title + one-line subtitle stack on the left; the
        methodology link stays on the right of .verify-how-head. */
@@ -2120,7 +2120,7 @@
       color: var(--ink);
       font-size: 1.16rem;
       line-height: 1.35;
-      font-weight: 600;   /* FONT-WEIGHT-FIX */
+      font-weight: 500;   /* FONT-WEIGHT-FIX-2: 600 still read heavy in Pretendard */
     }
     .verify-how-desc {
       margin: 0;
@@ -2167,7 +2167,7 @@
       color: var(--ink);
       font-size: 1.308rem;
       line-height: 1.25;
-      font-weight: 600;   /* FONT-WEIGHT-FIX */
+      font-weight: 500;   /* FONT-WEIGHT-FIX-2: 600 still read heavy in Pretendard */
     }
     /* quiet muted empty state (was a heavy dashed .empty-state box); kept visible as
        an onboarding cue, not auto-hidden. Scoped to #history so the JS re-render
@@ -2197,7 +2197,7 @@
       color: var(--ink);
       font-size: 1.308rem;
       line-height: 1.25;
-      font-weight: 600;   /* FONT-WEIGHT-FIX */
+      font-weight: 500;   /* FONT-WEIGHT-FIX-2: 600 still read heavy in Pretendard */
     }
     .corrections-sub {
       margin: 0;
@@ -2219,7 +2219,7 @@
       color: var(--ink);
       font-size: 1.308rem;
       line-height: 1.25;
-      font-weight: 600;   /* FONT-WEIGHT-FIX */
+      font-weight: 500;   /* FONT-WEIGHT-FIX-2: 600 still read heavy in Pretendard */
     }
 
     .section-heading p {
@@ -2302,7 +2302,7 @@
       color: var(--ink);
       line-height: 1.3;
       letter-spacing: 0;
-      font-weight: 600;   /* FONT-WEIGHT-FIX: was browser-default 700 */
+      font-weight: 500;   /* FONT-WEIGHT-FIX-2: was browser-default 700 */
       font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', system-ui, sans-serif;
     }
 
@@ -2523,6 +2523,11 @@
       font-size: 3.0rem;
       line-height: 1.2;
       -webkit-line-clamp: 3;
+      /* FONT-WEIGHT-FIX-2: the big hero headline is the LIGHTEST type on the page
+         — at 3.0rem a regular weight still reads as dominant, and the extra weight
+         was what made it look thick. Hero-scoped: .topic-card--secondary and the
+         grid cards keep the 500 base above. */
+      font-weight: 400;
     }
     .topic-card--hero .topic-card-summary {
       /* DESIGN-C2b → DESIGN-C3g: 1.2rem → 1.28rem small bump to match the larger
@@ -2575,7 +2580,7 @@
       color: var(--ink);
       font-size: 1.308rem;
       line-height: 1.25;
-      font-weight: 600;   /* FONT-WEIGHT-FIX */
+      font-weight: 500;   /* FONT-WEIGHT-FIX-2: 600 still read heavy in Pretendard */
     }
     .latest-checks-eyebrow {
       color: var(--muted);
@@ -2613,7 +2618,7 @@
       color: var(--ink);
       font-size: 1.5rem;
       line-height: 1.25;
-      font-weight: 600;   /* FONT-WEIGHT-FIX */
+      font-weight: 500;   /* FONT-WEIGHT-FIX-2: 600 still read heavy in Pretendard */
     }
     .domain-section-sub {
       margin: 2px 0 0;
@@ -2691,7 +2696,10 @@
       color: var(--ink);
       font-size: 1.077rem;
       line-height: 1.45;
-      font-weight: 600;   /* FONT-WEIGHT-FIX: 750 was serif-tuned; hero inherits this too */
+      /* FONT-WEIGHT-FIX-2: base covers grid + secondary card titles. The LARGE
+         3.0rem hero headline overrides this to 400 in .topic-card--hero below —
+         big type carries a lighter weight, so the hero reads lightest of all. */
+      font-weight: 500;
       display: -webkit-box;
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
