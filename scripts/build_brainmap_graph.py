@@ -442,6 +442,31 @@ def assign_lineage_ids(prev_graph, new_graph):
     return {"carried": carried, "minted": minted, "merged_away": merged_away}
 
 
+def _vector_cursor(conn):
+    """SERVER-SIDE (named) cursor for the vector fetch.
+
+    BRAINMAP-OOM Slice 2: psycopg3's UNNAMED cursor is CLIENT-SIDE — execute()
+    materializes the ENTIRE result set in process memory, so the fetchmany()
+    loop below was iterating an already-full buffer, not streaming. The whole
+    embedding_cache for this provider+model (claim + per-chunk + both
+    title+claim generations) is many times the corpus and crossed 2GiB during
+    the load, before the matmul ever ran. A named cursor makes psycopg DECLARE
+    a real server-side cursor so fetchmany(500) genuinely streams.
+
+    Output-neutral by construction: ux_embedding_cache_lookup makes text_hash
+    UNIQUE under this WHERE, so the first-hit-per-hash rule cannot fire and
+    fetch order cannot change vec_by_hash; and Xn's row ORDER comes from
+    SELECT_ROWS_SQL's ORDER BY id, not from this fetch.
+
+    Falls back to a plain cursor for the offline test fakes, whose cursor()
+    takes no name — same rows, same order, same parsing either way.
+    """
+    try:
+        return conn.cursor(name="brainmap_vectors")
+    except TypeError:
+        return conn.cursor()
+
+
 def load_corpus_vectors(conn):
     """Read-only: corpus rows + their title+claim vectors from embedding_cache.
     Key construction is REUSED verbatim (build_embed_text + hash_text_for_cache).
@@ -467,16 +492,18 @@ def load_corpus_vectors(conn):
             if host:
                 outlets_by_hash.setdefault(text_hash, set()).add(host)
 
-    # BRAINMAP-OOM Slice 1: STREAM the vector page (fetchmany batches) and
-    # parse each hit straight into a float32 array — the old fetchall() held
-    # every vector_json string (~240MB) AND every parsed Python-float list
-    # (~370MB at 7,600 rows) simultaneously. Same rows, same cursor order,
-    # same first-hit-per-hash rule, same float64->float32 rounding as the old
-    # np.asarray(list, float32) in build_graph — values are identical.
+    # BRAINMAP-OOM Slice 1: parse each hit straight into a float32 array — the
+    # old fetchall() held every vector_json string AND every parsed Python-float
+    # list simultaneously. Same rows, same cursor order, same first-hit-per-hash
+    # rule, same float64->float32 rounding as the old np.asarray(list, float32)
+    # in build_graph — values are identical.
+    # Slice 2: the fetch is now a SERVER-SIDE cursor (see _vector_cursor) — the
+    # fetchmany() loop below only streamed in intent before, because an unnamed
+    # psycopg3 cursor buffers the whole result set client-side.
     import numpy as np
 
     vec_by_hash = {}
-    with conn.cursor() as cur:
+    with _vector_cursor(conn) as cur:
         cur.execute(SELECT_VECTORS_SQL, (EMBED_PROVIDER, EMBED_MODEL))
         while True:
             batch = cur.fetchmany(500)
