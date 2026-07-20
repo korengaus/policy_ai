@@ -94,12 +94,17 @@
              showing a fabricated total. Replaces the old 검증 진행 (draft) figure. -->
         <span class="utility-counts"><span id="utilityCumulativeClause" hidden>누적 검증 <strong class="utility-count-num" id="utilityTotalCount">—</strong>건 · </span>이번 주 <strong class="utility-count-num" id="utilityUpdateCount">—</strong>건</span>
       </div>
+      <!-- NAV-RESTRUCTURE: this header carries the CONTENT/FEATURE destinations only.
+           The two SITE-UNDERSTANDING links (검증 방법 / 등급·상태 안내) live in the tab
+           row below. 연결지도 is emphasised by POSITION (first) + a small line icon
+           (#ic-workflow, the existing node-graph glyph) — no color highlight, so the
+           header keeps its neutral tone. -->
       <nav class="utility-right" aria-label="사이트 메뉴">
-        <a class="utility-link" href="#about">About</a>
-        <a class="utility-link" href="mailto:contact@tickedin.org">Contact</a>
-        <a class="utility-link" href="/web/brainmap.html">연결지도</a>
+        <a class="utility-link utility-link--icon" href="/web/brainmap.html"><svg class="utility-icon" aria-hidden="true"><use href="#ic-workflow"/></svg>연결지도</a>
         <a class="utility-link" href="/web/weekly.html">주간 리포트</a>
         <a class="utility-link" href="/web/faded.html">후속 끊긴 주장</a>
+        <a class="utility-link" href="#about">About</a>
+        <a class="utility-link" href="mailto:contact@tickedin.org">Contact</a>
         <a class="utility-report" href="mailto:contact@tickedin.org">제보하기</a>
       </nav>
     </div>
@@ -171,7 +176,14 @@
            검증 등급 안내 but opened the methodology page, the same conflation G(c)
            fixed on the footer's 등급 안내; it now lands on the real 검증 등급 legend
            via the shared show-home-then-scroll handler. -->
-      <a class="grade-guide-link" href="#gradeStatus">등급·상태 안내 →</a>
+      <!-- NAV-RESTRUCTURE: both SITE-UNDERSTANDING links sit here, 검증 방법 first.
+           Wrapped in one span so .domain-tabs-row's justify-content:space-between
+           still sees exactly two children (tabs | guide links) and the pair wraps
+           together on narrow screens. -->
+      <span class="guide-links">
+        <a class="grade-guide-link" href="#methodology">검증 방법 →</a>
+        <a class="grade-guide-link" href="#gradeStatus">등급·상태 안내 →</a>
+      </span>
     </nav>
 
     <!-- DESIGN-DETAIL-2: #homeScreen wraps the home-only view (#metrics through
@@ -397,23 +409,35 @@
           <!-- LABEL-1b STEP 1: each row's leading mark (✓ swatch OR round dot) is
                wrapped in a fixed 18px .legend-lead cell so every row LABEL left-aligns
                regardless of the mark's own width. Group headers have no lead cell. -->
-          <!-- GRADE-STATUS-PAGE: the FULL legend moved to #gradeStatus (등급·상태
-               안내). The sidebar keeps only the two most-seen rows as a visual
-               anchor plus a link to the full page — no duplicated legend. -->
+          <!-- NAV-RESTRUCTURE: a fuller SUMMARY — both axes, all six labels, but
+               LABELS ONLY (no .legend-desc) so it stays compact. The descriptions
+               live on #gradeStatus (등급·상태 안내), linked below; nothing duplicated. -->
           <ul class="legend-list">
+            <li class="legend-group-head">공식 근거</li>
             <li class="legend-row">
               <span class="legend-lead"><span class="legend-swatch legend-swatch--check">✓</span></span>
-              <div class="legend-body">
-                <span class="legend-label">공식 근거 확인</span>
-                <span class="legend-desc">1차·공식 문서가 주장을 직접 뒷받침</span>
-              </div>
+              <div class="legend-body"><span class="legend-label">공식 근거 확인</span></div>
+            </li>
+            <li class="legend-row">
+              <span class="legend-lead"><span class="verdict-dot" style="background:var(--brand)"></span></span>
+              <div class="legend-body"><span class="legend-label">공식자료 참고</span></div>
+            </li>
+            <li class="legend-group-head">AI 판정</li>
+            <li class="legend-row">
+              <span class="legend-lead"><span class="verdict-dot" style="background:var(--verify)"></span></span>
+              <div class="legend-body"><span class="legend-label">검증 완료</span></div>
             </li>
             <li class="legend-row">
               <span class="legend-lead"><span class="verdict-dot" style="background:var(--orange)"></span></span>
-              <div class="legend-body">
-                <span class="legend-label">검토 필요</span>
-                <span class="legend-desc">맥락 추가·공식 확인·사람 검토 대기</span>
-              </div>
+              <div class="legend-body"><span class="legend-label">검토 필요</span></div>
+            </li>
+            <li class="legend-row">
+              <span class="legend-lead"><span class="verdict-dot" style="background:var(--red)"></span></span>
+              <div class="legend-body"><span class="legend-label">상충·오해 가능성</span></div>
+            </li>
+            <li class="legend-row">
+              <span class="legend-lead"><span class="verdict-dot" style="background:var(--muted)"></span></span>
+              <div class="legend-body"><span class="legend-label">추가 검증 필요</span></div>
             </li>
           </ul>
           <a class="legend-more-link" href="#gradeStatus">등급·상태 안내 전체 →</a>
@@ -960,8 +984,11 @@
       </div>
 
       <div class="methodology-card">
-        <h3><svg class="section-icon" aria-hidden="true"><use href="#ic-compass"/></svg>🔥 표시</h3>
-        <p>최근 보도가 활발한 항목에 붙는 표시입니다. 보도의 최신성·활발함만 나타내며, 근거 수준이나 주장의 진위와는 무관합니다.</p>
+        <h3><svg class="section-icon" aria-hidden="true"><use href="#ic-compass"/></svg>🔥 새로 부상한 이슈 · 공식 확인 진행 중</h3>
+        <p>
+          최근 새로 퍼지기 시작한 주장에 붙는 표시로, 카드에는 <strong>“🔥 새로 부상한 이슈 · 공식 확인 진행 중”</strong>으로 나타납니다.
+          보도의 최신성·활발함을 나타내며, 근거 수준이나 주장의 진위와는 무관합니다. 공식 확인이 아직 진행 중이라는 뜻입니다.
+        </p>
       </div>
     </section>
 

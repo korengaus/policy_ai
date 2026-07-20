@@ -240,6 +240,31 @@
       color: var(--brand-ink);
       text-decoration: underline;
     }
+    /* NAV-RESTRUCTURE: the tab row now carries TWO guide links. Wrapping them keeps
+       .domain-tabs-row's space-between at two children and lets the pair wrap as a
+       unit on narrow screens. Additive — no existing rule changed. */
+    .guide-links {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    /* 연결지도's leading glyph — sized to the utility-link text, stroke-inherited so
+       it stays neutral (no color emphasis) and follows :hover like the label. */
+    .utility-link--icon {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .utility-icon {
+      width: 15px;
+      height: 15px;
+      flex: 0 0 auto;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
 
     .topbar {
       display: flex;

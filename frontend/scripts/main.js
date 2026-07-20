@@ -7732,6 +7732,21 @@
     // history.state (.tickedinScreen) + a module variable; the URL is left UNCHANGED
     // (pass window.location.href) so the ?result_id= deep-link read + the
     // operator_tools replaceState are unaffected (same choice as pushDetailHistoryState).
+    // NAV-RESTRUCTURE (back-nav consistency): remember WHERE ON HOME the reader was
+    // before a full-page screen swap, so browser BACK returns them to that exact spot
+    // — the footer they clicked from, not the top. #detailScreen already did this via
+    // detailReturnScrollY; methodology / gradeStatus / about had no equivalent and the
+    // popstate home-branch hardcoded targetY = 0, so footer-entry always bounced to the
+    // top while detail-entry restored position. That asymmetry was the inconsistency.
+    // Captured ONLY while home is the visible screen, so screen→screen hops (e.g.
+    // 검증 방법 → 등급·상태 안내) never overwrite the saved home position.
+    let homeReturnScrollY = 0;
+    function captureHomeReturnScroll() {
+      const homeEl = document.getElementById("homeScreen");
+      if (homeEl && !homeEl.classList.contains("screen-hidden")) {
+        homeReturnScrollY = window.scrollY || window.pageYOffset || 0;
+      }
+    }
     let methodologyHistoryActive = false;
     function pushMethodologyHistoryState() {
       if (!window.history || !window.history.pushState) return;
@@ -7778,6 +7793,7 @@
     document.querySelectorAll('a[href="#methodology"]').forEach((link) => {
       link.addEventListener("click", (event) => {
         event.preventDefault();
+        captureHomeReturnScroll();      // BACK returns to where they left home
         pushMethodologyHistoryState();  // DETAIL-2b: BACK from here returns home
         showScreen("methodology");
       });
@@ -7804,6 +7820,7 @@
     document.querySelectorAll('a[href="#about"]').forEach((link) => {
       link.addEventListener("click", (event) => {
         event.preventDefault();
+        captureHomeReturnScroll();
         pushAboutHistoryState();
         showScreen("about");
       });
@@ -7828,6 +7845,7 @@
     document.querySelectorAll('a[href="#gradeStatus"]').forEach((link) => {
       link.addEventListener("click", (event) => {
         event.preventDefault();
+        captureHomeReturnScroll();
         pushGradeStatusHistoryState();
         showScreen("gradeStatus");
       });
@@ -9521,7 +9539,10 @@
       renderHotTopics();
       hideStatus();
       v2ResetProgress();
-      const targetY = wasDetail ? (detailReturnScrollY || 0) : 0;
+      // NAV-RESTRUCTURE: uniform restore — detail keeps its own saved offset, and
+      // methodology / gradeStatus / about now all restore the home position captured
+      // on the way out (0 when they entered from the top, so nothing regresses).
+      const targetY = wasDetail ? (detailReturnScrollY || 0) : (homeReturnScrollY || 0);
       requestAnimationFrame(() => { window.scrollTo(0, targetY || 0); });
     });
     // M9.4 — decide reviewer/admin visibility BEFORE binding the
