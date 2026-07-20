@@ -1946,18 +1946,23 @@
       margin: 10px 0;
     }
 
-    /* VERIFY-STRIP-REDESIGN: the "이렇게 검증합니다" band, relocated under the hero
-       and scaled UP — this is now the first-visit "what is this site" moment. Same
-       quiet tokens (--surface-soft panel, --paper tiles, --line hairlines, --brand
-       accents); bigger paddings, 56px icon tiles, larger type. No gradient, no
-       shadow, no new color. 3 columns → 1 column at <=960px (the shared breakpoint
-       below adds .verify-how-steps to its 1fr group and hides the arrows). */
+    /* VERIFY-STRIP-REDESIGN-V2: the "이렇게 검증합니다" band as the approved
+       Claude-Design stepper, adapted to SITE tokens + inherited site font (no
+       Noto Sans KR, no external font). White card (--paper, mockup #ffffff),
+       --line border (mockup #e2e8f0 — same value), --radius corner (site token,
+       nearest to the mockup's 16px). Width is RESPONSIVE — it fills .home-main;
+       the mockup's fixed 825px is not hardcoded. Mockup blues (#1d4ed8/#2563eb
+       family) map to --brand/--brand-ink; the light tints have no site token, so
+       they are --brand-derived SOLID hexes (solid on purpose — the tiles must
+       mask the track line running behind them). 3 columns → 1 at <=960px (the
+       shared block adds .verify-how-steps to its 1fr group and hides the
+       arrows + track). */
     .verify-how {
       margin: 18px 0 24px;
-      padding: 26px 28px 22px;
+      padding: 30px 30px 24px;
       border: 1px solid var(--line);
-      border-radius: var(--radius-sm);
-      background: var(--surface-soft);
+      border-radius: var(--radius);
+      background: var(--paper);
     }
     .verify-how-head {
       display: flex;
@@ -1965,12 +1970,11 @@
       justify-content: space-between;
       gap: 12px;
       flex-wrap: wrap;
-      margin-bottom: 20px;
     }
     .verify-how-head h2 {
       margin: 0;
       color: var(--ink);
-      font-size: 1.46rem;
+      font-size: 1.38rem;
       line-height: 1.25;
       font-weight: 700;
     }
@@ -1980,14 +1984,16 @@
       min-width: 0;
     }
     .verify-how-sub {
-      margin: 5px 0 0;
-      color: var(--muted);
-      font-size: 0.97rem;
+      margin: 7px 0 0;
+      color: var(--slate);
+      font-size: 0.875rem;
       line-height: 1.45;
     }
+    /* V2: footer links are brand-colored (mockup #1d4ed8 → --brand), darker on
+       hover (--brand-ink), site font inherited. */
     .verify-how-link {
-      color: var(--muted);
-      font-size: 0.86rem;
+      color: var(--brand);
+      font-size: 0.845rem;
       font-weight: 600;
       white-space: nowrap;
     }
@@ -1997,25 +2003,57 @@
     /* VERIFY-STEPS-REDESIGN: step / arrow / step / arrow / step so the flow arrows
        sit BETWEEN the three steps. Arrows collapse (display:none) at the shared
        <=960px breakpoint where the steps stack (see the media block below). */
+    /* V2 stepper geometry. .verify-how-flow anchors the absolute track + arrow
+       chips; the steps grid is positioned so it paints above the track, and the
+       chips come after the grid in DOM so they paint above both (they sit in the
+       column gaps, over the bare line). Track top 27px = the 54px tile's center;
+       chips are 24px, so top 15px centers them on the line. */
+    .verify-how-flow {
+      position: relative;
+      margin-top: 26px;
+    }
+    .verify-how-track {
+      position: absolute;
+      top: 27px;
+      left: 16.66%;
+      right: 16.66%;
+      height: 2px;
+      background: #d9e5f9;   /* --brand-derived light tint (no tint token) */
+    }
+    .verify-how-arrow {
+      position: absolute;
+      top: 15px;
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      background: #edf3fc;   /* --brand-derived chip tint, SOLID (masks the line) */
+      color: var(--brand);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transform: translateX(-50%);
+    }
+    .verify-how-arrow--a { left: 33.33%; }
+    .verify-how-arrow--b { left: 66.66%; }
     .verify-how-steps {
+      position: relative;
       display: grid;
-      grid-template-columns: 1fr auto 1fr auto 1fr;
+      grid-template-columns: 1fr 1fr 1fr;
       align-items: start;
       gap: 20px;
     }
     .verify-how-step {
       min-width: 0;
     }
-    /* 56px rounded-square icon tile — a white chip on the surface-soft box, thin
-       --line border, brand-colored inline-SVG line icon (stroke=currentColor).
-       The svg carries width/height=24 attributes; the CSS below upsizes it to
-       match the bigger tile. */
+    /* 54px rounded icon tile — SOLID brand-tinted chip (must mask the track line
+       behind it), brand-colored inline line icon. STEP 03's --fill modifier goes
+       solid --brand with a white icon (the mockup's emphasis tile). */
     .verify-how-icon {
-      width: 56px;
-      height: 56px;
+      width: 54px;
+      height: 54px;
       border-radius: var(--radius-sm);
-      background: var(--paper);
-      border: 1px solid var(--line);
+      background: #edf3fc;   /* --brand-derived tile tint, SOLID */
+      border: 1px solid #c3d4f3;   /* --brand-derived tile border */
       color: var(--brand);
       display: inline-flex;
       align-items: center;
@@ -2023,50 +2061,46 @@
       margin-bottom: 12px;
     }
     .verify-how-icon svg {
-      width: 27px;
-      height: 27px;
+      width: 26px;
+      height: 26px;
     }
-    /* letter-spaced "STEP 01" eyebrow — brand-tinted so the 01→02→03 sequence
-       reads as the strip's visual spine (position + tone, no bright highlight). */
+    .verify-how-icon--fill {
+      background: var(--brand);
+      border-color: var(--brand);
+      color: #fff;
+    }
+    /* "STEP 01" eyebrow — brand, wide letter-spacing (mockup .12em). */
     .verify-how-eyebrow {
       color: var(--brand);
       font-size: 0.75rem;
-      font-weight: 800;
-      letter-spacing: 0.08em;
+      font-weight: 700;
+      letter-spacing: 0.12em;
       margin-bottom: 6px;
-    }
-    /* muted right-arrow connector, centered on the 56px icon-tile row. */
-    .verify-how-arrow {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      align-self: start;
-      margin-top: 18px;
-      color: var(--muted);
     }
     .verify-how-title {
       margin: 0 0 6px;
       color: var(--ink);
-      font-size: 1.11rem;
+      font-size: 1.16rem;
       line-height: 1.35;
       font-weight: 700;
     }
     .verify-how-desc {
       margin: 0;
       color: var(--slate);
-      font-size: 0.9rem;
-      line-height: 1.6;
+      font-size: 0.845rem;
+      line-height: 1.68;
+      max-width: 228px;   /* mockup measure; released when stacked (<=960px) */
     }
-    /* VERIFY-STRIP-REDESIGN: footer link row — the go-deeper set (검증 방법 /
-       등급·상태 안내 / 연결지도) under a hairline, replacing the old head-right
-       검증 방법론 전체 → link. Reuses .verify-how-link's quiet style. */
+    /* V2: centered go-deeper row (검증 방법 / 등급·상태 안내 / 연결지도) under a
+       hairline — replaces the old left-aligned row. */
     .verify-how-links {
       display: flex;
       align-items: center;
+      justify-content: center;
       flex-wrap: wrap;
-      gap: 10px 22px;
-      margin-top: 20px;
-      padding-top: 16px;
+      gap: 10px 30px;
+      margin-top: 26px;
+      padding-top: 18px;
       border-top: 1px solid var(--line);
     }
 
@@ -4531,9 +4565,15 @@
       }
       /* VERIFY-STEPS-REDESIGN: the how-we-verify steps stack to one column here, so
          hide the horizontal flow arrows (a sideways arrow between stacked steps reads
-         wrong). The steps read top-to-bottom instead. */
-      .verify-how-arrow {
+         wrong). The steps read top-to-bottom instead.
+         V2: the horizontal track line is desktop-geometry too — hide it, and release
+         the desc's 228px desktop measure so stacked text uses the full width. */
+      .verify-how-arrow,
+      .verify-how-track {
         display: none;
+      }
+      .verify-how-desc {
+        max-width: none;
       }
 
       /* DESIGN-C2b: the band has stacked to one column here, so drop the hero|
