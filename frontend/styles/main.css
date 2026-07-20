@@ -1946,13 +1946,15 @@
       margin: 10px 0;
     }
 
-    /* DESIGN-C3a: static "이렇게 검증합니다" 01/02/03 method strip. A quiet soft
-       panel (--surface-soft) sitting in the feed between the cards and "나머지 뉴스".
-       All existing tokens; no new color/font. 3 columns → 1 column at <=960px
-       (the shared breakpoint below adds .verify-how-steps to its 1fr group). */
+    /* VERIFY-STRIP-REDESIGN: the "이렇게 검증합니다" band, relocated under the hero
+       and scaled UP — this is now the first-visit "what is this site" moment. Same
+       quiet tokens (--surface-soft panel, --paper tiles, --line hairlines, --brand
+       accents); bigger paddings, 56px icon tiles, larger type. No gradient, no
+       shadow, no new color. 3 columns → 1 column at <=960px (the shared breakpoint
+       below adds .verify-how-steps to its 1fr group and hides the arrows). */
     .verify-how {
-      margin: 18px 0;
-      padding: 18px 20px;
+      margin: 18px 0 24px;
+      padding: 26px 28px 22px;
       border: 1px solid var(--line);
       border-radius: var(--radius-sm);
       background: var(--surface-soft);
@@ -1963,12 +1965,12 @@
       justify-content: space-between;
       gap: 12px;
       flex-wrap: wrap;
-      margin-bottom: 14px;
+      margin-bottom: 20px;
     }
     .verify-how-head h2 {
       margin: 0;
       color: var(--ink);
-      font-size: 1.231rem;
+      font-size: 1.46rem;
       line-height: 1.25;
       font-weight: 700;
     }
@@ -1978,9 +1980,9 @@
       min-width: 0;
     }
     .verify-how-sub {
-      margin: 4px 0 0;
+      margin: 5px 0 0;
       color: var(--muted);
-      font-size: 0.92rem;
+      font-size: 0.97rem;
       line-height: 1.45;
     }
     .verify-how-link {
@@ -1999,16 +2001,18 @@
       display: grid;
       grid-template-columns: 1fr auto 1fr auto 1fr;
       align-items: start;
-      gap: 14px;
+      gap: 20px;
     }
     .verify-how-step {
       min-width: 0;
     }
-    /* 48px rounded-square icon tile — a white chip on the surface-soft box, thin
-       --line border, brand-colored inline-SVG line icon (stroke=currentColor). */
+    /* 56px rounded-square icon tile — a white chip on the surface-soft box, thin
+       --line border, brand-colored inline-SVG line icon (stroke=currentColor).
+       The svg carries width/height=24 attributes; the CSS below upsizes it to
+       match the bigger tile. */
     .verify-how-icon {
-      width: 48px;
-      height: 48px;
+      width: 56px;
+      height: 56px;
       border-radius: var(--radius-sm);
       background: var(--paper);
       border: 1px solid var(--line);
@@ -2016,37 +2020,54 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      margin-bottom: 10px;
+      margin-bottom: 12px;
     }
-    /* small letter-spaced "STEP 01" eyebrow (replaces the big accent number). */
+    .verify-how-icon svg {
+      width: 27px;
+      height: 27px;
+    }
+    /* letter-spaced "STEP 01" eyebrow — brand-tinted so the 01→02→03 sequence
+       reads as the strip's visual spine (position + tone, no bright highlight). */
     .verify-how-eyebrow {
-      color: var(--muted);
-      font-size: 0.72rem;
+      color: var(--brand);
+      font-size: 0.75rem;
       font-weight: 800;
       letter-spacing: 0.08em;
-      margin-bottom: 4px;
+      margin-bottom: 6px;
     }
-    /* muted right-arrow connector, aligned to the icon-tile row. */
+    /* muted right-arrow connector, centered on the 56px icon-tile row. */
     .verify-how-arrow {
       display: inline-flex;
       align-items: center;
       justify-content: center;
       align-self: start;
-      margin-top: 14px;
+      margin-top: 18px;
       color: var(--muted);
     }
     .verify-how-title {
-      margin: 0 0 4px;
+      margin: 0 0 6px;
       color: var(--ink);
-      font-size: 1rem;
+      font-size: 1.11rem;
       line-height: 1.35;
       font-weight: 700;
     }
     .verify-how-desc {
       margin: 0;
-      color: var(--muted);
-      font-size: 0.86rem;
-      line-height: 1.55;
+      color: var(--slate);
+      font-size: 0.9rem;
+      line-height: 1.6;
+    }
+    /* VERIFY-STRIP-REDESIGN: footer link row — the go-deeper set (검증 방법 /
+       등급·상태 안내 / 연결지도) under a hairline, replacing the old head-right
+       검증 방법론 전체 → link. Reuses .verify-how-link's quiet style. */
+    .verify-how-links {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px 22px;
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
     }
 
     /* DESIGN-C3b: static "정정·업데이트" section — full-width, above the long
@@ -4682,19 +4703,22 @@
       .home-aside {
         display: contents;
       }
+      /* VERIFY-STRIP-REDESIGN: renumbered — #verifyHowSection moved up to slot 2
+         (mirrors its new desktop position under the hero); #trendingPanel (still
+         lifted from the aside) and the sort/feed slots shift down one. */
       #hotTopicsTop {
         order: 1;
       }
-      #trendingPanel {
+      #verifyHowSection {
         order: 2;
       }
-      .home-main > .feed-sort-row {
+      #trendingPanel {
         order: 3;
       }
-      .home-main > .news-home-section {
+      .home-main > .feed-sort-row {
         order: 4;
       }
-      #verifyHowSection {
+      .home-main > .news-home-section {
         order: 5;
       }
       #feedDomainSections {

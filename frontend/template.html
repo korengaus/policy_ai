@@ -215,55 +215,25 @@
              row and the sortable card-row/list (which render into #hotTopics below).
              The dropdown node is never destroyed → its change-listener stays bound. -->
         <div id="hotTopicsTop"></div>
-        <!-- DESIGN-C3h-1c: feed SORT control — PERSISTENT static node (#hotTopicsSort id
-             unchanged) so its existing change-listener stays bound; it is NOT re-emitted
-             inside the JS-rebuilt feed. Right-aligned via .feed-sort-row. -->
-        <div class="feed-sort-row">
-          <div class="hot-topics-sort" aria-label="피드 정렬">
-            <label class="hot-topics-sort-label" for="hotTopicsSort">정렬</label>
-            <select id="hotTopicsSort" class="hot-topics-sort-select">
-              <!-- SORT-LABEL-HONESTY: the LABEL reads 주목순 because this sort has no
-                   popularity signal — it ranks by alert severity x1000 + freshness +
-                   근거 수준 (sortTopicCards, main.js), which "뜨는순" wrongly implied.
-                   The VALUE stays "뜨는순": the hero band calls
-                   sortTopicCards(filtered, "뜨는순") with a hardcoded literal
-                   (main.js:2484) and activeSort defaults to the same string, so
-                   changing the value would silently drop both into the no-match
-                   branch. Real circulation ranking lives in the sidebar
-                   확산 성장 Top 5 (/api/trending) — a deliberately separate axis. -->
-              <option value="뜨는순" selected>주목순</option>
-              <option value="최신순">최신순</option>
-              <option value="위험도순">위험도순</option>
-              <option value="검토됨 우선">검토됨 우선</option>
-            </select>
-          </div>
-        </div>
-        <section class="news-home-section">
-          <div id="hotTopics" class="topic-card-grid">
-            <div class="empty-state">분석을 실행하거나 최근 분석을 불러오면 검증 뉴스 카드가 표시됩니다.</div>
-          </div>
-          <div class="hot-topics-load-more-wrap">
-            <!-- DESIGN-C3-2: page-number nav (prev / 1..N / next) for the post-hero grid;
-                 filled by renderFeedPagination, empty when totalPages <= 1. Replaced the
-                 retired 더보기/접기 buttons; the centering wrap is reused. -->
-            <nav id="feedPagination" class="feed-pagination" aria-label="페이지"></nav>
-          </div>
-        </section>
 
-        <!-- DESIGN-C3a: static "이렇게 검증합니다" 01/02/03 method strip — display-only,
-             no data, no JS. Sits between the feed and "나머지 뉴스". The right link is a
-             same-page jump to the existing long explainer section. Reuses existing
-             tokens (--surface-soft / --brand / --line / --muted / --radius-sm). -->
-        <!-- VERIFY-STEPS-REDESIGN: icon tile + STEP eyebrow per step + arrow connectors
-             showing the 01→02→03 flow. Box kept; step copy unchanged. All icons are
-             INLINE SVG line icons (stroke=currentColor → brand via CSS), no images. -->
+        <!-- VERIFY-STRIP-REDESIGN: the "이렇게 검증합니다" band, RELOCATED from below
+             the card grid to directly under the hero — the first-visit "what is this
+             site" moment now sits before the sort row and the feed. Redesigned BIGGER
+             (56px icon tiles, larger titles, brand-tinted STEP eyebrows) on the same
+             restrained tokens (--surface-soft / --paper / --line / --brand); no
+             gradients, no new assets — the three inline line icons are unchanged.
+             The old head-right 검증 방법론 전체 → link is FOLDED into the new
+             .verify-how-links footer row (검증 방법 / 등급·상태 안내 / 연결지도).
+             In-page links ride the EXISTING delegated a[href="#methodology"] /
+             a[href="#gradeStatus"] handlers (static nodes, bound at init);
+             연결지도 is a plain page link. Step copy unchanged (STEP 02 keeps the
+             honesty-safe "공식 근거가 있는지 확인합니다" framing). -->
         <section id="verifyHowSection" class="verify-how" aria-label="이렇게 검증합니다">
           <div class="verify-how-head">
             <div class="verify-how-titles">
               <h2>이렇게 검증합니다</h2>
               <p class="verify-how-sub">뉴스 속 주장을 공식 1차 자료로 검증하는 3단계</p>
             </div>
-            <a class="verify-how-link" href="#methodology">검증 방법론 전체 →</a>
           </div>
           <div class="verify-how-steps">
             <div class="verify-how-step">
@@ -314,7 +284,50 @@
               <p class="verify-how-desc">근거 등급과 판정을 출처 링크와 함께 공개하고, 새 사실이 나오면 정정합니다.</p>
             </div>
           </div>
+          <nav class="verify-how-links" aria-label="자세히 보기">
+            <a class="verify-how-link" href="#methodology">검증 방법 전체 →</a>
+            <a class="verify-how-link" href="#gradeStatus">등급·상태 안내 →</a>
+            <a class="verify-how-link" href="/web/brainmap.html">연결지도 →</a>
+          </nav>
         </section>
+        <!-- DESIGN-C3h-1c: feed SORT control — PERSISTENT static node (#hotTopicsSort id
+             unchanged) so its existing change-listener stays bound; it is NOT re-emitted
+             inside the JS-rebuilt feed. Right-aligned via .feed-sort-row. -->
+        <div class="feed-sort-row">
+          <div class="hot-topics-sort" aria-label="피드 정렬">
+            <label class="hot-topics-sort-label" for="hotTopicsSort">정렬</label>
+            <select id="hotTopicsSort" class="hot-topics-sort-select">
+              <!-- SORT-LABEL-HONESTY: the LABEL reads 주목순 because this sort has no
+                   popularity signal — it ranks by alert severity x1000 + freshness +
+                   근거 수준 (sortTopicCards, main.js), which "뜨는순" wrongly implied.
+                   The VALUE stays "뜨는순": the hero band calls
+                   sortTopicCards(filtered, "뜨는순") with a hardcoded literal
+                   (main.js:2484) and activeSort defaults to the same string, so
+                   changing the value would silently drop both into the no-match
+                   branch. Real circulation ranking lives in the sidebar
+                   확산 성장 Top 5 (/api/trending) — a deliberately separate axis. -->
+              <option value="뜨는순" selected>주목순</option>
+              <option value="최신순">최신순</option>
+              <option value="위험도순">위험도순</option>
+              <option value="검토됨 우선">검토됨 우선</option>
+            </select>
+          </div>
+        </div>
+        <section class="news-home-section">
+          <div id="hotTopics" class="topic-card-grid">
+            <div class="empty-state">분석을 실행하거나 최근 분석을 불러오면 검증 뉴스 카드가 표시됩니다.</div>
+          </div>
+          <div class="hot-topics-load-more-wrap">
+            <!-- DESIGN-C3-2: page-number nav (prev / 1..N / next) for the post-hero grid;
+                 filled by renderFeedPagination, empty when totalPages <= 1. Replaced the
+                 retired 더보기/접기 buttons; the centering wrap is reused. -->
+            <nav id="feedPagination" class="feed-pagination" aria-label="페이지"></nav>
+          </div>
+        </section>
+
+        <!-- VERIFY-STRIP-REDESIGN: the "이렇게 검증합니다" band was RELOCATED from
+             here (below the card grid) to directly under the hero (#hotTopicsTop),
+             so first-time visitors meet it before the feed. See the section above. -->
 
         <!-- DESIGN-C3h-2: per-domain grouped sections — filled by renderDomainSections()
              on the 전체 tab ONLY (one section per domain that has cards, top-3 by 뜨는순

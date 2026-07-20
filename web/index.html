@@ -1982,13 +1982,15 @@
       margin: 10px 0;
     }
 
-    /* DESIGN-C3a: static "이렇게 검증합니다" 01/02/03 method strip. A quiet soft
-       panel (--surface-soft) sitting in the feed between the cards and "나머지 뉴스".
-       All existing tokens; no new color/font. 3 columns → 1 column at <=960px
-       (the shared breakpoint below adds .verify-how-steps to its 1fr group). */
+    /* VERIFY-STRIP-REDESIGN: the "이렇게 검증합니다" band, relocated under the hero
+       and scaled UP — this is now the first-visit "what is this site" moment. Same
+       quiet tokens (--surface-soft panel, --paper tiles, --line hairlines, --brand
+       accents); bigger paddings, 56px icon tiles, larger type. No gradient, no
+       shadow, no new color. 3 columns → 1 column at <=960px (the shared breakpoint
+       below adds .verify-how-steps to its 1fr group and hides the arrows). */
     .verify-how {
-      margin: 18px 0;
-      padding: 18px 20px;
+      margin: 18px 0 24px;
+      padding: 26px 28px 22px;
       border: 1px solid var(--line);
       border-radius: var(--radius-sm);
       background: var(--surface-soft);
@@ -1999,12 +2001,12 @@
       justify-content: space-between;
       gap: 12px;
       flex-wrap: wrap;
-      margin-bottom: 14px;
+      margin-bottom: 20px;
     }
     .verify-how-head h2 {
       margin: 0;
       color: var(--ink);
-      font-size: 1.231rem;
+      font-size: 1.46rem;
       line-height: 1.25;
       font-weight: 700;
     }
@@ -2014,9 +2016,9 @@
       min-width: 0;
     }
     .verify-how-sub {
-      margin: 4px 0 0;
+      margin: 5px 0 0;
       color: var(--muted);
-      font-size: 0.92rem;
+      font-size: 0.97rem;
       line-height: 1.45;
     }
     .verify-how-link {
@@ -2035,16 +2037,18 @@
       display: grid;
       grid-template-columns: 1fr auto 1fr auto 1fr;
       align-items: start;
-      gap: 14px;
+      gap: 20px;
     }
     .verify-how-step {
       min-width: 0;
     }
-    /* 48px rounded-square icon tile — a white chip on the surface-soft box, thin
-       --line border, brand-colored inline-SVG line icon (stroke=currentColor). */
+    /* 56px rounded-square icon tile — a white chip on the surface-soft box, thin
+       --line border, brand-colored inline-SVG line icon (stroke=currentColor).
+       The svg carries width/height=24 attributes; the CSS below upsizes it to
+       match the bigger tile. */
     .verify-how-icon {
-      width: 48px;
-      height: 48px;
+      width: 56px;
+      height: 56px;
       border-radius: var(--radius-sm);
       background: var(--paper);
       border: 1px solid var(--line);
@@ -2052,37 +2056,54 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      margin-bottom: 10px;
+      margin-bottom: 12px;
     }
-    /* small letter-spaced "STEP 01" eyebrow (replaces the big accent number). */
+    .verify-how-icon svg {
+      width: 27px;
+      height: 27px;
+    }
+    /* letter-spaced "STEP 01" eyebrow — brand-tinted so the 01→02→03 sequence
+       reads as the strip's visual spine (position + tone, no bright highlight). */
     .verify-how-eyebrow {
-      color: var(--muted);
-      font-size: 0.72rem;
+      color: var(--brand);
+      font-size: 0.75rem;
       font-weight: 800;
       letter-spacing: 0.08em;
-      margin-bottom: 4px;
+      margin-bottom: 6px;
     }
-    /* muted right-arrow connector, aligned to the icon-tile row. */
+    /* muted right-arrow connector, centered on the 56px icon-tile row. */
     .verify-how-arrow {
       display: inline-flex;
       align-items: center;
       justify-content: center;
       align-self: start;
-      margin-top: 14px;
+      margin-top: 18px;
       color: var(--muted);
     }
     .verify-how-title {
-      margin: 0 0 4px;
+      margin: 0 0 6px;
       color: var(--ink);
-      font-size: 1rem;
+      font-size: 1.11rem;
       line-height: 1.35;
       font-weight: 700;
     }
     .verify-how-desc {
       margin: 0;
-      color: var(--muted);
-      font-size: 0.86rem;
-      line-height: 1.55;
+      color: var(--slate);
+      font-size: 0.9rem;
+      line-height: 1.6;
+    }
+    /* VERIFY-STRIP-REDESIGN: footer link row — the go-deeper set (검증 방법 /
+       등급·상태 안내 / 연결지도) under a hairline, replacing the old head-right
+       검증 방법론 전체 → link. Reuses .verify-how-link's quiet style. */
+    .verify-how-links {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px 22px;
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
     }
 
     /* DESIGN-C3b: static "정정·업데이트" section — full-width, above the long
@@ -4718,19 +4739,22 @@
       .home-aside {
         display: contents;
       }
+      /* VERIFY-STRIP-REDESIGN: renumbered — #verifyHowSection moved up to slot 2
+         (mirrors its new desktop position under the hero); #trendingPanel (still
+         lifted from the aside) and the sort/feed slots shift down one. */
       #hotTopicsTop {
         order: 1;
       }
-      #trendingPanel {
+      #verifyHowSection {
         order: 2;
       }
-      .home-main > .feed-sort-row {
+      #trendingPanel {
         order: 3;
       }
-      .home-main > .news-home-section {
+      .home-main > .feed-sort-row {
         order: 4;
       }
-      #verifyHowSection {
+      .home-main > .news-home-section {
         order: 5;
       }
       #feedDomainSections {
@@ -4946,55 +4970,25 @@
              row and the sortable card-row/list (which render into #hotTopics below).
              The dropdown node is never destroyed → its change-listener stays bound. -->
         <div id="hotTopicsTop"></div>
-        <!-- DESIGN-C3h-1c: feed SORT control — PERSISTENT static node (#hotTopicsSort id
-             unchanged) so its existing change-listener stays bound; it is NOT re-emitted
-             inside the JS-rebuilt feed. Right-aligned via .feed-sort-row. -->
-        <div class="feed-sort-row">
-          <div class="hot-topics-sort" aria-label="피드 정렬">
-            <label class="hot-topics-sort-label" for="hotTopicsSort">정렬</label>
-            <select id="hotTopicsSort" class="hot-topics-sort-select">
-              <!-- SORT-LABEL-HONESTY: the LABEL reads 주목순 because this sort has no
-                   popularity signal — it ranks by alert severity x1000 + freshness +
-                   근거 수준 (sortTopicCards, main.js), which "뜨는순" wrongly implied.
-                   The VALUE stays "뜨는순": the hero band calls
-                   sortTopicCards(filtered, "뜨는순") with a hardcoded literal
-                   (main.js:2484) and activeSort defaults to the same string, so
-                   changing the value would silently drop both into the no-match
-                   branch. Real circulation ranking lives in the sidebar
-                   확산 성장 Top 5 (/api/trending) — a deliberately separate axis. -->
-              <option value="뜨는순" selected>주목순</option>
-              <option value="최신순">최신순</option>
-              <option value="위험도순">위험도순</option>
-              <option value="검토됨 우선">검토됨 우선</option>
-            </select>
-          </div>
-        </div>
-        <section class="news-home-section">
-          <div id="hotTopics" class="topic-card-grid">
-            <div class="empty-state">분석을 실행하거나 최근 분석을 불러오면 검증 뉴스 카드가 표시됩니다.</div>
-          </div>
-          <div class="hot-topics-load-more-wrap">
-            <!-- DESIGN-C3-2: page-number nav (prev / 1..N / next) for the post-hero grid;
-                 filled by renderFeedPagination, empty when totalPages <= 1. Replaced the
-                 retired 더보기/접기 buttons; the centering wrap is reused. -->
-            <nav id="feedPagination" class="feed-pagination" aria-label="페이지"></nav>
-          </div>
-        </section>
 
-        <!-- DESIGN-C3a: static "이렇게 검증합니다" 01/02/03 method strip — display-only,
-             no data, no JS. Sits between the feed and "나머지 뉴스". The right link is a
-             same-page jump to the existing long explainer section. Reuses existing
-             tokens (--surface-soft / --brand / --line / --muted / --radius-sm). -->
-        <!-- VERIFY-STEPS-REDESIGN: icon tile + STEP eyebrow per step + arrow connectors
-             showing the 01→02→03 flow. Box kept; step copy unchanged. All icons are
-             INLINE SVG line icons (stroke=currentColor → brand via CSS), no images. -->
+        <!-- VERIFY-STRIP-REDESIGN: the "이렇게 검증합니다" band, RELOCATED from below
+             the card grid to directly under the hero — the first-visit "what is this
+             site" moment now sits before the sort row and the feed. Redesigned BIGGER
+             (56px icon tiles, larger titles, brand-tinted STEP eyebrows) on the same
+             restrained tokens (--surface-soft / --paper / --line / --brand); no
+             gradients, no new assets — the three inline line icons are unchanged.
+             The old head-right 검증 방법론 전체 → link is FOLDED into the new
+             .verify-how-links footer row (검증 방법 / 등급·상태 안내 / 연결지도).
+             In-page links ride the EXISTING delegated a[href="#methodology"] /
+             a[href="#gradeStatus"] handlers (static nodes, bound at init);
+             연결지도 is a plain page link. Step copy unchanged (STEP 02 keeps the
+             honesty-safe "공식 근거가 있는지 확인합니다" framing). -->
         <section id="verifyHowSection" class="verify-how" aria-label="이렇게 검증합니다">
           <div class="verify-how-head">
             <div class="verify-how-titles">
               <h2>이렇게 검증합니다</h2>
               <p class="verify-how-sub">뉴스 속 주장을 공식 1차 자료로 검증하는 3단계</p>
             </div>
-            <a class="verify-how-link" href="#methodology">검증 방법론 전체 →</a>
           </div>
           <div class="verify-how-steps">
             <div class="verify-how-step">
@@ -5045,7 +5039,50 @@
               <p class="verify-how-desc">근거 등급과 판정을 출처 링크와 함께 공개하고, 새 사실이 나오면 정정합니다.</p>
             </div>
           </div>
+          <nav class="verify-how-links" aria-label="자세히 보기">
+            <a class="verify-how-link" href="#methodology">검증 방법 전체 →</a>
+            <a class="verify-how-link" href="#gradeStatus">등급·상태 안내 →</a>
+            <a class="verify-how-link" href="/web/brainmap.html">연결지도 →</a>
+          </nav>
         </section>
+        <!-- DESIGN-C3h-1c: feed SORT control — PERSISTENT static node (#hotTopicsSort id
+             unchanged) so its existing change-listener stays bound; it is NOT re-emitted
+             inside the JS-rebuilt feed. Right-aligned via .feed-sort-row. -->
+        <div class="feed-sort-row">
+          <div class="hot-topics-sort" aria-label="피드 정렬">
+            <label class="hot-topics-sort-label" for="hotTopicsSort">정렬</label>
+            <select id="hotTopicsSort" class="hot-topics-sort-select">
+              <!-- SORT-LABEL-HONESTY: the LABEL reads 주목순 because this sort has no
+                   popularity signal — it ranks by alert severity x1000 + freshness +
+                   근거 수준 (sortTopicCards, main.js), which "뜨는순" wrongly implied.
+                   The VALUE stays "뜨는순": the hero band calls
+                   sortTopicCards(filtered, "뜨는순") with a hardcoded literal
+                   (main.js:2484) and activeSort defaults to the same string, so
+                   changing the value would silently drop both into the no-match
+                   branch. Real circulation ranking lives in the sidebar
+                   확산 성장 Top 5 (/api/trending) — a deliberately separate axis. -->
+              <option value="뜨는순" selected>주목순</option>
+              <option value="최신순">최신순</option>
+              <option value="위험도순">위험도순</option>
+              <option value="검토됨 우선">검토됨 우선</option>
+            </select>
+          </div>
+        </div>
+        <section class="news-home-section">
+          <div id="hotTopics" class="topic-card-grid">
+            <div class="empty-state">분석을 실행하거나 최근 분석을 불러오면 검증 뉴스 카드가 표시됩니다.</div>
+          </div>
+          <div class="hot-topics-load-more-wrap">
+            <!-- DESIGN-C3-2: page-number nav (prev / 1..N / next) for the post-hero grid;
+                 filled by renderFeedPagination, empty when totalPages <= 1. Replaced the
+                 retired 더보기/접기 buttons; the centering wrap is reused. -->
+            <nav id="feedPagination" class="feed-pagination" aria-label="페이지"></nav>
+          </div>
+        </section>
+
+        <!-- VERIFY-STRIP-REDESIGN: the "이렇게 검증합니다" band was RELOCATED from
+             here (below the card grid) to directly under the hero (#hotTopicsTop),
+             so first-time visitors meet it before the feed. See the section above. -->
 
         <!-- DESIGN-C3h-2: per-domain grouped sections — filled by renderDomainSections()
              on the 전체 tab ONLY (one section per domain that has cards, top-3 by 뜨는순
