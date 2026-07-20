@@ -27,13 +27,13 @@
   <!-- VISUAL-REDESIGN: Pretendard (Korean-first web font) via CDN. -->
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-  <!-- DESIGN-C3f: Nanum Myeongjo (명조 serif) for HEADLINE text only (brand
-       wordmark, hero/card titles, section + feed/sidebar headings). Replaces the
-       former Noto Serif KR load. Body/UI stays Pretendard sans. Weights 700;800
-       cover all heading weights in use. -->
+  <!-- FONT-SWITCH: serif load trimmed to Noto Serif KR ONLY — it serves just the
+       .brand "tickedin" wordmark (header + footer). Every heading now uses the
+       Pretendard sans body stack; the former Nanum Myeongjo heading family is
+       unused and no longer loaded. -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nanum+Myeongjo:wght@700;800&family=Noto+Serif+KR:wght@600;700&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@600;700&display=swap">
   <style>
     :root {
       /* VISUAL-REDESIGN "Verification Stamp" tokens — single source of truth.
@@ -487,6 +487,8 @@
     /* DESIGN-DETAIL-5c: the DETAIL headings were removed from this serif group — the
        detail now uses a single font (Pretendard, hierarchy by size/weight only). Only
        the HOME feed + methodology headings keep the Nanum Myeongjo serif here. */
+    /* FONT-SWITCH: headings now use the Pretendard BODY stack (one sans across
+       the site). The serif survives ONLY in .brand below (the tickedin logo). */
     .topic-card-title,
     .section-heading h2,
     .verify-how-head h2,
@@ -495,7 +497,7 @@
     .latest-checks-head h2,
     .rank-panel-heading h2,
     .domain-section-title {
-      font-family: 'Nanum Myeongjo', 'Apple SD Gothic Neo', 'Pretendard', serif;
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', system-ui, sans-serif;
     }
     /* DESIGN-C3g: the brand wordmark (+ the footer brand via the shared .brand
        class) reverts to the prior Noto Serif KR; all the other headings above stay
@@ -2300,7 +2302,7 @@
       color: var(--ink);
       line-height: 1.3;
       letter-spacing: 0;
-      font-family: 'Nanum Myeongjo', 'Apple SD Gothic Neo', 'Pretendard', serif;
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', system-ui, sans-serif;
     }
 
     .methodology-card h2 {
