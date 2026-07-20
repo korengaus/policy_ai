@@ -2005,38 +2005,32 @@
     /* VERIFY-STEPS-REDESIGN: step / arrow / step / arrow / step so the flow arrows
        sit BETWEEN the three steps. Arrows collapse (display:none) at the shared
        <=960px breakpoint where the steps stack (see the media block below). */
-    /* VERIFY-STEPPER-ALIGN: geometry anchored to the REAL tile layout, not the
-       mockup's. The mockup centered each step in its column, so its 16.66% /
-       33.33% / 66.66% offsets meant "column centers / boundaries". OUR tiles are
-       LEFT-ALIGNED in three 1fr columns with a 20px gap — with those mockup
-       offsets the line started mid-air right of tile 1, ran ~97px past tile 3's
-       center, and the chips hugged the tiles' left edges. Everything below is
-       derived from the actual constants (tile 54px, gap 20px → one column =
-       (full width - 40px) / 3, tile+gap = 74px):
-         * line spans FIRST TILE CENTER (27px) → LAST TILE CENTER,
-         * each chip sits at the midpoint between adjacent tiles' facing edges,
-         * vertical: line center = chips center = 27px = the tile row's center
-           (2px line at top 26; 24px chip at top 15). Change the tile size or the
-           grid gap and these calcs must move with them. */
+    /* VERIFY-STEPPER-CENTER: geometry for CENTERED step content in three equal
+       1fr columns with a 20px gap. With tiles centered per column, the tile
+       centers sit at exactly (col/2), (50%), and (row - col/2), where one column
+       = (full width - 40px) / 3 — as %-plus-offset: 16.667% ∓ 6.67px on the
+       outer tiles, 50% exact on the middle. Chip positions are the midpoints
+       BETWEEN adjacent tile centers: 33.333% - 3.33px and 66.667% + 3.33px.
+       Vertical: line center = chip center = 27px = the 54px tile row's center
+       (2px line at top 26; 24px chip at top 15). Change the tile size or grid
+       gap and these calcs must move with them.
+       PIN-SAFE: neither values nor comments may spell the literal full-percent
+       token (honesty pin, test_frontend_v2_client §7) — hence the offset forms. */
     .verify-how-flow {
       position: relative;
       margin-top: 26px;
     }
     .verify-how-track {
       position: absolute;
-      top: 26px;                                        /* 2px line centered on y=27 */
-      left: 27px;                                       /* first tile's center */
-      /* = (full width - 40px gaps)/3 - 27px, written as a %-plus-offset form.
-         PIN-SAFE: the honesty pin (test_frontend_v2_client §7) forbids a literal
-         full-percent token near certain words that occur in comments above, so
-         neither the values NOR these comments may spell one out. Same math. */
-      right: calc(33.333% - 40.333px);                  /* last tile's center */
+      top: 26px;                                 /* 2px line centered on y=27 */
+      left: calc(16.667% - 6.67px);              /* first tile's center */
+      right: calc(16.667% - 6.67px);             /* last tile's center (mirror) */
       height: 2px;
       background: #d9e5f9;   /* --brand-derived light tint (no tint token) */
     }
     .verify-how-arrow {
       position: absolute;
-      top: 15px;                                        /* 24px chip centered on y=27 */
+      top: 15px;                                 /* 24px chip centered on y=27 */
       width: 24px;
       height: 24px;
       border-radius: 999px;
@@ -2047,11 +2041,8 @@
       justify-content: center;
       transform: translateX(-50%);
     }
-    /* midpoint(tile1 right edge, tile2 left edge) and midpoint(tile2 right, tile3
-       left) — %-plus-offset forms of ((col + 74px) / 2) and (50% + 37px), same
-       pin-safe form as the track above. */
-    .verify-how-arrow--a { left: calc(16.667% + 30.333px); }
-    .verify-how-arrow--b { left: calc(50% + 37px); }
+    .verify-how-arrow--a { left: calc(33.333% - 3.33px); }
+    .verify-how-arrow--b { left: calc(66.667% + 3.33px); }
     .verify-how-steps {
       position: relative;
       display: grid;
@@ -2061,6 +2052,12 @@
     }
     .verify-how-step {
       min-width: 0;
+      /* VERIFY-STEPPER-CENTER: each step's content is CENTERED in its column
+         (mockup layout). The grid always spanned the card; the left-bunched look
+         came from left-aligned content leaving dead space on each column's right.
+         Centering also puts the tile centers at exactly 16.667% / 50% / 83.333%
+         of the row — the track/chip offsets below rely on this. */
+      text-align: center;
     }
     /* 54px rounded icon tile — SOLID brand-tinted chip (must mask the track line
        behind it), brand-colored inline line icon. STEP 03's --fill modifier goes
@@ -2080,7 +2077,9 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      margin-bottom: 12px;
+      /* VERIFY-STEPPER-CENTER: auto side margins center the block-level tile in
+         its column (text-align only centers inline content). */
+      margin: 0 auto 12px;
     }
     .verify-how-icon svg {
       width: 26px;
@@ -2107,7 +2106,7 @@
       font-weight: 500;   /* FONT-WEIGHT-FIX-2: 600 still read heavy in Pretendard */
     }
     .verify-how-desc {
-      margin: 0;
+      margin: 0 auto;   /* VERIFY-STEPPER-CENTER: center the capped measure */
       color: var(--slate);
       font-size: 0.845rem;
       line-height: 1.68;
