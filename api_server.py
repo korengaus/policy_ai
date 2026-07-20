@@ -176,6 +176,34 @@ async def request_id_middleware(request, call_next):
         reset_request_id(token)
 
 
+@app.middleware("http")
+async def html_no_cache_middleware(request, call_next):
+    """CACHE-HEADERS-FIX — make browsers revalidate HTML on every visit.
+
+    web/index.html IS the whole app (frontend/build_index.py inlines the CSS and
+    JS into it), and it was served with no Cache-Control at all — so browsers
+    applied RFC 9111 heuristic freshness (~10% of Date - Last-Modified) and could
+    reuse a stale page for ~a day WITHOUT revalidating. A deploy therefore did
+    not reach users until a hard refresh.
+
+    `no-cache` means "revalidate before reuse", NOT "do not store": the ETag that
+    FileResponse/StaticFiles already send turns that revalidation into a cheap
+    304 when nothing changed, and delivers fresh bytes when it did. `no-store`
+    would force a full re-download of the inlined bundle on every visit.
+
+    Scope is deliberately narrow: text/html ONLY, and it never overwrites a
+    Cache-Control a route already set — so the API JSON routes keep their own
+    max-age / no-store / no-cache values untouched. This sets a response HEADER
+    only; no file body is modified, so the served bytes still match
+    frontend/dist_checksum.txt (build_index.py --check).
+    """
+    response = await call_next(request)
+    content_type = (response.headers.get("content-type") or "").lower()
+    if content_type.startswith("text/html") and "cache-control" not in response.headers:
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 # ---------------------------------------------------------------------------
 # HONESTY-GUARD B3 Phase 3 — response-boundary honesty middleware.
 #
