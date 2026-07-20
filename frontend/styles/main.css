@@ -1863,6 +1863,19 @@
       font-size: 0.8rem;
       line-height: 1.4;
     }
+    /* GRADE-STATUS-PAGE: the sidebar keeps only a 2-row taster; this link opens the
+       full 등급·상태 안내 screen. Own line under the list; mirrors .grade-guide-link's
+       tone. Additive — no existing rule changed, no new breakpoint. */
+    .legend-more-link {
+      display: inline-block;
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 0.82rem;
+      font-weight: 600;
+    }
+    .legend-more-link:hover {
+      color: var(--brand-ink);
+    }
 
     /* 제보 input — compact, reusing the base input/button tokens. */
     .report-input-row {

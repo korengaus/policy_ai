@@ -9,16 +9,25 @@ const html = fs.readFileSync(htmlPath, "utf8");
 const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
 const methodologyMatch = html.match(/<section id="methodology"[\s\S]*?<\/section>/);
 const methodologyHtml = methodologyMatch ? methodologyMatch[0] : "";
+// GRADE-STATUS-PAGE: the four verification-STATUS meanings moved out of 검증 방법
+// into the 등급·상태 안내 screen (#gradeStatus), which is where every badge/status
+// meaning now lives. The assertions below are unchanged — they follow the content
+// to its new section. The methodology assertions above/below still target
+// #methodology, so nothing lost coverage.
+const gradeStatusMatch = html.match(/<section id="gradeStatus"[\s\S]*?<\/section>/);
+const gradeStatusHtml = gradeStatusMatch ? gradeStatusMatch[0] : "";
 
 assert.ok(methodologyHtml, "methodology section should render in index.html");
+assert.ok(gradeStatusHtml, "gradeStatus section should render in index.html");
 assert.ok(html.includes('href="#methodology"'), "main page should link to methodology section");
+assert.ok(html.includes('href="#gradeStatus"'), "main page should link to gradeStatus section");
 for (const label of [
   "공식 후보만 있음",
   "공식기관 후보는 있으나 상세 본문 미확인",
   "의미 매칭 근거 부족",
   "사람 검토 필요",
 ]) {
-  assert.ok(methodologyHtml.includes(label), `methodology should explain "${label}"`);
+  assert.ok(gradeStatusHtml.includes(label), `gradeStatus should explain "${label}"`);
 }
 assert.ok(!methodologyHtml.includes("100%"), "methodology should not promise 100% certainty");
 

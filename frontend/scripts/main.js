@@ -7706,11 +7706,15 @@
       // ABOUT-PAGE: #aboutScreen is a 4th mutually-exclusive screen, toggled here
       // exactly like #methodology.
       const aboutEl = document.getElementById("aboutScreen");
+      // GRADE-STATUS-PAGE: #gradeStatus is a 5th mutually-exclusive screen,
+      // toggled here exactly like #methodology / #aboutScreen.
+      const gradeStatusEl = document.getElementById("gradeStatus");
       const isHome = name === "home";
       if (homeEl) homeEl.classList.toggle("screen-hidden", !isHome);
       if (methodologyEl) methodologyEl.classList.toggle("screen-hidden", name !== "methodology");
       if (detailEl) detailEl.classList.toggle("screen-hidden", name !== "detail");
       if (aboutEl) aboutEl.classList.toggle("screen-hidden", name !== "about");
+      if (gradeStatusEl) gradeStatusEl.classList.toggle("screen-hidden", name !== "gradeStatus");
       // DESIGN-DETAIL-2c: the under-search status line (#statusLine — e.g. "저장된
       // 검증 결과를 불러왔습니다") lives in the always-visible header region, so it
       // leaked onto non-home pages. Clear it whenever we leave home; it is a
@@ -7804,20 +7808,35 @@
         showScreen("about");
       });
     });
-    // MOBILE-POLISH G(c): the footer 등급 안내 link used to share #methodology with
-    // 검증 방법론 (two links up in the same column), so both landed on the identical
-    // page. It now targets the real 검증 등급 legend (#gradeLegend). That panel lives
-    // inside #homeScreen, so a plain anchor jump would do nothing whenever another
-    // screen is showing — switch to home FIRST, then scroll. Mirrors the
-    // methodology/about interception: preventDefault, then an explicit screen swap.
-    document.querySelectorAll('a[href="#gradeLegend"]').forEach((link) => {
+    // GRADE-STATUS-PAGE: 등급·상태 안내 opens as a full-page view-swap, mirroring the
+    // methodology/about interception line-for-line. Links come from the home tab row,
+    // the sidebar legend panel, the footer, About, and the 검증 방법 cross-link.
+    let gradeStatusHistoryActive = false;
+    function pushGradeStatusHistoryState() {
+      if (!window.history || !window.history.pushState) return;
+      if (window.history.state && window.history.state.tickedinScreen === "gradeStatus") {
+        gradeStatusHistoryActive = true;  // already a gradeStatus entry — don't stack duplicates
+        return;
+      }
+      try {
+        window.history.pushState({ tickedinScreen: "gradeStatus" }, "", window.location.href);
+        gradeStatusHistoryActive = true;
+      } catch (_) {
+        /* history unavailable — the page still opens via the visual toggle */
+      }
+    }
+    document.querySelectorAll('a[href="#gradeStatus"]').forEach((link) => {
       link.addEventListener("click", (event) => {
         event.preventDefault();
-        showScreen("home");
-        const legendEl = document.getElementById("gradeLegend");
-        if (legendEl) legendEl.scrollIntoView({ behavior: "smooth", block: "start" });
+        pushGradeStatusHistoryState();
+        showScreen("gradeStatus");
       });
     });
+    // GRADE-STATUS-PAGE: the MOBILE-POLISH G(c) handler for a[href="#gradeLegend"]
+    // was REMOVED — the full legend now lives on the #gradeStatus screen, and every
+    // link that used to target #gradeLegend (home tab row, footer 등급 안내) now points
+    // at #gradeStatus. No anchor references #gradeLegend any more, so the handler was
+    // dead code. The id itself stays on the sidebar panel as its element id.
     // DESIGN-DETAIL-2 / DESIGN-UNIFY: restore the FULL home feed and land on home.
     // Shared by the header .brand-home logo AND the footer .footer-brand logo. The
     // detail loaders narrow currentReportContext to the single opened card, so without
@@ -9425,7 +9444,18 @@
         methodologyHistoryActive = true;
         detailHistoryActive = false;
         aboutHistoryActive = false;
+        gradeStatusHistoryActive = false;
         showScreen("methodology");  // non-home branch scrolls to top
+        return;
+      }
+      // GRADE-STATUS-PAGE: mirror the methodology branch — entering (BACK) or
+      // re-entering (FORWARD) the gradeStatus entry re-shows 등급·상태 안내.
+      if (navState && navState.tickedinScreen === "gradeStatus") {
+        gradeStatusHistoryActive = true;
+        methodologyHistoryActive = false;
+        detailHistoryActive = false;
+        aboutHistoryActive = false;
+        showScreen("gradeStatus");  // non-home branch scrolls to top
         return;
       }
       // ABOUT-PAGE: mirror the methodology branch — entering (BACK) or re-entering
@@ -9434,6 +9464,7 @@
         aboutHistoryActive = true;
         methodologyHistoryActive = false;
         detailHistoryActive = false;
+        gradeStatusHistoryActive = false;
         showScreen("about");  // non-home branch scrolls to top
         return;
       }
@@ -9448,6 +9479,7 @@
           detailHistoryActive = true;
           methodologyHistoryActive = false;
           aboutHistoryActive = false;
+          gradeStatusHistoryActive = false;
           renderSearchHitsView(lastSearchHitsCache.query, lastSearchHitsCache.hits);
           showScreen("detail");
           const searchY = (typeof navState.scrollY === "number") ? navState.scrollY : 0;
@@ -9462,6 +9494,7 @@
         detailHistoryActive = true;
         methodologyHistoryActive = false;
         aboutHistoryActive = false;
+        gradeStatusHistoryActive = false;
         showScreen("detail");
         const detailY = (typeof navState.scrollY === "number") ? navState.scrollY : 0;
         requestAnimationFrame(() => { window.scrollTo(0, detailY || 0); });
@@ -9470,11 +9503,13 @@
       // Popped to a home/neutral (null) entry. Only act if we were tracking a non-home
       // screen; otherwise this popstate isn't ours (e.g. an operator_tools
       // replaceState navigation) and the page is left alone.
-      if (!methodologyHistoryActive && !detailHistoryActive && !aboutHistoryActive) return;
+      if (!methodologyHistoryActive && !detailHistoryActive && !aboutHistoryActive
+          && !gradeStatusHistoryActive) return;
       const wasDetail = detailHistoryActive;
       methodologyHistoryActive = false;
       detailHistoryActive = false;
       aboutHistoryActive = false;
+      gradeStatusHistoryActive = false;
       // Restore the FULL home feed WITHOUT destroying #detailScreen content (so a
       // later FORWARD can re-show the detail). The old renderResults([]) wiped it —
       // replaced with showScreen("home") + clearCurrentReportContext() (un-narrow the

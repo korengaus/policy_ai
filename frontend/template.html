@@ -171,7 +171,7 @@
            검증 등급 안내 but opened the methodology page, the same conflation G(c)
            fixed on the footer's 등급 안내; it now lands on the real 검증 등급 legend
            via the shared show-home-then-scroll handler. -->
-      <a class="grade-guide-link" href="#gradeLegend">검증 등급 안내 →</a>
+      <a class="grade-guide-link" href="#gradeStatus">등급·상태 안내 →</a>
     </nav>
 
     <!-- DESIGN-DETAIL-2: #homeScreen wraps the home-only view (#metrics through
@@ -397,28 +397,15 @@
           <!-- LABEL-1b STEP 1: each row's leading mark (✓ swatch OR round dot) is
                wrapped in a fixed 18px .legend-lead cell so every row LABEL left-aligns
                regardless of the mark's own width. Group headers have no lead cell. -->
+          <!-- GRADE-STATUS-PAGE: the FULL legend moved to #gradeStatus (등급·상태
+               안내). The sidebar keeps only the two most-seen rows as a visual
+               anchor plus a link to the full page — no duplicated legend. -->
           <ul class="legend-list">
-            <li class="legend-group-head">공식 근거</li>
             <li class="legend-row">
               <span class="legend-lead"><span class="legend-swatch legend-swatch--check">✓</span></span>
               <div class="legend-body">
                 <span class="legend-label">공식 근거 확인</span>
                 <span class="legend-desc">1차·공식 문서가 주장을 직접 뒷받침</span>
-              </div>
-            </li>
-            <li class="legend-row">
-              <span class="legend-lead"><span class="verdict-dot" style="background:var(--brand)"></span></span>
-              <div class="legend-body">
-                <span class="legend-label">공식자료 참고</span>
-                <span class="legend-desc">관련 공식자료 참고 (직접 검증 아님)</span>
-              </div>
-            </li>
-            <li class="legend-group-head">AI 판정</li>
-            <li class="legend-row">
-              <span class="legend-lead"><span class="verdict-dot" style="background:var(--verify)"></span></span>
-              <div class="legend-body">
-                <span class="legend-label">검증 완료</span>
-                <span class="legend-desc">임시 검증 완료</span>
               </div>
             </li>
             <li class="legend-row">
@@ -428,21 +415,8 @@
                 <span class="legend-desc">맥락 추가·공식 확인·사람 검토 대기</span>
               </div>
             </li>
-            <li class="legend-row">
-              <span class="legend-lead"><span class="verdict-dot" style="background:var(--red)"></span></span>
-              <div class="legend-body">
-                <span class="legend-label">상충·오해 가능성</span>
-                <span class="legend-desc">근거 상충·오해 소지, 사람 검토 필요</span>
-              </div>
-            </li>
-            <li class="legend-row">
-              <span class="legend-lead"><span class="verdict-dot" style="background:var(--muted)"></span></span>
-              <div class="legend-body">
-                <span class="legend-label">추가 검증 필요</span>
-                <span class="legend-desc">자동 생성·추가 확인 전</span>
-              </div>
-            </li>
           </ul>
+          <a class="legend-more-link" href="#gradeStatus">등급·상태 안내 전체 →</a>
         </section>
 
         <!-- SIDEBAR-RANK-B2: 제보 input. The 의뢰하기 button opens a mailto to the
@@ -834,8 +808,113 @@
         </p>
       </div>
 
+      <!-- GRADE-STATUS-PAGE: the 검증 상태의 의미 definitions and the 경고 단계 /
+           근거 수준 card MOVED OUT to #gradeStatus (등급·상태 안내) — this page is
+           methodology only now. Nothing is duplicated; see #gradeStatus below. -->
       <div class="methodology-card">
-        <h3><svg class="section-icon" aria-hidden="true"><use href="#ic-file-text"/></svg>현재 표시되는 검증 상태의 의미</h3>
+        <h3><svg class="section-icon" aria-hidden="true"><use href="#ic-message"/></svg>한계, 정정, 문의</h3>
+        <ul class="methodology-list">
+          <li>새로운 공식 자료가 나오면 기존 판단이 바뀔 수 있습니다.</li>
+          <li>오래된 자료는 현재 정책 상황과 다를 수 있어 업데이트 확인이 필요합니다.</li>
+          <li>오류 제보나 이의제기는 원문 URL, 공식 자료 링크, 문제 설명과 함께 전달해 주세요.</li>
+          <li>수정 시 업데이트 시간과 수정 이유를 남기는 방향으로 운영합니다.</li>
+        </ul>
+      </div>
+      <div class="methodology-card">
+        <p>카드에 표시되는 배지·색상·숫자·경고 단계의 의미는 <a href="#gradeStatus">등급·상태 안내 →</a>에서 확인하실 수 있습니다.</p>
+      </div>
+    </section>
+
+    <!-- GRADE-STATUS-PAGE: 등급·상태 안내 — the consolidated legend screen. EVERY
+         badge / dot-color / number / warning meaning lives HERE, moved out of the
+         #gradeLegend sidebar panel and the #methodology page (which keeps
+         methodology only). A 5th mutually-exclusive screen, wired exactly like
+         #methodology / #aboutScreen via showScreen(). Vocabulary is closed and
+         circulation/evidence-only — no truth or falsity claim anywhere. -->
+    <section id="gradeStatus" class="methodology-section" aria-labelledby="gradeStatusTitle">
+      <div class="methodology-card methodology-masthead">
+        <div class="public-eyebrow">Badges &amp; Status</div>
+        <h2 id="gradeStatusTitle">등급·상태 안내</h2>
+        <p>
+          카드에 표시되는 배지·색상·숫자의 의미를 설명합니다. 이 사이트는 주장의 진위를 단정하지 않으며,
+          모든 표시는 공식 근거가 어디까지 확인되었는지와 보도가 얼마나 퍼졌는지를 나타내는 참고 지표입니다.
+        </p>
+      </div>
+
+      <!-- MOVED verbatim from the #gradeLegend sidebar panel: same labels, same
+           dot colors, same descriptions. -->
+      <div class="methodology-card">
+        <h3><svg class="section-icon" aria-hidden="true"><use href="#ic-file-text"/></svg>공식 근거</h3>
+        <ul class="legend-list">
+          <li class="legend-row">
+            <span class="legend-lead"><span class="legend-swatch legend-swatch--check">✓</span></span>
+            <div class="legend-body">
+              <span class="legend-label">공식 근거 확인</span>
+              <span class="legend-desc">1차·공식 문서가 주장을 직접 뒷받침</span>
+            </div>
+          </li>
+          <li class="legend-row">
+            <span class="legend-lead"><span class="verdict-dot" style="background:var(--brand)"></span></span>
+            <div class="legend-body">
+              <span class="legend-label">공식자료 참고</span>
+              <span class="legend-desc">관련 공식자료 참고 (직접 검증 아님)</span>
+            </div>
+          </li>
+        </ul>
+      </div>
+
+      <div class="methodology-card">
+        <h3><svg class="section-icon" aria-hidden="true"><use href="#ic-gauge"/></svg>AI 판정</h3>
+        <ul class="legend-list">
+          <li class="legend-row">
+            <span class="legend-lead"><span class="verdict-dot" style="background:var(--verify)"></span></span>
+            <div class="legend-body">
+              <span class="legend-label">검증 완료</span>
+              <span class="legend-desc">임시 검증 완료</span>
+            </div>
+          </li>
+          <li class="legend-row">
+            <span class="legend-lead"><span class="verdict-dot" style="background:var(--orange)"></span></span>
+            <div class="legend-body">
+              <span class="legend-label">검토 필요</span>
+              <span class="legend-desc">맥락 추가·공식 확인·사람 검토 대기</span>
+            </div>
+          </li>
+          <li class="legend-row">
+            <span class="legend-lead"><span class="verdict-dot" style="background:var(--red)"></span></span>
+            <div class="legend-body">
+              <span class="legend-label">상충·오해 가능성</span>
+              <span class="legend-desc">근거 상충·오해 소지, 사람 검토 필요</span>
+            </div>
+          </li>
+          <li class="legend-row">
+            <span class="legend-lead"><span class="verdict-dot" style="background:var(--muted)"></span></span>
+            <div class="legend-body">
+              <span class="legend-label">추가 검증 필요</span>
+              <span class="legend-desc">자동 생성·추가 확인 전</span>
+            </div>
+          </li>
+        </ul>
+      </div>
+
+      <!-- MOVED from #methodology (경고 단계 + 근거 수준 점수). -->
+      <div class="methodology-card">
+        <h3><svg class="section-icon" aria-hidden="true"><use href="#ic-gauge"/></svg>경고 단계</h3>
+        <ul class="methodology-list">
+          <li><strong>낮음(LOW)</strong>: 현재 수집된 정보 기준으로 즉각적인 높은 정책 리스크 신호는 낮습니다.</li>
+          <li><strong>관찰(WATCH)</strong>: 정책 영향 가능성은 있으나 공식 근거, 맥락, 반박 가능성 등 추가 확인이 필요합니다.</li>
+          <li><strong>주의(CAUTION)·높음(HIGH)·심각(CRITICAL)</strong>: 더 강한 정책 영향 또는 위험 신호가 있을 수 있으나 최종 판단은 근거와 사람 검토가 필요합니다.</li>
+        </ul>
+      </div>
+
+      <div class="methodology-card">
+        <h3><svg class="section-icon" aria-hidden="true"><use href="#ic-gauge"/></svg>근거 수준 점수</h3>
+        <p>근거 수준 점수는 수집된 근거의 품질, 공식 출처 연결성, 의미 매칭, 반박 가능성 등을 종합한 참고 지표이며, 주장의 진위를 뜻하지 않습니다.</p>
+      </div>
+
+      <!-- MOVED from #methodology: the per-stage status definitions. -->
+      <div class="methodology-card">
+        <h3><svg class="section-icon" aria-hidden="true"><use href="#ic-file-text"/></svg>세부 검증 상태의 의미</h3>
         <div class="methodology-grid">
           <div class="methodology-definition">
             <strong>공식 근거 상태: 공식 후보만 있음</strong>
@@ -860,25 +939,29 @@
         </div>
       </div>
 
-      <div class="methodology-grid">
-        <div class="methodology-card">
-          <h3><svg class="section-icon" aria-hidden="true"><use href="#ic-gauge"/></svg>경고 단계와 근거 수준</h3>
-          <ul class="methodology-list">
-            <li><strong>낮음(LOW)</strong>: 현재 수집된 정보 기준으로 즉각적인 높은 정책 리스크 신호는 낮습니다.</li>
-            <li><strong>관찰(WATCH)</strong>: 정책 영향 가능성은 있으나 공식 근거, 맥락, 반박 가능성 등 추가 확인이 필요합니다.</li>
-            <li><strong>주의(CAUTION)·높음(HIGH)·심각(CRITICAL)</strong>: 더 강한 정책 영향 또는 위험 신호가 있을 수 있으나 최종 판단은 근거와 사람 검토가 필요합니다.</li>
-          </ul>
-          <p>근거 수준 점수는 수집된 근거의 품질, 공식 출처 연결성, 의미 매칭, 반박 가능성 등을 종합한 참고 지표이며, 주장의 진위를 뜻하지 않습니다.</p>
-        </div>
-        <div class="methodology-card">
-          <h3><svg class="section-icon" aria-hidden="true"><use href="#ic-message"/></svg>한계, 정정, 문의</h3>
-          <ul class="methodology-list">
-            <li>새로운 공식 자료가 나오면 기존 판단이 바뀔 수 있습니다.</li>
-            <li>오래된 자료는 현재 정책 상황과 다를 수 있어 업데이트 확인이 필요합니다.</li>
-            <li>오류 제보나 이의제기는 원문 URL, 공식 자료 링크, 문제 설명과 함께 전달해 주세요.</li>
-            <li>수정 시 업데이트 시간과 수정 이유를 남기는 방향으로 운영합니다.</li>
-          </ul>
-        </div>
+      <!-- NEW: card elements that were previously explained NOWHERE. Circulation
+           vocabulary only — "N개 매체" is spread, never verification. -->
+      <div class="methodology-card">
+        <h3><svg class="section-icon" aria-hidden="true"><use href="#ic-layers"/></svg>확산 표시: "N개 매체"</h3>
+        <p>
+          같은 내용의 주장을 보도한 서로 다른 매체의 수입니다. 얼마나 널리 퍼졌는지를 보여주는 <strong>확산 정도이며, 사실 여부 검증이 아닙니다</strong>.
+          많은 매체가 보도했다는 것이 그 주장이 공식 근거로 뒷받침된다는 뜻은 아닙니다.
+        </p>
+      </div>
+
+      <div class="methodology-card">
+        <h3><svg class="section-icon" aria-hidden="true"><use href="#ic-workflow"/></svg>검토 상태 배지</h3>
+        <ul class="methodology-list">
+          <li><strong>AI 초안</strong>: 사람 검토를 거치기 전의 자동 생성 결과입니다.</li>
+          <li><strong>사람 검토 대기</strong>: 사람이 원문·공식문서·맥락을 확인해야 하는 상태입니다.</li>
+          <li><strong>고위험 사람 검토 대기</strong>: 위험 신호가 있어 사람 확인이 우선적으로 필요한 상태입니다.</li>
+          <li><strong>사람 검토됨</strong>: 사람이 확인을 마친 결과입니다.</li>
+        </ul>
+      </div>
+
+      <div class="methodology-card">
+        <h3><svg class="section-icon" aria-hidden="true"><use href="#ic-compass"/></svg>🔥 표시</h3>
+        <p>최근 보도가 활발한 항목에 붙는 표시입니다. 보도의 최신성·활발함만 나타내며, 근거 수준이나 주장의 진위와는 무관합니다.</p>
       </div>
     </section>
 
@@ -926,7 +1009,8 @@
       <div class="methodology-card">
         <h3><svg class="section-icon" aria-hidden="true"><use href="#ic-compass"/></svg>더 보기</h3>
         <p><a href="/web/brainmap.html">연결지도 →</a> 뉴스가 어떻게 유통·연결되는지 보여주는 지도입니다.</p>
-        <p><a href="#methodology">검증 등급 안내 →</a> 검증 방법과 등급의 의미를 설명합니다.</p>
+        <p><a href="#methodology">검증 방법 →</a> 무엇을, 어떤 출처 우선순위로 검증하는지 설명합니다.</p>
+        <p><a href="#gradeStatus">등급·상태 안내 →</a> 카드의 배지·색상·숫자가 무엇을 뜻하는지 설명합니다.</p>
       </div>
     </section>
 
@@ -974,13 +1058,13 @@
           </div>
           <div class="footer-col">
             <div class="footer-col-head">검증</div>
-            <a href="#methodology">검증 방법론</a>
+            <a href="#methodology">검증 방법</a>
             <a href="/web/weekly.html">주간 리포트</a>
             <a href="/web/faded.html">후속 끊긴 주장</a>
             <!-- MOBILE-POLISH G(c): 등급 안내 pointed at #methodology, landing on the
                  identical page as 검증 방법론 two links up. It now targets the real
                  legend block (#gradeLegend, the .legend-panel on home). -->
-            <a href="#gradeLegend">등급 안내</a>
+            <a href="#gradeStatus">등급·상태 안내</a>
           </div>
           <div class="footer-col">
             <div class="footer-col-head">회사</div>
@@ -1003,8 +1087,10 @@
                standalone static pages under the existing /web mount, linked the same
                way as weekly.html / brainmap.html / faded.html (plain absolute href,
                no JS interception). -->
+          <!-- GRADE-STATUS-PAGE: the 검증 방법론 link here duplicated the footer's
+               검증 column 검증 방법 link (same #methodology target), so it was removed.
+               This nav is the legal/policy row. -->
           <a href="/web/privacy.html">개인정보처리방침</a>
-          <a href="#methodology">검증 방법론</a>
           <a href="/web/youth.html">청소년보호정책</a>
         </nav>
       </div>
