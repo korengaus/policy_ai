@@ -98,9 +98,13 @@ def build_embed_text(title, claim_text):
 
 
 def run_backfill(conn, provider, batch, max_rows, dry_run,
-                 embed_fn=None, cache_lookup=None, pacing=PACING_SECONDS):
+                 embed_fn=None, cache_lookup=None, pacing=PACING_SECONDS,
+                 start_id=0):
     """Drive the batched embed backfill against an already-open connection.
 
+    `start_id` seeds the id cursor: only ids > start_id are scanned (default 0
+    = the whole table, i.e. the pre-existing behavior). Lets the operator drain
+    a backlog in slices, one process per slice, without re-walking the head.
     `provider` is an active EmbeddingProvider. `embed_fn` / `cache_lookup` are
     injected so the selftest can pass fakes; in main they default to the REAL
     semantic_similarity._embed_with_cache and database.get_cached_embedding
@@ -116,7 +120,7 @@ def run_backfill(conn, provider, batch, max_rows, dry_run,
     embedded = cache_hits = would_embed = skipped_empty = failed = 0
     total = 0
     page_no = 0
-    last_id = 0
+    last_id = start_id
     while True:
         if max_rows is not None and total >= max_rows:
             break
@@ -326,6 +330,9 @@ def main(argv=None) -> int:
                         help="Rows per SELECT page. Default %d." % DEFAULT_BATCH)
     parser.add_argument("--max-rows", type=int, default=None,
                         help="Optional total cap for this run. Default: all rows.")
+    parser.add_argument("--start-id", type=int, default=0,
+                        help="Resume from this id cursor; only ids > this are "
+                             "scanned. Default 0 (whole table).")
     parser.add_argument("--dry-run", action="store_true",
                         help="Hash + cache-existence check only; NO API call, NO write.")
     args = parser.parse_args(argv)
@@ -371,7 +378,8 @@ def main(argv=None) -> int:
              args.dry_run))
     print()
     with psycopg.connect(url) as conn:
-        run_backfill(conn, provider, args.limit, args.max_rows, args.dry_run)
+        run_backfill(conn, provider, args.limit, args.max_rows, args.dry_run,
+                     start_id=args.start_id)
     return 0
 
 
