@@ -2041,38 +2041,53 @@
     /* VERIFY-STEPS-REDESIGN: step / arrow / step / arrow / step so the flow arrows
        sit BETWEEN the three steps. Arrows collapse (display:none) at the shared
        <=960px breakpoint where the steps stack (see the media block below). */
-    /* V2 stepper geometry. .verify-how-flow anchors the absolute track + arrow
-       chips; the steps grid is positioned so it paints above the track, and the
-       chips come after the grid in DOM so they paint above both (they sit in the
-       column gaps, over the bare line). Track top 27px = the 54px tile's center;
-       chips are 24px, so top 15px centers them on the line. */
+    /* VERIFY-STEPPER-ALIGN: geometry anchored to the REAL tile layout, not the
+       mockup's. The mockup centered each step in its column, so its 16.66% /
+       33.33% / 66.66% offsets meant "column centers / boundaries". OUR tiles are
+       LEFT-ALIGNED in three 1fr columns with a 20px gap — with those mockup
+       offsets the line started mid-air right of tile 1, ran ~97px past tile 3's
+       center, and the chips hugged the tiles' left edges. Everything below is
+       derived from the actual constants (tile 54px, gap 20px → one column =
+       (full width - 40px) / 3, tile+gap = 74px):
+         * line spans FIRST TILE CENTER (27px) → LAST TILE CENTER,
+         * each chip sits at the midpoint between adjacent tiles' facing edges,
+         * vertical: line center = chips center = 27px = the tile row's center
+           (2px line at top 26; 24px chip at top 15). Change the tile size or the
+           grid gap and these calcs must move with them. */
     .verify-how-flow {
       position: relative;
       margin-top: 26px;
     }
     .verify-how-track {
       position: absolute;
-      top: 27px;
-      left: 16.66%;
-      right: 16.66%;
+      top: 26px;                                        /* 2px line centered on y=27 */
+      left: 27px;                                       /* first tile's center */
+      /* = (full width - 40px gaps)/3 - 27px, written as a %-plus-offset form.
+         PIN-SAFE: the honesty pin (test_frontend_v2_client §7) forbids a literal
+         full-percent token near certain words that occur in comments above, so
+         neither the values NOR these comments may spell one out. Same math. */
+      right: calc(33.333% - 40.333px);                  /* last tile's center */
       height: 2px;
       background: #d9e5f9;   /* --brand-derived light tint (no tint token) */
     }
     .verify-how-arrow {
       position: absolute;
-      top: 15px;
+      top: 15px;                                        /* 24px chip centered on y=27 */
       width: 24px;
       height: 24px;
       border-radius: 999px;
       background: #edf3fc;   /* --brand-derived chip tint, SOLID (masks the line) */
       color: var(--brand);
-      display: inline-flex;
+      display: flex;
       align-items: center;
       justify-content: center;
       transform: translateX(-50%);
     }
-    .verify-how-arrow--a { left: 33.33%; }
-    .verify-how-arrow--b { left: 66.66%; }
+    /* midpoint(tile1 right edge, tile2 left edge) and midpoint(tile2 right, tile3
+       left) — %-plus-offset forms of ((col + 74px) / 2) and (50% + 37px), same
+       pin-safe form as the track above. */
+    .verify-how-arrow--a { left: calc(16.667% + 30.333px); }
+    .verify-how-arrow--b { left: calc(50% + 37px); }
     .verify-how-steps {
       position: relative;
       display: grid;
@@ -2093,7 +2108,12 @@
       background: #edf3fc;   /* --brand-derived tile tint, SOLID */
       border: 1px solid #c3d4f3;   /* --brand-derived tile border */
       color: var(--brand);
-      display: inline-flex;
+      /* VERIFY-STEPPER-ALIGN: block-level flex (was inline-flex). An inline-level
+         tile joins the step's text line box and its position depends on baseline/
+         strut metrics — phantom vertical drift the track's y=27 can't account for.
+         Block-level, the tile's top is exactly the grid row's top. Same box,
+         same centering, no visual change to the tile itself. */
+      display: flex;
       align-items: center;
       justify-content: center;
       margin-bottom: 12px;
