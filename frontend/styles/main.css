@@ -1607,7 +1607,7 @@
       color: var(--ink);
       font-size: 1.231rem;
       line-height: 1.25;
-      font-weight: 700;
+      font-weight: 600;   /* FONT-WEIGHT-FIX: 700 read too heavy in Pretendard */
     }
     .rank-panel-heading p {
       margin: 3px 0 0;
@@ -1978,7 +1978,7 @@
       color: var(--ink);
       font-size: 1.38rem;
       line-height: 1.25;
-      font-weight: 700;
+      font-weight: 600;   /* FONT-WEIGHT-FIX */
     }
     /* VERIFY-STEPS-REDESIGN: title + one-line subtitle stack on the left; the
        methodology link stays on the right of .verify-how-head. */
@@ -2084,7 +2084,7 @@
       color: var(--ink);
       font-size: 1.16rem;
       line-height: 1.35;
-      font-weight: 700;
+      font-weight: 600;   /* FONT-WEIGHT-FIX */
     }
     .verify-how-desc {
       margin: 0;
@@ -2131,7 +2131,7 @@
       color: var(--ink);
       font-size: 1.308rem;
       line-height: 1.25;
-      font-weight: 700;
+      font-weight: 600;   /* FONT-WEIGHT-FIX */
     }
     /* quiet muted empty state (was a heavy dashed .empty-state box); kept visible as
        an onboarding cue, not auto-hidden. Scoped to #history so the JS re-render
@@ -2161,7 +2161,7 @@
       color: var(--ink);
       font-size: 1.308rem;
       line-height: 1.25;
-      font-weight: 700;
+      font-weight: 600;   /* FONT-WEIGHT-FIX */
     }
     .corrections-sub {
       margin: 0;
@@ -2183,7 +2183,7 @@
       color: var(--ink);
       font-size: 1.308rem;
       line-height: 1.25;
-      font-weight: 700;
+      font-weight: 600;   /* FONT-WEIGHT-FIX */
     }
 
     .section-heading p {
@@ -2266,6 +2266,7 @@
       color: var(--ink);
       line-height: 1.3;
       letter-spacing: 0;
+      font-weight: 600;   /* FONT-WEIGHT-FIX: was browser-default 700 */
       font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', system-ui, sans-serif;
     }
 
@@ -2538,7 +2539,7 @@
       color: var(--ink);
       font-size: 1.308rem;
       line-height: 1.25;
-      font-weight: 700;
+      font-weight: 600;   /* FONT-WEIGHT-FIX */
     }
     .latest-checks-eyebrow {
       color: var(--muted);
@@ -2576,7 +2577,7 @@
       color: var(--ink);
       font-size: 1.5rem;
       line-height: 1.25;
-      font-weight: 700;
+      font-weight: 600;   /* FONT-WEIGHT-FIX */
     }
     .domain-section-sub {
       margin: 2px 0 0;
@@ -2654,7 +2655,7 @@
       color: var(--ink);
       font-size: 1.077rem;
       line-height: 1.45;
-      font-weight: 750;
+      font-weight: 600;   /* FONT-WEIGHT-FIX: 750 was serif-tuned; hero inherits this too */
       display: -webkit-box;
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
