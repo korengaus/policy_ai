@@ -67,6 +67,11 @@
     <symbol id="ic-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
     <symbol id="ic-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></symbol>
     <symbol id="ic-workflow" viewBox="0 0 24 24"><rect width="8" height="8" x="3" y="3" rx="2"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/><rect width="8" height="8" x="13" y="13" rx="2"/></symbol>
+    <!-- ic-network: distinctive network-graph glyph for the 연결지도 header link only
+         (the site's key visualization = the brainmap). A central hub node linked to
+         three satellites + one cross-link → reads as connected/spreading reports.
+         Circles inherit fill:none/stroke:currentColor from .utility-icon. NOT a verdict. -->
+    <symbol id="ic-network" viewBox="0 0 24 24"><path d="M10.5 10.7 6.5 7.3"/><path d="M13.6 10.8 17.4 8.2"/><path d="M12 14v4"/><path d="M7 6.1 17 6.9"/><circle cx="12" cy="12" r="2.1"/><circle cx="5" cy="6" r="2"/><circle cx="19" cy="7" r="2"/><circle cx="12" cy="20" r="2"/></symbol>
     <symbol id="ic-scale" viewBox="0 0 24 24"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></symbol>
     <symbol id="ic-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></symbol>
     <symbol id="ic-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
@@ -97,10 +102,11 @@
       <!-- NAV-RESTRUCTURE: this header carries the CONTENT/FEATURE destinations only.
            The two SITE-UNDERSTANDING links (검증 방법 / 등급·상태 안내) live in the tab
            row below. 연결지도 is emphasised by POSITION (first) + a small line icon
-           (#ic-workflow, the existing node-graph glyph) — no color highlight, so the
-           header keeps its neutral tone. -->
+           (#ic-network, a unique network-graph glyph — distinct from the shared
+           #ic-workflow used on About) — no color highlight, so the header keeps its
+           neutral tone. -->
       <nav class="utility-right" aria-label="사이트 메뉴">
-        <a class="utility-link utility-link--icon" href="/web/brainmap.html"><svg class="utility-icon" aria-hidden="true"><use href="#ic-workflow"/></svg>연결지도</a>
+        <a class="utility-link utility-link--icon" href="/web/brainmap.html"><svg class="utility-icon" aria-hidden="true"><use href="#ic-network"/></svg>연결지도</a>
         <a class="utility-link" href="/web/weekly.html">주간 리포트</a>
         <a class="utility-link" href="/web/faded.html">후속 끊긴 주장</a>
         <a class="utility-link" href="#about">About</a>
