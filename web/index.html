@@ -1551,7 +1551,17 @@
        bottom margin breathes before the verify strip. */
     .pagination-full {
       grid-column: 1 / -1;
-      margin-bottom: 4px;
+      /* PAGINATION-SPACING: group the pagination with the cards it paginates —
+         the top gap is just the .home-shell 24px row-gap (the inner wrap's extra
+         16px top margin is zeroed below), while a larger bottom margin gives clear
+         separation before the full-width verify strip. */
+      margin-bottom: 22px;
+    }
+    /* PAGINATION-SPACING: drop the shared wrap's 16px top margin in the pagination
+       context only (tier2's load-more wrap keeps it) so the card->pagination gap is
+       the comfortable 24px row-gap, not ~40px. */
+    .pagination-full .hot-topics-load-more-wrap {
+      margin-top: 0;
     }
     .hot-topics-load-more-wrap {
       display: flex;
