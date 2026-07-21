@@ -7277,7 +7277,14 @@
       `).join("")}</div>`;
     }
 
-    function renderEvidenceSources(sources) {
+    // OFFICIAL-EVIDENCE-DISPLAY-HONESTY Phase 4: cardHasGenuineOfficial (the SAME
+    // card-level has_genuine_official_support predicate Phase 2 gates on) clamps the
+    // authority wording of official-like rows on non-genuine cards. Default true =
+    // legacy callers byte-identical. Rows are never hidden (collected-source
+    // transparency); only the TYPE label + authority CAPTION are de-emphasized to the
+    // existing 공식 약한 후보 vocabulary. The 0-5 grade number stays (Phase 2 rule:
+    // numbers are not rescaled).
+    function renderEvidenceSources(sources, cardHasGenuineOfficial = true) {
       const list = Array.isArray(sources) ? sources : [];
       if (!list.length) {
         return '<div class="evidence-source-meta">표시할 근거 출처가 없습니다.</div>';
@@ -7285,11 +7292,16 @@
       return `
         <div class="source-list">
           ${list.map((source) => {
+            const clampAuthority = cardHasGenuineOfficial === false && isOfficialLikeSource(source);
             const sourceTitle = escapeHtml(userFacingReportText(source.title || source.url || "근거 출처", "근거 출처"));
             const sourceUrl = escapeHtml(safeUrl(source.url || ""));
-            const sourceType = escapeHtml(formatSourceType(source.source_type));
+            const sourceType = escapeHtml(clampAuthority
+              ? "공식 약한 후보"
+              : formatSourceType(source.source_type));
             const score = escapeHtml(source.reliability_score ?? "-");
-            const reason = escapeHtml(userFacingReportText(source.reliability_reason || "", ""));
+            const reason = escapeHtml(clampAuthority
+              ? "공식 후보이지만 상세 본문 또는 직접 일치가 제한적입니다."
+              : userFacingReportText(source.reliability_reason || "", ""));
             const titleHtml = source.url
               ? `<a href="${sourceUrl}" target="_blank" rel="noopener noreferrer">${sourceTitle}</a>`
               : sourceTitle;
@@ -11803,7 +11815,7 @@
           ),
           renderCollapsibleSection(
             "근거 요약과 부족한 맥락",
-            `${renderEvidenceExtractionSummary(evidenceExtractionSummary)}${renderEvidenceSources(verification.evidence_sources)}${advDefList([
+            `${renderEvidenceExtractionSummary(evidenceExtractionSummary)}${renderEvidenceSources(verification.evidence_sources, cardHasGenuineOfficial)}${advDefList([
               ["근거 요약", userFacingReportText(cleanConceptKeysForDisplay(verification.evidence_summary), "-")],
               ["부족한 맥락", buildSafeMissingContext(result)],
               ["마지막 확인", formatDisplayDate(verification.last_checked_at)],
