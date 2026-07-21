@@ -133,6 +133,12 @@
     <strong>사실 여부에 대한 판단이 아닙니다.</strong>
     제목을 누르면 해당 주장의 검증 카드로 이동합니다.
   </p>
+  <!-- WEEKLY-PAGE-ENRICH: clarify the 문구 거의 동일 metric so "문구 거의 동일 1"
+       is not misread as "only 1 outlet reported". Circulation vocabulary only. -->
+  <p class="report-subtitle report-note">
+    <strong>문구 거의 동일</strong> = 첫 보도와 제목·주장 문구가 거의 같은 매체 수입니다.
+    전체 확산 매체 수와는 별개이며, 사실 여부 판단이 아닙니다.
+  </p>
 </header>
 <main class="report-body">
   <div id="status">리포트를 불러오는 중…</div>
@@ -149,6 +155,18 @@
   function stamp(iso) {
     if (typeof iso !== "string" || iso.length < 16) return iso || "";
     return iso.slice(0, 16).replace("T", " ") + " UTC";
+  }
+  // WEEKLY-PAGE-ENRICH: honest spread-SPEED = the first->last SPAN duration only
+  // (we have first/last timestamps, NOT a per-outlet arrival curve, so never a
+  // "M개 매체 in N시간" rate). "" when either timestamp is missing/unparseable so
+  // the caller omits the span; "당일" when the span rounds to <1h.
+  function spreadSpeed(firstIso, lastIso) {
+    var a = Date.parse(firstIso), b = Date.parse(lastIso);
+    if (isNaN(a) || isNaN(b) || b < a) return "";
+    var hours = (b - a) / 3600000;
+    if (hours < 1) return "확산 속도: 당일";
+    if (hours < 24) return "확산 속도: 약 " + Math.round(hours) + "시간";
+    return "확산 속도: 약 " + Math.round(hours / 24) + "일";
   }
   function el(tag, className, text) {
     var node = document.createElement(tag);
@@ -193,6 +211,18 @@
       if (from && to) meta.appendChild(el("span", null, "확산 기간 " + from + " → " + to));
       if (Number(item.window_member_count) > 0) {
         meta.appendChild(el("span", null, "이번 주 보도 " + Number(item.window_member_count) + "건"));
+      }
+      // WEEKLY-PAGE-ENRICH: spread-speed span (first->last duration). Omitted when
+      // the timestamps are missing/equal (spreadSpeed returns "").
+      var speed = spreadSpeed(item.window_first_at || item.first_at,
+                              item.window_last_at || item.last_at);
+      if (speed) meta.appendChild(el("span", null, speed));
+      // WEEKLY-PAGE-ENRICH: 문구 거의 동일 (near-anchor syndication) count. Null-guarded
+      // so OLD report rows generated before the field exists render cleanly (no span,
+      // never "undefined"). Circulation measurement, not a verdict.
+      var nearSame = item.near_anchor_outlet_count;
+      if (typeof nearSame === "number" && nearSame > 0) {
+        meta.appendChild(el("span", null, "문구 거의 동일: " + nearSame + "개 매체"));
       }
       main.appendChild(meta);
 

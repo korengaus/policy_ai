@@ -141,6 +141,12 @@ def build_report(graph, published_by_id, week_start, week_end,
             "representative_analysis_id": representative_id,
             "outlet_count": cluster.get("outlet_count"),
             "size_label": cluster.get("size_label"),
+            # WEEKLY-PAGE-ENRICH: additive circulation field — distinct outlets whose
+            # title+claim cosine >= 0.95 to the cluster's earliest-published anchor
+            # ("첫 보도와 문구 거의 동일"). Copied straight from the same graph cluster
+            # object build_brainmap_graph already computed; None on old graphs lacking
+            # it. Verdict-isolated (a syndication measurement, never a truth signal).
+            "near_anchor_outlet_count": cluster.get("near_anchor_outlet_count"),
             "member_count": len(member_ids),
             "window_member_count": len(window_dates),
             "first_at": dated[0] if dated else None,
