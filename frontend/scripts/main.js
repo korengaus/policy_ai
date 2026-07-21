@@ -5566,10 +5566,24 @@
         // says something new. The full arrays still appear in the 고급 검증 정보
         // collapsible (핵심 주장과 정규화 / 근거 문장), which is that section's job.
         const heroClaimText = exportClaimText(result);
+        // CLAIM-DISPLAY-FIX: heroClaimText may now be a PROMOTED substantive claim
+        // (see buildReviewerSafeClaim), so its raw source sits in this very pool and
+        // must be de-duped out of "그 밖의 핵심 주장". The hero carries a cautious
+        // prefix ("보도 내용은 " / "기사 제목과 요약 기준으로는 ") and may have had
+        // certainty words stripped, so besides the plain overlap we compare each
+        // entry's SANITIZED form against the prefix-stripped hero core — both go
+        // through the identical sanitizeClaimText, so the promoted entry matches
+        // even when prefixing/stripping changed the surface text.
+        const heroClaimCore = heroClaimText.replace(/^(보도 내용은|기사 제목과 요약 기준으로는)\s*/, "");
         const contentLeadClaims = ((Array.isArray(normalizedClaims) && normalizedClaims.length)
           ? normalizedClaims.slice(0, 3).map((claim) => claim && claim.claim_text).filter(Boolean)
           : (Array.isArray(claims) ? claims : []).slice(0, 3).filter(Boolean))
-          .filter((claim) => !claimTextsOverlap(claim, heroClaimText));
+          .filter((claim) => {
+            if (claimTextsOverlap(claim, heroClaimText)) return false;
+            const sanitized = sanitizeClaimText(claim, result);
+            if (sanitized && claimTextsOverlap(sanitized, heroClaimCore)) return false;
+            return true;
+          });
         const contentLead = contentLeadClaims.join(" ");
         // DETAIL-CLEANUP A6: route through userFacingReportText so the raw
         // English reason-code tails (press_release:/weakly_usable/…) that
@@ -6492,6 +6506,36 @@
       return best.length >= 10 ? best : "";
     }
 
+    // CLAIM-DISPLAY-FIX (Phase 2, option a): the substantive-claim pool the primary
+    // can PROMOTE from when its aligned-candidate gate rejects everything. Reads the
+    // SAME already-extracted fields "그 밖의 핵심 주장" (contentLead) shows —
+    // normalized_claims[].claim_text first, then the claims[] array — and returns the
+    // FIRST entry that survives sanitizeClaimText (generic/suspicious rejection +
+    // stripCertaintyWords when no official support) and is not a quote-lead. Returns
+    // the RAW text (caller re-sanitizes) or "" when the card has no real claim. This
+    // is a RESELECTION of an existing field — it never fabricates/rewrites/summarizes.
+    function substantiveClaimForPromotion(result) {
+      const verification = result?.verification_card || result || {};
+      const normalized = Array.isArray(verification.normalized_claims)
+        ? verification.normalized_claims
+        : (Array.isArray(result?.normalized_claims) ? result.normalized_claims : []);
+      const claimsArr = Array.isArray(verification.claims)
+        ? verification.claims
+        : (Array.isArray(result?.claims) ? result.claims : []);
+      const pool = normalized.map((c) => c && c.claim_text)
+        .concat(claimsArr)
+        .map((c) => String(c || "").trim())
+        .filter(Boolean);
+      for (const raw of pool) {
+        const cleaned = sanitizeClaimText(raw, result);
+        // sanitizeClaimText already drops generic/placeholder + suspicious text.
+        // Skip quote-leads (messy reported-speech dumps) — prefer a clean claim; if
+        // only quote-leads exist we return "" and the title-echo fallback is kept.
+        if (cleaned && !claimIsQuoteLead(cleaned)) return raw;
+      }
+      return "";
+    }
+
     function buildReviewerSafeClaim(result) {
       const verification = result?.verification_card || result || {};
       const candidates = [
@@ -6502,7 +6546,19 @@
       ]
         .map((item) => sanitizeClaimText(item, result))
         .filter((item) => item && claimLooksAlignedWithResult(result, item));
-      let claim = candidates[0] || sanitizeClaimText(fallbackClaimFromTitle(result), result);
+      // CLAIM-DISPLAY-FIX (option a): when NO aligned candidate survives, we would
+      // fall back to the title-echo template (fallbackClaimFromTitle). Before that,
+      // PROMOTE the first substantive claim from this card's own normalized_claims/
+      // claims — the same pool that already renders below as "그 밖의 핵심 주장".
+      // Relaxed acceptance: promotion does NOT require the >=2-keyword title overlap
+      // (a real body claim legitimately shows as secondary today), only that it's a
+      // real extracted claim that passes the sanitize safety. If none exists, the
+      // title-echo template is preserved exactly as before (honest "추가 확인 필요").
+      let claim = candidates[0];
+      if (!claim) {
+        claim = sanitizeClaimText(substantiveClaimForPromotion(result), result)
+          || sanitizeClaimText(fallbackClaimFromTitle(result), result);
+      }
       // CARD-CLAIM-QUALITY A2 ②: only when the resolved claim is a quote-lead,
       // (a) prefer the structured normalized claim (contentLead's source, when
       // the detail payload carries it) if it is clean + aligned + not itself a
