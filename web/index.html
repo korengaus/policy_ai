@@ -1543,6 +1543,16 @@
       margin: 0;
     }
 
+    /* PAGINATION-CENTER: full-width pagination row — a 3rd child of the 2-col
+       .home-shell grid spanning both tracks, so the centered pagination aligns with
+       the page content width (matching the full-width verify strip / domain sections
+       below) instead of centering only within the left column. The inner
+       .hot-topics-load-more-wrap keeps its own flex-centering + 16px top gap; a small
+       bottom margin breathes before the verify strip. */
+    .pagination-full {
+      grid-column: 1 / -1;
+      margin-bottom: 4px;
+    }
     .hot-topics-load-more-wrap {
       display: flex;
       justify-content: center;
@@ -4907,6 +4917,12 @@
       .home-main > .news-home-section {
         order: 5;
       }
+      /* PAGINATION-CENTER: .pagination-full is a direct .home-shell grid child (not
+         dissolved by display:contents), so it takes an explicit order — slot 6, right
+         after the cards (5) and before tier2(7)/the sidebar panels(8-10). */
+      .pagination-full {
+        order: 6;
+      }
       /* DOMAIN-SECTION-REVAMP: #feedDomainSections was relocated OUT of .home-shell to
          a full-width sibling below it, so it is no longer a grid child here and its
          old order:6 rule was inert — removed. As a block sibling after .home-shell it
@@ -5163,12 +5179,11 @@
           <div id="hotTopics" class="topic-card-grid">
             <div class="empty-state">분석을 실행하거나 최근 분석을 불러오면 검증 뉴스 카드가 표시됩니다.</div>
           </div>
-          <div class="hot-topics-load-more-wrap">
-            <!-- DESIGN-C3-2: page-number nav (prev / 1..N / next) for the post-hero grid;
-                 filled by renderFeedPagination, empty when totalPages <= 1. Replaced the
-                 retired 더보기/접기 buttons; the centering wrap is reused. -->
-            <nav id="feedPagination" class="feed-pagination" aria-label="페이지"></nav>
-          </div>
+          <!-- PAGINATION-CENTER: #feedPagination was moved OUT of this left-column
+               section to a full-width .pagination-full row (3rd child of .home-shell,
+               grid-column:1/-1) so it centers on the FULL page width — aligned with the
+               verify strip / domain sections below — instead of sitting left-of-center
+               beside the sidebar. Its own delegated click listener moves with the node. -->
         </section>
 
         <!-- VERIFY-STRIP-REDESIGN: the "이렇게 검증합니다" band was RELOCATED from
@@ -5318,6 +5333,18 @@
           <div class="report-contact-note">제보 contact@tickedin.org</div>
         </section>
       </aside>
+
+      <!-- PAGINATION-CENTER: full-width pagination row — a 3rd child of .home-shell
+           spanning grid-column:1/-1, so it centers on the full page content width
+           (past the sidebar) and lines up with the full-width sections below. On
+           mobile (display:contents + order) it takes order:6 → right after the cards
+           (order 5), before the sidebar panels. The .hot-topics-load-more-wrap /
+           .feed-pagination internals + the delegated click listener are unchanged. -->
+      <div class="pagination-full">
+        <div class="hot-topics-load-more-wrap">
+          <nav id="feedPagination" class="feed-pagination" aria-label="페이지"></nav>
+        </div>
+      </div>
     </div>
 
     <!-- VERIFY-STRIP-RELOCATE: the "이렇게 검증합니다" 3-step strip, moved here from

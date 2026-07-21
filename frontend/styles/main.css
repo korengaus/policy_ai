@@ -1507,6 +1507,16 @@
       margin: 0;
     }
 
+    /* PAGINATION-CENTER: full-width pagination row — a 3rd child of the 2-col
+       .home-shell grid spanning both tracks, so the centered pagination aligns with
+       the page content width (matching the full-width verify strip / domain sections
+       below) instead of centering only within the left column. The inner
+       .hot-topics-load-more-wrap keeps its own flex-centering + 16px top gap; a small
+       bottom margin breathes before the verify strip. */
+    .pagination-full {
+      grid-column: 1 / -1;
+      margin-bottom: 4px;
+    }
     .hot-topics-load-more-wrap {
       display: flex;
       justify-content: center;
@@ -4870,6 +4880,12 @@
       }
       .home-main > .news-home-section {
         order: 5;
+      }
+      /* PAGINATION-CENTER: .pagination-full is a direct .home-shell grid child (not
+         dissolved by display:contents), so it takes an explicit order — slot 6, right
+         after the cards (5) and before tier2(7)/the sidebar panels(8-10). */
+      .pagination-full {
+        order: 6;
       }
       /* DOMAIN-SECTION-REVAMP: #feedDomainSections was relocated OUT of .home-shell to
          a full-width sibling below it, so it is no longer a grid child here and its
