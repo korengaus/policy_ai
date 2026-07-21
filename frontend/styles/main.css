@@ -1985,6 +1985,15 @@
        mask the track line running behind them). 3 columns → 1 at <=960px (the
        shared block adds .verify-how-steps to its 1fr group and hides the
        arrows + track). */
+    /* VERIFY-STRIP-RELOCATE: full-width wrapper for the relocated "이렇게 검증합니다"
+       strip — a sibling below the 2-col .home-shell, above the domain sections. Like
+       .domain-sections-full it carries no width of its own, so its edges align to the
+       page content column (not the browser edge); a small top margin separates it from
+       the card grid above (the .verify-how card's own bottom margin spaces the domain
+       sections below). */
+    .verify-how-full {
+      margin-top: 8px;
+    }
     .verify-how {
       margin: 18px 0 24px;
       padding: 30px 30px 24px;
@@ -4830,9 +4839,12 @@
       #hotTopicsTop {
         order: 1;
       }
-      #verifyHowSection {
-        order: 2;
-      }
+      /* VERIFY-STRIP-RELOCATE: #verifyHowSection was moved OUT of .home-shell to a
+         full-width sibling below it (above the domain sections), so its old order:2
+         rule was inert — removed. As a block sibling after .home-shell (and before
+         .domain-sections-full) it renders after the promoted sidebar panels, giving
+         mobile: hero -> 확산 Top5 -> sort -> cards+pagination -> 최근7일 -> 검증등급 ->
+         제보하기 -> 이렇게 검증합니다 strip -> domain sections last. */
       #trendingPanel {
         order: 3;
       }
