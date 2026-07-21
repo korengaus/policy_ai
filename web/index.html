@@ -177,22 +177,9 @@
       color: var(--brand-ink);
       text-decoration: underline;
     }
-    .utility-report {
-      display: inline-block;
-      padding: 5px 12px;
-      border-radius: var(--radius-sm);
-      background: var(--brand);
-      color: #fff;
-      text-decoration: none;
-      font-weight: 650;
-    }
-    .utility-report:hover {
-      background: var(--brand-ink);
-      /* DESIGN-3A5b: keep the text white on hover. Without this, the base
-         a:hover (color: var(--brand-ink)) wins and the text matches the darkened
-         background — making "제보하기" invisible on hover. */
-      color: #fff;
-    }
+    /* NAV-EMPHASIS: the old .utility-report filled blue button (padding 5px 12px,
+       radius, --brand background, white text, weight 650) was removed — 제보하기
+       is now a plain .utility-link so the header nav reads uniform. */
 
     /* DESIGN-3A: domain tabs row directly under the brand. The tabs sit left,
        the 검증 등급 안내 link right (anchors to #methodology). #categoryTabs keeps
@@ -300,6 +287,29 @@
       stroke-width: 1.8;
       stroke-linecap: round;
       stroke-linejoin: round;
+    }
+    /* NAV-EMPHASIS: 연결지도 is the primary entrance (brainmap). Restrained
+       brand-color emphasis — brand-blue text + icon (currentColor) against the
+       neutral neighbors, NO box/pill/background. Same signal in the header and
+       the 3-step strip footer row. */
+    .utility-link--map {
+      color: var(--brand);
+    }
+    .utility-link--map:hover {
+      color: var(--brand-ink);
+    }
+    .utility-link--map .utility-icon {
+      width: 16px;
+      height: 16px;
+    }
+    .verify-how-link--map {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .verify-how-link--map .utility-icon {
+      width: 14px;
+      height: 14px;
     }
 
     .topbar {
@@ -4928,15 +4938,16 @@
            The two SITE-UNDERSTANDING links (검증 방법 / 등급·상태 안내) live in the tab
            row below. 연결지도 is emphasised by POSITION (first) + a small line icon
            (#ic-network, a unique network-graph glyph — distinct from the shared
-           #ic-workflow used on About) — no color highlight, so the header keeps its
-           neutral tone. -->
+           #ic-workflow used on About) + NAV-EMPHASIS brand-blue text/icon
+           (.utility-link--map) — contrast only, no box/pill, so the header keeps
+           its restrained tone. -->
       <nav class="utility-right" aria-label="사이트 메뉴">
-        <a class="utility-link utility-link--icon" href="/web/brainmap.html"><svg class="utility-icon" aria-hidden="true"><use href="#ic-network"/></svg>연결지도</a>
+        <a class="utility-link utility-link--icon utility-link--map" href="/web/brainmap.html"><svg class="utility-icon" aria-hidden="true"><use href="#ic-network"/></svg>연결지도</a>
         <a class="utility-link" href="/web/weekly.html">주간 리포트</a>
         <a class="utility-link" href="/web/faded.html">후속 끊긴 주장</a>
         <a class="utility-link" href="#about">About</a>
         <a class="utility-link" href="mailto:contact@tickedin.org">Contact</a>
-        <a class="utility-report" href="mailto:contact@tickedin.org">제보하기</a>
+        <a class="utility-link" href="mailto:contact@tickedin.org">제보하기</a>
       </nav>
     </div>
     <header class="topbar">
@@ -5130,7 +5141,7 @@
           <nav class="verify-how-links" aria-label="자세히 보기">
             <a class="verify-how-link" href="#methodology">검증 방법 전체 →</a>
             <a class="verify-how-link" href="#gradeStatus">등급·상태 안내 →</a>
-            <a class="verify-how-link" href="/web/brainmap.html">연결지도 →</a>
+            <a class="verify-how-link verify-how-link--map" href="/web/brainmap.html"><svg class="utility-icon" aria-hidden="true"><use href="#ic-network"/></svg>연결지도 →</a>
           </nav>
         </section>
         <!-- DESIGN-C3h-1c: feed SORT control — PERSISTENT static node (#hotTopicsSort id

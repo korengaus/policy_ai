@@ -103,15 +103,16 @@
            The two SITE-UNDERSTANDING links (검증 방법 / 등급·상태 안내) live in the tab
            row below. 연결지도 is emphasised by POSITION (first) + a small line icon
            (#ic-network, a unique network-graph glyph — distinct from the shared
-           #ic-workflow used on About) — no color highlight, so the header keeps its
-           neutral tone. -->
+           #ic-workflow used on About) + NAV-EMPHASIS brand-blue text/icon
+           (.utility-link--map) — contrast only, no box/pill, so the header keeps
+           its restrained tone. -->
       <nav class="utility-right" aria-label="사이트 메뉴">
-        <a class="utility-link utility-link--icon" href="/web/brainmap.html"><svg class="utility-icon" aria-hidden="true"><use href="#ic-network"/></svg>연결지도</a>
+        <a class="utility-link utility-link--icon utility-link--map" href="/web/brainmap.html"><svg class="utility-icon" aria-hidden="true"><use href="#ic-network"/></svg>연결지도</a>
         <a class="utility-link" href="/web/weekly.html">주간 리포트</a>
         <a class="utility-link" href="/web/faded.html">후속 끊긴 주장</a>
         <a class="utility-link" href="#about">About</a>
         <a class="utility-link" href="mailto:contact@tickedin.org">Contact</a>
-        <a class="utility-report" href="mailto:contact@tickedin.org">제보하기</a>
+        <a class="utility-link" href="mailto:contact@tickedin.org">제보하기</a>
       </nav>
     </div>
     <header class="topbar">
@@ -305,7 +306,7 @@
           <nav class="verify-how-links" aria-label="자세히 보기">
             <a class="verify-how-link" href="#methodology">검증 방법 전체 →</a>
             <a class="verify-how-link" href="#gradeStatus">등급·상태 안내 →</a>
-            <a class="verify-how-link" href="/web/brainmap.html">연결지도 →</a>
+            <a class="verify-how-link verify-how-link--map" href="/web/brainmap.html"><svg class="utility-icon" aria-hidden="true"><use href="#ic-network"/></svg>연결지도 →</a>
           </nav>
         </section>
         <!-- DESIGN-C3h-1c: feed SORT control — PERSISTENT static node (#hotTopicsSort id
