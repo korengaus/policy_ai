@@ -348,12 +348,11 @@
              here (below the card grid) to directly under the hero (#hotTopicsTop),
              so first-time visitors meet it before the feed. See the section above. -->
 
-        <!-- DESIGN-C3h-2: per-domain grouped sections — filled by renderDomainSections()
-             on the 전체 tab ONLY (one section per domain that has cards, top-3 by 뜨는순
-             with a heavy var(--rule-strong) rule). Emptied on single-domain tabs (where
-             나머지 뉴스 #tier2Section shows instead). Cards render via renderTopicCardHtml
-             verbatim; the .home-main card-open delegation covers them. -->
-        <div id="feedDomainSections"></div>
+        <!-- DOMAIN-SECTION-REVAMP: #feedDomainSections was RELOCATED out of .home-main
+             to a FULL-PAGE-WIDTH sibling immediately after .home-shell (below), so the
+             per-domain sections span the full content width (4 cards across) while the
+             hero + main grid + sidebar above stay 2-col. Its id is unchanged
+             (getElementById + the delegated click listener still resolve). -->
 
         <!-- HOMEPAGE-TIERED: TIER 2 "나머지 뉴스" — concise cards for items ranked
              beyond the tier-1 cut. #domainSections (formerly the per-domain browse
@@ -492,6 +491,18 @@
           <div class="report-contact-note">제보 contact@tickedin.org</div>
         </section>
       </aside>
+    </div>
+
+    <!-- DOMAIN-SECTION-REVAMP: per-domain grouped sections — filled by
+         renderDomainSections() on the 전체 tab ONLY (one section per domain that has
+         cards, top-4 by 뜨는순 in TAB_ORDER). RELOCATED here (full-page-width sibling
+         after .home-shell) so the sections span the full content width at 4-across;
+         the .domain-sections-full wrapper aligns its edges to the page content width
+         (matches .home-shell), NOT the browser edges. Emptied on single-domain tabs.
+         Cards render via renderTopicCardHtml verbatim; the #homeScreen-level click
+         delegation covers them (id unchanged). -->
+    <div class="domain-sections-full">
+      <div id="feedDomainSections"></div>
     </div>
 
     <!-- DESIGN-DETAIL-3: #selectedIssueIntro / #reportActions / #results were

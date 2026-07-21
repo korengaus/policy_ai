@@ -2418,14 +2418,19 @@
       // HOME-SECTION-FIX A1: source each section from its OWN per-domain fetch
       // (domainSectionCache), not the global recent pool — so every domain with
       // rows gets a section and its real top-3 (fixes 보건=1 and missing 교육).
-      return DOMAIN_ORDER.map((d) => {
+      // DOMAIN-SECTION-REVAMP: iterate TAB_ORDER (corpus-volume-descending) so the
+      // sections match the top tabs. "전체" is not a real domain (skip it); the
+      // remaining keys — incl. "기타-미분류" last — are identical to DOMAIN_ORDER's,
+      // so domainSectionCache + domainDisplayLabel resolve unchanged. DOMAIN_ORDER
+      // itself is untouched (still drives ensureDomainSectionsLoaded's fetch loop).
+      return TAB_ORDER.filter((d) => d !== "전체").map((d) => {
         const results = domainSectionCache.get(d);
         if (!results || !results.length) return "";
         const domainCards = results.map((result, index) =>
           topicCardFromResult(result, index, "server"));
         if (!domainCards.length) return "";
         const label = domainDisplayLabel(d);
-        const top3 = sortTopicCards(domainCards, "뜨는순").slice(0, 3);
+        const top3 = sortTopicCards(domainCards, "뜨는순").slice(0, 4);
         return `<section class="domain-section">`
           + `<div class="domain-section-head">`
           + `<div class="domain-section-titles">`
@@ -7950,9 +7955,18 @@
     if (feedDomainSectionsEl) {
       feedDomainSectionsEl.addEventListener("click", (event) => {
         const btn = event.target.closest("[data-domain]");
-        if (!btn) return;
-        setActiveDomain(btn.dataset.domain || "전체");
-        window.scrollTo({ top: 0, behavior: "smooth" });
+        if (btn) {
+          setActiveDomain(btn.dataset.domain || "전체");
+          window.scrollTo({ top: 0, behavior: "smooth" });
+          return;
+        }
+        // DOMAIN-SECTION-REVAMP: #feedDomainSections was relocated OUT of .home-main,
+        // so the .home-main card-open delegation (below) no longer reaches these
+        // cards — bind the SAME closest("[data-topic-source]") → openTopicCard
+        // pattern here so section cards still open the detail view.
+        const card = event.target.closest("[data-topic-source]");
+        if (!card) return;
+        openTopicCard(card);
       });
     }
     if (hotTopicsSortEl) {

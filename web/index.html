@@ -1792,6 +1792,14 @@
     }
     @media (max-width: 640px) {
       .recent-viewed-strip .recent-viewed-item { width: 200px; }
+      /* DOMAIN-SECTION-REVAMP: domain sections collapse 2 -> 1 column on phones.
+         id-scoped so this beats the plain .latest-checks-row repeat(2) rule in the
+         later <=960px block (which also matches at <=640px) regardless of source
+         order. .latest-checks-row lives only inside #feedDomainSections, so the
+         scope is equivalent. */
+      #feedDomainSections .latest-checks-row {
+        grid-template-columns: repeat(1, minmax(0, 1fr));
+      }
     }
 
     /* DESIGN-UNIFY: quiet "back to top" text link at the detail bottom (not a heavy
@@ -2683,10 +2691,31 @@
       padding-top: 10px;
     }
 
+    /* DOMAIN-SECTION-REVAMP: #feedDomainSections is a full-page-width sibling below
+       the 2-col .home-shell. The wrapper carries NO width of its own — it inherits
+       the page content column from its #homeScreen ancestor, so its left/right edges
+       line up with .home-shell / the header, not the browser edges. Only a little top
+       separation from the 2-col block. */
+    .domain-sections-full {
+      margin-top: 8px;
+    }
+    /* DOMAIN-SECTION-REVAMP: per-domain section card grid — 4 across on the now
+       full-width row (was 3 in the narrower left column). Used ONLY by the domain
+       sections. Collapses 4 -> 2 (<=960px) -> 1 (<=640px) below. */
     .latest-checks-row {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 12px;
+    }
+    /* DOMAIN-SECTION-REVAMP: the 4-across grid can wrap, so the "+ .topic-card"
+       left-border divider would land mid-row on wrapped columns. Drop it inside the
+       domain sections and let the grid gap separate the cards. */
+    #feedDomainSections .latest-checks-row > .topic-card + .topic-card {
+      border-left: none;
+      padding-left: 0;
+    }
+    #feedDomainSections .latest-checks-row > .topic-card + .topic-card:hover {
+      padding-left: 0;
     }
     /* the row cards drop their bottom divider (the row groups them); the
        single-column rest below keeps its dividers. */
@@ -4623,7 +4652,6 @@
       .metrics,
       .topic-card-grid,
       .feed-hero-band,
-      .latest-checks-row,
       .verify-how-steps,
       .public-source-grid,
       .selected-issue-meta,
@@ -4660,6 +4688,11 @@
         padding-left: 0;
       }
 
+      /* DOMAIN-SECTION-REVAMP: the full-width domain sections drop 4 -> 2 columns
+         here (1 column at <=640px below). */
+      .latest-checks-row {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
       /* DESIGN-C3e FIX 1: the 오늘의 검증 row is single-column here, so drop the
          between-card vertical rule (it would be a stray left border on stacked cards). */
       .latest-checks-row > .topic-card + .topic-card {
@@ -4837,9 +4870,12 @@
       .home-main > .news-home-section {
         order: 5;
       }
-      #feedDomainSections {
-        order: 6;
-      }
+      /* DOMAIN-SECTION-REVAMP: #feedDomainSections was relocated OUT of .home-shell to
+         a full-width sibling below it, so it is no longer a grid child here and its
+         old order:6 rule was inert — removed. As a block sibling after .home-shell it
+         renders LAST naturally (below the promoted sidebar panels 8/9/10), giving the
+         mobile order: hero -> strip -> 확산 Top5 -> sort -> cards+pagination ->
+         최근 7일 -> 검증 등급 -> 제보하기 -> domain sections. */
       /* id selector — beats the .news-home-section order:4 above (#tier2Section
          carries that class too) and keeps 나머지 뉴스 last in the feed. */
       #tier2Section {
@@ -5183,12 +5219,11 @@
              here (below the card grid) to directly under the hero (#hotTopicsTop),
              so first-time visitors meet it before the feed. See the section above. -->
 
-        <!-- DESIGN-C3h-2: per-domain grouped sections — filled by renderDomainSections()
-             on the 전체 tab ONLY (one section per domain that has cards, top-3 by 뜨는순
-             with a heavy var(--rule-strong) rule). Emptied on single-domain tabs (where
-             나머지 뉴스 #tier2Section shows instead). Cards render via renderTopicCardHtml
-             verbatim; the .home-main card-open delegation covers them. -->
-        <div id="feedDomainSections"></div>
+        <!-- DOMAIN-SECTION-REVAMP: #feedDomainSections was RELOCATED out of .home-main
+             to a FULL-PAGE-WIDTH sibling immediately after .home-shell (below), so the
+             per-domain sections span the full content width (4 cards across) while the
+             hero + main grid + sidebar above stay 2-col. Its id is unchanged
+             (getElementById + the delegated click listener still resolve). -->
 
         <!-- HOMEPAGE-TIERED: TIER 2 "나머지 뉴스" — concise cards for items ranked
              beyond the tier-1 cut. #domainSections (formerly the per-domain browse
@@ -5327,6 +5362,18 @@
           <div class="report-contact-note">제보 contact@tickedin.org</div>
         </section>
       </aside>
+    </div>
+
+    <!-- DOMAIN-SECTION-REVAMP: per-domain grouped sections — filled by
+         renderDomainSections() on the 전체 tab ONLY (one section per domain that has
+         cards, top-4 by 뜨는순 in TAB_ORDER). RELOCATED here (full-page-width sibling
+         after .home-shell) so the sections span the full content width at 4-across;
+         the .domain-sections-full wrapper aligns its edges to the page content width
+         (matches .home-shell), NOT the browser edges. Emptied on single-domain tabs.
+         Cards render via renderTopicCardHtml verbatim; the #homeScreen-level click
+         delegation covers them (id unchanged). -->
+    <div class="domain-sections-full">
+      <div id="feedDomainSections"></div>
     </div>
 
     <!-- DESIGN-DETAIL-3: #selectedIssueIntro / #reportActions / #results were
@@ -8412,14 +8459,19 @@
       // HOME-SECTION-FIX A1: source each section from its OWN per-domain fetch
       // (domainSectionCache), not the global recent pool — so every domain with
       // rows gets a section and its real top-3 (fixes 보건=1 and missing 교육).
-      return DOMAIN_ORDER.map((d) => {
+      // DOMAIN-SECTION-REVAMP: iterate TAB_ORDER (corpus-volume-descending) so the
+      // sections match the top tabs. "전체" is not a real domain (skip it); the
+      // remaining keys — incl. "기타-미분류" last — are identical to DOMAIN_ORDER's,
+      // so domainSectionCache + domainDisplayLabel resolve unchanged. DOMAIN_ORDER
+      // itself is untouched (still drives ensureDomainSectionsLoaded's fetch loop).
+      return TAB_ORDER.filter((d) => d !== "전체").map((d) => {
         const results = domainSectionCache.get(d);
         if (!results || !results.length) return "";
         const domainCards = results.map((result, index) =>
           topicCardFromResult(result, index, "server"));
         if (!domainCards.length) return "";
         const label = domainDisplayLabel(d);
-        const top3 = sortTopicCards(domainCards, "뜨는순").slice(0, 3);
+        const top3 = sortTopicCards(domainCards, "뜨는순").slice(0, 4);
         return `<section class="domain-section">`
           + `<div class="domain-section-head">`
           + `<div class="domain-section-titles">`
@@ -13944,9 +13996,18 @@
     if (feedDomainSectionsEl) {
       feedDomainSectionsEl.addEventListener("click", (event) => {
         const btn = event.target.closest("[data-domain]");
-        if (!btn) return;
-        setActiveDomain(btn.dataset.domain || "전체");
-        window.scrollTo({ top: 0, behavior: "smooth" });
+        if (btn) {
+          setActiveDomain(btn.dataset.domain || "전체");
+          window.scrollTo({ top: 0, behavior: "smooth" });
+          return;
+        }
+        // DOMAIN-SECTION-REVAMP: #feedDomainSections was relocated OUT of .home-main,
+        // so the .home-main card-open delegation (below) no longer reaches these
+        // cards — bind the SAME closest("[data-topic-source]") → openTopicCard
+        // pattern here so section cards still open the detail view.
+        const card = event.target.closest("[data-topic-source]");
+        if (!card) return;
+        openTopicCard(card);
       });
     }
     if (hotTopicsSortEl) {
