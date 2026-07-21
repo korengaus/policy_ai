@@ -2743,6 +2743,13 @@
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
       overflow: hidden;
+      /* MOBILE-OVERFLOW-FIX: break a long unbreakable token (long digit run,
+         English/ticker, URL, bracketed source tag) so it wraps instead of
+         inflating the card's min-content width past the mobile viewport. Only
+         engages when a token would otherwise overflow — normal Korean/latin
+         wrapping is unaffected; the line-clamp/ellipsis then works as intended. */
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
 
     /* HOMEPAGE-TIERED: summary returns on TIER-1 (detailed) cards only; concise
@@ -2755,6 +2762,9 @@
       -webkit-line-clamp: 3;
       -webkit-box-orient: vertical;
       overflow: hidden;
+      /* MOBILE-OVERFLOW-FIX: same long-token wrap as .topic-card-title. */
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
 
     .topic-card-meta {
@@ -4631,8 +4641,6 @@
     @media (max-width: 960px) {
       .controls,
       .metrics,
-      .topic-card-grid,
-      .feed-hero-band,
       .verify-how-steps,
       .public-source-grid,
       .selected-issue-meta,
@@ -4647,6 +4655,15 @@
       .verification-intro,
       .verification-grid {
         grid-template-columns: 1fr;
+      }
+      /* MOBILE-OVERFLOW-FIX: the card grid + hero band stack to ONE column here,
+         but with minmax(0,1fr) (not bare 1fr = minmax(auto,1fr)) so the track's
+         min-track is 0 — the card can shrink below its content's min-content and
+         the title/summary wrap + ellipsis engage instead of a long token pushing
+         the card past the mobile viewport. Mirrors the base minmax(0,1fr). */
+      .topic-card-grid,
+      .feed-hero-band {
+        grid-template-columns: minmax(0, 1fr);
       }
       /* VERIFY-STEPS-REDESIGN: the how-we-verify steps stack to one column here, so
          hide the horizontal flow arrows (a sideways arrow between stacked steps reads
