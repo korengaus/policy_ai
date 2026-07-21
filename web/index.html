@@ -7423,16 +7423,25 @@
       return labels[value] || formatTechnicalLabel(value);
     }
 
-    function renderSourceReliabilitySummary(summary) {
+    function renderSourceReliabilitySummary(summary, cardHasGenuineOfficial = true) {
       const data = summary || {};
       const topTitle = userFacingReportText(publicInstitutionName(data.top_source_title || "-"), "-");
       const topUrl = data.top_source_url || "";
       const mismatchReasons = Array.isArray(data.official_mismatch_reasons)
         ? formatDiagnosticText(formatList(data.official_mismatch_reasons))
         : "";
-      const topHtml = topUrl
-        ? `<a href="${escapeHtml(safeUrl(topUrl))}" target="_blank" rel="noopener noreferrer">${escapeHtml(topTitle)}</a>`
-        : escapeHtml(topTitle);
+      // OFFICIAL-EVIDENCE-DISPLAY-HONESTY STEP 1: on a card WITHOUT genuine official
+      // support (the same has_genuine_official_support predicate the honest top-line
+      // uses), the stored top_source_title is a REJECTED/unrelated candidate — do not
+      // present it as "최고 신뢰 출처". Reuse the existing missing-basis wording
+      // ("공식 상세 근거 부족", the same string the summary/limitation paths use).
+      // Neutral counts below stay; only the title/authority claim is gated.
+      // Genuine cards render exactly as before.
+      const topHtml = (cardHasGenuineOfficial === false)
+        ? escapeHtml("공식 상세 근거 부족")
+        : (topUrl
+          ? `<a href="${escapeHtml(safeUrl(topUrl))}" target="_blank" rel="noopener noreferrer">${escapeHtml(topTitle)}</a>`
+          : escapeHtml(topTitle));
       // DESIGN-DETAIL-5c: unified to the shared label+value deflist (counts incl. 0 kept).
       return `
         ${advDefList([
@@ -7831,7 +7840,11 @@
       }).join("")}</div>`;
     }
 
-    function renderSourceCandidates(sourceCandidates) {
+    // OFFICIAL-EVIDENCE-DISPLAY-HONESTY: cardHasGenuineOfficial (the SAME card-level
+    // has_genuine_official_support predicate the top-line uses) gates the candidate
+    // badges + the primary_evidence role suffix below. Default true = legacy callers
+    // unchanged.
+    function renderSourceCandidates(sourceCandidates, cardHasGenuineOfficial = true) {
       // DESIGN-DETAIL-5c: tame the candidate scroll-wall WITHOUT losing any candidate
       // or field. ALL candidates are kept (no slice/truncation) — each becomes its own
       // <details> COLLAPSED by default, with a one-line at-a-glance summary
@@ -7849,7 +7862,14 @@
           ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a>`
           : title;
         const exclusionLabel = sourceExclusionLabel(source);
-        const trace = sourceTraceability(source);
+        const trace = sourceTraceability(source, {}, cardHasGenuineOfficial);
+        // STEP 3: on a non-genuine card the "핵심 근거" (primary_evidence) role suffix
+        // is suppressed to the EXISTING context wording ("맥락 참고") so no rejected
+        // candidate reads as core evidence. Other roles + genuine cards unchanged.
+        const roleLabel = (role) => (
+          (cardHasGenuineOfficial === false && role === "primary_evidence")
+            ? formatVerificationRole("context_only")
+            : formatVerificationRole(role));
         const domain = sourceDomain(source.url || "");
         const publisher = source.publisher ? publicInstitutionName(source.publisher) : "";
         // One-line summary (populated bits only). Falls back to the candidate title.
@@ -7863,7 +7883,7 @@
           // takes the 근거 수준 label — NOT a bare "신뢰도", which on this same
           // screen already means the 0-5 source grade. No "/5" here: this is 0-100.
           source.reliability_score == null ? "" : `근거 수준 ${source.reliability_score}`,
-          source.verification_role ? formatVerificationRole(source.verification_role) : "",
+          source.verification_role ? roleLabel(source.verification_role) : "",
         ].filter((b) => b && String(b).trim() && String(b).trim() !== "-");
         const summaryText = summaryBits.length
           ? summaryBits.join(" · ")
@@ -7891,7 +7911,7 @@
           // source-level grade, kept distinct as 출처 신뢰도 등급.
           ["근거 수준 점수", source.reliability_score == null ? "" : `${source.reliability_score}`],
           ["출처 신뢰도 등급", source.reliability_level ? formatReliabilityLevel(source.reliability_level) : ""],
-          ["검증 역할", source.verification_role ? formatVerificationRole(source.verification_role) : ""],
+          ["검증 역할", source.verification_role ? roleLabel(source.verification_role) : ""],
           ["도메인", domain || ""],
           ["공개 표시 판단", userFacingReportText(trace.explanation, "")],
         ]);
@@ -10474,7 +10494,7 @@
       return score === undefined || score === null || score === "" ? "-" : score;
     }
 
-    function sourceTraceability(source, reliability = {}) {
+    function sourceTraceability(source, reliability = {}, cardHasGenuineOfficial = null) {
       const exclusion = sourceExclusionLabel(source, reliability);
       if (exclusion) {
         return { label: "제외/불일치", className: "trace-excluded", explanation: exclusion };
@@ -10482,15 +10502,21 @@
       if (source?.source_origin === "selected_news" || source?.evidence_type === "news_context") {
         return { label: "뉴스 원문", className: "trace-news", explanation: "분석 대상이 된 원문 기사입니다." };
       }
+      // OFFICIAL-EVIDENCE-DISPLAY-HONESTY STEP 2: when the CARD-level predicate says
+      // no genuine official support (explicit false — null keeps legacy callers
+      // byte-identical), per-candidate strong badges cannot exceed the card's honest
+      // top-line: the 직접/맥락 tiers are skipped and official-like candidates fall
+      // through to the EXISTING weak tier ("공식 약한 후보"). No new vocabulary.
+      const clampToWeak = cardHasGenuineOfficial === false;
       const classification = String(source?.official_evidence_classification || source?.official_direct_match_classification || "");
       const score = numberValue(
         source?.official_evidence_score ?? source?.official_final_direct_match_score ?? source?.official_body_match_score,
         0
       );
-      if (classification === "strong_official_direct_support" || (isOfficialLikeSource(source) && source?.official_body_match && score >= 75)) {
+      if (!clampToWeak && (classification === "strong_official_direct_support" || (isOfficialLikeSource(source) && source?.official_body_match && score >= 75))) {
         return { label: "공식 직접 근거", className: "trace-direct", explanation: "공식 상세문서 본문이 기사 핵심 주장과 직접 연결됩니다." };
       }
-      if (classification === "medium_official_contextual_support" || (isOfficialLikeSource(source) && source?.official_body_match)) {
+      if (!clampToWeak && (classification === "medium_official_contextual_support" || (isOfficialLikeSource(source) && source?.official_body_match))) {
         return { label: "공식 맥락 근거", className: "trace-context", explanation: "공식 상세문서가 같은 기관이나 정책 맥락을 일부 뒷받침합니다." };
       }
       if (isOfficialLikeSource(source)) {
@@ -11088,6 +11114,13 @@
       const evidenceExtractionSummary = verification.evidence_extraction_summary || {};
       const contradictionSummary = verification.contradiction_summary || result?.contradiction_summary || {};
       const debugSummary = verification.debug_summary || result?.debug_summary || {};
+      // OFFICIAL-EVIDENCE-DISPLAY-HONESTY: ONE card-level gate shared by STEPS 1-3
+      // (최고 신뢰 출처 / candidate badges / 검증 역할 suffix) — the SAME
+      // has_genuine_official_support predicate (+ official_body_matches fallback)
+      // the honest top-line "공식 출처 상태" already uses (topicCardFromResult).
+      const cardHasGenuineOfficial = (typeof sourceReliabilitySummary.has_genuine_official_support === "boolean")
+        ? sourceReliabilitySummary.has_genuine_official_support
+        : (numberValue(debugSummary.official_body_matches, 0) > 0);
       const strength = debugSummary.evidence_strength_summary
         || evidenceExtractionSummary.evidence_strength_summary
         || {};
@@ -11107,6 +11140,9 @@
         sourceQueries: verification.source_queries || result?.source_queries || [],
         sourceCandidates: verification.source_candidates || result?.source_candidates || [],
         sourceReliabilitySummary,
+        // OFFICIAL-EVIDENCE-DISPLAY-HONESTY: the shared STEPS 1-3 gate rides the
+        // parts object to the detail renderer's destructure.
+        cardHasGenuineOfficial,
         evidenceSnippets: verification.evidence_snippets || result?.evidence_snippets || [],
         evidenceExtractionSummary,
         contradictionChecks: verification.contradiction_checks || result?.contradiction_checks || [],
@@ -11644,6 +11680,7 @@
           sourceQueries,
           sourceCandidates,
           sourceReliabilitySummary,
+          cardHasGenuineOfficial,
           evidenceSnippets,
           evidenceExtractionSummary,
           contradictionChecks,
@@ -11760,7 +11797,7 @@
           ),
           renderCollapsibleSection(
             "출처와 공식 근거",
-            `${renderSourceReliabilitySummary(sourceReliabilitySummary)}${renderSourceCandidates(sourceCandidates)}${renderSourceQueries(sourceQueries)}`,
+            `${renderSourceReliabilitySummary(sourceReliabilitySummary, cardHasGenuineOfficial)}${renderSourceCandidates(sourceCandidates, cardHasGenuineOfficial)}${renderSourceQueries(sourceQueries)}`,
             false,
             "공식기관 후보와 언론 출처가 실제 주장 검증에 얼마나 도움이 되는지 보여줍니다."
           ),
@@ -12625,6 +12662,48 @@
       return best.length >= 10 ? best : "";
     }
 
+    // OFFICIAL-EVIDENCE-DISPLAY-HONESTY STEP 4 — deictic body-reference lead
+    // detection (DISPLAY ONLY, mirrors the quote-lead branch). A deictic lead is
+    // an article sentence that back-references its own body ("…이같이 결정했다")
+    // and carries NO substantive quantity — a bare "14일/제14차" date/ordinal does
+    // not count; a unit-bearing amount (%, 원, 억/조/만, 명, 건, 가구, 배) does.
+    // Detection never rewrites — it only lets the selector prefer an EXISTING
+    // quantity-bearing claim from the same card's extracted pool.
+    const CLAIM_DEICTIC_MARK = /(이같이|이\s?같이|이와\s?같이|이렇게\s*결정)/;
+    const CLAIM_QUANTITY = /\d[\d,.]*\s*(%|퍼센트|원|억|조|만(?![가-힣])|명(?![가-힣])|건(?![가-힣])|가구|배(?![가-힣]))/;
+
+    function claimIsDeicticLead(text) {
+      const value = String(text || "");
+      if (!value) return false;
+      return CLAIM_DEICTIC_MARK.test(value) && !CLAIM_QUANTITY.test(value);
+    }
+
+    // The first EXISTING claim in the card's own normalized_claims/claims pool
+    // that carries a real quantity and survives the same sanitize safety —
+    // reselection material for a deictic lead. "" when none (keep the original;
+    // never fabricate).
+    function quantitativeClaimForReselection(result) {
+      const verification = result?.verification_card || result || {};
+      const normalized = Array.isArray(verification.normalized_claims)
+        ? verification.normalized_claims
+        : (Array.isArray(result?.normalized_claims) ? result.normalized_claims : []);
+      const claimsArr = Array.isArray(verification.claims)
+        ? verification.claims
+        : (Array.isArray(result?.claims) ? result.claims : []);
+      const pool = normalized.map((c) => c && c.claim_text)
+        .concat(claimsArr)
+        .map((c) => String(c || "").trim())
+        .filter(Boolean);
+      for (const raw of pool) {
+        const cleaned = sanitizeClaimText(raw, result);
+        if (cleaned && CLAIM_QUANTITY.test(cleaned)
+            && !claimIsDeicticLead(cleaned) && !claimIsQuoteLead(cleaned)) {
+          return raw;
+        }
+      }
+      return "";
+    }
+
     // CLAIM-DISPLAY-FIX (Phase 2, option a): the substantive-claim pool the primary
     // can PROMOTE from when its aligned-candidate gate rejects everything. Reads the
     // SAME already-extracted fields "그 밖의 핵심 주장" (contentLead) shows —
@@ -12699,6 +12778,18 @@
           if (stripped && claimLooksAlignedWithResult(result, stripped)) {
             claim = stripped;
           }
+        }
+      }
+      // OFFICIAL-EVIDENCE-DISPLAY-HONESTY STEP 4: a deictic body-reference lead
+      // ("…이같이 결정했다" — back-reference, no quantity) reads as content-free.
+      // Reselect the first quantity-bearing claim from the SAME card's extracted
+      // pool (e.g. "…3.7% 인상"), mirroring the quote-lead branch above. Same
+      // sanitize + cautious-prefix path downstream; no alternative -> keep the
+      // original. Reselection only — never rewrites or fabricates.
+      if (claim && claimIsDeicticLead(claim)) {
+        const quantAlt = sanitizeClaimText(quantitativeClaimForReselection(result), result);
+        if (quantAlt && !claimIsDeicticLead(quantAlt)) {
+          claim = quantAlt;
         }
       }
       if (!claim) {
