@@ -68,13 +68,32 @@
   }
   .map-home:hover { text-decoration: underline; }
   .map-reset {
-    margin-left: auto;
+    /* BRAINMAP-FEATURES: margin-left:auto moved to .map-search so the whole
+       search+count+spread+리셋 group right-aligns together. */
     font-size: 12.5px; font-weight: 600; padding: 5px 13px;
     border: 1px solid var(--line); border-radius: var(--radius-sm);
     background: var(--paper); color: var(--slate); cursor: pointer;
     font-family: inherit;
   }
   .map-reset:hover { color: var(--ink); border-color: var(--muted); }
+  /* BRAINMAP-FEATURES: search input + spread dropdown share the 리셋 button's
+     calm chrome (site tokens). The count is a muted live annotation. */
+  .map-search {
+    margin-left: auto;
+    font-size: 12.5px; padding: 5px 11px; width: 170px;
+    border: 1px solid var(--line); border-radius: var(--radius-sm);
+    background: var(--paper); color: var(--ink); font-family: inherit;
+  }
+  .map-search:focus { outline: 2px solid var(--brand); outline-offset: 1px; }
+  .search-count { font-size: 12px; color: var(--slate); white-space: nowrap; }
+  .map-spread {
+    font-size: 12.5px; font-weight: 600; padding: 5px 9px;
+    border: 1px solid var(--line); border-radius: var(--radius-sm);
+    background: var(--paper); color: var(--slate); cursor: pointer;
+    font-family: inherit;
+  }
+  .map-spread:hover { color: var(--ink); border-color: var(--muted); }
+  .map-stats { margin-top: 8px; font-size: 12px; color: var(--muted); }
   .head-row { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
   .map-title {
     font-size: 22px; font-weight: 500; letter-spacing: -0.02em; color: var(--ink);
@@ -141,6 +160,18 @@
   </div>
   <div class="head-row">
     <span class="map-title">뉴스 연결지도</span>
+    <!-- BRAINMAP-FEATURES: keyword search (substring over node titles, dims
+         non-matches via the SAME isActive mechanism the domain filter uses) +
+         a spread-size dropdown (cluster outlet_count threshold). Circulation
+         vocabulary only — 일치/연결/매체, never verdict words. -->
+    <input type="search" id="mapSearch" class="map-search" placeholder="제목 검색" autocomplete="off" aria-label="노드 제목 검색">
+    <span id="searchCount" class="search-count" aria-live="polite"></span>
+    <select id="spreadFilter" class="map-spread" aria-label="확산 규모 필터">
+      <option value="0" selected>확산 규모: 전체</option>
+      <option value="3">3개 매체 이상 보도</option>
+      <option value="5">5개 매체 이상 보도</option>
+      <option value="10">10개 매체 이상 보도</option>
+    </select>
     <button type="button" id="resetView" class="map-reset">리셋</button>
   </div>
   <p class="map-subtitle">
@@ -148,6 +179,9 @@
     가까이 모인 점은 비슷한 내용이 여러 매체에 보도되었다는 뜻일 뿐, 사실 여부와는 무관합니다.
   </p>
   <div class="legend" id="legend" aria-label="범례"></div>
+  <!-- BRAINMAP-FEATURES: one-line numeric stats over the FULL loaded graph
+       (not the filtered view) — circulation counts only. -->
+  <div class="map-stats" id="mapStats"></div>
 </header>
 <main class="map-body">
   <canvas id="map"></canvas>
@@ -204,6 +238,17 @@
   // (no new fetch, no data change). null = show all; {type:'domain', value}
   // isolates one domain; {type:'market'} isolates market_commercial nodes.
   var activeFilter = null;
+  // BRAINMAP-FEATURES: two ADDITIONAL client-side conditions that compose with
+  // the domain filter via AND in isActive — a node stays lit only if it passes
+  // ALL active conditions. Circulation-only (title match / cluster outlet
+  // count); never verdict-based.
+  var searchQuery = "";     // lowercased substring over node.title ("" = off)
+  var spreadMin = 0;        // min cluster outlet_count (0 = off)
+  var hasEdgeById = {};     // node id -> true when the node has >=1 edge
+
+  function anyFilterActive() {
+    return activeFilter !== null || searchQuery !== "" || spreadMin > 0;
+  }
 
   // View transform (pan/zoom). Screen = world * scale + offset. Initial
   // {1, 0, 0} is byte-identical to the original static fit-to-viewport view.
@@ -224,10 +269,28 @@
   }
 
   // BRAINMAP-FILTER: is this node in the active filter's set? (all -> always).
+  // BRAINMAP-FEATURES: extended — domain/market AND spread-size AND search
+  // must ALL pass. Each block returns false independently; no filter = pass.
   function isActive(n) {
-    if (!activeFilter) return true;
-    if (activeFilter.type === "market") return n.content_nature === "market_commercial";
-    return (n.domain || "기타-미분류") === activeFilter.value;
+    if (activeFilter) {
+      if (activeFilter.type === "market") {
+        if (n.content_nature !== "market_commercial") return false;
+      } else if ((n.domain || "기타-미분류") !== activeFilter.value) {
+        return false;
+      }
+    }
+    if (spreadMin > 0) {
+      // Metric: the node's CLUSTER outlet_count. Isolated nodes (no cluster)
+      // never meet an "N개 매체 이상" threshold — they dim, correctly (single
+      // -outlet by definition).
+      var c = (n.cluster_id !== null && n.cluster_id !== undefined)
+        ? clusterById[n.cluster_id] : null;
+      if (!c || !(c.outlet_count >= spreadMin)) return false;
+    }
+    if (searchQuery) {
+      if ((n.title || "").toLowerCase().indexOf(searchQuery) === -1) return false;
+    }
+    return true;
   }
 
   function buildLegend(nodes) {
@@ -294,7 +357,8 @@
 
     // BRAINMAP-FILTER: when a domain is isolated, draw only edges whose BOTH
     // endpoints are in the active set (cross-domain edges are hidden).
-    var filtering = activeFilter !== null;
+    // BRAINMAP-FEATURES: "filtering" now covers domain OR search OR spread.
+    var filtering = anyFilterActive();
 
     // Edges first — thin, low-alpha. (Line width stays constant in screen px.)
     ctx.lineWidth = 0.7;
@@ -394,7 +458,7 @@
   // Hit test in SCREEN space so the radius stays a constant ~9px at any zoom.
   function nearestNode(mx, my) {
     var best = null, bestD = HIT_RADIUS * HIT_RADIUS;
-    var filtering = activeFilter !== null;
+    var filtering = anyFilterActive();
     for (var i = 0; i < graph.nodes.length; i++) {
       // BRAINMAP-FILTER: hover/click only apply to visible (active) nodes.
       if (filtering && !isActive(graph.nodes[i])) continue;
@@ -581,6 +645,9 @@
     updateLegendActive();
     hoverNode = null;
     tooltip.style.display = "none";
+    // BRAINMAP-FEATURES: the composed (domain AND spread AND search) lit set
+    // changed — refresh the live search count too.
+    updateSearchCount();
     draw();
   }
 
@@ -593,6 +660,93 @@
       else on = (kind === "domain" && k.getAttribute("data-domain") === activeFilter.value);
       if (on) k.classList.add("active"); else k.classList.remove("active");
     }
+  }
+
+  // BRAINMAP-FEATURES: live search count — over the FULLY COMPOSED active set
+  // (domain AND spread AND search), i.e. exactly the nodes currently lit.
+  // "연결됨" = the node has at least one edge (hasEdgeById).
+  function updateSearchCount() {
+    var el = document.getElementById("searchCount");
+    if (!el) return;
+    if (!searchQuery) { el.textContent = ""; return; }
+    var total = 0, connected = 0;
+    graph.nodes.forEach(function (n) {
+      if (!isActive(n)) return;
+      total += 1;
+      if (hasEdgeById[n.id]) connected += 1;
+    });
+    el.textContent = total + "건 일치 · 그중 " + connected + "건 연결됨";
+  }
+
+  // BRAINMAP-FEATURES: center+zoom on one node — the SAME math as the
+  // ?focus=<id> deep-link path (scale 2.5, node at viewport center).
+  function centerOnNode(n) {
+    var rect = canvas.parentElement.getBoundingClientRect();
+    var fw = Math.max(320, rect.width), fh = Math.max(280, rect.height);
+    var fp = positions[n._i];
+    view.scale = 2.5;
+    view.offsetX = fw / 2 - fp.px * view.scale;
+    view.offsetY = fh / 2 - fp.py * view.scale;
+    hoverNode = n;
+    tooltip.style.display = "none";
+    draw();
+  }
+
+  // BRAINMAP-FEATURES: search input — lightly debounced; ENTER jumps to the
+  // first node passing ALL active conditions. Clearing restores per the other
+  // active filters (domain/spread stay in force).
+  var searchDebounce = null;
+  function onSearchInput(ev) {
+    var q = String(ev.target.value || "").trim().toLowerCase();
+    if (searchDebounce) clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(function () {
+      searchQuery = q;
+      hoverNode = null;
+      tooltip.style.display = "none";
+      updateSearchCount();
+      draw();
+    }, 120);
+  }
+
+  function onSearchKeydown(ev) {
+    if (ev.key !== "Enter") return;
+    ev.preventDefault();
+    // Apply any pending debounced value immediately, then jump.
+    searchQuery = String(ev.target.value || "").trim().toLowerCase();
+    updateSearchCount();
+    if (!searchQuery) { draw(); return; }
+    for (var i = 0; i < graph.nodes.length; i++) {
+      if (isActive(graph.nodes[i])) { centerOnNode(graph.nodes[i]); return; }
+    }
+    draw(); // no match — just repaint dimmed state
+  }
+
+  // BRAINMAP-FEATURES: spread-size dropdown (cluster outlet_count threshold).
+  function onSpreadChange(ev) {
+    spreadMin = Number(ev.target.value) || 0;
+    hoverNode = null;
+    tooltip.style.display = "none";
+    updateSearchCount();
+    draw();
+  }
+
+  // BRAINMAP-FEATURES: one-pass FULL-graph stats (never the filtered view):
+  // 노드/연결(edges)/클러스터 counts + connected-vs-isolated by the has-an-edge
+  // definition, + largest cluster's outlet count. Circulation vocabulary only.
+  function renderStats() {
+    var el = document.getElementById("mapStats");
+    if (!el) return;
+    var connected = 0;
+    graph.nodes.forEach(function (n) { if (hasEdgeById[n.id]) connected += 1; });
+    var isolated = graph.nodes.length - connected;
+    var maxOutlets = 0;
+    (graph.clusters || []).forEach(function (c) {
+      if (c.outlet_count > maxOutlets) maxOutlets = c.outlet_count;
+    });
+    el.textContent = "노드 " + graph.nodes.length + "개 · 연결 " + graph.edges.length
+      + "개 · 클러스터 " + (graph.clusters || []).length
+      + "개 · 연결된 노드 " + connected + "개 · 미연결 " + isolated + "개"
+      + (maxOutlets > 0 ? " · 최대 확산 " + maxOutlets + "개 매체" : "");
   }
 
   function onClick(ev) {
@@ -617,9 +771,23 @@
     graph = data;
     graph.nodes.forEach(function (n, i) { n._i = i; nodeById[n.id] = n; });
     (graph.clusters || []).forEach(function (c) { clusterById[c.cluster_id] = c; });
+    // BRAINMAP-FEATURES: has-an-edge index (drives the 연결됨 count + stats).
+    graph.edges.forEach(function (e) {
+      hasEdgeById[e.src] = true;
+      hasEdgeById[e.dst] = true;
+    });
     statusEl.style.display = "none";
     buildLegend(graph.nodes);
+    renderStats();
     document.getElementById("legend").addEventListener("click", onLegendClick);
+    // BRAINMAP-FEATURES: search + spread controls.
+    var searchEl = document.getElementById("mapSearch");
+    if (searchEl) {
+      searchEl.addEventListener("input", onSearchInput);
+      searchEl.addEventListener("keydown", onSearchKeydown);
+    }
+    var spreadEl = document.getElementById("spreadFilter");
+    if (spreadEl) spreadEl.addEventListener("change", onSpreadChange);
     layout();
     draw();
     canvas.style.cursor = "grab";
