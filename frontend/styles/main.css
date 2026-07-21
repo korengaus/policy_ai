@@ -275,6 +275,14 @@
       width: 14px;
       height: 14px;
     }
+    /* NAV-ICON-EVERYWHERE: the #ic-network signature also leads the 연결지도 entrance
+       link in the methodology "더 보기" card. inline-flex so the 15px glyph sits with
+       the label; the link keeps its own inherited color (not brand-forced here). */
+    .map-more-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
 
     .topbar {
       display: flex;

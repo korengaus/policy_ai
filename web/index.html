@@ -311,6 +311,14 @@
       width: 14px;
       height: 14px;
     }
+    /* NAV-ICON-EVERYWHERE: the #ic-network signature also leads the 연결지도 entrance
+       link in the methodology "더 보기" card. inline-flex so the 15px glyph sits with
+       the label; the link keeps its own inherited color (not brand-forced here). */
+    .map-more-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
 
     .topbar {
       display: flex;
@@ -5949,7 +5957,7 @@
 
       <div class="methodology-card">
         <h3><svg class="section-icon" aria-hidden="true"><use href="#ic-compass"/></svg>더 보기</h3>
-        <p><a href="/web/brainmap.html">연결지도 →</a> 뉴스가 어떻게 유통·연결되는지 보여주는 지도입니다.</p>
+        <p><a class="map-more-link" href="/web/brainmap.html"><svg class="utility-icon" aria-hidden="true"><use href="#ic-network"/></svg>연결지도 →</a> 뉴스가 어떻게 유통·연결되는지 보여주는 지도입니다.</p>
         <p><a href="#methodology">검증 방법 →</a> 무엇을, 어떤 출처 우선순위로 검증하는지 설명합니다.</p>
         <p><a href="#gradeStatus">등급·상태 안내 →</a> 카드의 배지·색상·숫자가 무엇을 뜻하는지 설명합니다.</p>
       </div>
