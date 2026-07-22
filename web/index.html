@@ -3195,7 +3195,7 @@
     .operator-tools[hidden] {
       display: none !important;
     }
-    .operator-tools-banner {
+    .operator-tools-note {
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -3208,22 +3208,22 @@
       color: #7c2d12;
       font-size: 0.92rem;
     }
-    .operator-tools-banner-body {
+    .operator-tools-note-body {
       display: flex;
       flex-direction: column;
       gap: 2px;
       line-height: 1.55;
     }
-    .operator-tools-banner-body strong {
+    .operator-tools-note-body strong {
       color: #7c2d12;
     }
-    .operator-tools-banner code {
+    .operator-tools-note code {
       background: #fff7e6;
       padding: 0 4px;
       border-radius: 3px;
       font-size: 0.85em;
     }
-    .operator-tools-banner button {
+    .operator-tools-note button {
       padding: 6px 12px;
       font-size: 12px;
       border-radius: 6px;
@@ -3879,7 +3879,7 @@
     /* DESIGN-UNIFY: de-boxed to the divider-list look (was border+radius+paper box).
        A thin --line TOP RULE bounds it like .plain-section, not a box. The <summary>
        affordance (cursor/weight/marker/hover below) is UNTOUCHED — the toggle still
-       reads clickable. .adv-outer + the nested sub-sections keep their own overrides. */
+       reads clickable. .vrf-outer + the nested sub-sections keep their own overrides. */
     .collapsible-section {
       border: none;
       border-top: 1px solid var(--line);
@@ -3890,10 +3890,10 @@
     }
 
     /* DESIGN-DETAIL-5d FIX 3b: un-box ONLY the outer advanced container (marked
-       .adv-outer in renderCollapsibleSection) → flat, no border/bg/radius. The
-       top-level reader reading-guide shares .collapsible-section but is NOT .adv-outer,
+       .vrf-outer in renderCollapsibleSection) → flat, no border/bg/radius. The
+       top-level reader reading-guide shares .collapsible-section but is NOT .vrf-outer,
        so it keeps its subtle box; the 8 inner sub-sections were flattened in 5c. */
-    .collapsible-section.adv-outer {
+    .collapsible-section.vrf-outer {
       border: 0;
       border-radius: 0;
       background: transparent;
@@ -3909,7 +3909,7 @@
        list-item rendering path as the working toggles (default disclosure marker),
        and only apply the FLAT un-boxed look (thin --line top rule + padding + readable
        --ink text + subtle hover). No flex, no chevron pseudo, no box. */
-    .collapsible-section.adv-outer > summary {
+    .collapsible-section.vrf-outer > summary {
       cursor: pointer;
       padding: 12px 0;
       border-top: 1px solid var(--line);
@@ -3919,11 +3919,11 @@
       line-height: 1.4;
       list-style-position: inside;
     }
-    .collapsible-section.adv-outer > summary:hover {
+    .collapsible-section.vrf-outer > summary:hover {
       color: var(--brand-ink);
       background: transparent;
     }
-    .collapsible-section.adv-outer > .collapsible-body {
+    .collapsible-section.vrf-outer > .collapsible-body {
       border-top: 0;
       padding: 8px 0 0;
     }
@@ -3998,13 +3998,13 @@
        of cells separated by thin --line rules (--slate label / --ink value), C3 tokens,
        0.923rem. Replaces the 5a <dt>/<dd> grid whose label column collapsed so only
        values showed. Empty cells are dropped upstream by advDefList(). */
-    .adv-deflist {
+    .vrf-deflist {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 0 22px;
       margin: 8px 0 0;
     }
-    .adv-cell {
+    .vrf-cell {
       display: flex;
       flex-direction: column;
       gap: 1px;
@@ -4014,41 +4014,41 @@
       font-size: 0.923rem;
       line-height: 1.5;
     }
-    .adv-cell-label {
+    .vrf-cell-label {
       color: var(--slate);
       font-weight: 700;
       font-size: 0.82rem;
     }
-    .adv-cell-value {
+    .vrf-cell-value {
       color: var(--ink);
       overflow-wrap: anywhere;
     }
-    .adv-empty {
+    .vrf-empty {
       margin-top: 6px;
       color: var(--muted);
       font-size: 0.86rem;
     }
     /* One-line collapsed per-claim row (반박·모순 / 프레이밍·편향). */
-    .adv-claim-line {
+    .vrf-claim-line {
       color: var(--ink);
       font-weight: 700;
       font-size: 0.923rem;
       line-height: 1.5;
       padding: 3px 0;
     }
-    .adv-check-item + .adv-check-item {
+    .vrf-check-item + .vrf-check-item {
       border-top: 1px solid var(--line);
     }
     /* Pipeline-debug step status as small TEXT (not a pill), tinted by state. */
-    .adv-status { font-weight: 700; }
-    .adv-status.debug-ok { color: #166534; }
-    .adv-status.debug-partial { color: #92400e; }
-    .adv-status.debug-missing { color: #991b1b; }
+    .vrf-status { font-weight: 700; }
+    .vrf-status.debug-ok { color: #166534; }
+    .vrf-status.debug-partial { color: #92400e; }
+    .vrf-status.debug-missing { color: #991b1b; }
 
     /* DESIGN-DETAIL-5c: #6 출처와 공식 근거 candidates — each a collapsed <details>
        (one-line summary, expandable to the full label+value detail). Flat, thin-rule
        separated; no heavy boxes. All candidates kept (no truncation). */
-    .adv-cand-count {
+    .vrf-cand-count {
       margin: 12px 0 2px;
       color: var(--slate);
       font-weight: 700;
@@ -4056,17 +4056,17 @@
     }
     /* DESIGN-DETAIL-5d FIX 4: each candidate is one ITEM — a stronger var(--rule-strong)
        rule (the home's section-divider weight) separates it from the next. */
-    .adv-cand {
+    .vrf-cand {
       border-top: 1px solid var(--rule-strong);
     }
-    .adv-cand-list .adv-cand:last-child {
+    .vrf-cand-list .vrf-cand:last-child {
       border-bottom: 1px solid var(--rule-strong);
     }
     /* DESIGN-DETAIL-5d FIX 1: the "전체 보기" overflow expander (candidates 7..N). */
-    .adv-cand-more {
+    .vrf-cand-more {
       margin-top: 4px;
     }
-    .adv-cand-more-summary {
+    .vrf-cand-more-summary {
       cursor: pointer;
       padding: 9px 0;
       color: var(--brand);
@@ -4074,7 +4074,7 @@
       font-size: 0.86rem;
       list-style-position: inside;
     }
-    .adv-cand-more-summary:hover {
+    .vrf-cand-more-summary:hover {
       color: var(--brand-ink);
       text-decoration: underline;
     }
@@ -4082,45 +4082,45 @@
        a valid <details> disclosure control — a flex/grid/contents summary can stop being
        recognized as the control and vanish when the <details> is closed (the
        DESIGN-DETAIL-5f rule documented above). The row layout moved to the inner
-       .adv-cand-summary-inner wrapper; the disclosure marker is suppressed the SAME way
+       .vrf-cand-summary-inner wrapper; the disclosure marker is suppressed the SAME way
        the working .review-tools-details > summary does it (list-style:none +
        ::-webkit-details-marker) so the prior no-triangle flex look is unchanged. Pure
        structural correctness — appearance identical. */
-    .adv-cand-summary {
+    .vrf-cand-summary {
       cursor: pointer;
       padding: 9px 0;
       font-size: 0.923rem;
       list-style: none;
     }
-    .adv-cand-summary::-webkit-details-marker {
+    .vrf-cand-summary::-webkit-details-marker {
       display: none;
     }
-    .adv-cand-summary-inner {
+    .vrf-cand-summary-inner {
       display: flex;
       flex-wrap: wrap;
       align-items: baseline;
       gap: 6px 10px;
     }
-    .adv-cand-summary:hover { color: var(--brand-ink); }
-    .adv-cand-trace { font-weight: 700; font-size: 0.8rem; }
-    .adv-cand-trace.trace-direct { color: #166534; }
-    .adv-cand-trace.trace-context { color: var(--brand-ink); }
-    .adv-cand-trace.trace-news { color: var(--slate); }
-    .adv-cand-trace.trace-weak { color: #92400e; }
-    .adv-cand-trace.trace-excluded { color: #991b1b; }
+    .vrf-cand-summary:hover { color: var(--brand-ink); }
+    .vrf-cand-trace { font-weight: 700; font-size: 0.8rem; }
+    .vrf-cand-trace.trace-direct { color: #166534; }
+    .vrf-cand-trace.trace-context { color: var(--brand-ink); }
+    .vrf-cand-trace.trace-news { color: var(--slate); }
+    .vrf-cand-trace.trace-weak { color: #92400e; }
+    .vrf-cand-trace.trace-excluded { color: #991b1b; }
     /* DESIGN-DETAIL-5i FIX 1: the candidate one-line summary text inherited the base
        .collapsible-section summary font-weight:900, rendering bolder than the other
-       advanced rows. Set it to normal weight to match .adv-cell-value (the regular
-       advanced body text). The trace-label pill (.adv-cand-trace, 700) is untouched,
+       advanced rows. Set it to normal weight to match .vrf-cell-value (the regular
+       advanced body text). The trace-label pill (.vrf-cand-trace, 700) is untouched,
        and the inner sub-section titles (검증 점수 상세 etc.) are unaffected. */
-    .adv-cand-line { color: var(--ink); overflow-wrap: anywhere; font-weight: 400; }
-    .adv-cand-body { padding: 2px 0 12px; }
-    .adv-cand-excl {
+    .vrf-cand-line { color: var(--ink); overflow-wrap: anywhere; font-weight: 400; }
+    .vrf-cand-body { padding: 2px 0 12px; }
+    .vrf-cand-excl {
       margin: 4px 0;
       color: var(--slate);
       font-size: 0.82rem;
     }
-    .adv-cand-body .source-candidate-title {
+    .vrf-cand-body .source-candidate-title {
       margin-bottom: 6px;
       font-weight: 700;
     }
@@ -4130,12 +4130,12 @@
        rule + larger spacing separates items from each other, vs the thin var(--line)
        rules between fields WITHIN an item. The heading line is set heavier/darker so
        it visually "starts" the block. Flat — no boxes. */
-    .adv-item + .adv-item {
+    .vrf-item + .vrf-item {
       margin-top: 16px;
       padding-top: 16px;
       border-top: 1px solid var(--rule-strong);
     }
-    .adv-item-head {
+    .vrf-item-head {
       color: var(--ink);
       font-weight: 600;
     }
@@ -4243,7 +4243,7 @@
 
     /* DESIGN-DETAIL-5c/5d: flat (no box). FIX 4: each claim's evidence block is one
        ITEM — a stronger var(--rule-strong) rule separates it from the next claim
-       (the per-sentence .adv-item boundaries sit inside, one weight down by spacing). */
+       (the per-sentence .vrf-item boundaries sit inside, one weight down by spacing). */
     .evidence-snippet {
       padding: 14px 0 0;
       border-top: 1px solid var(--rule-strong);
@@ -4964,7 +4964,7 @@
       .evidence-snippet-grid,
       .pipeline-debug-grid,
       /* DESIGN-DETAIL-5c: the 2-col advanced label+value grid stacks on phones. */
-      .adv-deflist {
+      .vrf-deflist {
         grid-template-columns: 1fr;
       }
     }
@@ -5478,8 +5478,8 @@
       but it is not a replacement for the server-side session gate.
     -->
     <div id="operatorTools" class="operator-tools" hidden>
-      <aside class="operator-tools-banner" role="note" aria-label="내부 운영자 도구 알림">
-        <div class="operator-tools-banner-body">
+      <aside class="operator-tools-note" role="note" aria-label="내부 운영자 도구 알림">
+        <div class="operator-tools-note-body">
           <strong>내부 운영자 도구 (관리자 전용)</strong>
           <span>
             내부 운영자 도구가 표시되어 있습니다. 이 표시는 인증이 아니며,
@@ -7264,15 +7264,15 @@
     function advDefList(pairs) {
       const rows = (Array.isArray(pairs) ? pairs : []).filter((pair) => pair && !advIsEmptyDisplay(pair[1]));
       if (!rows.length) {
-        return '<div class="adv-empty">정보 없음</div>';
+        return '<div class="vrf-empty">정보 없음</div>';
       }
       // DESIGN-DETAIL-5c: label ABOVE value, both visible (the readable #6 pattern,
       // adopted for all 8 sub-sections). Replaces the 5a <dl><dt>/<dd> grid whose
       // label column collapsed so only values showed.
-      return `<div class="adv-deflist">${rows.map(([label, value, opts]) => `
-        <div class="adv-cell">
-          <span class="adv-cell-label">${escapeHtml(label)}</span>
-          <span class="adv-cell-value">${opts && opts.html ? value : escapeHtml(value)}</span>
+      return `<div class="vrf-deflist">${rows.map(([label, value, opts]) => `
+        <div class="vrf-cell">
+          <span class="vrf-cell-label">${escapeHtml(label)}</span>
+          <span class="vrf-cell-value">${opts && opts.html ? value : escapeHtml(value)}</span>
         </div>
       `).join("")}</div>`;
     }
@@ -7528,7 +7528,7 @@
       // non-zeros still show) — no real data is hidden, only the all-zero case folds.
       const allZero = cells.every(([, value]) => Number(value) === 0);
       if (allZero) {
-        return '<div class="adv-empty">수집된 근거 문장이 없습니다</div>';
+        return '<div class="vrf-empty">수집된 근거 문장이 없습니다</div>';
       }
       return advDefList(cells);
     }
@@ -7591,9 +7591,9 @@
         const statusLabel = formatContradictionStatus(check.contradiction_status);
         const hasScore = !advIsEmptyDisplay(check.contradiction_score);
         const expand = hasScore || conflicts.length > 0 || !!check.missing_evidence_warning;
-        const headLine = `<div class="adv-claim-line">claim #${index + 1} — ${escapeHtml(statusLabel)}</div>`;
+        const headLine = `<div class="vrf-claim-line">claim #${index + 1} — ${escapeHtml(statusLabel)}</div>`;
         if (!expand) {
-          return `<div class="adv-check-item">${headLine}</div>`;
+          return `<div class="vrf-check-item">${headLine}</div>`;
         }
         const claimText = escapeHtml(limitClaimSentences(cleanArticleTextForPolicyAnalysis(claim || check.claim_text) || "정책 주장 확인 필요", 2, CLAIM_MAX_CHARS));
         const detail = advDefList([
@@ -7693,9 +7693,9 @@
           || !advIsEmptyDisplay(loaded) || !!analysis.emotional_language_detected || !!analysis.needs_editor_review;
         const framingLabel = analysis.framing_level ? formatFramingLevel(analysis.framing_level) : "낮음";
         const biasLabel = analysis.bias_direction ? formatBiasDirection(analysis.bias_direction) : "중립";
-        const headLine = `<div class="adv-claim-line">claim #${index + 1} — 프레이밍 ${escapeHtml(framingLabel)} · 편향 ${escapeHtml(biasLabel)}</div>`;
+        const headLine = `<div class="vrf-claim-line">claim #${index + 1} — 프레이밍 ${escapeHtml(framingLabel)} · 편향 ${escapeHtml(biasLabel)}</div>`;
         if (!elevated && !hasFlags) {
-          return `<div class="adv-check-item">${headLine}</div>`;
+          return `<div class="vrf-check-item">${headLine}</div>`;
         }
         const claimText = escapeHtml(limitClaimSentences(cleanArticleTextForPolicyAnalysis(claim || analysis.claim_text) || "정책 주장 확인 필요", 2, CLAIM_MAX_CHARS));
         const detail = advDefList([
@@ -7741,13 +7741,13 @@
         ? data.evidence_zero_reasons.join(", ")
         : "없음";
       // DESIGN-DETAIL-5a: the off-brand debug box is restyled to the C3 definition-
-      // list language. Step status is small TEXT (.adv-status, tinted ok/partial/
+      // list language. Step status is small TEXT (.vrf-status, tinted ok/partial/
       // missing) — not pills. Each former metric tile's sub-meta is folded into its
       // value with " · " so every field is kept. The trailing diagnostic run-on
       // becomes a labeled definition list (each 사유 on its own row, empties hidden).
       const stepRow = (label, ok, count) => {
         const state = debugState(ok, count);
-        return [label, `<span class="adv-status ${state.className}">${escapeHtml(state.label)}</span> · 개수 ${escapeHtml(count ?? "-")}`, { html: true }];
+        return [label, `<span class="vrf-status ${state.className}">${escapeHtml(state.label)}</span> · 개수 ${escapeHtml(count ?? "-")}`, { html: true }];
       };
       return `
         <div class="pipeline-debug">
@@ -7763,7 +7763,7 @@
             stepRow("근거 매칭", data.evidence_matching_ok, data.matched_evidence_count ?? data.direct_evidence_count),
             stepRow("반박/모순 검사", data.contradiction_check_ok, data.contradiction_checks_count),
             stepRow("프레이밍/편향 검사", data.bias_framing_ok, data.framing_flags_count),
-            ["사람 검토", `<span class="adv-status ${data.needs_human_review ? "debug-partial" : "debug-ok"}">${data.needs_human_review ? "필요" : "불필요"}</span> · 초안 상태: ${escapeHtml(formatVerdict(data.overall_verdict || "-"))}`, { html: true }],
+            ["사람 검토", `<span class="vrf-status ${data.needs_human_review ? "debug-partial" : "debug-ok"}">${data.needs_human_review ? "필요" : "불필요"}</span> · 초안 상태: ${escapeHtml(formatVerdict(data.overall_verdict || "-"))}`, { html: true }],
           ])}
           ${advDefList([
             ["출처 구성", `공식 ${data.official_sources_count ?? 0} · 뉴스 ${data.news_sources_count ?? 0}`],
@@ -7828,11 +7828,11 @@
               // definition list (empty 발행처/관련도/추출 방식 etc. drop out; formatter
               // cells guarded so empties don't render placeholder rows).
               // DESIGN-DETAIL-5d FIX 4: wrap each evidence sentence + its fields in an
-              // .adv-item so a clear boundary (stronger rule + spacing + heading
+              // .vrf-item so a clear boundary (stronger rule + spacing + heading
               // emphasis) separates one evidence from the next (vs the thin field rules).
               return `
-                <div class="adv-item">
-                  <div class="evidence-snippet-text adv-item-head">${escapeHtml(userFacingReportText(snippet.evidence_text || "-", "-"))}</div>
+                <div class="vrf-item">
+                  <div class="evidence-snippet-text vrf-item-head">${escapeHtml(userFacingReportText(snippet.evidence_text || "-", "-"))}</div>
                   ${advDefList([
                     ["출처", sourceHtml, { html: true }],
                     ["발행처", snippet.publisher ? publicInstitutionName(snippet.publisher) : ""],
@@ -7931,7 +7931,7 @@
           <div class="evidence-source-meta"><strong>공식 문서 매칭 문장</strong></div>
           <ul class="compact-list">
             ${source.official_matched_sentences.slice(0, 2).map((match) => `
-              <li>${escapeHtml(match.sentence || "-")} <span class="adv-cell-label">(${escapeHtml(match.score ?? "-")}점)</span></li>
+              <li>${escapeHtml(match.sentence || "-")} <span class="vrf-cell-label">(${escapeHtml(match.score ?? "-")}점)</span></li>
             `).join("")}
           </ul>
         ` : "";
@@ -7941,16 +7941,16 @@
         const flagText = formatDiagnosticText(formatList(source.source_risk_flags));
         const flags = advIsEmptyDisplay(flagText) ? "" : `<div class="risk-flags">${escapeHtml(flagText)}</div>`;
         return `
-          <details class="adv-cand">
-            <summary class="adv-cand-summary">
-              <span class="adv-cand-summary-inner">
-                <span class="adv-cand-trace ${escapeHtml(trace.className)}">${escapeHtml(trace.label)}</span>
-                <span class="adv-cand-line">${escapeHtml(summaryText)}</span>
+          <details class="vrf-cand">
+            <summary class="vrf-cand-summary">
+              <span class="vrf-cand-summary-inner">
+                <span class="vrf-cand-trace ${escapeHtml(trace.className)}">${escapeHtml(trace.label)}</span>
+                <span class="vrf-cand-line">${escapeHtml(summaryText)}</span>
               </span>
             </summary>
-            <div class="adv-cand-body">
+            <div class="vrf-cand-body">
               <div class="source-candidate-title">${titleHtml}</div>
-              ${exclusionLabel ? `<div class="adv-cand-excl">${escapeHtml(exclusionLabel)}</div>` : ""}
+              ${exclusionLabel ? `<div class="vrf-cand-excl">${escapeHtml(exclusionLabel)}</div>` : ""}
               ${detail}${matched}${reason}${flags}
             </div>
           </details>
@@ -7964,12 +7964,12 @@
       const head = list.slice(0, VISIBLE);
       const overflow = list.slice(VISIBLE);
       return `
-        <div class="adv-cand-count">공식 출처 후보 ${list.length}개</div>
-        <div class="adv-cand-list">${head.map(renderCand).join("")}</div>
+        <div class="vrf-cand-count">공식 출처 후보 ${list.length}개</div>
+        <div class="vrf-cand-list">${head.map(renderCand).join("")}</div>
         ${overflow.length ? `
-          <details class="adv-cand-more">
-            <summary class="adv-cand-more-summary">공식 출처 후보 ${list.length}개 전체 보기</summary>
-            <div class="adv-cand-list">${overflow.map(renderCand).join("")}</div>
+          <details class="vrf-cand-more">
+            <summary class="vrf-cand-more-summary">공식 출처 후보 ${list.length}개 전체 보기</summary>
+            <div class="vrf-cand-list">${overflow.map(renderCand).join("")}</div>
           </details>
         ` : ""}
       `;
@@ -11856,7 +11856,7 @@
           "핵심 판단을 뒷받침하는 주장 추출, 근거 매칭, 반박 검사, 프레이밍 검사, 출처 후보, 내부 점검 정보를 한곳에 모았습니다.",
           // DESIGN-DETAIL-5d FIX 3b: mark the OUTER advanced container so CSS un-boxes
           // only it (not the top-level reader reading-guide, which shares the class).
-          "adv-outer"
+          "vrf-outer"
         );
 
         return `

@@ -3159,7 +3159,7 @@
     .operator-tools[hidden] {
       display: none !important;
     }
-    .operator-tools-banner {
+    .operator-tools-note {
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -3172,22 +3172,22 @@
       color: #7c2d12;
       font-size: 0.92rem;
     }
-    .operator-tools-banner-body {
+    .operator-tools-note-body {
       display: flex;
       flex-direction: column;
       gap: 2px;
       line-height: 1.55;
     }
-    .operator-tools-banner-body strong {
+    .operator-tools-note-body strong {
       color: #7c2d12;
     }
-    .operator-tools-banner code {
+    .operator-tools-note code {
       background: #fff7e6;
       padding: 0 4px;
       border-radius: 3px;
       font-size: 0.85em;
     }
-    .operator-tools-banner button {
+    .operator-tools-note button {
       padding: 6px 12px;
       font-size: 12px;
       border-radius: 6px;
@@ -3843,7 +3843,7 @@
     /* DESIGN-UNIFY: de-boxed to the divider-list look (was border+radius+paper box).
        A thin --line TOP RULE bounds it like .plain-section, not a box. The <summary>
        affordance (cursor/weight/marker/hover below) is UNTOUCHED — the toggle still
-       reads clickable. .adv-outer + the nested sub-sections keep their own overrides. */
+       reads clickable. .vrf-outer + the nested sub-sections keep their own overrides. */
     .collapsible-section {
       border: none;
       border-top: 1px solid var(--line);
@@ -3854,10 +3854,10 @@
     }
 
     /* DESIGN-DETAIL-5d FIX 3b: un-box ONLY the outer advanced container (marked
-       .adv-outer in renderCollapsibleSection) → flat, no border/bg/radius. The
-       top-level reader reading-guide shares .collapsible-section but is NOT .adv-outer,
+       .vrf-outer in renderCollapsibleSection) → flat, no border/bg/radius. The
+       top-level reader reading-guide shares .collapsible-section but is NOT .vrf-outer,
        so it keeps its subtle box; the 8 inner sub-sections were flattened in 5c. */
-    .collapsible-section.adv-outer {
+    .collapsible-section.vrf-outer {
       border: 0;
       border-radius: 0;
       background: transparent;
@@ -3873,7 +3873,7 @@
        list-item rendering path as the working toggles (default disclosure marker),
        and only apply the FLAT un-boxed look (thin --line top rule + padding + readable
        --ink text + subtle hover). No flex, no chevron pseudo, no box. */
-    .collapsible-section.adv-outer > summary {
+    .collapsible-section.vrf-outer > summary {
       cursor: pointer;
       padding: 12px 0;
       border-top: 1px solid var(--line);
@@ -3883,11 +3883,11 @@
       line-height: 1.4;
       list-style-position: inside;
     }
-    .collapsible-section.adv-outer > summary:hover {
+    .collapsible-section.vrf-outer > summary:hover {
       color: var(--brand-ink);
       background: transparent;
     }
-    .collapsible-section.adv-outer > .collapsible-body {
+    .collapsible-section.vrf-outer > .collapsible-body {
       border-top: 0;
       padding: 8px 0 0;
     }
@@ -3962,13 +3962,13 @@
        of cells separated by thin --line rules (--slate label / --ink value), C3 tokens,
        0.923rem. Replaces the 5a <dt>/<dd> grid whose label column collapsed so only
        values showed. Empty cells are dropped upstream by advDefList(). */
-    .adv-deflist {
+    .vrf-deflist {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 0 22px;
       margin: 8px 0 0;
     }
-    .adv-cell {
+    .vrf-cell {
       display: flex;
       flex-direction: column;
       gap: 1px;
@@ -3978,41 +3978,41 @@
       font-size: 0.923rem;
       line-height: 1.5;
     }
-    .adv-cell-label {
+    .vrf-cell-label {
       color: var(--slate);
       font-weight: 700;
       font-size: 0.82rem;
     }
-    .adv-cell-value {
+    .vrf-cell-value {
       color: var(--ink);
       overflow-wrap: anywhere;
     }
-    .adv-empty {
+    .vrf-empty {
       margin-top: 6px;
       color: var(--muted);
       font-size: 0.86rem;
     }
     /* One-line collapsed per-claim row (반박·모순 / 프레이밍·편향). */
-    .adv-claim-line {
+    .vrf-claim-line {
       color: var(--ink);
       font-weight: 700;
       font-size: 0.923rem;
       line-height: 1.5;
       padding: 3px 0;
     }
-    .adv-check-item + .adv-check-item {
+    .vrf-check-item + .vrf-check-item {
       border-top: 1px solid var(--line);
     }
     /* Pipeline-debug step status as small TEXT (not a pill), tinted by state. */
-    .adv-status { font-weight: 700; }
-    .adv-status.debug-ok { color: #166534; }
-    .adv-status.debug-partial { color: #92400e; }
-    .adv-status.debug-missing { color: #991b1b; }
+    .vrf-status { font-weight: 700; }
+    .vrf-status.debug-ok { color: #166534; }
+    .vrf-status.debug-partial { color: #92400e; }
+    .vrf-status.debug-missing { color: #991b1b; }
 
     /* DESIGN-DETAIL-5c: #6 출처와 공식 근거 candidates — each a collapsed <details>
        (one-line summary, expandable to the full label+value detail). Flat, thin-rule
        separated; no heavy boxes. All candidates kept (no truncation). */
-    .adv-cand-count {
+    .vrf-cand-count {
       margin: 12px 0 2px;
       color: var(--slate);
       font-weight: 700;
@@ -4020,17 +4020,17 @@
     }
     /* DESIGN-DETAIL-5d FIX 4: each candidate is one ITEM — a stronger var(--rule-strong)
        rule (the home's section-divider weight) separates it from the next. */
-    .adv-cand {
+    .vrf-cand {
       border-top: 1px solid var(--rule-strong);
     }
-    .adv-cand-list .adv-cand:last-child {
+    .vrf-cand-list .vrf-cand:last-child {
       border-bottom: 1px solid var(--rule-strong);
     }
     /* DESIGN-DETAIL-5d FIX 1: the "전체 보기" overflow expander (candidates 7..N). */
-    .adv-cand-more {
+    .vrf-cand-more {
       margin-top: 4px;
     }
-    .adv-cand-more-summary {
+    .vrf-cand-more-summary {
       cursor: pointer;
       padding: 9px 0;
       color: var(--brand);
@@ -4038,7 +4038,7 @@
       font-size: 0.86rem;
       list-style-position: inside;
     }
-    .adv-cand-more-summary:hover {
+    .vrf-cand-more-summary:hover {
       color: var(--brand-ink);
       text-decoration: underline;
     }
@@ -4046,45 +4046,45 @@
        a valid <details> disclosure control — a flex/grid/contents summary can stop being
        recognized as the control and vanish when the <details> is closed (the
        DESIGN-DETAIL-5f rule documented above). The row layout moved to the inner
-       .adv-cand-summary-inner wrapper; the disclosure marker is suppressed the SAME way
+       .vrf-cand-summary-inner wrapper; the disclosure marker is suppressed the SAME way
        the working .review-tools-details > summary does it (list-style:none +
        ::-webkit-details-marker) so the prior no-triangle flex look is unchanged. Pure
        structural correctness — appearance identical. */
-    .adv-cand-summary {
+    .vrf-cand-summary {
       cursor: pointer;
       padding: 9px 0;
       font-size: 0.923rem;
       list-style: none;
     }
-    .adv-cand-summary::-webkit-details-marker {
+    .vrf-cand-summary::-webkit-details-marker {
       display: none;
     }
-    .adv-cand-summary-inner {
+    .vrf-cand-summary-inner {
       display: flex;
       flex-wrap: wrap;
       align-items: baseline;
       gap: 6px 10px;
     }
-    .adv-cand-summary:hover { color: var(--brand-ink); }
-    .adv-cand-trace { font-weight: 700; font-size: 0.8rem; }
-    .adv-cand-trace.trace-direct { color: #166534; }
-    .adv-cand-trace.trace-context { color: var(--brand-ink); }
-    .adv-cand-trace.trace-news { color: var(--slate); }
-    .adv-cand-trace.trace-weak { color: #92400e; }
-    .adv-cand-trace.trace-excluded { color: #991b1b; }
+    .vrf-cand-summary:hover { color: var(--brand-ink); }
+    .vrf-cand-trace { font-weight: 700; font-size: 0.8rem; }
+    .vrf-cand-trace.trace-direct { color: #166534; }
+    .vrf-cand-trace.trace-context { color: var(--brand-ink); }
+    .vrf-cand-trace.trace-news { color: var(--slate); }
+    .vrf-cand-trace.trace-weak { color: #92400e; }
+    .vrf-cand-trace.trace-excluded { color: #991b1b; }
     /* DESIGN-DETAIL-5i FIX 1: the candidate one-line summary text inherited the base
        .collapsible-section summary font-weight:900, rendering bolder than the other
-       advanced rows. Set it to normal weight to match .adv-cell-value (the regular
-       advanced body text). The trace-label pill (.adv-cand-trace, 700) is untouched,
+       advanced rows. Set it to normal weight to match .vrf-cell-value (the regular
+       advanced body text). The trace-label pill (.vrf-cand-trace, 700) is untouched,
        and the inner sub-section titles (검증 점수 상세 etc.) are unaffected. */
-    .adv-cand-line { color: var(--ink); overflow-wrap: anywhere; font-weight: 400; }
-    .adv-cand-body { padding: 2px 0 12px; }
-    .adv-cand-excl {
+    .vrf-cand-line { color: var(--ink); overflow-wrap: anywhere; font-weight: 400; }
+    .vrf-cand-body { padding: 2px 0 12px; }
+    .vrf-cand-excl {
       margin: 4px 0;
       color: var(--slate);
       font-size: 0.82rem;
     }
-    .adv-cand-body .source-candidate-title {
+    .vrf-cand-body .source-candidate-title {
       margin-bottom: 6px;
       font-weight: 700;
     }
@@ -4094,12 +4094,12 @@
        rule + larger spacing separates items from each other, vs the thin var(--line)
        rules between fields WITHIN an item. The heading line is set heavier/darker so
        it visually "starts" the block. Flat — no boxes. */
-    .adv-item + .adv-item {
+    .vrf-item + .vrf-item {
       margin-top: 16px;
       padding-top: 16px;
       border-top: 1px solid var(--rule-strong);
     }
-    .adv-item-head {
+    .vrf-item-head {
       color: var(--ink);
       font-weight: 600;
     }
@@ -4207,7 +4207,7 @@
 
     /* DESIGN-DETAIL-5c/5d: flat (no box). FIX 4: each claim's evidence block is one
        ITEM — a stronger var(--rule-strong) rule separates it from the next claim
-       (the per-sentence .adv-item boundaries sit inside, one weight down by spacing). */
+       (the per-sentence .vrf-item boundaries sit inside, one weight down by spacing). */
     .evidence-snippet {
       padding: 14px 0 0;
       border-top: 1px solid var(--rule-strong);
@@ -4928,7 +4928,7 @@
       .evidence-snippet-grid,
       .pipeline-debug-grid,
       /* DESIGN-DETAIL-5c: the 2-col advanced label+value grid stacks on phones. */
-      .adv-deflist {
+      .vrf-deflist {
         grid-template-columns: 1fr;
       }
     }

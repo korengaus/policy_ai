@@ -1145,15 +1145,15 @@
     function advDefList(pairs) {
       const rows = (Array.isArray(pairs) ? pairs : []).filter((pair) => pair && !advIsEmptyDisplay(pair[1]));
       if (!rows.length) {
-        return '<div class="adv-empty">정보 없음</div>';
+        return '<div class="vrf-empty">정보 없음</div>';
       }
       // DESIGN-DETAIL-5c: label ABOVE value, both visible (the readable #6 pattern,
       // adopted for all 8 sub-sections). Replaces the 5a <dl><dt>/<dd> grid whose
       // label column collapsed so only values showed.
-      return `<div class="adv-deflist">${rows.map(([label, value, opts]) => `
-        <div class="adv-cell">
-          <span class="adv-cell-label">${escapeHtml(label)}</span>
-          <span class="adv-cell-value">${opts && opts.html ? value : escapeHtml(value)}</span>
+      return `<div class="vrf-deflist">${rows.map(([label, value, opts]) => `
+        <div class="vrf-cell">
+          <span class="vrf-cell-label">${escapeHtml(label)}</span>
+          <span class="vrf-cell-value">${opts && opts.html ? value : escapeHtml(value)}</span>
         </div>
       `).join("")}</div>`;
     }
@@ -1409,7 +1409,7 @@
       // non-zeros still show) — no real data is hidden, only the all-zero case folds.
       const allZero = cells.every(([, value]) => Number(value) === 0);
       if (allZero) {
-        return '<div class="adv-empty">수집된 근거 문장이 없습니다</div>';
+        return '<div class="vrf-empty">수집된 근거 문장이 없습니다</div>';
       }
       return advDefList(cells);
     }
@@ -1472,9 +1472,9 @@
         const statusLabel = formatContradictionStatus(check.contradiction_status);
         const hasScore = !advIsEmptyDisplay(check.contradiction_score);
         const expand = hasScore || conflicts.length > 0 || !!check.missing_evidence_warning;
-        const headLine = `<div class="adv-claim-line">claim #${index + 1} — ${escapeHtml(statusLabel)}</div>`;
+        const headLine = `<div class="vrf-claim-line">claim #${index + 1} — ${escapeHtml(statusLabel)}</div>`;
         if (!expand) {
-          return `<div class="adv-check-item">${headLine}</div>`;
+          return `<div class="vrf-check-item">${headLine}</div>`;
         }
         const claimText = escapeHtml(limitClaimSentences(cleanArticleTextForPolicyAnalysis(claim || check.claim_text) || "정책 주장 확인 필요", 2, CLAIM_MAX_CHARS));
         const detail = advDefList([
@@ -1574,9 +1574,9 @@
           || !advIsEmptyDisplay(loaded) || !!analysis.emotional_language_detected || !!analysis.needs_editor_review;
         const framingLabel = analysis.framing_level ? formatFramingLevel(analysis.framing_level) : "낮음";
         const biasLabel = analysis.bias_direction ? formatBiasDirection(analysis.bias_direction) : "중립";
-        const headLine = `<div class="adv-claim-line">claim #${index + 1} — 프레이밍 ${escapeHtml(framingLabel)} · 편향 ${escapeHtml(biasLabel)}</div>`;
+        const headLine = `<div class="vrf-claim-line">claim #${index + 1} — 프레이밍 ${escapeHtml(framingLabel)} · 편향 ${escapeHtml(biasLabel)}</div>`;
         if (!elevated && !hasFlags) {
-          return `<div class="adv-check-item">${headLine}</div>`;
+          return `<div class="vrf-check-item">${headLine}</div>`;
         }
         const claimText = escapeHtml(limitClaimSentences(cleanArticleTextForPolicyAnalysis(claim || analysis.claim_text) || "정책 주장 확인 필요", 2, CLAIM_MAX_CHARS));
         const detail = advDefList([
@@ -1622,13 +1622,13 @@
         ? data.evidence_zero_reasons.join(", ")
         : "없음";
       // DESIGN-DETAIL-5a: the off-brand debug box is restyled to the C3 definition-
-      // list language. Step status is small TEXT (.adv-status, tinted ok/partial/
+      // list language. Step status is small TEXT (.vrf-status, tinted ok/partial/
       // missing) — not pills. Each former metric tile's sub-meta is folded into its
       // value with " · " so every field is kept. The trailing diagnostic run-on
       // becomes a labeled definition list (each 사유 on its own row, empties hidden).
       const stepRow = (label, ok, count) => {
         const state = debugState(ok, count);
-        return [label, `<span class="adv-status ${state.className}">${escapeHtml(state.label)}</span> · 개수 ${escapeHtml(count ?? "-")}`, { html: true }];
+        return [label, `<span class="vrf-status ${state.className}">${escapeHtml(state.label)}</span> · 개수 ${escapeHtml(count ?? "-")}`, { html: true }];
       };
       return `
         <div class="pipeline-debug">
@@ -1644,7 +1644,7 @@
             stepRow("근거 매칭", data.evidence_matching_ok, data.matched_evidence_count ?? data.direct_evidence_count),
             stepRow("반박/모순 검사", data.contradiction_check_ok, data.contradiction_checks_count),
             stepRow("프레이밍/편향 검사", data.bias_framing_ok, data.framing_flags_count),
-            ["사람 검토", `<span class="adv-status ${data.needs_human_review ? "debug-partial" : "debug-ok"}">${data.needs_human_review ? "필요" : "불필요"}</span> · 초안 상태: ${escapeHtml(formatVerdict(data.overall_verdict || "-"))}`, { html: true }],
+            ["사람 검토", `<span class="vrf-status ${data.needs_human_review ? "debug-partial" : "debug-ok"}">${data.needs_human_review ? "필요" : "불필요"}</span> · 초안 상태: ${escapeHtml(formatVerdict(data.overall_verdict || "-"))}`, { html: true }],
           ])}
           ${advDefList([
             ["출처 구성", `공식 ${data.official_sources_count ?? 0} · 뉴스 ${data.news_sources_count ?? 0}`],
@@ -1709,11 +1709,11 @@
               // definition list (empty 발행처/관련도/추출 방식 etc. drop out; formatter
               // cells guarded so empties don't render placeholder rows).
               // DESIGN-DETAIL-5d FIX 4: wrap each evidence sentence + its fields in an
-              // .adv-item so a clear boundary (stronger rule + spacing + heading
+              // .vrf-item so a clear boundary (stronger rule + spacing + heading
               // emphasis) separates one evidence from the next (vs the thin field rules).
               return `
-                <div class="adv-item">
-                  <div class="evidence-snippet-text adv-item-head">${escapeHtml(userFacingReportText(snippet.evidence_text || "-", "-"))}</div>
+                <div class="vrf-item">
+                  <div class="evidence-snippet-text vrf-item-head">${escapeHtml(userFacingReportText(snippet.evidence_text || "-", "-"))}</div>
                   ${advDefList([
                     ["출처", sourceHtml, { html: true }],
                     ["발행처", snippet.publisher ? publicInstitutionName(snippet.publisher) : ""],
@@ -1812,7 +1812,7 @@
           <div class="evidence-source-meta"><strong>공식 문서 매칭 문장</strong></div>
           <ul class="compact-list">
             ${source.official_matched_sentences.slice(0, 2).map((match) => `
-              <li>${escapeHtml(match.sentence || "-")} <span class="adv-cell-label">(${escapeHtml(match.score ?? "-")}점)</span></li>
+              <li>${escapeHtml(match.sentence || "-")} <span class="vrf-cell-label">(${escapeHtml(match.score ?? "-")}점)</span></li>
             `).join("")}
           </ul>
         ` : "";
@@ -1822,16 +1822,16 @@
         const flagText = formatDiagnosticText(formatList(source.source_risk_flags));
         const flags = advIsEmptyDisplay(flagText) ? "" : `<div class="risk-flags">${escapeHtml(flagText)}</div>`;
         return `
-          <details class="adv-cand">
-            <summary class="adv-cand-summary">
-              <span class="adv-cand-summary-inner">
-                <span class="adv-cand-trace ${escapeHtml(trace.className)}">${escapeHtml(trace.label)}</span>
-                <span class="adv-cand-line">${escapeHtml(summaryText)}</span>
+          <details class="vrf-cand">
+            <summary class="vrf-cand-summary">
+              <span class="vrf-cand-summary-inner">
+                <span class="vrf-cand-trace ${escapeHtml(trace.className)}">${escapeHtml(trace.label)}</span>
+                <span class="vrf-cand-line">${escapeHtml(summaryText)}</span>
               </span>
             </summary>
-            <div class="adv-cand-body">
+            <div class="vrf-cand-body">
               <div class="source-candidate-title">${titleHtml}</div>
-              ${exclusionLabel ? `<div class="adv-cand-excl">${escapeHtml(exclusionLabel)}</div>` : ""}
+              ${exclusionLabel ? `<div class="vrf-cand-excl">${escapeHtml(exclusionLabel)}</div>` : ""}
               ${detail}${matched}${reason}${flags}
             </div>
           </details>
@@ -1845,12 +1845,12 @@
       const head = list.slice(0, VISIBLE);
       const overflow = list.slice(VISIBLE);
       return `
-        <div class="adv-cand-count">공식 출처 후보 ${list.length}개</div>
-        <div class="adv-cand-list">${head.map(renderCand).join("")}</div>
+        <div class="vrf-cand-count">공식 출처 후보 ${list.length}개</div>
+        <div class="vrf-cand-list">${head.map(renderCand).join("")}</div>
         ${overflow.length ? `
-          <details class="adv-cand-more">
-            <summary class="adv-cand-more-summary">공식 출처 후보 ${list.length}개 전체 보기</summary>
-            <div class="adv-cand-list">${overflow.map(renderCand).join("")}</div>
+          <details class="vrf-cand-more">
+            <summary class="vrf-cand-more-summary">공식 출처 후보 ${list.length}개 전체 보기</summary>
+            <div class="vrf-cand-list">${overflow.map(renderCand).join("")}</div>
           </details>
         ` : ""}
       `;
@@ -5737,7 +5737,7 @@
           "핵심 판단을 뒷받침하는 주장 추출, 근거 매칭, 반박 검사, 프레이밍 검사, 출처 후보, 내부 점검 정보를 한곳에 모았습니다.",
           // DESIGN-DETAIL-5d FIX 3b: mark the OUTER advanced container so CSS un-boxes
           // only it (not the top-level reader reading-guide, which shares the class).
-          "adv-outer"
+          "vrf-outer"
         );
 
         return `
