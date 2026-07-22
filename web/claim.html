@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>주장 확산 기록 — tickedin</title>
+<!-- LINK-PREVIEW: OG/Twitter tags mirror web/weekly.html's set. One static,
+     claim-NEUTRAL preview serves every claim URL (og:url has no query; a
+     per-claim image would need generation — out of scope). Circulation
+     vocabulary only — no truth/falsity claim, no counts, no dates. -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="tickedin">
+<meta property="og:locale" content="ko_KR">
+<meta property="og:url" content="https://tickedin.org/web/claim.html">
+<meta property="og:title" content="주장 확산 기록 — tickedin">
+<meta property="og:description" content="하나의 정책 주장이 여러 매체로 퍼진 기록과 기사별 근거 수준을 함께 보여줍니다. 확산 규모 기준이며 사실 검증이 아닙니다.">
+<meta property="og:image" content="https://tickedin.org/web/assets/og-image.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="tickedin — 확산 규모 기준 · 사실 검증 아님">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="주장 확산 기록 — tickedin">
+<meta name="twitter:description" content="하나의 정책 주장이 여러 매체로 퍼진 기록과 기사별 근거 수준을 함께 보여줍니다. 확산 규모 기준이며 사실 검증이 아닙니다.">
+<meta name="twitter:image" content="https://tickedin.org/web/assets/og-image.png">
+<!--
+  CLAIM-PAGE Phase 3 — standalone, hand-authored page (NOT build_index-managed;
+  touches none of the index pins — same precedent as web/weekly.html /
+  web/brainmap.html). Fetches GET /api/claim/{lineage_id} and renders ONE
+  claim cluster: circulation meta, the daily published_at curve, and every
+  member article side by side with the evidence level THAT article carries.
+
+  HONESTY BOUNDARY (the point of this page):
+    * NO aggregate cluster score — evidence levels are never averaged,
+      maxed, or combined; no cluster-level verdict/badge/colour/gauge.
+    * Members render in CHRONOLOGICAL order only (the API's order) — never
+      by score; no member is highlighted as strongest, confirming, or
+      refuting. Sequence is not contradiction.
+    * The header title is a REPRESENTATIVE ARTICLE title, labelled by the
+      rule that chose it (most recent published_at) — the /api/claim payload
+      carries no representative field and picking by score would be
+      cherry-picking. No member is ever labelled origin/source/최초 보도자:
+      the earliest member can PREDATE the decision the cluster is about.
+    * outlet count (매체) and member count (기사) stay SEPARATE numbers.
+    * gaps_omitted timeline: bars are spaced BY INDEX with date labels —
+      no continuous axis that would imply zero-days were measured.
+    * superseded=true renders an explicit merge notice — never a different
+      cluster silently under the requested id.
+  Self-contained: inline CSS + JS, no external lib/CDN. Data is rendered via
+  textContent (never innerHTML) so API strings are display-only.
+-->
+<style>
+  /* Tokens mirrored from the main site's design system (same set as
+     web/weekly.html / web/brainmap.html) so this page reads as tickedin. */
+  :root {
+    --ink: #0f172a;
+    --slate: #475569;
+    --muted: #94a3b8;
+    --line: #e2e8f0;
+    --paper: #ffffff;
+    --canvas: #f6f8fb;
+    --brand: #1e5fd8;
+    --brand-ink: #1542a0;
+    --shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+    --radius-sm: 9px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+    min-height: 100vh;
+  }
+  header.report-head {
+    background: var(--paper);
+    border-bottom: 1px solid var(--line);
+    padding: 16px 24px 18px;
+  }
+  .brand-row {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .brand {
+    display: inline-flex; align-items: center; gap: 8px;
+    color: var(--ink); text-decoration: none;
+    font-family: 'Noto Serif KR', 'Nanum Myeongjo', 'Apple SD Gothic Neo', serif;
+    font-size: 21px; font-weight: 700; letter-spacing: -0.01em;
+  }
+  .brand img { width: 1.25em; height: 1.25em; object-fit: contain; vertical-align: middle; }
+  .brand-page-label {
+    color: var(--muted); font-size: 13px; font-weight: 600;
+    padding-left: 12px; border-left: 1px solid var(--line);
+  }
+  .report-home {
+    margin-left: auto; font-size: 13px; font-weight: 600;
+    color: var(--brand-ink); text-decoration: none;
+  }
+  .report-home:hover { text-decoration: underline; }
+  /* The rule that chose the header title, stated ABOVE it so the title is
+     never mistaken for "the claim itself" or an origin attribution. */
+  .title-rule { font-size: 12.5px; color: var(--muted); font-weight: 600; margin-bottom: 4px; }
+  .report-title {
+    font-size: 22px; font-weight: 500; letter-spacing: -0.02em; color: var(--ink);
+    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+  }
+  /* HONESTY (fixed, always visible): circulation record, NOT verification. */
+  .report-framing {
+    margin-top: 10px; display: inline-block;
+    background: #eef4ff; border: 1px solid var(--brand);
+    color: var(--brand-ink); font-size: 12.5px; font-weight: 700;
+    border-radius: 999px; padding: 4px 12px;
+  }
+  .report-subtitle { margin-top: 8px; font-size: 13.5px; line-height: 1.55; color: var(--slate); }
+  .report-subtitle strong { color: var(--ink); font-weight: 700; }
+  /* SUPERSEDED notice — explicit, never a silent swap. Neutral styling
+     (no red/green semantics). */
+  .merge-notice {
+    margin-top: 12px; padding: 10px 14px;
+    background: #fffbeb; border: 1px solid #d9c58a; border-radius: var(--radius-sm);
+    font-size: 13px; color: var(--slate); line-height: 1.55;
+  }
+  .merge-notice strong { color: var(--ink); }
+  main.report-body { max-width: 860px; margin: 0 auto; padding: 22px 20px 40px; }
+  #status { color: var(--slate); font-size: 15px; text-align: center; padding: 48px 24px; }
+  .panel {
+    background: var(--paper); border: 1px solid var(--line);
+    border-radius: var(--radius-sm); box-shadow: var(--shadow);
+    padding: 16px 18px; margin-bottom: 14px;
+  }
+  .panel-title { font-size: 13.5px; font-weight: 700; color: var(--slate); margin-bottom: 10px; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 13px; color: var(--slate); }
+  .outlet-badge {
+    display: inline-flex; align-items: center;
+    background: #eef4ff; color: var(--brand-ink);
+    border-radius: 999px; padding: 2px 10px;
+    font-weight: 700; font-size: 12px;
+  }
+  /* Daily curve: bars spaced BY INDEX (gaps_omitted honesty — days without
+     articles are not drawn, and no continuous axis implies they were). */
+  .spark-row { display: flex; align-items: flex-end; gap: 6px; overflow-x: auto; padding: 4px 2px 0; }
+  .spark-col { display: flex; flex-direction: column; align-items: center; gap: 3px; flex: 0 0 auto; }
+  .spark-bar { width: 20px; background: var(--brand); border-radius: 2px 2px 0 0; opacity: 0.85; }
+  .spark-count { font-size: 10.5px; color: var(--slate); font-weight: 700; }
+  .spark-date { font-size: 10px; color: var(--muted); }
+  .spark-note { margin-top: 8px; font-size: 12px; color: var(--muted); line-height: 1.5; }
+  /* Member table — chronological, plain text verdicts (no colour semantics). */
+  .explain-line { font-size: 13px; color: var(--slate); line-height: 1.6; margin-bottom: 10px; }
+  .explain-line strong { color: var(--ink); }
+  .cap-line { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  table.members { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.members th {
+    text-align: left; font-size: 12px; color: var(--muted); font-weight: 700;
+    border-bottom: 1px solid var(--line); padding: 6px 8px; white-space: nowrap;
+  }
+  table.members td { border-bottom: 1px solid var(--line); padding: 7px 8px; vertical-align: top; color: var(--slate); }
+  table.members td.m-date { white-space: nowrap; color: var(--muted); }
+  table.members td.m-host { white-space: nowrap; }
+  table.members a { color: var(--ink); text-decoration: none; font-weight: 600; }
+  table.members a:hover { color: var(--brand-ink); text-decoration: underline; }
+  .table-scroll { overflow-x: auto; }
+  footer.report-foot {
+    max-width: 860px; margin: 0 auto; padding: 0 20px 46px;
+    font-size: 12.5px; color: var(--muted); line-height: 1.7;
+  }
+  footer.report-foot a { color: var(--brand-ink); text-decoration: none; font-weight: 600; }
+  footer.report-foot a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<header class="report-head">
+  <div class="brand-row">
+    <a class="brand" href="/" aria-label="tickedin 홈으로"><img src="/web/assets/favicon-180.png" alt="" aria-hidden="true">tickedin</a>
+    <span class="brand-page-label">주장 확산 기록</span>
+    <a class="report-home" href="/">← 홈으로</a>
+  </div>
+  <div class="title-rule" id="titleRule" hidden></div>
+  <div class="report-title" id="claimTitle">주장 확산 기록</div>
+  <div class="report-framing">확산 규모 기준 · 사실 검증 아님</div>
+  <p class="report-subtitle">
+    이 페이지는 <strong>하나의 주장</strong>이 여러 매체로 퍼진 기록과, 그 주장을 다룬
+    <strong>기사별 근거 수준</strong>을 나란히 보여줍니다.
+    <strong>사실 여부에 대한 판단이 아닙니다.</strong>
+  </p>
+  <div class="merge-notice" id="mergeNotice" hidden></div>
+</header>
+<main class="report-body">
+  <div id="status">주장 확산 기록을 불러오는 중…</div>
+  <section class="panel" id="metaPanel" hidden>
+    <div class="panel-title">확산 규모</div>
+    <div class="meta-row" id="metaRow"></div>
+  </section>
+  <section class="panel" id="timelinePanel" hidden>
+    <div class="panel-title">일자별 보도 건수</div>
+    <div class="spark-row" id="sparkRow"></div>
+    <div class="spark-note">기사가 있는 날만 표시합니다 — 사이의 빈 날은 측정값이 아니므로 그리지 않습니다. 보도 건수 기준이며 사실 검증이 아닙니다.</div>
+  </section>
+  <section class="panel" id="membersPanel" hidden>
+    <div class="panel-title">이 주장을 다룬 기사들 (시간순)</div>
+    <!-- ★THE EXPLANATION LINE — the point of the page. Basis wording reused
+         verbatim from the detail view's verdict-note. -->
+    <p class="explain-line">
+      같은 주장이라도 기사마다 <strong>근거 수준</strong>이 다르게 표시될 수 있습니다 —
+      근거 수준은 그 기사에서 <strong>수집된 근거의 양이며 진위 판정이 아닙니다</strong>.
+    </p>
+    <div class="cap-line" id="capLine" hidden></div>
+    <div class="table-scroll">
+      <table class="members" aria-label="이 주장을 다룬 기사 목록 (시간순)">
+        <thead>
+          <tr><th>보도일</th><th>매체</th><th>기사</th><th>판정</th><th>근거 수준</th></tr>
+        </thead>
+        <tbody id="memberRows"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+<footer class="report-foot" id="foot">
+  <div>확산 규모를 보여줄 뿐, 사실 여부에 대한 검증이 아닙니다.</div>
+  <div>
+    <a href="/web/weekly.html">주간 확산 리포트</a> ·
+    <a href="/web/brainmap.html">뉴스 연결지도</a> ·
+    <a href="/">tickedin 홈</a>
+  </div>
+</footer>
+<script>
+(function () {
+  "use strict";
+
+  function day(iso) {
+    return (typeof iso === "string" && iso.length >= 10) ? iso.slice(0, 10) : "";
+  }
+  function el(tag, className, text) {
+    var node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined && text !== null) node.textContent = String(text);
+    return node;
+  }
+
+  // Verdict display labels — the EXACT map + fallback the main site renders
+  // (frontend/scripts/main.js VERDICT_LABELS / verdictLabelKo). No new
+  // vocabulary; unknown/legacy labels fall back exactly like the site does.
+  var VERDICT_LABELS = {
+    draft_verified: "임시 검증 완료",
+    draft_likely_true: "사실 가능성 높음",
+    draft_unverified: "추가 검증 필요",
+    draft_needs_context: "맥락 추가 확인 필요",
+    draft_needs_official_confirmation: "공식 출처 확인 필요",
+    draft_misleading: "오해 가능성 있음",
+    draft_disputed: "상충 근거 확인 필요",
+    draft_outdated: "최신 여부 확인 필요"
+  };
+  function verdictLabelKo(label) {
+    return VERDICT_LABELS[String(label || "")] || "추가 검증 필요";
+  }
+
+  var idParam = (new URLSearchParams(location.search).get("id") || "").trim().toLowerCase();
+  if (!/^[0-9a-f]{6,64}$/.test(idParam)) idParam = "";
+
+  function showEmpty() {
+    document.getElementById("status").textContent = "해당 주장을 찾을 수 없습니다.";
+  }
+
+  function render(data) {
+    var cluster = data.cluster || {};
+    var members = Array.isArray(data.members) ? data.members : [];
+    var timeline = data.timeline || {};
+    if (!members.length) { showEmpty(); return; }
+
+    // SUPERSEDED: say plainly that the requested claim was merged — never
+    // render a different cluster silently under the requested id.
+    if (data.superseded === true) {
+      var notice = document.getElementById("mergeNotice");
+      notice.textContent = "요청한 주장 기록(" + (data.requested_lineage_id || idParam)
+        + ")은 이후 다른 주장 묶음으로 병합되었습니다. 아래는 병합된 현재 묶음("
+        + (cluster.lineage_id || "") + ") 기준의 기록입니다.";
+      notice.hidden = false;
+    }
+
+    // HEADER TITLE — representative ARTICLE, not "the claim". The /api/claim
+    // payload carries no representative field (the trending representative is
+    // only reachable for currently-trending clusters), so the rule here is
+    // the MOST RECENT published_at member, stated right above the title.
+    // Deliberately NOT the earliest member and NEVER labelled 최초/원조/출처:
+    // picking by score would be cherry-picking, and the earliest article can
+    // predate the decision the cluster is about.
+    var dated = members.filter(function (m) { return !!m.published_at; });
+    var headMember = dated.length ? dated[dated.length - 1] : members[members.length - 1];
+    if (headMember && headMember.title) {
+      document.getElementById("claimTitle").textContent = headMember.title;
+      var rule = document.getElementById("titleRule");
+      rule.textContent = dated.length
+        ? "이 주장을 다룬 기사 중 가장 최근 보도의 제목입니다 (대표 기사이며, 주장 원문·최초 보도가 아닙니다)"
+        : "이 주장을 다룬 기사 제목 중 하나입니다 (대표 기사이며, 주장 원문·최초 보도가 아닙니다)";
+      rule.hidden = false;
+    }
+
+    // META ROW — outlet count and article count SEPARATE, never merged.
+    var meta = document.getElementById("metaRow");
+    if (Number(cluster.outlet_count) > 0) {
+      meta.appendChild(el("span", "outlet-badge", Number(cluster.outlet_count) + "개 매체"));
+    }
+    if (Number(cluster.member_count) > 0) {
+      meta.appendChild(el("span", null, "기사 " + Number(cluster.member_count) + "건"));
+    }
+    var from = day(cluster.earliest_member_published_at);
+    var to = day(cluster.latest_member_published_at);
+    if (from && to) {
+      meta.appendChild(el("span", null, "확산 기간 " + from + " → " + to + " (수집 기사 기준)"));
+    }
+    document.getElementById("metaPanel").hidden = false;
+
+    // TIMELINE — bars spaced by INDEX (gaps_omitted: days without articles
+    // are not drawn; the note below the bars states this).
+    var daily = Array.isArray(timeline.daily) ? timeline.daily : [];
+    if (daily.length) {
+      var max = daily.reduce(function (acc, p) { return Math.max(acc, Number(p.count) || 0); }, 1);
+      var row = document.getElementById("sparkRow");
+      daily.forEach(function (point) {
+        var count = Number(point.count) || 0;
+        var col = el("div", "spark-col");
+        col.appendChild(el("span", "spark-count", count));
+        var bar = el("div", "spark-bar");
+        bar.style.height = Math.max(3, Math.round((count / max) * 44)) + "px";
+        bar.title = point.date + " · " + count + "건";
+        col.appendChild(bar);
+        col.appendChild(el("span", "spark-date", String(point.date || "").slice(5)));
+        row.appendChild(col);
+      });
+      document.getElementById("timelinePanel").hidden = false;
+    }
+
+    // MEMBER TABLE — the API's chronological order, verbatim. No score sort,
+    // no highlight, no confirm/refute badge of any kind.
+    if (data.member_rows_capped === true) {
+      var capLine = document.getElementById("capLine");
+      capLine.textContent = "전체 " + Number(cluster.member_count) + "건 중 가장 이른 "
+        + members.length + "건만 표시합니다.";
+      capLine.hidden = false;
+    }
+    var tbody = document.getElementById("memberRows");
+    members.forEach(function (m) {
+      var tr = el("tr");
+      tr.appendChild(el("td", "m-date", day(m.published_at) || "날짜 없음"));
+      tr.appendChild(el("td", "m-host", m.outlet_host || "-"));
+      var tdTitle = el("td");
+      var link = el("a", null, m.title || "(제목 없음)");
+      var rid = Number(m.analysis_id);
+      link.href = rid > 0 ? "/?result_id=" + encodeURIComponent(rid) : "/";
+      tdTitle.appendChild(link);
+      tr.appendChild(tdTitle);
+      tr.appendChild(el("td", null, verdictLabelKo(m.verdict_label)));
+      // "근거 수준 N" — the card face's exact label (SCORE-CLARITY wording).
+      var conf = m.policy_confidence_score;
+      tr.appendChild(el("td", null,
+        (conf === null || conf === undefined) ? "-" : "근거 수준 " + conf));
+      tbody.appendChild(tr);
+    });
+    document.getElementById("membersPanel").hidden = false;
+
+    document.getElementById("status").style.display = "none";
+  }
+
+  if (!idParam) { showEmpty(); return; }
+  fetch("/api/claim/" + encodeURIComponent(idParam))
+    .then(function (response) {
+      if (!response.ok) throw new Error("http " + response.status);
+      return response.json();
+    })
+    .then(function (data) {
+      if (!data || data.found !== true) { showEmpty(); return; }
+      render(data);
+    })
+    .catch(function () { showEmpty(); });
+})();
+</script>
+</body>
+</html>
