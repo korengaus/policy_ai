@@ -5244,16 +5244,32 @@
       // Claim title — wrapped, max 3 lines.
       ctx.fillStyle = palette.ink;
       ctx.font = `700 50px ${SHARE_IMAGE_FONTS}`;
+      const titleLines = wrapCanvasText(ctx, title, width - margin * 2, 3);
+      // SHARE-IMAGE-EMPTY-STATE: the spread lines are gated on outletCount >= 2
+      // below, so a singleton card draws only title + official line and used to
+      // leave a large blank band above the divider. When (and only when) the
+      // spread lines are absent, shift the remaining block down by HALF the
+      // leftover space to the divider (height-118) so it sits centered instead
+      // of top-hugging. Layout arithmetic only: absent stays absent — no zero,
+      // no placeholder date, no label (a singleton may be a truly single-outlet
+      // story OR a clustering-threshold artifact; we cannot tell which, so the
+      // image asserts neither). With spread data the shift is 0 by construction
+      // and every coordinate below is unchanged.
+      const outletCount = Number(spreadData?.cluster?.outlet_count);
+      const hasSpread = Number.isFinite(outletCount) && outletCount >= 2;
       let y = 210;
-      for (const line of wrapCanvasText(ctx, title, width - margin * 2, 3)) {
+      if (!hasSpread) {
+        const blockEnd = 210 + titleLines.length * 66 + 8 + (officialLabel ? 14 + 40 : 0);
+        y += Math.max(0, Math.round((height - 118 - blockEnd) / 2));
+      }
+      for (const line of titleLines) {
         ctx.fillText(line, margin, y);
         y += 66;
       }
       y += 8;
 
       // Spread facts — only when the card actually has multi-outlet data.
-      const outletCount = Number(spreadData?.cluster?.outlet_count);
-      if (Number.isFinite(outletCount) && outletCount >= 2) {
+      if (hasSpread) {
         ctx.fillStyle = palette.brandInk;
         ctx.font = `800 40px ${SHARE_IMAGE_FONTS}`;
         ctx.fillText(`${outletCount}개 매체에서 보도`, margin, y);
