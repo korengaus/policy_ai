@@ -1424,6 +1424,243 @@ def cluster_sizes(ids: Optional[str] = None) -> Response:
 
 
 # ---------------------------------------------------------------------------
+# CLAIM-PAGE Phase 2 — read-only WHOLE-CLAIM (cluster) payload, addressed by
+# the DURABLE lineage id (build_brainmap_graph.assign_lineage_ids), so a
+# standalone claim page can hold a URL that survives brainmap rebuilds.
+#
+# GET /api/claim/{lineage_id} resolves the lineage in the NEWEST graph (the
+# SAME cached spread indexes every spread route uses) and returns cluster
+# meta + the members' published_at daily curve + SLIM per-member rows for
+# ALL members (the 10-cap sibling route /api/cluster/{id}/members is a
+# different, untouched surface).
+#
+# MERGE FALLBACK: a merged-away lineage stops with no tombstone
+# (assign_lineage_ids), so a lineage absent from the current graph is looked
+# up in the most recent PRIOR graph rows; its last known members are then
+# majority-mapped through the CURRENT graph. When they resolve to a living
+# cluster, THAT cluster is returned with superseded=true — the payload keeps
+# the requested id alongside the current one, never a silent swap. An
+# unresolvable id -> {"found": false} at 200; a cluster is NEVER fabricated.
+#
+# SAFETY / HONESTY (these define the payload, not just the UI):
+#   * READ-ONLY, SLIM projection only — never debug_summary /
+#     source_candidates / any heavy JSON blob (the PERF-2 16MB lesson).
+#   * outlet_count (distinct 매체) and member_count (article rows) are
+#     SEPARATE fields — conflating them would overstate reach (78 vs 156).
+#   * NO aggregate cluster score of ANY kind (no avg/max/min/median):
+#     policy_confidence_score describes the evidence in THAT one article; a
+#     combined number would be fabricated and would read as a claim verdict.
+#   * NO strength/score ordering field: members are chronological
+#     (published_at ASC, undated last, id tiebreak) — a fact, not a ranking;
+#     sequence is never framed as contradiction or 반박.
+#   * earliest_member_published_at means "earliest article in OUR CORPUS for
+#     this cluster", nothing more — deliberately NOT named origin/originator/
+#     최초 보도자 (the 최저임금 cluster's earliest member PREDATES the
+#     decision it reports; an origination claim would be flatly wrong).
+#   * NO truth/falsity field anywhere; circulation vocabulary only.
+#   * NEVER 500: malformed id / no graph / PG off / any failure ->
+#     {"found": false} at HTTP 200 (the spread posture), 5-min cache.
+# ---------------------------------------------------------------------------
+_CLAIM_NOT_FOUND_JSON = '{"found": false}'
+_CLAIM_NOTE = "확산 규모 기준 · 사실 검증 아님"
+# Slim member rows per response. Cluster meta counts and the daily timeline
+# ALWAYS cover the whole cluster; when the cap bites the payload says so
+# (member_rows_capped + member_rows_cap) so the page can state "earliest N
+# shown" instead of silently truncating. 400 ≈ 2.5x the largest cluster today.
+_CLAIM_MEMBER_ROWS_CAP = 400
+# Merge fallback: how many prior graph rows to scan for a vanished lineage.
+_CLAIM_LINEAGE_SCAN_ROWS = 6
+
+
+def _find_cluster_by_lineage(indexes: dict, lineage_id: str):
+    """cluster_id in the CURRENT indexes for this lineage, or None. A
+    pre-lineage graph row falls back to stable_id — exactly the value
+    assign_lineage_ids' minting would have given that cluster."""
+    for cid, meta in (indexes.get("clusters") or {}).items():
+        if (meta.get("lineage_id") or meta.get("stable_id")) == lineage_id:
+            return cid
+    return None
+
+
+def _resolve_superseded_lineage(lineage_id: str, indexes: dict):
+    """Merge fallback: find the lineage in recent PRIOR graph rows and
+    majority-map its last known members into the CURRENT graph. Returns the
+    current cluster_id, or None when the id cannot be resolved (then the
+    route answers found:false — never a guess)."""
+    import sqlalchemy as sa
+    from sqlalchemy.exc import ProgrammingError
+
+    import postgres_storage
+
+    engine = postgres_storage.get_engine()
+    if engine is None:
+        return None
+    try:
+        with engine.connect() as conn:
+            prior_ids = conn.execute(sa.text(
+                "SELECT id FROM brainmap_graph ORDER BY id DESC "
+                "LIMIT :n OFFSET 1"
+            ), {"n": _CLAIM_LINEAGE_SCAN_ROWS}).fetchall()
+            for (row_id,) in prior_ids:
+                graph_json = conn.execute(sa.text(
+                    "SELECT graph_json FROM brainmap_graph WHERE id = :i"
+                ), {"i": row_id}).scalar()
+                if not graph_json:
+                    continue
+                try:
+                    graph = json.loads(graph_json)
+                except (TypeError, ValueError):
+                    continue
+                if not isinstance(graph, dict):
+                    continue
+                old = _build_spread_indexes(graph)
+                old_cid = _find_cluster_by_lineage(old, lineage_id)
+                if old_cid is None:
+                    continue
+                # Found its last appearance: majority-map those members into
+                # the current graph. Deterministic tie-break: lowest cid.
+                counts: dict = {}
+                for mid in old["members"].get(old_cid) or []:
+                    cid = indexes["cluster_of"].get(mid)
+                    if cid is not None:
+                        counts[cid] = counts.get(cid, 0) + 1
+                if not counts:
+                    return None
+                return max(counts.items(), key=lambda kv: (kv[1], -kv[0]))[0]
+    except ProgrammingError:
+        return None
+    return None
+
+
+def _fetch_claim_member_rows(member_ids):
+    """Read-only SLIM member projection — metadata columns only, never a
+    heavy JSON blob. source_reliability_summary is fetched solely to extract
+    the one has_genuine_official_support boolean."""
+    if not member_ids:
+        return []
+    import sqlalchemy as sa
+
+    import postgres_storage
+
+    engine = postgres_storage.get_engine()
+    if engine is None:
+        return []
+    stmt = sa.text(
+        "SELECT id, title, original_url, published_at, verdict_label, "
+        "policy_confidence_score, source_reliability_summary "
+        "FROM analysis_results WHERE id IN :ids"
+    ).bindparams(sa.bindparam("ids", expanding=True))
+    with engine.connect() as conn:
+        return conn.execute(stmt, {"ids": list(member_ids)}).fetchall()
+
+
+def _build_claim_payload(requested_lineage: str, cluster_meta: dict,
+                         member_ids, rows, superseded: bool) -> dict:
+    """Pure assembly. member_count comes from the GRAPH membership (the same
+    count every other cluster surface reports); timeline/earliest/latest come
+    from ALL fetched rows, independent of the member-rows cap."""
+    # Outlet identity = the builder's own normalizer, imported (not
+    # reimplemented) so 매체 counting can never drift from the graph.
+    try:
+        from scripts.build_brainmap_graph import normalize_outlet_host
+    except ImportError:  # scripts/ directly on sys.path (test-harness layout)
+        from build_brainmap_graph import normalize_outlet_host
+
+    members = []
+    for rid, title, url, published_at, verdict, conf, srs_json in rows:
+        genuine = None  # null = unknown (old rows without the flag) — never guessed
+        if srs_json:
+            try:
+                srs = json.loads(srs_json)
+                value = (srs.get("has_genuine_official_support")
+                         if isinstance(srs, dict) else None)
+                if isinstance(value, bool):
+                    genuine = value
+            except (TypeError, ValueError):
+                pass
+        members.append({
+            "analysis_id": rid,
+            "title": title or "",
+            "outlet_host": normalize_outlet_host(url),
+            "published_at": published_at,
+            "verdict_label": verdict or "",
+            "policy_confidence_score": conf,
+            "has_genuine_official_support": genuine,
+        })
+    # Chronological ONLY (published_at ASC, undated last, id tiebreak) — a
+    # fact, not a ranking. NEVER ordered by score/verdict/strength.
+    members.sort(key=lambda m: (m["published_at"] is None,
+                                m["published_at"] or "", m["analysis_id"]))
+    dated = sorted(m["published_at"] for m in members if m["published_at"])
+    daily_counts: dict = {}
+    for value in dated:
+        day = value[:10]
+        daily_counts[day] = daily_counts.get(day, 0) + 1
+    capped = len(members) > _CLAIM_MEMBER_ROWS_CAP
+    payload = {
+        "found": True,
+        "requested_lineage_id": requested_lineage,
+        "superseded": superseded,
+        "cluster": {
+            "lineage_id": (cluster_meta.get("lineage_id")
+                           or cluster_meta.get("stable_id")),
+            "stable_id": cluster_meta.get("stable_id"),
+            "outlet_count": cluster_meta.get("outlet_count"),
+            "member_count": len(list(member_ids)),
+            "earliest_member_published_at": dated[0] if dated else None,
+            "latest_member_published_at": dated[-1] if dated else None,
+        },
+        "timeline": {
+            # gaps_omitted: only days with >=1 dated member appear; zero-days
+            # between points are NOT emitted (consistent, stated shape).
+            "daily": [{"date": day, "count": count}
+                      for day, count in sorted(daily_counts.items())],
+            "gaps_omitted": True,
+            "dated_members": len(dated),
+            "undated_members": len(members) - len(dated),
+        },
+        "members": members[:_CLAIM_MEMBER_ROWS_CAP],
+        "member_rows_capped": capped,
+        "note": _CLAIM_NOTE,
+    }
+    if capped:
+        payload["member_rows_cap"] = _CLAIM_MEMBER_ROWS_CAP
+    return payload
+
+
+@app.get("/api/claim/{lineage_id}")
+def claim_by_lineage(lineage_id: str) -> Response:
+    try:
+        requested = (lineage_id or "").strip().lower()
+        # Lineage ids are short lowercase hex (sha256[:12]; minted values are
+        # the same shape). Anything else cannot exist -> found:false, and the
+        # bound also keeps arbitrary input out of the fallback graph scan.
+        if not re.fullmatch(r"[0-9a-f]{6,64}", requested):
+            return _spread_response(_CLAIM_NOT_FOUND_JSON)
+        indexes = _load_spread_indexes()
+        if indexes is None:
+            return _spread_response(_CLAIM_NOT_FOUND_JSON)
+        superseded = False
+        cid = _find_cluster_by_lineage(indexes, requested)
+        if cid is None:
+            cid = _resolve_superseded_lineage(requested, indexes)
+            if cid is None:
+                return _spread_response(_CLAIM_NOT_FOUND_JSON)
+            superseded = True
+        cluster_meta = indexes["clusters"].get(cid) or {}
+        member_ids = indexes["members"].get(cid) or []
+        if not member_ids:
+            return _spread_response(_CLAIM_NOT_FOUND_JSON)
+        rows = _fetch_claim_member_rows(member_ids)
+        payload = _build_claim_payload(requested, cluster_meta, member_ids,
+                                       rows, superseded)
+        return _spread_response(json.dumps(payload, ensure_ascii=False))
+    except Exception:
+        logger.exception("Failed to build claim payload")
+        return _spread_response(_CLAIM_NOT_FOUND_JSON)
+
+
+# ---------------------------------------------------------------------------
 # TRENDING-API Slice 1 — read-only spread-GROWTH Top-N from the
 # brainmap_snapshots time series (§27c passive accumulation).
 #
