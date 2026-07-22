@@ -1105,6 +1105,60 @@ def weekly_report_for_week(week_start: str) -> Response:
     return _weekly_report_response(week_start)
 
 
+# WEEKLY-ARCHIVE — read-only week enumeration for the 지난 리포트 list.
+# One entry per week_start: rows are walked newest-id-first and the FIRST row
+# per week wins, which is the SAME row _load_weekly_report_row serves for that
+# week (ORDER BY id DESC LIMIT 1) — the list and the per-week page can never
+# disagree, and the duplicate 07-14 row is deduped at READ time only (the data
+# is untouched). Sorted newest week first. Empty/absent table -> {"weeks": []},
+# never a placeholder. Circulation metadata only — no verdict field anywhere.
+_WEEKLY_WEEKS_EMPTY_JSON = '{"weeks": []}'
+
+
+def _load_weekly_report_weeks() -> list:
+    import sqlalchemy as sa
+    from sqlalchemy.exc import ProgrammingError
+
+    import postgres_storage
+
+    engine = postgres_storage.get_engine()
+    if engine is None:
+        return []
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(sa.text(
+                "SELECT week_start, week_end, generated_at "
+                "FROM weekly_reports ORDER BY id DESC"
+            )).fetchall()
+    except ProgrammingError:
+        # Table not created yet — the generator creates it on first run.
+        return []
+    seen = set()
+    weeks = []
+    for week_start, week_end, generated_at in rows:
+        if not week_start or week_start in seen:
+            continue
+        seen.add(week_start)
+        weeks.append({
+            "week_start": week_start,
+            "week_end": week_end,
+            "generated_at": generated_at,
+        })
+    weeks.sort(key=lambda entry: entry["week_start"], reverse=True)
+    return weeks
+
+
+@app.get("/api/weekly-report-weeks")
+def weekly_report_weeks() -> Response:
+    try:
+        return _spread_response(json.dumps(
+            {"weeks": _load_weekly_report_weeks()}, ensure_ascii=False,
+        ))
+    except Exception:
+        logger.exception("Failed to list weekly report weeks")
+        return _spread_response(_WEEKLY_WEEKS_EMPTY_JSON)
+
+
 @app.get("/api/spread/{analysis_id}")
 def spread_annotation(analysis_id: int) -> Response:
     try:

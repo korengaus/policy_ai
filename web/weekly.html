@@ -110,6 +110,12 @@
     border-radius: 999px; padding: 2px 10px;
     font-weight: 700; font-size: 12px;
   }
+  /* WEEKLY-ARCHIVE: 지난 리포트 list — deliberately unnumbered plain links. */
+  .archive-section { max-width: 860px; margin: 0 auto; padding: 4px 20px 26px; }
+  .archive-title { font-size: 13.5px; font-weight: 700; color: var(--slate); margin-bottom: 8px; }
+  .archive-list { list-style: none; display: flex; flex-direction: column; gap: 5px; }
+  .archive-list a { color: var(--brand-ink); text-decoration: none; font-size: 13px; font-weight: 600; }
+  .archive-list a:hover { text-decoration: underline; }
   footer.report-foot {
     max-width: 860px; margin: 0 auto; padding: 0 20px 46px;
     font-size: 12.5px; color: var(--muted); line-height: 1.7;
@@ -146,6 +152,9 @@
   <div id="status">리포트를 불러오는 중…</div>
   <ol class="top-list" id="topList"></ol>
 </main>
+<!-- WEEKLY-ARCHIVE: filled by JS only when archived weeks exist — an empty
+     archive renders nothing here, never fabricated history. -->
+<section class="archive-section" id="archive"></section>
 <footer class="report-foot" id="foot"></footer>
 <script>
 (function () {
@@ -176,9 +185,18 @@
     if (text !== undefined && text !== null) node.textContent = String(text);
     return node;
   }
+  // WEEKLY-ARCHIVE: stable per-week permalink. ?week=YYYY-MM-DD fetches that
+  // archived snapshot via the EXISTING /api/weekly-report/{week_start} route
+  // and renders it through the same render(report) below (no renderer fork).
+  // Absent/malformed -> latest, unchanged. A week with no stored row renders
+  // the empty posture — never a fabricated report.
+  var weekParam = new URLSearchParams(location.search).get("week") || "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(weekParam)) weekParam = "";
+
   function showEmpty() {
-    document.getElementById("status").textContent =
-      "이번 주 리포트가 아직 준비되지 않았습니다.";
+    document.getElementById("status").textContent = weekParam
+      ? "해당 주간의 리포트가 없습니다."
+      : "이번 주 리포트가 아직 준비되지 않았습니다.";
   }
 
   function render(report) {
@@ -252,7 +270,26 @@
     foot.appendChild(mapLine);
   }
 
-  fetch("/api/weekly-report")
+  // WEEKLY-ARCHIVE: past-week view — the static "이번 주" heading would be
+  // wrong for an archived week, so it drops to the same phrase minus 이번 주,
+  // and a back-link to the latest report is added (existing label styles
+  // reused; weekRange still shows the actual date range via render()).
+  if (weekParam) {
+    document.querySelector(".report-title").textContent =
+      "가장 많이 확산된 정책 주장";
+    var backLine = el("p", "report-subtitle");
+    var backStrong = el("strong", null, "지난 리포트");
+    var backLink = el("a", "report-home", "최신 리포트 보기 →");
+    backLink.href = "/web/weekly.html";
+    backLine.appendChild(backStrong);
+    backLine.appendChild(document.createTextNode(" · "));
+    backLine.appendChild(backLink);
+    document.querySelector("header.report-head").appendChild(backLine);
+  }
+
+  fetch(weekParam
+      ? "/api/weekly-report/" + encodeURIComponent(weekParam)
+      : "/api/weekly-report")
     .then(function (response) {
       if (!response.ok) throw new Error("http " + response.status);
       return response.json();
@@ -262,6 +299,36 @@
       render(data.report);
     })
     .catch(function () { showEmpty(); });
+
+  // WEEKLY-ARCHIVE: 지난 리포트 list — one entry per archived week, the ACTUAL
+  // date range always shown, deliberately UNNUMBERED (no 1주차/2주차: the two
+  // earliest archived ranges overlap because they predate the weekly cron, and
+  // explicit ranges keep that visible instead of implying a consecutive,
+  // complete series). No total count, nothing summed across weeks. An empty
+  // archive renders nothing. Rendered on both the latest and past-week views.
+  fetch("/api/weekly-report-weeks")
+    .then(function (response) {
+      return response.ok ? response.json() : null;
+    })
+    .then(function (data) {
+      var weeks = (data && Array.isArray(data.weeks)) ? data.weeks : [];
+      var section = document.getElementById("archive");
+      if (!weeks.length || !section) return;
+      section.appendChild(el("div", "archive-title", "지난 리포트"));
+      var listNode = el("ul", "archive-list");
+      weeks.forEach(function (week) {
+        var start = day(week.week_start);
+        var end = day(week.week_end);
+        if (!start) return;
+        var item = el("li");
+        var link = el("a", null, end ? start + " ~ " + end : start);
+        link.href = "/web/weekly.html?week=" + encodeURIComponent(start);
+        item.appendChild(link);
+        listNode.appendChild(item);
+      });
+      section.appendChild(listNode);
+    })
+    .catch(function () {});
 })();
 </script>
 </body>
