@@ -446,6 +446,17 @@ def root():
     return FileResponse("web/index.html")
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    # Browsers request /favicon.ico at the ROOT by convention regardless of the
+    # <link rel="icon"> declared in the page; only /web is mounted, so this
+    # route is the only thing that can answer it (was a live 404).
+    path = os.path.join("web", "assets", "favicon.ico")
+    if not os.path.exists(path):
+        return Response(status_code=404)
+    return FileResponse(path)
+
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "healthy"}

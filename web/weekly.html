@@ -4,6 +4,24 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>주간 확산 리포트 — tickedin</title>
+<!-- LINK-PREVIEW: OG/Twitter tags mirror frontend/template.html's set. Circulation
+     vocabulary only (확산/매체) — no truth/falsity claim, no counts. Canonical URL
+     has no query parameters (archive permalinks share one preview). -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="tickedin">
+<meta property="og:locale" content="ko_KR">
+<meta property="og:url" content="https://tickedin.org/web/weekly.html">
+<meta property="og:title" content="주간 확산 리포트 — tickedin">
+<meta property="og:description" content="한 주 동안 가장 많이 확산된 정책 주장을 매체 수 기준으로 보여주는 주간 확산 리포트. 확산 규모 기준이며 사실 검증이 아닙니다.">
+<meta property="og:image" content="https://tickedin.org/web/assets/og-image.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="tickedin — 정책 뉴스 검증">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="주간 확산 리포트 — tickedin">
+<meta name="twitter:description" content="한 주 동안 가장 많이 확산된 정책 주장을 매체 수 기준으로 보여주는 주간 확산 리포트. 확산 규모 기준이며 사실 검증이 아닙니다.">
+<meta name="twitter:image" content="https://tickedin.org/web/assets/og-image.png">
 <!--
   WEEKLY-REPORT Slice 2 — standalone, hand-authored page (NOT
   build_index-managed; touches none of the index pins — same precedent as
@@ -230,7 +248,10 @@
       var to = day(item.window_last_at) || day(item.last_at);
       if (from && to) meta.appendChild(el("span", null, "확산 기간 " + from + " → " + to));
       if (Number(item.window_member_count) > 0) {
-        meta.appendChild(el("span", null, "이번 주 보도 " + Number(item.window_member_count) + "건"));
+        // ARCHIVE-LABEL: on a past-week permalink (?week=...) "이번 주" is wrong —
+        // reuse the "해당 주간" vocabulary already used by showEmpty above. The
+        // latest view (no ?week) renders the exact same string as before.
+        meta.appendChild(el("span", null, (weekParam ? "해당 주간 보도 " : "이번 주 보도 ") + Number(item.window_member_count) + "건"));
       }
       // WEEKLY-PAGE-ENRICH: spread-speed span (first->last duration). Omitted when
       // the timestamps are missing/equal (spreadSpeed returns "").
