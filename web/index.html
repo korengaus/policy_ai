@@ -12629,7 +12629,58 @@
         || commaCount >= 4;
     }
 
+    // BOILERPLATE-CLAIM-PROMOTION: wire-service/copyright furniture must never
+    // be SELECTED as a card's primary claim (harness-proven to reach the screen
+    // mutilated: "보도 내용은 -재배포, AI 학습 및 활용 금지> … 송고"). Marker
+    // spans are ONLY the patterns observed in the corpus probe
+    // (scripts/boilerplate_claim_probe.py) — no guessed additions, no ★NEW
+    // repeat-templates (human-reviewed as REAL syndicated claims), no datelines
+    // ("(서울=연합뉴스) OOO 기자 ="), no photo captions ("사진=", out of scope).
+    // ★Presence alone never rejects — policy news legitimately QUOTES copyright
+    // vocabulary ("무단 전재를 금지하는 저작권법 개정안"). Furniture must
+    // DOMINATE: only when, after deleting every marker span, fewer than 15
+    // Hangul characters remain (agency names, chat handles, timestamps and
+    // separators are not substance) is the candidate rejected. Rejection is
+    // SELECTION-ONLY: the caller's walk skips to the next candidate and the
+    // existing fallback chain (fallbackClaimFromTitle -> final sentence) still
+    // guarantees a non-empty claim; surviving text is NEVER trimmed here.
+    const CLAIM_FURNITURE_MARKERS = [
+      /무단\s*전재/g,
+      /재배포/g,
+      /AI\s*학습\s*및\s*활용\s*금지/g,
+      /송고/g,
+      /저작권자/g,
+      /제보는\s*카카오톡/g,
+      /기사문의\s*및\s*제보/g,
+      /재판매\s*및\s*DB\s*금지/g,
+    ];
+
+    function claimIsBoilerplateFurniture(text) {
+      let value = String(text || "");
+      if (!value) return false;
+      let matched = false;
+      for (const marker of CLAIM_FURNITURE_MARKERS) {
+        // replace-compare instead of .test(): /g regexes carry lastIndex state
+        // across .test() calls, which would randomly skip matches.
+        const replaced = value.replace(marker, " ");
+        if (replaced !== value) {
+          matched = true;
+          value = replaced;
+        }
+      }
+      if (!matched) return false;
+      return (value.match(/[가-힣]/g) || []).length < 15;
+    }
+
     function sanitizeClaimText(claimText, result = {}) {
+      // BOILERPLATE-CLAIM-PROMOTION single choke point: EVERY primary-claim
+      // acceptance path (aligned candidates, substantiveClaimForPromotion,
+      // title fallback, quote-lead replacements, deictic reselection) funnels
+      // its candidate through this function, so the furniture gate here covers
+      // all of them at once — gating only one path is how the 7/21 official-
+      // candidate leak happened. Must run on the RAW input: the word-stripping
+      // below deletes the very tokens the markers match.
+      if (claimIsBoilerplateFurniture(claimText)) return "";
       let claim = limitClaimSentences(claimText, 2, CLAIM_MAX_CHARS);
       if (!claim || isGenericClaimPlaceholder(claim)) return "";
       if (claimLooksSuspicious(claim)) return "";
