@@ -133,10 +133,12 @@
     <strong>사실 여부에 대한 판단이 아닙니다.</strong>
     제목을 누르면 해당 주장의 검증 카드로 이동합니다.
   </p>
-  <!-- WEEKLY-PAGE-ENRICH: clarify the 문구 거의 동일 metric so "문구 거의 동일 1"
-       is not misread as "only 1 outlet reported". Circulation vocabulary only. -->
+  <!-- NEAR-ANCHOR-LABEL-HONESTY: the stored near_anchor_outlet_count includes the
+       anchor's own outlet (build_brainmap_graph.py sim=1.0 self-pass), so the page
+       subtracts the 첫 보도 at DISPLAY time. Legend states the exclusion.
+       Circulation vocabulary only. -->
   <p class="report-subtitle report-note">
-    <strong>문구 거의 동일</strong> = 첫 보도와 제목·주장 문구가 거의 같은 매체 수입니다.
+    <strong>문구 거의 동일</strong> = 첫 보도를 제외하고, 첫 보도와 제목·주장 문구가 거의 같은 매체 수입니다.
     전체 확산 매체 수와는 별개이며, 사실 여부 판단이 아닙니다.
   </p>
 </header>
@@ -217,12 +219,16 @@
       var speed = spreadSpeed(item.window_first_at || item.first_at,
                               item.window_last_at || item.last_at);
       if (speed) meta.appendChild(el("span", null, speed));
-      // WEEKLY-PAGE-ENRICH: 문구 거의 동일 (near-anchor syndication) count. Null-guarded
-      // so OLD report rows generated before the field exists render cleanly (no span,
-      // never "undefined"). Circulation measurement, not a verdict.
+      // NEAR-ANCHOR-LABEL-HONESTY: the stored count includes the anchor's own
+      // outlet, so the DISPLAYED value excludes the 첫 보도 (max(0, stored-1)).
+      // 0 renders on purpose — "spreads widely but phrasing differs per outlet"
+      // is the honest reading. ABSENT/null/non-finite (old report rows) still
+      // hides the span entirely (never renders 0 for missing data). Stored
+      // value untouched. Circulation measurement, not a verdict.
       var nearSame = item.near_anchor_outlet_count;
-      if (typeof nearSame === "number" && nearSame > 0) {
-        meta.appendChild(el("span", null, "문구 거의 동일: " + nearSame + "개 매체"));
+      if (typeof nearSame === "number" && isFinite(nearSame) && nearSame >= 0) {
+        var nearShown = Math.max(0, nearSame - 1);
+        meta.appendChild(el("span", null, "문구 거의 동일: " + nearShown + "개 매체"));
       }
       main.appendChild(meta);
 
