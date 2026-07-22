@@ -6331,6 +6331,13 @@
     // for the 오늘의 한 장 hero pick. null until the fetch lands; stays null on
     // failure (the hero then keeps its pre-S5b two-card behavior).
     let trendingHeroRows = null;
+    // HERO-TRENDING: the resolved hero result object (mapHistoryRowToResult
+    // shape) for the first non-market trending entry, fetched by id via
+    // GET /history/{id} — trending representatives are usually OLDER than the
+    // recent-50 pool, so the pick can no longer resolve from that pool. null
+    // until resolveTrendingHeroPick lands; stays null on every failure path
+    // (the hero then keeps its pre-S5b two-card severity fallback).
+    let trendingHeroPick = null;
     // SEARCH-ANALYZE S-i (bug b): the last corpus-search results, cached so a
     // BACK from a card opened off the results can re-render them (the card
     // overwrote #results in place). {query, hits} or null.
@@ -8602,17 +8609,53 @@
     // same sort (default 뜨는순) so ranking is consistent: tier-1 = global top,
     // tier-2 = ranks beyond the tier-1 cut. Nothing disappears — an item that
     // misses the tier-1 cut shows in tier-2 (and ranks high under its domain tab).
-    // HOME-TOP5 S5b: resolve the #1 trending cluster's representative card from
-    // the loaded server pool (the renderRecentViewed resolution). Returns null
-    // when the trending fetch hasn't landed / is empty / the representative is
-    // older than the recent-50 pool — callers then render the two-card hero.
-    function trendingDailyPickCard() {
+    // HERO-TRENDING: fetch-resolve the hero pick from the trending rows, in
+    // the ORDER the API returns them (no re-ranking by score/confidence/looks —
+    // representative selection stays exactly what /api/trending returned).
+    // Replaces the old "representative must be in the recent-50 pool" rule:
+    // each candidate is fetched by id through the existing deep-link path
+    // (v2FetchHistoryRow → mapHistoryRowToResult), so a spreading claim can be
+    // the hero regardless of feed position.
+    // market_commercial entries are SKIPPED: the feed already rank-downs
+    // market_commercial in 뜨는순 (sortTopicCards), so promoting one to the
+    // hero would contradict the site's own policy — a BMW subsidy story
+    // outranking policy claims on a policy-verification site. This applies an
+    // EXISTING content-class rule consistently at the hero; it is NOT a
+    // quality/score re-rank.
+    // Fail-quiet per entry (a missing/failed id just advances to the next
+    // row); when no entry qualifies, trendingHeroPick stays null and the
+    // Branch B two-card severity hero renders unchanged.
+    async function resolveTrendingHeroPick() {
       const rows = Array.isArray(trendingHeroRows) ? trendingHeroRows : [];
-      const rid = Number(rows[0]?.representative_analysis_id);
-      if (!Number.isInteger(rid) || rid <= 0) return null;
-      const idx = serverHotTopicResults.findIndex((r) => Number(r?.result_id) === rid);
-      if (idx < 0) return null;
-      return topicCardFromResult(serverHotTopicResults[idx], idx, "server");
+      for (const row of rows) {
+        const rid = Number(row?.representative_analysis_id);
+        if (!Number.isInteger(rid) || rid <= 0) continue;
+        let result = null;
+        try {
+          const raw = await v2FetchHistoryRow(rid);
+          if (raw) result = mapHistoryRowToResult(raw);
+        } catch (_) { /* per-id fetch failure → try the next trending entry */ }
+        if (!result) continue;
+        if ((result.content_nature ?? null) === "market_commercial") continue;
+        trendingHeroPick = result;
+        // repaint-when-landed (the renderTrendingTop5 posture): the home
+        // render is idempotent, so this just upgrades the hero in place.
+        renderHotTopics();
+        return;
+      }
+    }
+
+    // HOME-TOP5 S5b → HERO-TRENDING: build the hero card from the RESOLVED
+    // pick (fetched by id above), no longer from the recent-50 pool. Returns
+    // null when the resolve hasn't landed / nothing qualified / the object is
+    // unusable — callers then render the two-card hero.
+    function trendingDailyPickCard() {
+      if (!trendingHeroPick) return null;
+      try {
+        return topicCardFromResult(trendingHeroPick, 0, "server");
+      } catch (_) {
+        return null; // unusable card object → Branch B fallback
+      }
     }
 
     function renderHotTopics(preferredResults) {
@@ -8693,12 +8736,20 @@
       // via the ORDINARY card builder ({detailed:true} only — no hero/secondary),
       // written straight in with NO .feed-sec-ruled / .latest-checks-row /
       // .feed-list wrappers (the container IS the 3-col grid now).
-      // HOME-TOP5 S5b: with a resolved 오늘의 한 장 the hero is that ONE big card
-      // (the most-CIRCULATED story by spread growth — circulation, never a
-      // verdict; the standard card face keeps its own honest badges). Every
-      // unresolved state falls through to the pre-S5b hero branches unchanged.
+      // HOME-TOP5 S5b → HERO-TRENDING: with a resolved pick the hero is that
+      // ONE big card (the most-CIRCULATED story by spread growth — circulation,
+      // never a verdict; the standard card face keeps its own honest badges).
+      // Every unresolved state falls through to the pre-S5b hero branches
+      // unchanged. The eyebrow is WEEK-scoped on purpose: snapshots are weekly
+      // (Monday cron), so the growth window is the last two weekly snapshots —
+      // "오늘/지금/실시간" would be a false label. All three fragments reuse
+      // existing site strings verbatim (trending panel h2, the 주간 스냅샷 기준
+      // spread-section meta, and the trending panel caption) — no new
+      // vocabulary. Styled by the existing .public-eyebrow class (no CSS edit).
       if (dailyPick) {
-        hotTopicsTopEl.innerHTML = renderTopicCardHtml(dailyPick, { detailed: true, hero: true });
+        hotTopicsTopEl.innerHTML =
+          '<div class="public-eyebrow">확산 성장 · 주간 스냅샷 기준 · 검증이 아닙니다</div>'
+          + renderTopicCardHtml(dailyPick, { detailed: true, hero: true });
         hotTopicsEl.innerHTML = pageSlice
           .map((card) => renderTopicCardHtml(card, { detailed: true }))
           .join("");
@@ -8858,11 +8909,12 @@
         if (!response.ok) return;
         const body = await response.json();
         const rows = Array.isArray(body?.trending) ? body.trending.slice(0, 5) : [];
-        // HOME-TOP5 S5b: cache the rows for the 오늘의 한 장 hero pick and
-        // repaint the (idempotent) home render now that trending has landed —
-        // it falls back to the two-card hero whenever the pick can't resolve.
+        // HOME-TOP5 S5b → HERO-TRENDING: cache the rows, then kick off the
+        // async by-id resolve of the hero pick (fire-and-forget; it repaints
+        // the idempotent home render when it lands, and every failure path
+        // leaves the two-card severity hero in place).
         trendingHeroRows = rows;
-        if (rows.length) renderHotTopics();
+        if (rows.length) resolveTrendingHeroPick();
         const items = rows.map((row, i) => {
           const rid = Number(row?.representative_analysis_id);
           // MOBILE-POLISH F: trending rows come straight off GET /api/trending,
