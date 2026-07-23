@@ -137,6 +137,13 @@ def build_report(graph, published_by_id, week_start, week_end,
                 break
         entries.append({
             "stable_id": cluster.get("stable_id"),
+            # CLAIM-LINK: the DURABLE lineage id (assign_lineage_ids), straight
+            # from the graph cluster — /web/claim.html?id= links use this, never
+            # stable_id (a membership hash that churns as clusters grow). None on
+            # rows from graphs predating lineage; weekly.html then resolves it
+            # client-side from representative_analysis_id. Past stored weekly
+            # rows are NEVER regenerated to backfill it.
+            "lineage_id": cluster.get("lineage_id"),
             "title": label_title,
             "representative_analysis_id": representative_id,
             "outlet_count": cluster.get("outlet_count"),
