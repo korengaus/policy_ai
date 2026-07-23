@@ -51,7 +51,15 @@ services:
     # above runs inside analyze_pipeline. weekly-spine's build lacks it only
     # because the spine never runs the pipeline.
     buildCommand: pip install -r requirements.txt && python -m playwright install chromium
-    startCommand: python scheduler.py --once
+    # COLLECTION-ALERT: the pin-OUT wrapper runs `python scheduler.py --once`
+    # unchanged (output streamed, exit code passed through) and sends ONE ntfy
+    # notification with the MAX(id) row delta — 일일 수집 완료 — 신규 N건 /
+    # 일일 수집 실패 (high priority). A 0-row success arrives as 신규 0건.
+    # ★DASHBOARD-PROVISIONED: this cron is managed in the Render dashboard,
+    # not from this file — editing the line below is DOCUMENTATION ONLY. The
+    # operator must set the same command (and add NTFY_TOPIC to this
+    # service's env) in the dashboard for it to take effect.
+    startCommand: python scripts/daily_collection_alert.py
     envVars:
       # --- core (required) -------------------------------------------------
       - key: DATABASE_URL
