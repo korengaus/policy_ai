@@ -6338,6 +6338,13 @@
     // until resolveTrendingHeroPick lands; stays null on every failure path
     // (the hero then keeps its pre-S5b two-card severity fallback).
     let trendingHeroPick = null;
+    // POLISH-LABELS 1: the /api/trending ROW the pick came from, kept so the
+    // hero eyebrow can show WHY it is the hero (outlets + ↑growth) in the
+    // sidebar's exact format. Set/cleared together with trendingHeroPick so
+    // the pair can never mix sources; the cluster-size chip on the card face
+    // is a DIFFERENT source (live graph vs snapshot) and is never paired with
+    // the trending delta.
+    let trendingHeroPickRow = null;
     // SEARCH-ANALYZE S-i (bug b): the last corpus-search results, cached so a
     // BACK from a card opened off the results can re-render them (the card
     // overwrote #results in place). {query, hits} or null.
@@ -8638,6 +8645,7 @@
         if (!result) continue;
         if ((result.content_nature ?? null) === "market_commercial") continue;
         trendingHeroPick = result;
+        trendingHeroPickRow = row;
         // repaint-when-landed (the renderTrendingTop5 posture): the home
         // render is idempotent, so this just upgrades the hero in place.
         renderHotTopics();
@@ -8747,8 +8755,21 @@
       // spread-section meta, and the trending panel caption) — no new
       // vocabulary. Styled by the existing .public-eyebrow class (no CSS edit).
       if (dailyPick) {
+        // POLISH-LABELS 1: surface WHY this card is the hero — the trending
+        // row's outlets + growth, in the sidebar Top-5 format VERBATIM
+        // ("{N}개 매체 · ↑{g}" / " · NEW"; badge omitted when growth is
+        // absent/zero/non-finite — never "↑0"). BOTH numbers come from the
+        // SAME /api/trending row (snapshot axis); the card face's cluster-size
+        // chip is the live-graph axis and stays unpaired with the delta.
+        const heroOutlets = Number(trendingHeroPickRow?.current_outlet_count);
+        const heroGrowth = Number(trendingHeroPickRow?.growth);
+        const heroBadge = trendingHeroPickRow?.is_new ? " · NEW"
+          : (Number.isFinite(heroGrowth) && heroGrowth > 0 ? ` · ↑${heroGrowth}` : "");
+        const heroStat = Number.isFinite(heroOutlets) && heroOutlets > 0
+          ? `${heroOutlets}개 매체${heroBadge}`
+          : heroBadge.replace(" · ", "");
         hotTopicsTopEl.innerHTML =
-          '<div class="public-eyebrow">확산 성장 · 주간 스냅샷 기준 · 검증이 아닙니다</div>'
+          `<div class="public-eyebrow">확산 성장${heroStat ? ` · ${heroStat}` : ""} · 주간 스냅샷 기준 · 검증이 아닙니다</div>`
           + renderTopicCardHtml(dailyPick, { detailed: true, hero: true });
         hotTopicsEl.innerHTML = pageSlice
           .map((card) => renderTopicCardHtml(card, { detailed: true }))
@@ -8765,17 +8786,30 @@
           hotTopicsEl.innerHTML = '<div class="empty-state">검색을 실행하거나 최근 분석을 불러오면 검증 카드가 표시됩니다.</div>';
         }
       } else if (hot.length >= 2) {
+        // POLISH-LABELS 2: Branch B now states its basis. The two-card hero is
+        // ranked by sortTopicCards(filtered, "뜨는순") — severity + freshness +
+        // 근거 수준 — whose public label is the existing sort-dropdown option
+        // "주목순" (SORT-LABEL-HONESTY, template.html); the tail reuses the
+        // Branch A eyebrow's honesty fragment. The eyebrow is a SIBLING placed
+        // before .feed-hero-band (exactly the Branch A structure), so the
+        // band's grid columns / divider rule / <=960px stacking are untouched.
+        // Also correct on the 전체 tab's trending-failure fallback — the
+        // ordering there is the same 뜨는순.
         const band = `<div class="feed-hero-band">`
           + renderTopicCardHtml(hot[0], { detailed: true, hero: true })
           + renderTopicCardHtml(hot[1], { detailed: true, secondary: true })
           + `</div>`;
-        hotTopicsTopEl.innerHTML = band;
+        hotTopicsTopEl.innerHTML =
+          '<div class="public-eyebrow">주목순 · 검증이 아닙니다</div>' + band;
         hotTopicsEl.innerHTML = pageSlice
           .map((card) => renderTopicCardHtml(card, { detailed: true }))
           .join("");
       } else {
         // <2 fallback — a single card renders as the hero alone (no grid below).
-        hotTopicsTopEl.innerHTML = renderTopicCardHtml(hot[0], { detailed: true, hero: true });
+        // POLISH-LABELS 2: same basis, same label as the two-card branch.
+        hotTopicsTopEl.innerHTML =
+          '<div class="public-eyebrow">주목순 · 검증이 아닙니다</div>'
+          + renderTopicCardHtml(hot[0], { detailed: true, hero: true });
         hotTopicsEl.innerHTML = "";
       }
 
@@ -11271,11 +11305,8 @@
     // (a 1-outlet cluster can't be distinguished from a not-yet-rebuilt
     // graph, so no "단독 보도" claim), missing/invalid id, fetch/parse
     // failure. The honesty line inside the section is MANDATORY copy.
-    function spreadSpanPhrase(spanDays) {
-      if (spanDays === 0) return "같은 날 집중 보도";
-      if (spanDays === 1) return "하루 사이 확산";
-      return `${spanDays}일에 걸쳐 확산`;
-    }
+    // (POLISH-LABELS 4 retired spreadSpanPhrase — the 확산 기간 from → to
+    // form shows the window directly, in both the DOM line and the canvas.)
 
     // SPREAD-TIMELINE Slice 3 — tiny CSS-bar sparkline of timeline.daily so
     // the SHAPE of circulation is visible (tall first bar = everyone published
@@ -11447,11 +11478,17 @@
         y += 54;
         const timeline = spreadData.timeline || {};
         const firstAt = typeof timeline.first_at === "string" ? timeline.first_at.slice(0, 10) : "";
-        const spanDays = Number(timeline.span_days);
-        if (Number(timeline.dated_members) > 0 && firstAt && Number.isFinite(spanDays)) {
+        const lastAt = typeof timeline.last_at === "string" ? timeline.last_at.slice(0, 10) : "";
+        // POLISH-LABELS 4: corpus-scoped wording (claim.html's solved form) —
+        // first_at is the earliest COLLECTED member, not the claim's origin,
+        // so 최초 보도 overclaimed. MUST stay in lockstep with the DOM line in
+        // loadSpreadAnnotations (two render sites, one string). Gate is
+        // truth-equivalent to the old span_days check: the payload computes
+        // last_at/span_days together whenever any dated member exists.
+        if (Number(timeline.dated_members) > 0 && firstAt && lastAt) {
           ctx.fillStyle = palette.slate;
           ctx.font = `500 28px ${SHARE_IMAGE_FONTS}`;
-          ctx.fillText(`최초 보도 ${firstAt} · ${spreadSpanPhrase(spanDays)}`, margin, y);
+          ctx.fillText(`확산 기간 ${firstAt} → ${lastAt} (수집 기사 기준)`, margin, y);
           y += 40;
         }
       }
@@ -11520,9 +11557,15 @@
           spreadDataCache.set(id, data);
           const timeline = data.timeline || {};
           const firstAt = typeof timeline.first_at === "string" ? timeline.first_at.slice(0, 10) : "";
-          const spanDays = Number(timeline.span_days);
-          const timelineLine = Number(timeline.dated_members) > 0 && firstAt && Number.isFinite(spanDays)
-            ? `<div class="spread-timeline-line">최초 보도 ${escapeHtml(firstAt)} · ${escapeHtml(spreadSpanPhrase(spanDays))}</div>`
+          const lastAt = typeof timeline.last_at === "string" ? timeline.last_at.slice(0, 10) : "";
+          // POLISH-LABELS 4: corpus-scoped wording (claim.html's solved form) —
+          // first_at is the earliest COLLECTED member, not the claim's origin
+          // and not this article's date, so 최초 보도 overclaimed (the 최저임금
+          // cluster's earliest member even predates the 07-14 decision). MUST
+          // stay in lockstep with the share-image canvas line above (two render
+          // sites, one string).
+          const timelineLine = Number(timeline.dated_members) > 0 && firstAt && lastAt
+            ? `<div class="spread-timeline-line">확산 기간 ${escapeHtml(firstAt)} → ${escapeHtml(lastAt)} (수집 기사 기준)</div>`
             : "";
           // SYNDICATION-STAT B5d 2b + NEAR-ANCHOR-LABEL-HONESTY: spread-structure
           // line (circulation only, never a verdict/color). The STORED
@@ -11712,8 +11755,8 @@
           section.innerHTML = `
             <h3>이 주장을 보도한 다른 기사들</h3>
             <ul class="cluster-members-list">${items}</ul>
-            <div class="reader-note">${escapeHtml(data.note || "같은 주장을 다룬 다른 보도 — 검증이 아닙니다")}</div>
             ${claimLink}
+            <div class="reader-note">${escapeHtml(data.note || "같은 주장을 다룬 다른 보도 — 검증이 아닙니다")}</div>
           `;
           section.hidden = false;
         } catch (error) {
