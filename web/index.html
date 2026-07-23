@@ -11608,15 +11608,35 @@
       return `${Number(match[1])}/${Number(match[2])}`;
     }
 
+    // CLAIM-LINK-CARD: ONE /api/topic-timeline/{id} request per card view,
+    // shared by loadTopicTimeline (확산 추이) and loadClusterMembers (claim
+    // link). The cache holds the IN-FLIGHT promise — both callers fire in
+    // parallel, so caching only the resolved value would race into a duplicate
+    // request. Any failure resolves to null for every waiter and EVICTS the
+    // entry, so one failed fetch never poisons the id for the whole session.
+    const topicTimelineCache = new Map();
+    function fetchTopicTimeline(id) {
+      let promise = topicTimelineCache.get(id);
+      if (!promise) {
+        promise = fetch(`${API_BASE}/api/topic-timeline/${encodeURIComponent(id)}`)
+          .then((response) => (response.ok ? response.json() : Promise.reject(new Error("timeline unavailable"))))
+          .catch(() => {
+            topicTimelineCache.delete(id);
+            return null;
+          });
+        topicTimelineCache.set(id, promise);
+      }
+      return promise;
+    }
+
     async function loadTopicTimeline() {
       const placeholders = document.querySelectorAll(".topic-timeline-section[data-timeline-id]");
       for (const section of placeholders) {
         const id = Number(section.getAttribute("data-timeline-id"));
         if (!Number.isInteger(id) || id <= 0) continue;
         try {
-          const response = await fetch(`${API_BASE}/api/topic-timeline/${encodeURIComponent(id)}`);
-          if (!response.ok) continue;
-          const data = await response.json();
+          const data = await fetchTopicTimeline(id);
+          if (!data) continue;
           const points = Array.isArray(data?.points) ? data.points : [];
           // >=2 points required: a single snapshot is not a trajectory.
           if (!data?.found || points.length < 2) continue;
@@ -11675,10 +11695,25 @@
             .map((m) => `<li><a href="/?result_id=${encodeURIComponent(Number(m.analysis_id))}">${escapeHtml(m.title || `기사 #${Number(m.analysis_id)}`)}</a></li>`)
             .join("");
           if (!items) continue;
+          // CLAIM-LINK-CARD: the full-record link rides the SAME timeline
+          // response the 확산 추이 section fetches — zero extra requests. Only
+          // the DURABLE lineage_id is ever linked; stable_id is a snapshot
+          // membership hash that churns and would mint dead links. No lineage
+          // (found:false — e.g. a 2-member/1-outlet cluster — or a failed
+          // fetch) renders NO link at all: no dead link, no placeholder.
+          // Wording matches weekly.html and is circulation vocabulary only.
+          const timeline = await fetchTopicTimeline(id);
+          const lineage = timeline && timeline.found === true
+            && typeof timeline.lineage_id === "string"
+            ? timeline.lineage_id.trim() : "";
+          const claimLink = lineage
+            ? `<div><a class="claim-link" href="/web/claim.html?id=${encodeURIComponent(lineage)}">이 주장 전체 확산 기록 →</a></div>`
+            : "";
           section.innerHTML = `
             <h3>이 주장을 보도한 다른 기사들</h3>
             <ul class="cluster-members-list">${items}</ul>
             <div class="reader-note">${escapeHtml(data.note || "같은 주장을 다룬 다른 보도 — 검증이 아닙니다")}</div>
+            ${claimLink}
           `;
           section.hidden = false;
         } catch (error) {
