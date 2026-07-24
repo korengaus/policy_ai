@@ -1,0 +1,757 @@
+"""B2B-READINESS-AUDIT — READ-ONLY pre-outreach verification (pin-OUT, reusable).
+
+Verifies, before every outreach wave, that everything a B2B prospect could
+click or scrutinise matches live truth TODAY:
+
+  C1  the outreach email's exact numbers on GET /api/claim/<flagship>
+  C2  cross-surface agreement of the flagship cluster's outlet number
+  C3  link integrity (weekly archive links, member /history rows, the four
+      public pages + honesty strings, found:false posture)
+  C4  corpus invariants (truth_claim / operator_review_required /
+      verdict_label legality) over the FULL corpus
+  C5  pipeline freshness (daily adds, latest weekly report + brainmap
+      snapshot, recent null rates)
+  C6  recent-row quality (sentence-join rate, boilerplate at the
+      PROMOTION layer vs raw stored)
+
+SAFETY
+------
+* DB: SELECT only. The engine is opened with
+  default_transaction_read_only=on so a stray write would ERROR, and
+  USE_POSTGRES_WRITE is never read or set. DATABASE_URL comes from the
+  environment or from the repo-root .env (parsed locally, never printed).
+* HTTP: sequential GETs against the live site, hard-capped at
+  MAX_LIVE_REQUESTS (58 < the 60 budget) with a polite delay.
+* No product code imported except the pure normalizer-free constants
+  mirrored below (mirrors are marked with their source lines).
+
+Usage:
+    python scripts/b2b_readiness_audit.py               # full audit
+    python scripts/b2b_readiness_audit.py --selftest    # offline parse checks
+    python scripts/b2b_readiness_audit.py --base http://127.0.0.1:8000
+
+Exit codes: 0 = audit ran (verdict in output) / selftest passed;
+            1 = selftest failed; 2 = usage / cannot even start.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+import time
+import urllib.request
+import urllib.error
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+except Exception:
+    pass
+
+ROOT = Path(__file__).resolve().parent.parent
+
+DEFAULT_BASE = "https://tickedin.org"
+MAX_LIVE_REQUESTS = 58          # hard stop under the ~60 budget
+REQUEST_DELAY_S = 0.25          # sequential + polite, never hammering
+
+FLAGSHIP_LINEAGE = "48e3baa51df2"
+FLAGSHIP_REPRESENTATIVE = 8523
+EMAIL_OUTLETS = 78
+EMAIL_MEMBERS = 156
+EMAIL_EARLIEST = "2026-06-30"
+EMAIL_LATEST = "2026-07-19"
+
+EXPECTED_WEEKLY_LATEST = "2026-07-14"
+EXPECTED_SNAPSHOT_LATEST = "2026-07-20"
+DAILY_ADD_BAND = (90, 160)
+KNOWN_NULL_VERDICTS = 3
+
+# Honesty strings the pages MUST show (source: prompt + web/*.html copy).
+S_NOT_VERIFICATION = "검증이 아닙니다"
+S_COLLECTED_BASIS = "수집 기사 기준"
+S_NEAR_ANCHOR_LEGEND = "첫 보도를 제외"
+S_BOILER_FRAGMENT = "무단 전재 및 재배포 금지"
+
+# Legal verdict-label closed set — MIRROR of honesty_guard.LEGAL_VERDICT_LABELS
+# (honesty_guard.py:37-47). Kept inline so the audit needs no project imports.
+LEGAL_VERDICT_LABELS = frozenset({
+    "",
+    "draft_disputed",
+    "draft_high_risk_review",
+    "draft_needs_review",
+    "draft_needs_official_confirmation",
+    "draft_needs_context",
+    "draft_verified",
+    "draft_likely_true",
+    "draft_unverified",
+})
+
+# MIRROR of web/index.html CLAIM_FURNITURE_MARKERS + claimIsBoilerplateFurniture
+# (index.html:12793-12819): marker spans removed; furniture iff <15 Hangul left.
+CLAIM_FURNITURE_MARKERS = [
+    re.compile(r"무단\s*전재"),
+    re.compile(r"재배포"),
+    re.compile(r"AI\s*학습\s*및\s*활용\s*금지"),
+    re.compile(r"송고"),
+    re.compile(r"저작권자"),
+    re.compile(r"제보는\s*카카오톡"),
+    re.compile(r"기사문의\s*및\s*제보"),
+    re.compile(r"재판매\s*및\s*DB\s*금지"),
+]
+# Broader copyright-furniture markers (scripts/boilerplate_claim_probe.py
+# SEED_MARKERS, copyright family only) — used as the INDEPENDENT post-gate
+# detector so the gate mirror can't trivially certify itself.
+BROAD_BOILER_MARKERS = [
+    re.compile(r"무단\s*전재"),
+    re.compile(r"재배포"),
+    re.compile(r"저작권"),
+    re.compile(r"[ⓒ©]|copyright", re.IGNORECASE),
+    re.compile(r"AI\s*학습"),
+    re.compile(r"송고\b|\d\s*송고|송고\s*$"),
+    re.compile(r"재판매\s*및\s*DB\s*금지"),
+]
+HANGUL_RX = re.compile(r"[가-힣]")
+# Sentence-join defect: Hangul + terminal punctuation + Hangul with NO space.
+SENTENCE_JOIN_RX = re.compile(r"[가-힣][.!?][가-힣]")
+
+
+def furniture_gate(text: str) -> bool:
+    """Mirror of claimIsBoilerplateFurniture: True = rejected as furniture."""
+    value = str(text or "")
+    if not value:
+        return False
+    matched = False
+    for rx in CLAIM_FURNITURE_MARKERS:
+        replaced = rx.sub(" ", value)
+        if replaced != value:
+            matched = True
+            value = replaced
+    if not matched:
+        return False
+    return len(HANGUL_RX.findall(value)) < 15
+
+
+def broad_boiler(text: str) -> bool:
+    """Independent detector: copyright markers present AND furniture dominates
+    (<15 Hangul after removing broad marker spans)."""
+    value = str(text or "")
+    if not value:
+        return False
+    matched = False
+    for rx in BROAD_BOILER_MARKERS:
+        replaced = rx.sub(" ", value)
+        if replaced != value:
+            matched = True
+            value = replaced
+    if not matched:
+        return False
+    return len(HANGUL_RX.findall(value)) < 15
+
+
+def claim_pool(normalized_raw, claims_raw) -> list:
+    """The frontend promotion pool, SAME order (index.html:12933-12944):
+    normalized_claims[].claim_text first, then claims[]."""
+    def loads(raw):
+        if raw in (None, ""):
+            return None
+        if isinstance(raw, (list, dict)):
+            return raw
+        try:
+            return json.loads(raw)
+        except Exception:
+            return None
+    pool = []
+    normalized = loads(normalized_raw)
+    if isinstance(normalized, list):
+        for entry in normalized:
+            if isinstance(entry, dict):
+                pool.append(str(entry.get("claim_text") or ""))
+            elif isinstance(entry, str):
+                pool.append(entry)
+    claims = loads(claims_raw)
+    if isinstance(claims, list):
+        pool.extend(str(c or "") for c in claims if isinstance(c, str))
+    return [t.strip() for t in pool if str(t or "").strip()]
+
+
+def promoted_pick(claim_text, normalized_raw, claims_raw, title) -> str:
+    """Mirror of the card's primary-claim selection ORDER for the furniture
+    question only (buildReviewerSafeClaim funnels every candidate through
+    sanitizeClaimText, whose FIRST gate is the furniture gate): stored
+    claim_text if it survives, else first surviving pool entry, else the
+    title fallback."""
+    if str(claim_text or "").strip() and not furniture_gate(claim_text):
+        return str(claim_text).strip()
+    for candidate in claim_pool(normalized_raw, claims_raw):
+        if not furniture_gate(candidate):
+            return candidate
+    return str(title or "").strip()
+
+
+def parse_env_file(path: Path) -> dict:
+    """Minimal KEY=VALUE .env parser (no export, strips optional quotes)."""
+    values = {}
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return values
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, raw = line.partition("=")
+        raw = raw.strip()
+        if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "\"'":
+            raw = raw[1:-1]
+        values[key.strip()] = raw
+    return values
+
+
+def resolve_weekly_links(weeks_payloads: dict, timeline_fetch) -> dict:
+    """Pure link-resolution over archived weekly reports, exactly as
+    weekly.html does (weekly.html:221-277): stored lineage_id wins; else
+    representative_analysis_id -> timeline_fetch(rid) -> found+lineage_id.
+    timeline_fetch(rid) returns a payload dict or None. Returns
+    {week_start: (resolved, total, [misses])}."""
+    out = {}
+    for week_start, payload in weeks_payloads.items():
+        entries = (payload or {}).get("top") or []
+        resolved, misses = 0, []
+        for entry in entries:
+            lid = entry.get("lineage_id")
+            if isinstance(lid, str) and lid.strip():
+                resolved += 1
+                continue
+            rid = entry.get("representative_analysis_id")
+            data = timeline_fetch(rid) if rid is not None else None
+            if (isinstance(data, dict) and data.get("found") is True
+                    and str(data.get("lineage_id") or "").strip()):
+                resolved += 1
+            else:
+                misses.append("rank%s(rep=%s)" % (entry.get("rank"), rid))
+        out[week_start] = (resolved, len(entries), misses)
+    return out
+
+
+def scan_forbidden_score_keys(payload, allowed=("policy_confidence_score",)):
+    """Recursively collect key paths containing 'score' (any aggregate or
+    combined score field would read as a claim verdict). Member-row
+    policy_confidence_score is the ONE allowed score field."""
+    hits = []
+
+    def walk(node, path):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if "score" in str(key).lower() and key not in allowed:
+                    hits.append(path + "." + str(key))
+                walk(value, path + "." + str(key))
+        elif isinstance(node, list):
+            for i, item in enumerate(node):
+                walk(item, "%s[%d]" % (path, i))
+
+    walk(payload, "$")
+    return hits
+
+
+# ---------------------------------------------------------------------------
+# Live HTTP (budgeted, sequential)
+# ---------------------------------------------------------------------------
+class Budget:
+    def __init__(self, cap):
+        self.cap = cap
+        self.used = 0
+
+
+def http_get(base, path, budget, as_json=True, timeout=30):
+    """One budgeted GET. Returns (status, body_or_payload). Never raises for
+    HTTP errors; raises RuntimeError only when the request budget is gone."""
+    if budget.used >= budget.cap:
+        raise RuntimeError("live request budget exhausted (%d)" % budget.cap)
+    budget.used += 1
+    time.sleep(REQUEST_DELAY_S)
+    url = base.rstrip("/") + path
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "b2b-readiness-audit/1.0 (read-only preflight)"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            status = resp.status
+    except urllib.error.HTTPError as err:
+        body = err.read().decode("utf-8", errors="replace") if err.fp else ""
+        status = err.code
+    except Exception as err:  # DNS/timeout — report, don't crash the audit
+        return (0, "request failed: %s" % err)
+    if as_json:
+        try:
+            return (status, json.loads(body))
+        except ValueError:
+            return (status, body)
+    return (status, body)
+
+
+# ---------------------------------------------------------------------------
+# Read-only DB engine (no USE_POSTGRES_WRITE, forced read-only transactions)
+# ---------------------------------------------------------------------------
+def build_readonly_engine():
+    import os
+    import sqlalchemy as sa
+
+    url = (os.environ.get("DATABASE_URL") or "").strip()
+    if not url:
+        url = parse_env_file(ROOT / ".env").get("DATABASE_URL", "").strip()
+    if not url:
+        return None, "DATABASE_URL not found (env or .env)"
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
+    if url.startswith("postgresql://"):
+        try:
+            import psycopg  # noqa: F401
+            url = "postgresql+psycopg://" + url[len("postgresql://"):]
+        except ImportError:
+            url = "postgresql+psycopg2://" + url[len("postgresql://"):]
+    try:
+        engine = sa.create_engine(
+            url, pool_pre_ping=True,
+            connect_args={
+                "connect_timeout": 20,
+                # Any write statement ERRORS instead of executing.
+                "options": "-c default_transaction_read_only=on "
+                           "-c statement_timeout=120000",
+            })
+        with engine.connect() as conn:
+            conn.execute(sa.text("SELECT 1"))
+        return engine, None
+    except Exception as err:
+        return None, "DB connect failed: %s" % str(err)[:160]
+
+
+# ---------------------------------------------------------------------------
+# The audit
+# ---------------------------------------------------------------------------
+class Report:
+    def __init__(self):
+        self.rows = []
+
+    def add(self, check, status, observed, impact):
+        self.rows.append((check, status, observed, impact))
+
+    def worst(self):
+        order = {"FAIL": 2, "WARN": 1, "PASS": 0, "SKIP": 0, "INFO": 0}
+        return max((order.get(s, 0) for _, s, _, _ in self.rows), default=0)
+
+
+def run_audit(base: str) -> int:
+    rep = Report()
+    budget = Budget(MAX_LIVE_REQUESTS)
+    p = print
+
+    # ---------------- CHECK 1 — the email's numbers -----------------------
+    status, claim = http_get(base, "/api/claim/" + FLAGSHIP_LINEAGE, budget)
+    claim_ok = status == 200 and isinstance(claim, dict) and claim.get("found") is True
+    if not claim_ok:
+        rep.add("C1 email numbers", "FAIL",
+                "claim payload http=%s found=%s" % (status, getattr(claim, "get", lambda *_: "?")("found") if isinstance(claim, dict) else "?"),
+                "email's flagship link renders '집계를 찾을 수 없' — dead pitch")
+        claim = {}
+    cluster = (claim.get("cluster") or {}) if isinstance(claim, dict) else {}
+    outlets = cluster.get("outlet_count")
+    members = cluster.get("member_count")
+    earliest = str(cluster.get("earliest_member_published_at") or "")[:10]
+    latest = str(cluster.get("latest_member_published_at") or "")[:10]
+    timeline = (claim.get("timeline") or {}) if isinstance(claim, dict) else {}
+    daily = timeline.get("daily") or []
+    daily_sum = sum(int(e.get("count") or 0) for e in daily if isinstance(e, dict))
+    dated = timeline.get("dated_members")
+    undated = timeline.get("undated_members")
+    member_rows = (claim.get("members") or []) if isinstance(claim, dict) else []
+    null_verdict = sum(1 for m in member_rows if not str(m.get("verdict_label") or "").strip())
+    null_conf = sum(1 for m in member_rows if m.get("policy_confidence_score") is None)
+    score_leaks = [h for h in scan_forbidden_score_keys(claim)
+                   if not re.search(r"\$\.members\[\d+\]\.policy_confidence_score$", h)]
+
+    if claim_ok:
+        numbers_match = (outlets == EMAIL_OUTLETS and members == EMAIL_MEMBERS
+                         and earliest == EMAIL_EARLIEST and latest == EMAIL_LATEST)
+        obs = ("outlets=%s members=%s earliest=%s latest=%s"
+               % (outlets, members, earliest, latest))
+        if numbers_match:
+            rep.add("C1 email numbers", "PASS", obs, "-")
+        else:
+            # Growth is not a bug — it is a copy-update signal (★).
+            rep.add("C1 email numbers", "WARN",
+                    obs + " (email says %s/%s %s→%s) — UPDATE EMAIL COPY"
+                    % (EMAIL_OUTLETS, EMAIL_MEMBERS, EMAIL_EARLIEST, EMAIL_LATEST),
+                    "prospect sees a different number than the email cited")
+        tl_ok = daily_sum == members
+        tl_labelled = (daily_sum == dated and (dated + (undated or 0)) == members)
+        rep.add("C1 timeline sum",
+                "PASS" if tl_ok else ("WARN" if tl_labelled else "FAIL"),
+                "sum(daily)=%s member_count=%s dated=%s undated=%s"
+                % (daily_sum, members, dated, undated),
+                "timeline curve contradicts the headline count on the claim page")
+        rep.add("C1 no aggregate score", "PASS" if not score_leaks else "FAIL",
+                "forbidden score keys: %s" % (score_leaks or "none"),
+                "a combined number reads as a truth verdict — honesty breach")
+        rep.add("C1 member fields", "PASS" if (null_verdict == 0 and null_conf == 0) else "FAIL",
+                "rows=%d null_verdict=%d null_conf=%d capped=%s"
+                % (len(member_rows), null_verdict, null_conf, claim.get("member_rows_capped")),
+                "blank verdict/score cells in the member table")
+
+    # ---------------- CHECK 2 — cross-surface agreement -------------------
+    _, spread = http_get(base, "/api/spread/%d" % FLAGSHIP_REPRESENTATIVE, budget)
+    spread_outlets = None
+    if isinstance(spread, dict):
+        spread_outlets = (spread.get("cluster") or {}).get("outlet_count") \
+            if isinstance(spread.get("cluster"), dict) else spread.get("outlet_count")
+    _, sizes = http_get(base, "/api/cluster-sizes?ids=%d" % FLAGSHIP_REPRESENTATIVE, budget)
+    sizes_outlets = (sizes.get("sizes") or {}).get(str(FLAGSHIP_REPRESENTATIVE)) \
+        if isinstance(sizes, dict) else None
+    _, trending = http_get(base, "/api/trending", budget)
+    trend_entry = None
+    for entry in (trending.get("trending") or []) if isinstance(trending, dict) else []:
+        if entry.get("cluster_lineage_id") == FLAGSHIP_LINEAGE:
+            trend_entry = entry
+            break
+    _, weekly_latest = http_get(base, "/api/weekly-report", budget)
+    weekly_payload = weekly_latest.get("report") if isinstance(weekly_latest, dict) and isinstance(weekly_latest.get("report"), dict) else weekly_latest
+    weekly_entry = None
+    if isinstance(weekly_payload, dict):
+        for entry in weekly_payload.get("top") or []:
+            # Archived weekly rows can predate CLAIM-LINK (stored lineage_id
+            # null, resolved client-side) — fall back to the representative id.
+            if (entry.get("lineage_id") == FLAGSHIP_LINEAGE
+                    or entry.get("representative_analysis_id") == FLAGSHIP_REPRESENTATIVE):
+                weekly_entry = entry
+                break
+
+    same_def = {"claim(all-time,graph)": outlets,
+                "spread(graph)": spread_outlets,
+                "cluster-sizes(graph)": sizes_outlets}
+    same_vals = {v for v in same_def.values() if v is not None}
+    labelled = {
+        "trending(snapshot)": (trend_entry or {}).get("current_outlet_count"),
+        "trending growth": (trend_entry or {}).get("growth"),
+        "weekly(at-generation)": (weekly_entry or {}).get("outlet_count"),
+        "weekly window_members": (weekly_entry or {}).get("window_member_count"),
+    }
+    rep.add("C2 cross-surface", "PASS" if len(same_vals) == 1 else "FAIL",
+            "; ".join("%s=%s" % kv for kv in {**same_def, **labelled}.items()),
+            "two pages show different outlet counts for the same claim")
+
+    # ---------------- CHECK 3 — link integrity ----------------------------
+    _, weeks_resp = http_get(base, "/api/weekly-report-weeks", budget)
+    weeks = [w.get("week_start") for w in (weeks_resp.get("weeks") or [])] \
+        if isinstance(weeks_resp, dict) else []
+    weeks_payloads = {}
+    for week in weeks:
+        _, wp = http_get(base, "/api/weekly-report/" + str(week), budget)
+        weeks_payloads[week] = wp.get("report") if isinstance(wp, dict) and isinstance(wp.get("report"), dict) else wp
+
+    def timeline_fetch(rid):
+        try:
+            _, data = http_get(base, "/api/topic-timeline/%s" % rid, budget)
+        except RuntimeError:
+            return None
+        return data if isinstance(data, dict) else None
+
+    resolution = resolve_weekly_links(weeks_payloads, timeline_fetch)
+    total_entries = sum(t for _, t, _ in resolution.values())
+    total_resolved = sum(r for r, _, _ in resolution.values())
+    all_misses = [m for _, _, ms in resolution.values() for m in ms]
+    rep.add("C3 weekly links", "PASS" if not all_misses else "WARN",
+            "%d/%d resolved over %d weeks%s"
+            % (total_resolved, total_entries, len(resolution),
+               ("; misses: " + ", ".join(all_misses)) if all_misses else ""),
+            "an entry renders with no claim link (safe, but a dead end)")
+
+    sample_ids = []
+    if member_rows:
+        n = min(10, len(member_rows))
+        step = max(1, (len(member_rows) - 1) // max(1, n - 1)) if n > 1 else 1
+        seen = set()
+        for i in range(0, len(member_rows), step):
+            rid = member_rows[i].get("analysis_id")
+            if rid is not None and rid not in seen:
+                sample_ids.append(rid)
+                seen.add(rid)
+            if len(sample_ids) == n:
+                break
+    hist_ok, hist_bad = 0, []
+    for rid in sample_ids:
+        st, data = http_get(base, "/history/%s" % rid, budget)
+        result = data.get("result") if isinstance(data, dict) else None
+        if st == 200 and isinstance(result, dict) and result.get("title"):
+            hist_ok += 1
+        else:
+            hist_bad.append("%s(http=%s)" % (rid, st))
+    rep.add("C3 member rows", "PASS" if not hist_bad else "FAIL",
+            "%d/%d renderable%s" % (hist_ok, len(sample_ids),
+                                    ("; bad: " + ", ".join(hist_bad)) if hist_bad else ""),
+            "clicking a member article 404s from the claim page")
+
+    pages = [
+        ("/", [S_NOT_VERIFICATION], []),
+        ("/web/weekly.html", [S_NOT_VERIFICATION, S_NEAR_ANCHOR_LEGEND], []),
+        ("/web/claim.html?id=" + FLAGSHIP_LINEAGE,
+         [S_NOT_VERIFICATION, S_COLLECTED_BASIS], []),
+        ("/web/brainmap.html", [S_NOT_VERIFICATION], []),
+    ]
+    page_problems = []
+    for path, must, must_not in pages:
+        st, html = http_get(base, path, budget, as_json=False)
+        if st != 200 or not isinstance(html, str):
+            page_problems.append("%s http=%s" % (path, st))
+            continue
+        for s in must:
+            if s not in html:
+                page_problems.append("%s missing '%s'" % (path, s))
+        for s in must_not:
+            if s in html:
+                page_problems.append("%s contains '%s'" % (path, s))
+    # Home cards are client-rendered: audit the feed the cards are built from
+    # and mirror the promotion gate — the boilerplate fragment must not be
+    # able to reach a card's primary-claim slot.
+    st, feed = http_get(base, "/history?limit=30", budget)
+    feed_rows = (feed.get("results") or []) if isinstance(feed, dict) else []
+    feed_boiler = 0
+    for row in feed_rows:
+        pick = promoted_pick(row.get("claim_text"), row.get("normalized_claims"),
+                             row.get("claims"), row.get("title"))
+        if broad_boiler(pick) or S_BOILER_FRAGMENT in pick:
+            feed_boiler += 1
+    if st != 200 or not feed_rows:
+        page_problems.append("/history feed http=%s rows=%d" % (st, len(feed_rows)))
+    elif feed_boiler:
+        page_problems.append("boilerplate reaches %d home card(s)" % feed_boiler)
+    rep.add("C3 pages+honesty", "PASS" if not page_problems else "FAIL",
+            "4 pages + 30-card feed; " + ("; ".join(page_problems) or "all strings present, 0 boilerplate cards"),
+            "missing disclaimer / copyright furniture shown as a claim")
+
+    st, ghost = http_get(base, "/api/claim/deadbeef0000", budget)
+    ghost_ok = st == 200 and isinstance(ghost, dict) and ghost.get("found") is False
+    rep.add("C3 not-found posture", "PASS" if ghost_ok else "FAIL",
+            "http=%s payload=%s" % (st, json.dumps(ghost, ensure_ascii=False)[:60]),
+            "a fabricated page for a nonexistent claim id")
+
+    # ---------------- CHECKS 4-6 — database -------------------------------
+    engine, db_err = build_readonly_engine()
+    if engine is None:
+        for cid in ("C4 invariants", "C5 freshness", "C6 recent quality"):
+            rep.add(cid, "FAIL", db_err, "unverified corpus before outreach")
+    else:
+        import sqlalchemy as sa
+        with engine.connect() as conn:
+            def q(sql, **params):
+                return conn.execute(sa.text(sql), params).fetchall()
+
+            # C4 — invariants over EVERY table carrying the columns.
+            tc_tables = [r[0] for r in q(
+                "SELECT table_name FROM information_schema.columns "
+                "WHERE column_name = 'truth_claim' AND table_schema = 'public'")]
+            tc_bad = {t: q('SELECT COUNT(*) FROM "%s" WHERE truth_claim <> 0' % t)[0][0]
+                      for t in tc_tables}
+            orr_tables = [r[0] for r in q(
+                "SELECT table_name FROM information_schema.columns "
+                "WHERE column_name = 'operator_review_required' "
+                "AND table_schema = 'public'")]
+            orr_bad = {t: q('SELECT COUNT(*) FROM "%s" '
+                            'WHERE operator_review_required <> 1' % t)[0][0]
+                       for t in orr_tables}
+            tc_total = sum(tc_bad.values())
+            orr_total = sum(orr_bad.values())
+            rep.add("C4 truth_claim", "PASS" if tc_total == 0 else "FAIL",
+                    "%d violations over %d tables %s" % (tc_total, len(tc_bad),
+                    {t: n for t, n in tc_bad.items() if n} or ""),
+                    "a stored row asserts truth — core honesty invariant broken")
+            rep.add("C4 operator_review", "PASS" if orr_total == 0 else "FAIL",
+                    "%d violations over %d tables %s" % (orr_total, len(orr_bad),
+                    {t: n for t, n in orr_bad.items() if n} or ""),
+                    "evidence row marked as not needing human review")
+
+            labels = q("SELECT COALESCE(verdict_label,'<null>') AS v, COUNT(*) "
+                       "FROM analysis_results GROUP BY 1 ORDER BY 2 DESC")
+            illegal = [(v, n) for v, n in labels
+                       if v not in LEGAL_VERDICT_LABELS and v != "<null>"]
+            nullish = sum(n for v, n in labels if v in ("", "<null>"))
+            label_status = ("FAIL" if illegal else
+                            ("WARN" if nullish > KNOWN_NULL_VERDICTS else "PASS"))
+            rep.add("C4 verdict_label", label_status,
+                    "distinct=%s illegal=%s null/empty=%d (known %d)"
+                    % ([(v, n) for v, n in labels], illegal or "none",
+                       nullish, KNOWN_NULL_VERDICTS),
+                    "a label above draft_* reads as a confirmed verdict")
+            rep.add("C4 fabricated-inst", "SKIP",
+                    "no anomaly-scan script in scripts/; 7/21 full-corpus scan "
+                    "measured Category A = 0 — not reimplemented ad hoc",
+                    "-")
+
+            # C5 — freshness.
+            today = datetime.now(timezone.utc).date()
+            day_rows = dict(q(
+                "SELECT substr(created_at,1,10) AS d, COUNT(*) "
+                "FROM analysis_results WHERE created_at >= :cut "
+                "GROUP BY 1 ORDER BY 1", cut=str(today - timedelta(days=4))))
+            last3 = [str(today - timedelta(days=i)) for i in (3, 2, 1)]
+            adds = {d: int(day_rows.get(d, 0)) for d in last3}
+            lo, hi = DAILY_ADD_BAND
+            fresh_status = ("FAIL" if any(v == 0 for v in adds.values())
+                            else ("WARN" if any(not lo <= v <= hi for v in adds.values())
+                                  else "PASS"))
+            max_id = q("SELECT MAX(id) FROM analysis_results")[0][0]
+            rep.add("C5 daily adds", fresh_status,
+                    "max_id=%s adds=%s today(partial)=%s band=%d-%d"
+                    % (max_id, adds, day_rows.get(str(today), 0), lo, hi),
+                    "stale data — 'today's briefing' built from old rows")
+
+            wk = q("SELECT week_start FROM weekly_reports ORDER BY id DESC LIMIT 1")
+            wk_latest = wk[0][0] if wk else None
+            snap = q("SELECT MAX(snapshot_date) FROM brainmap_snapshots")[0][0]
+            arts_status = ("PASS" if (wk_latest == EXPECTED_WEEKLY_LATEST
+                                      and str(snap) == EXPECTED_SNAPSHOT_LATEST)
+                           else "WARN")
+            rep.add("C5 spine artifacts", arts_status,
+                    "weekly=%s (expect %s) snapshot=%s (expect %s)"
+                    % (wk_latest, EXPECTED_WEEKLY_LATEST, snap, EXPECTED_SNAPSHOT_LATEST),
+                    "weekly page / brainmap serving an older batch than expected")
+
+            cut7 = str(today - timedelta(days=7))
+            n7, pub_null, dom_null = q(
+                "SELECT COUNT(*), "
+                "SUM(CASE WHEN published_at IS NULL OR published_at='' THEN 1 ELSE 0 END), "
+                "SUM(CASE WHEN domain IS NULL OR domain='' THEN 1 ELSE 0 END) "
+                "FROM analysis_results WHERE created_at >= :cut", cut=cut7)[0]
+            pub_rate = 100.0 * (pub_null or 0) / n7 if n7 else 0.0
+            dom_rate = 100.0 * (dom_null or 0) / n7 if n7 else 0.0
+            rep.add("C5 7d null rates",
+                    "WARN" if (pub_rate > 3 or dom_rate > 3) else "PASS",
+                    "rows=%s published_at_null=%.1f%% domain_null=%.1f%% (warn>3%%)"
+                    % (n7, pub_rate, dom_rate),
+                    "undated/uncategorised rows degrade briefing filters")
+
+            # C6 — recent-row quality.
+            recent = q("SELECT claim_text, normalized_claims, claims, title "
+                       "FROM analysis_results WHERE created_at >= :cut", cut=cut7)
+            joins = sum(1 for ct, _, _, _ in recent
+                        if SENTENCE_JOIN_RX.search(str(ct or "")))
+            raw_boiler = sum(1 for ct, _, _, _ in recent
+                             if broad_boiler(ct) or furniture_gate(ct))
+            promo_boiler = sum(
+                1 for ct, nc, cl, ti in recent
+                if broad_boiler(promoted_pick(ct, nc, cl, ti)))
+            n = len(recent) or 1
+            join_rate = 100.0 * joins / n
+            promo_rate = 100.0 * promo_boiler / n
+            rep.add("C6 sentence-join", "WARN" if join_rate > 3 else "PASS",
+                    "%d/%d = %.1f%% (known ~1%%, warn>3%%)" % (joins, len(recent), join_rate),
+                    "claims render with sentences jammed together")
+            rep.add("C6 boilerplate", "FAIL" if promo_boiler else "PASS",
+                    "promotion-layer=%d/%d (%.2f%%, must be ~0); raw stored "
+                    "claim_text=%d (reported only)" % (promo_boiler, len(recent),
+                                                       promo_rate, raw_boiler),
+                    "copyright furniture shown as an article's core claim")
+        engine.dispose()
+
+    # ---------------- output ----------------------------------------------
+    p("")
+    p("| check | status | observed | if it failed, a customer sees |")
+    p("|---|---|---|---|")
+    for check, statx, observed, impact in rep.rows:
+        p("| %s | %s | %s | %s |" % (check, statx, observed.replace("|", "/"),
+                                     impact))
+    p("")
+    p("live requests used: %d / %d" % (budget.used, budget.cap))
+    worst = rep.worst()
+    fails = [c for c, s, _, _ in rep.rows if s == "FAIL"]
+    warns = [c for c, s, _, _ in rep.rows if s == "WARN"]
+    if worst == 2:
+        p("VERDICT: fix %s first" % ", ".join(fails))
+    elif warns:
+        p("VERDICT: safe to send on 8/3 AFTER addressing warns: %s" % ", ".join(warns))
+    else:
+        p("VERDICT: safe to send on 8/3")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Selftest — offline, no network, no DB
+# ---------------------------------------------------------------------------
+def selftest() -> int:
+    failures = []
+
+    def check(name, got, want):
+        if got != want:
+            failures.append("%s: got %r want %r" % (name, got, want))
+
+    boiler_a = ("제보는 카카오톡 okjebo <저작권자(c) 연합뉴스, 무단 전재-재배포, "
+                "AI 학습 및 활용 금지> 2026년06월20일 08시00분 송고")
+    boiler_b = "무단 전재-재배포, AI 학습 및 활용 금지> 2026년06월30일 17시11분 송고"
+    real_e = ("국토부는 노선버스에 지급 중인 유류세연동보조금과 유가연동보조금을 "
+              "모두 지원하되 지급 단가는 노선버스의 50% 수준으로 적용한다.")
+    real_g = "정부는 AI 학습 데이터의 무단 전재를 금지하는 저작권법 개정안을 발표했다."
+    check("gate-boiler-a", furniture_gate(boiler_a), True)
+    check("gate-boiler-b", furniture_gate(boiler_b), True)
+    check("gate-real-e", furniture_gate(real_e), False)
+    check("gate-real-g-quotes-markers", furniture_gate(real_g), False)
+    check("broad-boiler-b", broad_boiler(boiler_b), True)
+    check("broad-real-g", broad_boiler(real_g), False)
+
+    check("join-hit", bool(SENTENCE_JOIN_RX.search("정책이다.다음 문장")), True)
+    check("join-decimal", bool(SENTENCE_JOIN_RX.search("금리 1.5% 인상")), False)
+    check("join-spaced", bool(SENTENCE_JOIN_RX.search("정책이다. 다음 문장")), False)
+
+    pool = claim_pool(json.dumps([{"claim_text": "정상 주장"}]), json.dumps([boiler_b]))
+    check("pool", pool, ["정상 주장", boiler_b])
+    check("promoted-skips-boiler",
+          promoted_pick(boiler_b, None, json.dumps(["실제 정책 주장이 여기에 있다"]), "제목"),
+          "실제 정책 주장이 여기에 있다")
+    check("promoted-title-fallback", promoted_pick(boiler_b, None, None, "제목"), "제목")
+
+    env = parse_env_file(Path(__file__))  # non-env file -> harmless keys only
+    check("env-parse-type", isinstance(env, dict), True)
+
+    weeks = {"2026-07-14": {"top": [
+        {"rank": 1, "lineage_id": "abc123", "representative_analysis_id": 1},
+        {"rank": 2, "lineage_id": None, "representative_analysis_id": 42},
+        {"rank": 3, "lineage_id": "", "representative_analysis_id": 43},
+    ]}}
+    fetched = []
+
+    def fake_fetch(rid):
+        fetched.append(rid)
+        return {"found": True, "lineage_id": "def456"} if rid == 42 else {"found": False}
+
+    res = resolve_weekly_links(weeks, fake_fetch)
+    check("resolve-counts", res["2026-07-14"][:2], (2, 3))
+    check("resolve-misses", res["2026-07-14"][2], ["rank3(rep=43)"])
+    check("resolve-fetch-only-missing", fetched, [42, 43])
+
+    payload = {"cluster": {"outlet_count": 78},
+               "members": [{"policy_confidence_score": 55}],
+               "bad": {"avg_score": 1}}
+    hits = scan_forbidden_score_keys(payload)
+    check("score-scan", hits, ["$.bad.avg_score"])
+
+    if failures:
+        print("SELFTEST FAIL (%d):" % len(failures))
+        for f in failures:
+            print("  - " + f)
+        return 1
+    print("SELFTEST PASS (all parsing logic checks)")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="B2B readiness audit (read-only)")
+    parser.add_argument("--base", default=DEFAULT_BASE)
+    parser.add_argument("--selftest", action="store_true")
+    args = parser.parse_args()
+    if args.selftest:
+        return selftest()
+    return run_audit(args.base)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
