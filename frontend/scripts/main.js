@@ -7804,7 +7804,8 @@
           // SEARCH-ANALYZE S-i (bug b): fresh detail entry ON TOP of the
           // search entry (the double-push guard only collapses detail→detail,
           // so search→detail pushes cleanly) — BACK now returns to the results.
-          pushDetailHistoryState(window.scrollY || 0);
+          // CARD-URL-ROUTING: search hits are server rows — write their id.
+          pushDetailHistoryState(window.scrollY || 0, id);
           loadServerResultById(id);
         };
         row.addEventListener("click", open);
@@ -8048,6 +8049,17 @@
       // showScreen("detail") BEFORE their own showStatus, so their confirmation
       // survives — see loadHistoryRecord / loadServerResultById.)
       if (!isHome) hideStatus();
+      // CARD-URL-ROUTING: leaving the detail for home IN-PAGE (logo, footer brand,
+      // category tab, footer domain link — every leave-path funnels through this
+      // home branch) must strip the /?result_id= the detail entry wrote, or the
+      // stale card URL lingers over the home feed. clearDetailHistoryState is
+      // self-guarding (no-op at popstate-home and on deep-link loads, where the
+      // detailHistoryActive flag is false/cleared first). try/catch: the ONE init
+      // call at the bottom of this file runs before the `let detailHistoryActive`
+      // declaration executes (TDZ) — that call must no-op, never throw.
+      if (isHome) {
+        try { clearDetailHistoryState(); } catch (_) { /* pre-init call — no-op */ }
+      }
       // DESIGN-DETAIL-3: both non-home screens land at the top (was methodology-only).
       if (!isHome) window.scrollTo(0, 0);
     }
@@ -8336,13 +8348,46 @@
     // ONE entry when a detail opens (recording the pre-open scroll position) and,
     // on popstate back, dismisses the detail (renderResults([]) -> #results empty
     // state + feed re-render) and restores that scroll — keeping the user on the
-    // page. URL is left UNCHANGED (no result_id write) so the ?result_id= deep-link
-    // READ and the operator_tools replaceState are unaffected. State rides in
-    // history.state.tickedinDetail + a module variable (no storage, no libs).
+    // page. State rides in history.state.tickedinDetail + a module variable (no
+    // storage, no libs).
+    // CARD-URL-ROUTING: the detail entry now ALSO writes /?result_id=N when the
+    // opened card has a positive SERVER id, so the address bar is shareable and
+    // analytics see per-card paths. This reverses the old "URL left UNCHANGED"
+    // choice deliberately: the ?result_id= deep-link READ happens ONCE at load
+    // (requestedResultIdFromUrl — no popstate listener reads the URL, so no loop),
+    // and the operator_tools strip rebuilds the query preserving other params.
+    // Cards WITHOUT a server id (localStorage records, index-based) pass no id and
+    // keep today's URL — never write an id that could deep-link elsewhere. BACK
+    // needs no extra handling: each history entry carries its own URL, so popping
+    // to home restores "/" natively.
     let detailHistoryActive = false;
     let detailReturnScrollY = 0;
-    function pushDetailHistoryState(scrollY) {
+    // Build the current URL with result_id set/removed, preserving every other
+    // query param + hash (same URLSearchParams idiom as the operator_tools strip).
+    // Returns null when the URL API is unavailable — callers fall back to the
+    // unchanged window.location.href (feature degrades to the old behavior).
+    function urlWithResultId(resultId) {
+      try {
+        const params = new URLSearchParams((window.location && window.location.search) || "");
+        if (Number.isInteger(resultId) && resultId > 0) {
+          params.set("result_id", String(resultId));
+        } else {
+          params.delete("result_id");
+        }
+        const remaining = params.toString();
+        const pathname = (window.location && window.location.pathname) || "/";
+        const hash = (window.location && window.location.hash) || "";
+        return pathname + (remaining ? `?${remaining}` : "") + hash;
+      } catch (_) {
+        return null;
+      }
+    }
+    function pushDetailHistoryState(scrollY, resultId) {
       if (!window.history || !window.history.pushState) return;
+      // CARD-URL-ROUTING: with a valid server id the entry's URL becomes
+      // /?result_id=N; without one it stays the current href (old behavior).
+      const detailUrl = (Number.isInteger(resultId) && resultId > 0 && urlWithResultId(resultId))
+        || window.location.href;
       // DESIGN-DETAIL-3b (FIX C): demote-before-push REMOVED. The old
       // clearMethodologyHistoryState() here replaceState(null)'d the methodology entry,
       // nulling its state so a later FORWARD popped null → router showed home →
@@ -8354,16 +8399,17 @@
           // Card -> card without going back: keep the ORIGINAL pre-open scroll and
           // refresh the single detail entry in place (double-push guard — never
           // stack duplicate detail entries, so ONE back always returns home).
+          // CARD-URL-ROUTING: the refreshed entry takes the NEW card's URL.
           window.history.replaceState(
             { tickedinDetail: true, scrollY: detailReturnScrollY },
-            "", window.location.href
+            "", detailUrl
           );
         } else {
           detailReturnScrollY = (typeof scrollY === "number" && isFinite(scrollY))
             ? scrollY : (window.scrollY || 0);
           window.history.pushState(
             { tickedinDetail: true, scrollY: detailReturnScrollY },
-            "", window.location.href
+            "", detailUrl
           );
         }
         detailHistoryActive = true;
@@ -8374,14 +8420,22 @@
     // DESIGN-DETAIL-3: mirror of clearMethodologyHistoryState. Leaving the detail
     // SCREEN via in-page nav (tab/logo) OR before pushing another non-home screen —
     // demote the current detail entry to a neutral state so a later BACK can't
-    // resurface a stale detail (at-most-one-non-home rule). replaceState keeps the URL.
-    // DESIGN-DETAIL-3b (FIX C): now UNUSED — see clearMethodologyHistoryState. Kept.
+    // resurface a stale detail (at-most-one-non-home rule).
+    // CARD-URL-ROUTING: REVIVED (was unused since DETAIL-3b FIX C) as the single
+    // leave-detail URL reset: now that detail entries write /?result_id=N, this
+    // strips the param so the URL doesn't linger after an in-page return to home.
+    // Called from showScreen's home branch (the one choke point every logo/tab/
+    // footer leave-path funnels through). Self-guarding: detailHistoryActive is
+    // false at init AND in the popstate home-branch (cleared before showScreen),
+    // so a page-load with ?result_id= or a browser BACK never strips the param
+    // before the deep-link read / URL restore happens natively.
     function clearDetailHistoryState() {
       if (!detailHistoryActive) return;
       detailHistoryActive = false;
       if (!window.history || !window.history.replaceState) return;
       if (window.history.state && window.history.state.tickedinDetail) {
-        try { window.history.replaceState(null, "", window.location.href); } catch (_) { /* noop */ }
+        const homeUrl = urlWithResultId(0) || window.location.href;
+        try { window.history.replaceState(null, "", homeUrl); } catch (_) { /* noop */ }
       }
     }
     // DISPLAY-CATEGORY B-1: open a topic card's detail report. Extracted so the
@@ -8390,7 +8444,13 @@
       // HISTORY-BACK: push one history entry (with the pre-open scroll) at the
       // shared card-click choke point so BACK returns here. Captured BEFORE any
       // loader scrollIntoView fires. Covers all branches (history/server/in-memory).
-      pushDetailHistoryState(window.scrollY || 0);
+      // CARD-URL-ROUTING: only SERVER-sourced cards carry an analysis_results id in
+      // data-topic-record-id — those get /?result_id=N. history-sourced cards carry
+      // a LOCAL record id there (not a server id) and in-memory cards none: both
+      // pass 0 → URL unchanged (never write an id that deep-links elsewhere).
+      const serverResultId = card.dataset.topicSource === "server"
+        ? Number(card.dataset.topicRecordId) : 0;
+      pushDetailHistoryState(window.scrollY || 0, serverResultId);
       const source = card.dataset.topicSource;
       const index = Number(card.dataset.topicIndex || 0);
       activeTopicKey = card.dataset.topicKey || "";
