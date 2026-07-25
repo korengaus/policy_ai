@@ -13,7 +13,7 @@
 <meta property="og:locale" content="ko_KR">
 <meta property="og:url" content="https://tickedin.org/web/claim.html">
 <meta property="og:title" content="주장 확산 기록 — tickedin">
-<meta property="og:description" content="하나의 정책 주장이 여러 매체로 퍼진 기록과 기사별 근거 수준을 함께 보여줍니다. 확산 규모 기준이며 사실 검증이 아닙니다.">
+<meta property="og:description" content="하나의 정책 주장이 여러 매체로 퍼진 기록을 보여줍니다. 확산 규모 기준이며 사실 검증이 아닙니다.">
 <meta property="og:image" content="https://tickedin.org/web/assets/og-image.png">
 <meta property="og:image:type" content="image/png">
 <meta property="og:image:width" content="1200">
@@ -21,7 +21,7 @@
 <meta property="og:image:alt" content="tickedin — 확산 규모 기준 · 사실 검증 아님">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="주장 확산 기록 — tickedin">
-<meta name="twitter:description" content="하나의 정책 주장이 여러 매체로 퍼진 기록과 기사별 근거 수준을 함께 보여줍니다. 확산 규모 기준이며 사실 검증이 아닙니다.">
+<meta name="twitter:description" content="하나의 정책 주장이 여러 매체로 퍼진 기록을 보여줍니다. 확산 규모 기준이며 사실 검증이 아닙니다.">
 <meta name="twitter:image" content="https://tickedin.org/web/assets/og-image.png">
 <!--
   CLAIM-PAGE Phase 3 — standalone, hand-authored page (NOT build_index-managed;
@@ -176,9 +176,12 @@
   <div class="title-rule" id="titleRule" hidden></div>
   <div class="report-title" id="claimTitle">주장 확산 기록</div>
   <div class="report-framing">확산 규모 기준 · 사실 검증 아님</div>
+  <!-- CARD-SIMPLIFY: the 기사별 근거 수준 column is OFF this page (same decision
+       as the card front face — the score stays in data/API, display only). The
+       subtitle, explain-line, table column and member cell that showed it are
+       removed together so nothing describes an invisible column. -->
   <p class="report-subtitle">
-    이 페이지는 <strong>하나의 주장</strong>이 여러 매체로 퍼진 기록과, 그 주장을 다룬
-    <strong>기사별 근거 수준</strong>을 나란히 보여줍니다.
+    이 페이지는 <strong>하나의 주장</strong>이 여러 매체로 퍼진 기록을 보여줍니다.
     <strong>사실 여부에 대한 판단이 아닙니다.</strong>
   </p>
   <div class="merge-notice" id="mergeNotice" hidden></div>
@@ -196,17 +199,11 @@
   </section>
   <section class="panel" id="membersPanel" hidden>
     <div class="panel-title">이 주장을 다룬 기사들 (시간순)</div>
-    <!-- ★THE EXPLANATION LINE — the point of the page. Basis wording reused
-         verbatim from the detail view's verdict-note. -->
-    <p class="explain-line">
-      같은 주장이라도 기사마다 <strong>근거 수준</strong>이 다르게 표시될 수 있습니다 —
-      근거 수준은 그 기사에서 <strong>수집된 근거의 양이며 진위 판정이 아닙니다</strong>.
-    </p>
     <div class="cap-line" id="capLine" hidden></div>
     <div class="table-scroll">
       <table class="members" aria-label="이 주장을 다룬 기사 목록 (시간순)">
         <thead>
-          <tr><th>보도일</th><th>매체</th><th>기사</th><th>판정</th><th>근거 수준</th></tr>
+          <tr><th>보도일</th><th>매체</th><th>기사</th><th>판정</th></tr>
         </thead>
         <tbody id="memberRows"></tbody>
       </table>
@@ -348,10 +345,9 @@
       tdTitle.appendChild(link);
       tr.appendChild(tdTitle);
       tr.appendChild(el("td", null, verdictLabelKo(m.verdict_label)));
-      // "근거 수준 N" — the card face's exact label (SCORE-CLARITY wording).
-      var conf = m.policy_confidence_score;
-      tr.appendChild(el("td", null,
-        (conf === null || conf === undefined) ? "-" : "근거 수준 " + conf));
+      // CARD-SIMPLIFY: the per-article 근거 수준 cell is OFF this table (same
+      // decision as the card front face). m.policy_confidence_score stays in the
+      // /api/claim payload untouched — b2b_readiness_audit pins it there.
       tbody.appendChild(tr);
     });
     document.getElementById("membersPanel").hidden = false;

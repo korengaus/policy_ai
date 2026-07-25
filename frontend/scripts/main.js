@@ -1703,16 +1703,13 @@
 
       return `<div class="evidence-snippet-list">${claimList.map((claim, index) => {
         const related = snippets.filter((snippet) => Number(snippet.claim_index) === index).slice(0, 4);
-        const strongCount = related.filter((snippet) => snippet.evidence_quality_label === "strong").length;
-        const mediumCount = related.filter((snippet) => snippet.evidence_quality_label === "medium").length;
-        const weakCount = related.filter((snippet) => snippet.evidence_quality_label === "weak").length;
-        const bestScore = related.reduce((best, snippet) => Math.max(best, Number(snippet.evidence_quality_score || 0)), 0);
+        // CARD-SIMPLIFY: the per-claim "근거 품질: 강함 N, 보통 N…" count line is a
+        // heuristic tally, not evidence — dropped from display. The underlying
+        // evidence_quality_* fields are untouched (still stored and still feeding
+        // final_score/verdict gates); each snippet's own fields still render below.
         return `
           <div class="evidence-snippet">
             <div class="normalized-claim-text">claim #${index + 1}: ${escapeHtml(limitClaimSentences(cleanArticleTextForPolicyAnalysis(claim) || "기사 제목과 요약 기준으로 핵심 주장을 추가 확인해야 합니다.", 2, CLAIM_MAX_CHARS))}</div>
-            <div class="evidence-source-meta">
-              근거 품질: 강함 ${escapeHtml(strongCount)}, 보통 ${escapeHtml(mediumCount)}, 약함 ${escapeHtml(weakCount)}, 최고 ${escapeHtml(bestScore)}
-            </div>
             ${related.length ? related.map((snippet) => {
               const sourceTitle = escapeHtml(userFacingReportText(publicInstitutionName(snippet.source_title || snippet.source_url || "출처"), "출처"));
               const sourceUrl = escapeHtml(safeUrl(snippet.source_url || ""));
@@ -1781,15 +1778,17 @@
         const publisher = source.publisher ? publicInstitutionName(source.publisher) : "";
         // One-line summary (populated bits only). Falls back to the candidate title.
         // DESIGN-DETAIL-5d FIX 2: this reliability_score is the 0-100 candidate score —
-        // shown as plain "신뢰도 N" (the bogus "/5" was removed; the genuine 0-5
-        // source.reliability_score lives in renderEvidenceSources / the reader card).
+        // (the bogus "/5" was removed; the genuine 0-5 source.reliability_score lives
+        // in renderEvidenceSources / the reader card, labelled "출처 신뢰도: N/5").
         const summaryBits = [
           source.source_type ? formatSourceType(source.source_type) : "",
           publisher,
-          // SCORE-CLARITY FIX C: 0-100 candidate score (see the note above), so it
-          // takes the 근거 수준 label — NOT a bare "신뢰도", which on this same
-          // screen already means the 0-5 source grade. No "/5" here: this is 0-100.
-          source.reliability_score == null ? "" : `근거 수준 ${source.reliability_score}`,
+          // CARD-SIMPLIFY MISLABEL FIX: this candidate score used to carry the
+          // 근거 수준 label — the same label the card-level policy_confidence_score
+          // wore, i.e. two different scales under one name (the 7/21 two-path shape).
+          // Relabelled to the 출처 신뢰도 family this same list already uses for the
+          // field (평균 출처 신뢰도 / 출처 신뢰도 등급). No "/5": this is 0-100.
+          source.reliability_score == null ? "" : `출처 신뢰도 ${source.reliability_score}`,
           source.verification_role ? roleLabel(source.verification_role) : "",
         ].filter((b) => b && String(b).trim() && String(b).trim() !== "-");
         const summaryText = summaryBits.length
@@ -1813,10 +1812,10 @@
           ["정책 일치도", source.policy_alignment_score ?? ""],
           ["공식 근거 점수", source.official_evidence_score ?? ""],
           ["공식 실패 사유", source.official_body_failure_reason ? formatDiagnosticText(source.official_body_failure_reason) : ""],
-          // SCORE-CLARITY FIX C: same 0-100 candidate score as the summary line
-          // above, so it carries the same 근거 수준 label. The adjacent 등급 is a
-          // source-level grade, kept distinct as 출처 신뢰도 등급.
-          ["근거 수준 점수", source.reliability_score == null ? "" : `${source.reliability_score}`],
+          // CARD-SIMPLIFY MISLABEL FIX: same 0-100 candidate score as the summary
+          // line above, same 출처 신뢰도 relabel (근거 수준 is no longer used for
+          // candidate scores). The adjacent 등급 stays 출처 신뢰도 등급.
+          ["출처 신뢰도 점수", source.reliability_score == null ? "" : `${source.reliability_score}`],
           ["출처 신뢰도 등급", source.reliability_level ? formatReliabilityLevel(source.reliability_level) : ""],
           ["검증 역할", source.verification_role ? roleLabel(source.verification_role) : ""],
           ["도메인", domain || ""],
@@ -1934,9 +1933,16 @@
       const metrics = computeMetrics(results);
       metricResults.textContent = metrics.count;
       metricAlert.textContent = metrics.highest === "-" ? "-" : formatAlert(metrics.highest);
-      metricConfidence.textContent = metrics.averageConfidence;
+      // CARD-SIMPLIFY: the 평균 신뢰도 tile is OFF the public strip. Display only —
+      // computeMetrics still returns averageConfidence (the reviewer queue and the
+      // text export keep consuming it). The tile markup lives in template.html
+      // (out of scope this commit), so it is hidden here and the fixed 4-col grid
+      // narrowed to 3 inline. closest() is null in the test DOM stubs → guarded.
+      const confidenceTile = metricConfidence && metricConfidence.closest ? metricConfidence.closest(".metric") : null;
+      if (confidenceTile) confidenceTile.hidden = true;
       metricImpact.textContent = metrics.highImpactCount;
       metricsEl.style.display = "grid";
+      metricsEl.style.gridTemplateColumns = "repeat(3, minmax(0, 1fr))";
     }
 
     // ===== C7 — Report context & selected-issue intro =====
@@ -2394,15 +2400,9 @@
             </div>
           </div>`;
       })();
-      const confidenceInline = (card.confidence !== "-" && card.confidence !== null && card.confidence !== undefined)
-        // SCORE-CLARITY FIX A: "신뢰도 88" read as "88% true". The number is
-        // policy_confidence_score — a weighted evidence/signal composite
-        // (policy_confidence.py:155-163) that is hard-clamped to <=20 whenever no
-        // official document was found, REGARDLESS of whether the claim is true.
-        // "근거 수준" names what it measures and cannot be read as a truth
-        // percentage. Label only; the score itself is untouched.
-        ? `<span class="card-confidence">근거 수준 ${escapeHtml(card.confidence)}</span>`
-        : "";
+      // CARD-SIMPLIFY: the front-face 근거 수준 number is OFF the card face.
+      // Display only — card.confidence stays mapped (topicCardFromResult) because
+      // the 뜨는순 composite sort and the hero pick read it (sortTopicCards).
       return `
         <article class="topic-card ${opts && opts.hero ? "topic-card--hero " : ""}${opts && opts.secondary ? "topic-card--secondary " : ""}${selected ? "selected" : ""}" data-topic-key="${escapeHtml(card.key)}" data-topic-source="${escapeHtml(card.source)}" data-topic-index="${escapeHtml(card.index)}" data-topic-record-id="${escapeHtml(card.recordId)}">
           <div class="topic-card-top">
@@ -2422,7 +2422,6 @@
               <span class="verdict-dot" style="background:${verdictDotColor(card.verdictLabel)}"></span>
               <span class="verdict-text">판정 ${escapeHtml(verdictLabelKo(card.verdictLabel))}</span>
             </span>
-            ${confidenceInline}
           </div>
           ${sourceBody}
         </article>
@@ -4627,21 +4626,24 @@
 
 
     function alertReasonBullets(level, decision, confidence, impact, quality, sourceReliabilitySummary, contradictionSummary, debugSummary) {
-      const finalScore = numberValue(decision?.final_score ?? confidence?.policy_confidence_score, 0);
+      // CARD-SIMPLIFY: the "최종 점수 N점" mentions are OFF the public bullets —
+      // final_score itself is unchanged in data (still stored, still driving
+      // policy_alert_level). Wording trimmed only; each bullet keeps its
+      // level-specific meaning and existing vocabulary.
       const impactLevel = formatLevel(impact?.impact_level);
       const riskLevel = formatLevel(confidence?.risk_level);
       const bullets = [];
       if (level === "HIGH") {
-        bullets.push(`영향도 ${impactLevel}, 위험도 ${riskLevel}이며 최종 점수 ${finalScore}점으로 높게 평가됐습니다.`);
+        bullets.push(`영향도 ${impactLevel}, 위험도 ${riskLevel}으로 높게 평가됐습니다.`);
         bullets.push("다만 HIGH는 실제 공식 근거와 반박 여부를 함께 확인해 해석해야 합니다.");
       } else if (level === "WATCH") {
-        bullets.push(`정책 영향 가능성은 있지만 최종 점수 ${finalScore}점 기준으로 확정 판단보다 관찰이 적절합니다.`);
+        bullets.push("정책 영향 가능성은 있지만 현재 근거 기준으로 확정 판단보다 관찰이 적절합니다.");
         bullets.push("공식 근거, 본문 직접 일치, 반박 가능성 중 일부가 아직 충분하지 않습니다.");
       } else if (level === "LOW") {
-        bullets.push(`현재 근거와 영향도를 종합하면 최종 점수 ${finalScore}점으로 낮은 경고 단계입니다.`);
+        bullets.push("현재 근거와 영향도를 종합하면 낮은 경고 단계입니다.");
         bullets.push("정책 변화로 확정하기에는 직접 근거가 약하거나 영향 범위가 제한적입니다.");
       } else {
-        bullets.push(`현재 단계는 ${formatAlert(level)}이며 최종 점수는 ${finalScore}점입니다.`);
+        bullets.push(`현재 단계는 ${formatAlert(level)}입니다.`);
       }
       bullets.push(evidenceQualityExplanation(quality || {}, debugSummary?.evidence_strength_summary || {}, officialEvidenceIsGenuine(sourceReliabilitySummary, debugSummary)));
       bullets.push(officialVerificationExplanation(sourceReliabilitySummary, debugSummary));
@@ -4729,22 +4731,16 @@
       const officialText = officialVerificationExplanation(context.sourceReliabilitySummary, context.debugSummary);
       const evidenceText = evidenceQualityExplanation(context.quality, context.strength, officialEvidenceIsGenuine(context.sourceReliabilitySummary, context.debugSummary));
       const contradictionText = contradictionExplanation(context.contradictionSummary);
-      const confidenceScore = context.confidence?.policy_confidence_score ?? context.decision?.final_score ?? "-";
       // DETAIL-CLEANUP-V2: header removed — this guide now lives inside a collapsed
       // renderCollapsibleSection whose <summary> provides the title.
+      // CARD-SIMPLIFY: the 근거 수준 guide card is gone with the score it explained
+      // (the verdict block no longer shows the number). Display only.
       return `
         <section class="reading-guide">
           <div class="reading-guide-grid">
             <div class="reading-guide-card">
               <strong>판정 단계</strong>
               ${escapeHtml(formatAlert(context.level))}은 현재 확보된 근거를 기준으로 얼마나 조심해서 봐야 하는지를 뜻합니다.
-            </div>
-            <div class="reading-guide-card">
-              <!-- SCORE-CLARITY FIX A: the reading guide is public (not operator-
-                   gated), so it uses the same 근거 수준 label as the verdict block
-                   it explains, and says outright that it is not a truth verdict. -->
-              <strong>근거 수준</strong>
-              ${escapeHtml(confidenceScore)}점은 공식 자료, 기사 근거, 반박 신호를 함께 본 참고 점수이며, 진위 판정이 아닙니다.
             </div>
             <div class="reading-guide-card">
               <strong>공식 출처 상태</strong>
@@ -4759,36 +4755,16 @@
       `;
     }
 
-    function renderUserSummarySections(context) {
-      // DESIGN-DETAIL-4 STEP 3b: the leading "왜 ${formatAlert(level)}인가" section
-      // was removed — it was byte-identical to the kept top verdict block's
-      // "왜 이렇게 판단했나요" (same decisionReasonBullets(context, 3)). The 영향
-      // sections + .user-explain below are unchanged.
-      return `
-        <div class="plain-section-grid">
-          <section class="plain-section">
-            <h4>주요 정책 영향</h4>
-            ${renderBulletList(policyImpactBullets(context.impact, context.decision))}
-          </section>
-          <section class="plain-section">
-            <h4>소비자 영향</h4>
-            ${renderBulletList(consumerImpactBullets(context.impact))}
-          </section>
-          <section class="plain-section">
-            <h4>금융 시스템 영향</h4>
-            ${renderBulletList(financialSystemBullets(context.impact))}
-          </section>
-        </div>
-        <div class="user-explain">
-          <!-- DETAIL-CLEANUP-V2: 영향도/위험도 relocated here from the removed
-               .headline-meta tiles so these fields stay visible on the page. -->
-          <strong>영향도:</strong> ${escapeHtml(formatLevel(context.impact?.impact_level))} · <strong>위험도:</strong> ${escapeHtml(formatLevel(context.confidence?.risk_level))}
-          <br><strong>근거 품질:</strong> ${escapeHtml(evidenceQualityExplanation(context.quality, context.strength, officialEvidenceIsGenuine(context.sourceReliabilitySummary, context.debugSummary)))}
-          <br><strong>공식 출처 확인:</strong> ${escapeHtml(officialVerificationExplanation(context.sourceReliabilitySummary, context.debugSummary))}
-          <br><strong>반박/모순 확인:</strong> ${escapeHtml(contradictionExplanation(context.contradictionSummary))}
-        </div>
-      `;
-    }
+    // CARD-SIMPLIFY: renderUserSummarySections (주요 정책 영향 / 소비자 영향 /
+    // 금융 시스템 영향 grid + the 영향도·위험도·근거 품질 user-explain lines) is
+    // REMOVED from the card detail. The sensitivity numbers it showed are keyword
+    // heuristics (policy_impact.py), not collected evidence — filler on the public
+    // page. Display only: consumer_sensitivity still gates HIGH alerts and
+    // impact_level still feeds scoring, all unchanged in data. The 공식 출처/반박
+    // explanations it duplicated still render in the verdict-block bullets
+    // (decisionReasonBullets) and the advanced GATE sections. policyImpactBullets /
+    // consumerImpactBullets / financialSystemBullets stay defined — the text
+    // export (buildReportText) still prints them.
 
     // ===== C13 — Reviewer dashboard =====
     function maxSourceNumber(sources, keys) {
@@ -5749,9 +5725,9 @@
         // consumed only by the removed duplicate .result-summary-grid (box 7). Those
         // data still render elsewhere — 최고 신뢰 출처 in the "출처와 공식 근거"
         // collapsible, 추천 다음 조치 in the 검증 결과 요약 카드, 경고 단계 in the
-        // alert badge + core indicator strip. finalScore is kept (used by the
-        // "검증 점수 상세" collapsible).
-        const finalScore = decision.final_score ?? confidence.policy_confidence_score ?? "-";
+        // alert badge + core indicator strip.
+        // CARD-SIMPLIFY: finalScore const removed with the "검증 점수 상세"
+        // collapsible (its only consumer). final_score stays in data untouched.
         const userContext = buildReportUserContext(parts);
         // SUMMARY-CONTENT-A: the top of the report leads with the news CONTENT
         // (what the government announced), built from the claim sentences, then a
@@ -5803,22 +5779,10 @@
         const verifyNote = userFacingReportText(
           cleanConceptKeysForDisplay(decision.decision_summary || ""), "");
         const verificationDetails = [
-          // DISPLAY-CATEGORY ⑩: ② 최종점수 and ③ 초안 신뢰도 are demoted off the
-          // headline into the advanced collapsible. Values are PRESERVED, only
-          // relocated — the headline keeps a single number (① 신뢰도). On the
-          // public/history feed these can coincide with ① by construction.
-          renderCollapsibleSection(
-            "검증 점수 상세",
-            advDefList([
-              ["최종 점수", finalScore],
-              // SCORE-CLARITY FIX A: verdict_confidence is a straight copy of
-              // policy_confidence_score (main.py:968), so it carries the same
-              // 근거 수준 label rather than a second "신뢰도" reading.
-              ["초안 근거 수준", verification.verdict_confidence ?? ""],
-            ]),
-            false,
-            "최종 점수와 초안 근거 수준은 화면 상단의 근거 수준을 보조하는 내부 참고 값입니다. 근거 수준과 같을 수 있습니다."
-          ),
+          // CARD-SIMPLIFY: the "검증 점수 상세" collapsible (최종 점수 + 초안 근거
+          // 수준) is OFF the card — both numbers are internal composites, not
+          // collected evidence. Display only: final_score and verdict_confidence
+          // stay stored and final_score still drives policy_alert_level.
           renderCollapsibleSection(
             "핵심 주장과 정규화",
             `${renderClaimList(claims)}${renderNormalizedClaims(normalizedClaims)}`,
@@ -5837,12 +5801,11 @@
             false,
             "같은 대상과 시점에 대해 상충되는 근거가 있는지 보수적으로 확인합니다."
           ),
-          renderCollapsibleSection(
-            "프레이밍/편향 검사",
-            `${renderBiasFramingSummary(biasFramingSummary)}${renderBiasFramingAnalysis(claims, biasFramingAnalysis)}`,
-            false,
-            "제목과 본문에 감정적 표현, 불확실 표현, 과장된 프레이밍이 있는지 확인합니다."
-          ),
+          // CARD-SIMPLIFY: the 프레이밍/편향 검사 collapsible is OFF the card
+          // (keyword-heuristic counts, not collected evidence). Display only —
+          // bias_framing_summary/analysis stay stored; renderBiasFramingSummary/
+          // renderBiasFramingAnalysis stay defined (same pattern as
+          // renderSourceQueries above).
           renderCollapsibleSection(
             "출처와 공식 근거",
             `${renderSourceReliabilitySummary(sourceReliabilitySummary, cardHasGenuineOfficial)}${renderSourceCandidates(sourceCandidates, cardHasGenuineOfficial)}${renderSourceQueries(sourceQueries)}`,
@@ -5934,15 +5897,9 @@
                   <span class="verdict-label">AI 초안 판정</span>
                   <span class="verdict-value">${escapeHtml(safeAiDraftVerdictForExport(result))}</span>
                 </div>
-                <!-- SCORE-CLARITY FIX A+B: relabelled 신뢰도 -> 근거 수준 (see the
-                     card-grid note), with a one-line caveat under the value so the
-                     0-100 number cannot be read as a truth percentage. Wording is
-                     aligned with the 내부 참고 값 hint on 검증 점수 상세 below. -->
-                <div class="verdict-indicator">
-                  <span class="verdict-label">근거 수준</span>
-                  <span class="verdict-value">${escapeHtml(confidence.policy_confidence_score ?? "-")}</span>
-                  <span class="verdict-note">수집된 근거의 양이며 진위 판정이 아닙니다</span>
-                </div>
+                <!-- CARD-SIMPLIFY: the 근거 수준 number indicator is OFF the verdict
+                     block. Display only — policy_confidence_score stays stored and
+                     keeps driving verdict_label / alert gates / the 뜨는순 sort. -->
                 <div class="verdict-indicator">
                   <span class="verdict-label">공식 출처 상태</span>
                   <span class="verdict-value">${escapeHtml(officialStatusLabel(result))}</span>
@@ -5973,7 +5930,7 @@
                  placeholder, too late for a first-time reader) — right after the
                  verdict block, before the dense sections. Kept collapsed,
                  content unchanged. -->
-            ${renderCollapsibleSection("이 리포트는 이렇게 읽으면 됩니다", renderReadingGuide(userContext), false, "처음 보는 분을 위한 안내입니다. 판정 단계·근거 수준·공식 출처·근거를 어떻게 읽으면 되는지 설명합니다.")}
+            ${renderCollapsibleSection("이 리포트는 이렇게 읽으면 됩니다", renderReadingGuide(userContext), false, "처음 보는 분을 위한 안내입니다. 판정 단계·공식 출처·근거를 어떻게 읽으면 되는지 설명합니다.")}
 
             <!-- SPREAD-TIMELINE Slice 2 / CARD-3LAYER S4a: circulation annotation
                  placeholder (유통 정보만 — 판정 아님), PROMOTED here as the endgame
@@ -6022,11 +5979,9 @@
             <div class="report-summary-lead">${escapeHtml(contentLead)}</div>` : ""}
             ${verifyNote ? `<div class="report-verify-note">${escapeHtml(verifyNote)}</div>` : ""}
 
-            <!-- STEP 2 item 4: 정책 영향 / 소비자 영향 / 금융 시스템 영향 + the
-                 .user-explain line. The duplicate "왜 관찰(WATCH)인가" sub-block was
-                 removed from renderUserSummarySections (STEP 3b — byte-identical to
-                 the kept top reasoning above). -->
-            ${renderUserSummarySections(userContext)}
+            <!-- CARD-SIMPLIFY: STEP 2 item 4 (정책 영향 / 소비자 영향 / 금융 시스템
+                 영향 grid + .user-explain) is OFF the card — see the note at the
+                 removed renderUserSummarySections definition. -->
 
             <!-- STEP 2 item 5: 근거와 출처 요약. -->
             ${renderPublicSourceCards(result)}
@@ -6088,7 +6043,8 @@
         const quality = row.evidence_quality_summary || {};
         const analyzedAt = row.analyzed_at || row.created_at || "-";
         const alert = row.highest_alert || row.policy_alert_level || "LOW";
-        const avgConfidence = row.average_confidence ?? row.policy_confidence_score ?? "-";
+        // CARD-SIMPLIFY: the 평균 신뢰도 value is OFF the history rows (display
+        // only; the slim record keeps average_confidence/policy_confidence_score).
         const highImpactCount = row.high_impact_count ?? 0;
         const selected = row.id && row.id === currentHistoryId;
         const topResult = getHistoryResults(row)[0] || {};
@@ -6102,7 +6058,6 @@
             <div class="history-meta">
               <span class="label">뉴스 개수:</span> ${escapeHtml(row.max_news ?? "-")}
               &nbsp; <span class="label">최고 경고:</span> ${escapeHtml(formatAlert(alert))}
-              &nbsp; <span class="label">평균 신뢰도:</span> ${escapeHtml(avgConfidence)}
               &nbsp; <span class="label">고영향 뉴스:</span> ${escapeHtml(highImpactCount)}
               &nbsp; <span class="label">주제:</span> ${escapeHtml(topic)}
               <br>
