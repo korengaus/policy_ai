@@ -7867,7 +7867,11 @@
     // has_genuine_official_support predicate the top-line uses) gates the candidate
     // badges + the primary_evidence role suffix below. Default true = legacy callers
     // unchanged.
-    function renderSourceCandidates(sourceCandidates, cardHasGenuineOfficial = true) {
+    // MATCHER-GUARD: reliabilitySummary (optional) lets the reason line below
+    // detect a period-suppressed card; legacy callers omit it — unchanged output.
+    function renderSourceCandidates(sourceCandidates, cardHasGenuineOfficial = true, reliabilitySummary = null) {
+      const periodSuppressed = !!(reliabilitySummary && typeof reliabilitySummary === "object"
+        && OFFICIAL_PERIOD_SUPPRESSED_SUMMARIES.has(reliabilitySummary));
       // DESIGN-DETAIL-5c: tame the candidate scroll-wall WITHOUT losing any candidate
       // or field. ALL candidates are kept (no slice/truncation) — each becomes its own
       // <details> COLLAPSED by default, with a one-line at-a-glance summary
@@ -7948,9 +7952,17 @@
             `).join("")}
           </ul>
         ` : "";
+        // MATCHER-GUARD: on a period-suppressed card the stored per-candidate
+        // reason ("…직접 뒷받침합니다") re-asserts the suppressed match — swap it
+        // for the EXISTING cautious fallback (same string the public source-card
+        // reason path uses). Only primary officials on suppressed cards; every
+        // other card renders byte-identically.
+        const reasonSuppressed = periodSuppressed && source.verification_role === "primary_evidence";
         const reason = advIsEmptyDisplay(source.reliability_reason)
           ? ""
-          : `<div class="evidence-source-meta">${escapeHtml(userFacingReportText(source.reliability_reason, ""))}</div>`;
+          : `<div class="evidence-source-meta">${escapeHtml(reasonSuppressed
+            ? "공식 자료와 직접 일치하는지 추가 확인이 필요합니다."
+            : userFacingReportText(source.reliability_reason, ""))}</div>`;
         const flagText = formatDiagnosticText(formatList(source.source_risk_flags));
         const flags = advIsEmptyDisplay(flagText) ? "" : `<div class="risk-flags">${escapeHtml(flagText)}</div>`;
         return `
@@ -8194,9 +8206,10 @@
       // fetched page (the IBK word-overlap pattern). The backend persists
       // has_genuine_official_support; old rows lacking it fall back to a real
       // body match (official_body_matches > 0). Score is untouched — display only.
-      const genuine = (typeof summary.has_genuine_official_support === "boolean")
-        ? summary.has_genuine_official_support
-        : (Number(debug.official_body_matches || 0) > 0);
+      // MATCHER-GUARD: stamp the period-mismatch check here (result-level entry),
+      // then read through the ONE shared predicate.
+      officialPeriodicEditionMismatch(result);
+      const genuine = officialEvidenceIsGenuine(summary, debug);
       if (genuine) {
         return "공식 근거 확인";
       }
@@ -8363,10 +8376,11 @@
         summaryNorm.length > 0 && summaryNorm === normalizeForCompare(cardTitle);
       // DESIGN-3B-1: card-face additions (all DISPLAY-ONLY, slim-backed). The
       // genuine flag reuses the SAME predicate as officialStatusLabel (LABEL-HONESTY).
+      // MATCHER-GUARD: stamp + unified read (slim records without candidates
+      // simply compute false and render unchanged).
       const reliability = verification.source_reliability_summary || result?.source_reliability_summary || {};
-      const hasGenuineOfficial = (typeof reliability.has_genuine_official_support === "boolean")
-        ? reliability.has_genuine_official_support
-        : (Number(debug.official_body_matches || 0) > 0);
+      officialPeriodicEditionMismatch(result);
+      const hasGenuineOfficial = officialEvidenceIsGenuine(reliability, debug);
       const officialDetailTitle = publicInstitutionName(
         reliability.top_official_detail_title || reliability.top_source_title || "");
       // CARD-BOX: institution string for the source box (NEW-rows-only; old rows
@@ -10179,12 +10193,133 @@
     }
 
 
+    // MATCHER-GUARD (DATE-MISMATCH Phase 2): suppress the false 공식 근거 확인 on
+    // periodic-statistical-release period mismatches (the 13977 shape: a 2021-11
+    // 고용동향 article carrying the 2026-06 edition as strong_official_direct_support
+    // because only the release TEMPLATE phrases matched). DISPLAY-ONLY — stored
+    // classification/scores untouched. The narrow measured rule (Phase 1: catches
+    // the 3 false-displayed cards, 0 legitimate rows; the naive periods-must-agree
+    // rule is NOT shipped — 27% false positives from application-year titles like
+    // "2027년 적용 최저임금안" and historical citations):
+    //   (a) ≥1 primary_evidence official candidate whose TITLE is a periodic-release
+    //       edition — /(동향|지수|변동률)/ plus a parseable year(/month); AND
+    //   (b) the claim side parses an explicit period (normalized_claims[].date_or_time,
+    //       falling back to claim text); AND
+    //   (c) NO claim period agrees with ANY parseable official-candidate title period
+    //       (same year; months compared only when both sides carry one).
+    // Computed ONCE per result (WeakMap memo) at the three result-level entry points
+    // (officialStatusLabel / topicCardFromResult / getResultPipelineParts); the
+    // summary-level readers (officialEvidenceIsGenuine, buildOfficialEvidenceState)
+    // consult a WeakSet stamped on the row's source_reliability_summary OBJECT, so
+    // their 13 call sites keep their signatures and any path that never saw the
+    // stamp degrades to today's behavior. Suppressed rows fall through to the
+    // EXISTING non-genuine vocabulary (공식자료 참고 / 공식 상세 근거 부족) — no new label.
+    const OFFICIAL_PERIODIC_FAMILY_RE = /(동향|지수|변동률)/;
+    const OFFICIAL_PERIOD_MISMATCH_MEMO = new WeakMap();
+    const OFFICIAL_PERIOD_SUPPRESSED_SUMMARIES = new WeakSet();
+    function parseKoreanPeriodTokens(rawText) {
+      const text = String(rawText || "");
+      if (!text) return [];
+      const periods = [];
+      const seen = new Set();
+      const push = (y, mo) => {
+        const year = Number(y);
+        const month = mo == null ? null : Number(mo);
+        if (!Number.isInteger(year) || year < 2000 || year > 2099) return;
+        if (month !== null && (!Number.isInteger(month) || month < 1 || month > 12)) return;
+        const key = `${year}-${month}`;
+        if (!seen.has(key)) { seen.add(key); periods.push({ year, month }); }
+      };
+      let m;
+      const reYearMonth = /(20\d{2})년\s*(\d{1,2})월/g;
+      while ((m = reYearMonth.exec(text))) push(m[1], m[2]);
+      const reDotted = /(20\d{2})[.\-\/](\d{1,2})(?![\d.\-\/])/g;
+      while ((m = reDotted.exec(text))) push(m[1], m[2]);
+      // 2-digit editions ("26년 6월") — [^0-9] guard keeps "2026년"'s tail out.
+      const reShortYearMonth = /(?:^|[^0-9])(\d{2})년\s*(\d{1,2})월/g;
+      while ((m = reShortYearMonth.exec(text))) push(2000 + Number(m[1]), m[2]);
+      const hadExplicitPair = periods.length > 0;
+      const years = [];
+      const reYearOnly = /(20\d{2})년/g;
+      while ((m = reYearOnly.exec(text))) if (!years.includes(Number(m[1]))) years.push(Number(m[1]));
+      // "2021년, 11월" shape: a lone year + standalone month(s), no explicit pair.
+      if (!hadExplicitPair && years.length) {
+        const reLoneMonth = /(?:^|[^년\d.\-\/])(\d{1,2})월/g;
+        while ((m = reLoneMonth.exec(text))) push(years[0], m[1]);
+      }
+      years.forEach((y) => { if (!periods.some((p) => p.year === y)) push(y, null); });
+      return periods;
+    }
+    function officialPeriodsAgree(a, b) {
+      return a.year === b.year && (a.month === null || b.month === null || a.month === b.month);
+    }
+    function coerceJsonArray(value) {
+      if (Array.isArray(value)) return value;
+      if (typeof value === "string" && value.trim().startsWith("[")) {
+        try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed : []; } catch (_) { return []; }
+      }
+      return [];
+    }
+    function officialPeriodicEditionMismatch(result) {
+      if (!result || typeof result !== "object") return false;
+      if (OFFICIAL_PERIOD_MISMATCH_MEMO.has(result)) return OFFICIAL_PERIOD_MISMATCH_MEMO.get(result);
+      let mismatch = false;
+      try {
+        const verification = result.verification_card || result;
+        const candidates = coerceJsonArray(verification.source_candidates || result.source_candidates);
+        const docAllPeriods = [];
+        let hasPeriodicEdition = false;
+        candidates.forEach((cand) => {
+          if (!cand || cand.verification_role !== "primary_evidence") return;
+          if (cand.source_type !== "official_government" && cand.source_type !== "public_institution") return;
+          const title = String(cand.title || "");
+          const periods = parseKoreanPeriodTokens(title);
+          if (!periods.length) return;
+          docAllPeriods.push(...periods);
+          if (OFFICIAL_PERIODIC_FAMILY_RE.test(title)) hasPeriodicEdition = true;
+        });
+        if (hasPeriodicEdition && docAllPeriods.length) {
+          const normalized = coerceJsonArray(verification.normalized_claims || result.normalized_claims);
+          let claimPeriods = [];
+          normalized.forEach((claim) => {
+            if (claim && claim.date_or_time) claimPeriods.push(...parseKoreanPeriodTokens(claim.date_or_time));
+          });
+          if (!claimPeriods.length) {
+            normalized.forEach((claim) => {
+              if (claim && claim.claim_text) claimPeriods.push(...parseKoreanPeriodTokens(claim.claim_text));
+            });
+            coerceJsonArray(verification.claims || result.claims).forEach((claim) => {
+              if (typeof claim === "string") claimPeriods.push(...parseKoreanPeriodTokens(claim));
+            });
+          }
+          if (claimPeriods.length) {
+            mismatch = !claimPeriods.some((c) => docAllPeriods.some((d) => officialPeriodsAgree(c, d)));
+          }
+        }
+        if (mismatch) {
+          const summaryA = verification.source_reliability_summary;
+          const summaryB = result.source_reliability_summary;
+          if (summaryA && typeof summaryA === "object") OFFICIAL_PERIOD_SUPPRESSED_SUMMARIES.add(summaryA);
+          if (summaryB && typeof summaryB === "object") OFFICIAL_PERIOD_SUPPRESSED_SUMMARIES.add(summaryB);
+        }
+      } catch (_) {
+        mismatch = false; // any parse surprise degrades to today's display
+      }
+      OFFICIAL_PERIOD_MISMATCH_MEMO.set(result, mismatch);
+      return mismatch;
+    }
+
     // DISPLAY-HONESTY (①): the SAME genuine-official predicate the "공식 근거 확인" /
     // "공식자료 참고" box uses (officialStatusLabel, ~L1908): the persisted
     // has_genuine_official_support boolean, else the old-row body-match fallback. Reused
     // to gate affirmative official-evidence COPY so it never over-claims strong official
     // evidence on a non-genuine row. Reads only — no stored field / score / verdict change.
     function officialEvidenceIsGenuine(summary, debug) {
+      // MATCHER-GUARD: a summary stamped as a periodic-edition period mismatch is
+      // never presented as genuine, whatever the stored boolean says. Display only.
+      if (summary && typeof summary === "object" && OFFICIAL_PERIOD_SUPPRESSED_SUMMARIES.has(summary)) {
+        return false;
+      }
       const s = summary || {};
       const d = debug || {};
       return (typeof s.has_genuine_official_support === "boolean")
@@ -10241,7 +10376,11 @@
       if (state.officialEvidenceStatus === "body_unmatched" || state.officialEvidenceStatus === "candidate_only" || state.officialEvidenceStatus === "not_found") {
         return buildOfficialEvidenceNarrative(state).detailedExplanation;
       }
-      if (summary.official_direct_match_reason) {
+      // MATCHER-GUARD: on a period-suppressed summary the STORED reason string
+      // ("…직접 일치하는 공식 상세문서를 찾았습니다") would re-assert the match the
+      // guard just suppressed — skip it and use the honest state narrative.
+      if (summary.official_direct_match_reason
+          && !OFFICIAL_PERIOD_SUPPRESSED_SUMMARIES.has(summary)) {
         return formatDiagnosticText(summary.official_direct_match_reason);
       }
       return buildOfficialEvidenceNarrative(state).detailedExplanation;
@@ -10309,9 +10448,12 @@
       // fall through to partial_support, not direct_support — honest, and the
       // card's certainty-word stripping (hasDirectOfficialSupport) becomes more
       // cautious for IBK-pattern rows (desired). Score/verdict untouched.
-      const genuine = (typeof summary.has_genuine_official_support === "boolean")
-        ? summary.has_genuine_official_support
-        : (matched > 0);
+      // MATCHER-GUARD: same suppression as officialEvidenceIsGenuine — a stamped
+      // period-mismatch summary must not reach direct_support/"직접 일치" wording.
+      const genuine = !OFFICIAL_PERIOD_SUPPRESSED_SUMMARIES.has(summary)
+        && ((typeof summary.has_genuine_official_support === "boolean")
+          ? summary.has_genuine_official_support
+          : (matched > 0));
       const hasDirectSupport = genuine && (
         classification === "strong_official_direct_support"
         || directMatches > 0
@@ -11192,9 +11334,10 @@
       // (최고 신뢰 출처 / candidate badges / 검증 역할 suffix) — the SAME
       // has_genuine_official_support predicate (+ official_body_matches fallback)
       // the honest top-line "공식 출처 상태" already uses (topicCardFromResult).
-      const cardHasGenuineOfficial = (typeof sourceReliabilitySummary.has_genuine_official_support === "boolean")
-        ? sourceReliabilitySummary.has_genuine_official_support
-        : (numberValue(debugSummary.official_body_matches, 0) > 0);
+      // MATCHER-GUARD: stamp here so every detail/export consumer downstream of
+      // the pipeline parts (incl. buildOfficialEvidenceState callers) is gated.
+      officialPeriodicEditionMismatch(result);
+      const cardHasGenuineOfficial = officialEvidenceIsGenuine(sourceReliabilitySummary, debugSummary);
       const strength = debugSummary.evidence_strength_summary
         || evidenceExtractionSummary.evidence_strength_summary
         || {};
@@ -11927,7 +12070,7 @@
           // renderSourceQueries above).
           renderCollapsibleSection(
             "출처와 공식 근거",
-            `${renderSourceReliabilitySummary(sourceReliabilitySummary, cardHasGenuineOfficial)}${renderSourceCandidates(sourceCandidates, cardHasGenuineOfficial)}${renderSourceQueries(sourceQueries)}`,
+            `${renderSourceReliabilitySummary(sourceReliabilitySummary, cardHasGenuineOfficial)}${renderSourceCandidates(sourceCandidates, cardHasGenuineOfficial, sourceReliabilitySummary)}${renderSourceQueries(sourceQueries)}`,
             false,
             "공식기관 후보와 언론 출처가 실제 주장 검증에 얼마나 도움이 되는지 보여줍니다."
           ),
