@@ -931,10 +931,14 @@ def _fetch_published_at(member_ids):
     return [row[0] for row in rows]
 
 
-def _build_spread_payload(cluster_meta: dict, member_ids, published_values) -> dict:
+def _build_spread_payload(cluster_meta: dict, member_ids, published_values,
+                          corpus=None) -> dict:
     """Pure aggregate: NULL/empty published_at members are EXCLUDED from the
     timeline (first/last/span/daily/dated_members) but stay inside the
-    cluster's precomputed outlet_count; they surface as undated_members."""
+    cluster's precomputed outlet_count; they surface as undated_members.
+    corpus (CARD-GRAPHS, additive): the live outlet-count distribution the
+    card histogram renders — computed per graph row, never a page constant.
+    Rides the found-payload ONLY; {"found": false} stays byte-identical."""
     dated = sorted(v for v in published_values if v)
     daily_counts: dict = {}
     for value in dated:
@@ -971,6 +975,7 @@ def _build_spread_payload(cluster_meta: dict, member_ids, published_values) -> d
             "dated_members": len(dated),
             "undated_members": max(0, len(list(member_ids)) - len(dated)),
         },
+        "corpus_outlet_distribution": corpus,
     }
 
 
@@ -1219,7 +1224,11 @@ def spread_annotation(analysis_id: int) -> Response:
         member_ids = indexes["members"].get(cluster_id) or []
         cluster_meta = indexes["clusters"].get(cluster_id) or {}
         published_values = _fetch_published_at(member_ids)
-        payload = _build_spread_payload(cluster_meta, member_ids, published_values)
+        # corpus rides the row-keyed cache (same source /api/claim uses); a
+        # patched/stale loader leaves it None -> the card hides the histogram.
+        payload = _build_spread_payload(cluster_meta, member_ids,
+                                        published_values,
+                                        corpus=_SPREAD_CACHE.get("corpus"))
         return _spread_response(json.dumps(payload, ensure_ascii=False))
     except Exception:
         logger.exception("Failed to build spread annotation")

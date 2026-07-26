@@ -5570,6 +5570,50 @@
       }
     }
 
+    // CARD-GRAPHS: compact corpus distribution — gives the outlet-count line
+    // above it meaning by SHOWING where this claim sits in the corpus. No
+    // sentence about rank: a superlative would go stale as the corpus grows;
+    // the marker position says it. Compressed for the card's numeric budget
+    // (CARD-SIMPLIFY took the open page 7 score elements -> 1): 6 bars with
+    // range labels + one 이 주장 chip; per-bucket counts live in title
+    // tooltips ONLY and are not load-bearing — bar lengths and the marker
+    // carry the meaning alone (tooltips don't exist on touch). The chip
+    // column is FIXED-WIDTH on every row so all bar tracks stay equal and
+    // lengths comparable. Inline-styled like the two sparkline helpers;
+    // single brand-blue family, solid marks — opacity never encodes anything.
+    // Data arrives on the SAME /api/spread response the section already
+    // fetches (computed per graph row server-side, never a page constant);
+    // absent corpus (older server) renders nothing.
+    function corpusDistributionHtml(corpus, outletCount) {
+      const buckets = Array.isArray(corpus?.outlet_buckets) ? corpus.outlet_buckets : [];
+      if (!buckets.length || !Number.isFinite(outletCount) || outletCount < 2) return "";
+      let maxCount = 0;
+      for (const bucket of buckets) maxCount = Math.max(maxCount, Number(bucket?.count) || 0);
+      if (maxCount <= 0) return "";
+      const rows = buckets.map((bucket) => {
+        const lo = Number(bucket?.min);
+        const hi = bucket?.max === null || bucket?.max === undefined ? null : Number(bucket.max);
+        if (!Number.isFinite(lo)) return "";
+        const label = hi === null ? `${lo}개 이상` : (lo === hi ? `${lo}개` : `${lo}-${hi}개`);
+        const isHere = outletCount >= lo && (hi === null || outletCount <= hi);
+        const count = Number(bucket?.count) || 0;
+        const widthPct = Math.max(1.5, Math.round((count / maxCount) * 1000) / 10);
+        const chip = isHere
+          ? `<span style="font-size:0.72rem;font-weight:700;color:var(--brand);border:1px solid currentColor;border-radius:999px;padding:0 6px;white-space:nowrap;">이 주장</span>`
+          : "";
+        return `<div title="${escapeHtml(label)} 매체 · ${escapeHtml(count)}건" style="display:flex;align-items:center;gap:6px;min-width:0;">
+              <span style="flex:0 0 58px;text-align:right;font-size:0.75rem;color:var(--muted);${isHere ? "font-weight:700;color:inherit;" : ""}">${escapeHtml(label)}</span>
+              <span style="flex:1 1 auto;min-width:0;"><span style="display:block;height:8px;width:${widthPct}%;min-width:2px;background:var(--brand);border-radius:2px;"></span></span>
+              <span style="flex:0 0 52px;">${chip}</span>
+            </div>`;
+      }).join("");
+      return `
+            <div style="margin:10px 0 4px;max-width:440px;">
+              <div role="img" aria-label="수집된 주장의 확산 규모 분포" style="display:flex;flex-direction:column;gap:3px;">${rows}</div>
+              <div style="font-size:0.75rem;color:var(--muted);margin-top:4px;">수집된 주장의 확산 규모 분포 — 우리가 수집한 범위 기준입니다.</div>
+            </div>`;
+    }
+
     async function loadSpreadAnnotations() {
       const placeholders = document.querySelectorAll(".spread-section[data-spread-id]");
       for (const section of placeholders) {
@@ -5619,6 +5663,7 @@
           section.innerHTML = `
             <h3>이슈 확산 현황</h3>
             <div>이 주장과 유사한 내용이 ${escapeHtml(outletCount)}개 매체에서 보도되었습니다.</div>
+            ${corpusDistributionHtml(data?.corpus_outlet_distribution, outletCount)}
             ${syndicationLine}
             ${timelineLine}
             ${spreadSparklineHtml(timeline.daily)}
