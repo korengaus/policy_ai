@@ -6172,9 +6172,25 @@
         // Nothing deleted: findings now lead the page and every process
         // indicator stays one click away. The kicker badge and the honesty
         // reader-note stay always-visible in layer 0.
+        // DETAIL-POLISH item 2: the AI-assist note ("AI 보조 단계가 비활성…")
+        // MOVED here byte-identical from between the title and the answer line.
+        // NOT deleted and NOT reworded — it states a real limitation of this
+        // analysis. It is process metadata about HOW the report was produced,
+        // so it belongs with the rest of the process block; the always-visible
+        // kicker badge (renderAiStatusBadge, layer 0) still carries the same
+        // fact in short form ("AI 보조 비활성 — 규칙 기반 분석만 적용"), so no
+        // honesty signal leaves the open page — only the jargon sentence that
+        // was outranking the answer line.
+        // DETAIL-POLISH item 1: the AI 종합 검증 판단 card (reviewer mounts,
+        // 상세 검증 정보, 고급 검증 정보 보기 + its 8 sub-collapsibles) MERGED in
+        // here as the last child of this ONE process block — the two collapsed
+        // blocks read as the same thing to a reader. Nothing deleted: every
+        // child section still renders, one level down, and the reviewer mount
+        // expressions moved byte-identical.
         const judgementSection = renderCollapsibleSection(
           "우리가 어떻게 판단했나",
           `
+            <div class="ai-status-note">${escapeHtml(buildAiStatusDescriptor(getResultAiStatus(result).status).note)}</div>
             <section class="verdict-block">
               <div class="verdict-indicators">
                 <div class="verdict-indicator">
@@ -6206,6 +6222,26 @@
               </div>
             </div>
             ${renderCollapsibleSection("이 리포트는 이렇게 읽으면 됩니다", renderReadingGuide(userContext), false, "처음 보는 분을 위한 안내입니다. 판정 단계·공식 출처·근거를 어떻게 읽으면 되는지 설명합니다.")}
+            <!-- STEP 2 items 6+7: the AI 종합 검증 판단 residual card. STEP 3c removed
+                 the duplicate 초안 판정 tile (now led by the top verdict block); kept:
+                 리뷰 상태 + 핵심 주장 + the advanced collapsible. STEP 5: the advanced
+                 collapsible (고급 검증 정보 보기 + its 8 sub-collapsibles) is KEPT and
+                 COLLAPSED with internals UNTOUCHED — presentation redesign is DETAIL-5.
+                 DETAIL-POLISH item 1: moved verbatim from its own top-level slot into
+                 this block; the h3 now reads as this block's sub-heading. -->
+            <section class="verification-card">
+              <h3>AI 종합 검증 판단</h3>
+              <!-- CARD-3LAYER S4b: the honesty reader-note and the 리뷰 상태 +
+                   사람 검토됨 badge tile moved UP into layer 1 (right after the
+                   verdict block); CARD-AISUMMARY moved the 핵심 주장 summary up
+                   under the headline — moves, not removals. -->
+              ${operatorToolsFlagSet() ? renderReviewerDecisionDashboard(result, userContext) : ""}
+              ${operatorToolsFlagSet() ? renderReviewerCheckpoints(result) : ""}
+              ${operatorToolsFlagSet() ? renderReviewerActionCard(result, userContext) : ""}
+              <div class="news-section-title">상세 검증 정보</div>
+              <div class="reader-note">더 자세한 주장별 근거, 반박 가능성, 표현 방식 점검은 아래 고급 정보에서 펼쳐볼 수 있습니다.</div>
+              ${advancedVerificationDetails}
+            </section>
           `,
           false
         );
@@ -6239,7 +6275,10 @@
               <h2 class="result-title">
                 <a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a>
               </h2>
-              <div class="ai-status-note">${escapeHtml(buildAiStatusDescriptor(getResultAiStatus(result).status).note)}</div>
+              <!-- DETAIL-POLISH item 2: the .ai-status-note sentence MOVED (not
+                   deleted, not reworded) into the collapsed 우리가 어떻게 판단했나
+                   block — see judgementSection above. The answer line now follows
+                   the title directly; the AI-status BADGE stays in the kicker. -->
               <!-- DETAIL-IA-3: the one ANSWER LINE — counted values + the
                    stamped official boolean only, never a verdict. Hydrated by
                    loadAnswerLines() from the same /api/spread response; renders
@@ -6329,24 +6368,11 @@
                  moved verbatim from the top; see judgementSection above). -->
             ${judgementSection}
 
-            <!-- STEP 2 items 6+7: the AI 종합 검증 판단 residual card. STEP 3c removed
-                 the duplicate 초안 판정 tile (now led by the top verdict block); kept:
-                 리뷰 상태 + 핵심 주장 + the advanced collapsible. STEP 5: the advanced
-                 collapsible (고급 검증 정보 보기 + its 8 sub-collapsibles) is KEPT and
-                 COLLAPSED with internals UNTOUCHED — presentation redesign is DETAIL-5. -->
-            <section class="verification-card">
-              <h3>AI 종합 검증 판단</h3>
-              <!-- CARD-3LAYER S4b: the honesty reader-note and the 리뷰 상태 +
-                   사람 검토됨 badge tile moved UP into layer 1 (right after the
-                   verdict block); CARD-AISUMMARY moved the 핵심 주장 summary up
-                   under the headline — moves, not removals. -->
-              ${operatorToolsFlagSet() ? renderReviewerDecisionDashboard(result, userContext) : ""}
-              ${operatorToolsFlagSet() ? renderReviewerCheckpoints(result) : ""}
-              ${operatorToolsFlagSet() ? renderReviewerActionCard(result, userContext) : ""}
-              <div class="news-section-title">상세 검증 정보</div>
-              <div class="reader-note">더 자세한 주장별 근거, 반박 가능성, 표현 방식 점검은 아래 고급 정보에서 펼쳐볼 수 있습니다.</div>
-              ${advancedVerificationDetails}
-            </section>
+            <!-- DETAIL-POLISH item 1: the AI 종합 검증 판단 card MOVED (not deleted)
+                 into the collapsed 우리가 어떻게 판단했나 block above — two adjacent
+                 blocks both named for "our judgement process" gave the reader no way
+                 to tell them apart. Every child (reviewer mounts, 상세 검증 정보,
+                 고급 검증 정보 보기 + its 8 sub-collapsibles) still renders there. -->
             <!-- CARD-3LAYER S4a: 이미지로 공유 button — split out of the (moved)
                  spread placeholder's conditional, byte-identical markup/condition;
                  stays low near the footer while the spread section sits up top. -->
