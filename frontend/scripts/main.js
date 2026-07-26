@@ -5660,17 +5660,20 @@
             : nearShown >= 1
               ? `<div class="spread-syndication-line">이 중 ${escapeHtml(nearShown)}개 매체는 첫 보도와 제목·주장 문구가 거의 동일합니다.${exactNote}</div>`
               : `<div class="spread-syndication-line">첫 보도와 제목·주장 문구가 거의 동일한 매체는 없습니다.</div>`;
+          // DETAIL-IA MERGE: this div is a CHILD of the 얼마나 퍼졌나 wrapper —
+          // the section h3 and the ONE consolidated caveat live on the wrapper
+          // (the old per-part h3/caveat here were consolidated, not deleted).
           section.innerHTML = `
-            <h3>이슈 확산 현황</h3>
             <div>이 주장과 유사한 내용이 ${escapeHtml(outletCount)}개 매체에서 보도되었습니다.</div>
             ${corpusDistributionHtml(data?.corpus_outlet_distribution, outletCount)}
             ${syndicationLine}
             ${timelineLine}
             ${spreadSparklineHtml(timeline.daily)}
             <div class="spread-map-link"><a href="/web/brainmap.html?focus=${encodeURIComponent(id)}" target="_blank" rel="noopener noreferrer">브레인맵에서 유사 보도 보기 →</a></div>
-            <div class="reader-note">확산 정보는 유통 규모를 보여줄 뿐, 사실 여부에 대한 검증이 아닙니다.</div>
           `;
           section.hidden = false;
+          const mergedWrapper = section.closest(".spread-merged-section");
+          if (mergedWrapper) mergedWrapper.hidden = false;
         } catch (error) {
           // fail-silent: spread info is optional context, never an error state
         }
@@ -5779,15 +5782,19 @@
             : (delta < 0
               ? `<div class="spread-timeline-line">최근 스냅샷에서 ${escapeHtml(Math.abs(delta))}개 매체 감소</div>`
               : "");
+          // DETAIL-IA MERGE: child of the 얼마나 퍼졌나 wrapper — the old h3
+          // becomes a sub-label (same existing string) and the caveat is the
+          // wrapper's consolidated one (moved, not deleted).
           section.innerHTML = `
-            <h3>확산 추이</h3>
+            <div class="spread-timeline-line"><strong>확산 추이</strong></div>
             <div>${escapeHtml(firstLabel)} ${escapeHtml(firstOutlets)}개 매체 → ${escapeHtml(lastLabel)} ${escapeHtml(lastOutlets)}개 매체</div>
             ${deltaLine}
             ${topicTimelineSparklineHtml(points)}
             <div class="evidence-source-meta">주간 스냅샷 기준 · 최초 관측 ${escapeHtml(timelineDateLabel(data?.first_seen))}</div>
-            <div class="reader-note">확산 추이는 유통 규모의 변화를 보여줄 뿐, 사실 여부에 대한 검증이 아닙니다.</div>
           `;
           section.hidden = false;
+          const mergedWrapper = section.closest(".spread-merged-section");
+          if (mergedWrapper) mergedWrapper.hidden = false;
         } catch (error) {
           // fail-silent: trajectory is optional context, never an error state
         }
@@ -5840,7 +5847,7 @@
             ? `<div><a class="claim-link" href="/web/claim.html?id=${encodeURIComponent(lineage)}">이 주장 전체 확산 기록 →</a></div>`
             : "";
           section.innerHTML = `
-            <h3>이 주장을 보도한 다른 기사들</h3>
+            <h3>어떤 매체가 보도했나</h3>
             <ul class="cluster-members-list">${items}</ul>
             ${claimLink}
             <div class="reader-note">${escapeHtml(data.note || "같은 주장을 다룬 다른 보도 — 검증이 아닙니다")}</div>
@@ -6080,6 +6087,51 @@
           // only it (not the top-level reader reading-guide, which shares the class).
           "vrf-outer"
         );
+        // DETAIL-IA Layer 2 — "우리가 어떻게 판단했나": the verdict block
+        // (판정 단계 / AI 초안 판정 / 공식 출처 상태 + 왜 이렇게 판단했나요), the
+        // 리뷰 상태 tile, and the reading guide, MOVED here byte-identical from
+        // the top of the card and collapsed behind the existing details/summary
+        // pattern (renderCollapsibleSection — summary never gets flex/grid).
+        // Nothing deleted: findings now lead the page and every process
+        // indicator stays one click away. The kicker badge and the honesty
+        // reader-note stay always-visible in layer 0.
+        const judgementSection = renderCollapsibleSection(
+          "우리가 어떻게 판단했나",
+          `
+            <section class="verdict-block">
+              <div class="verdict-indicators">
+                <div class="verdict-indicator">
+                  <span class="verdict-label">판정 단계</span>
+                  <span class="verdict-value">${escapeHtml(formatAlert(level))}</span>
+                </div>
+                <div class="verdict-indicator">
+                  <span class="verdict-label">AI 초안 판정</span>
+                  <span class="verdict-value">${escapeHtml(safeAiDraftVerdictForExport(result))}</span>
+                </div>
+                <!-- CARD-SIMPLIFY: the 근거 수준 number indicator is OFF the verdict
+                     block. Display only — policy_confidence_score stays stored and
+                     keeps driving verdict_label / alert gates / the 뜨는순 sort. -->
+                <div class="verdict-indicator">
+                  <span class="verdict-label">공식 출처 상태</span>
+                  <span class="verdict-value">${escapeHtml(officialStatusLabel(result))}</span>
+                </div>
+              </div>
+              <div class="verdict-reasoning">
+                <h3>왜 이렇게 판단했나요?</h3>
+                ${renderBulletList(decisionReasonBullets(userContext, 3))}
+              </div>
+            </section>
+            <div class="verification-intro">
+              <div class="summary-tile">
+                <span class="label">리뷰 상태</span>
+                <strong>${escapeHtml(formatReviewStatus(verification.review_status))}</strong>
+                ${result.human_reviewed_at ? `<span class="review-status review-approved">${escapeHtml(HUMAN_REVIEWED_LABEL)}</span>` : ""}
+              </div>
+            </div>
+            ${renderCollapsibleSection("이 리포트는 이렇게 읽으면 됩니다", renderReadingGuide(userContext), false, "처음 보는 분을 위한 안내입니다. 판정 단계·공식 출처·근거를 어떻게 읽으면 되는지 설명합니다.")}
+          `,
+          false
+        );
 
         return `
           <article class="result-card">
@@ -6110,88 +6162,41 @@
               ${escapeHtml(exportClaimText(result))}
             </div>
 
-            <!-- DESIGN-DETAIL-4 STEP 1: the consolidated AI VERDICT BLOCK — the first
-                 thing the reader sees. Verdict indicators (판정 단계 / AI 초안 판정 /
-                 신뢰도 / 공식 출처 상태) as a clean flat row, then the single
-                 "왜 이렇게 판단했나요" bullets right below: conclusion → why. This
-                 ABSORBS the former core-indicator-strip AND the standalone reasoning
-                 section (both removed). safeAiDraftVerdictForExport is surfaced HERE
-                 so the duplicate AI-card 초안 판정 tile (STEP 3c) is removed with no
-                 data loss; decisionReasonBullets keeps the next-step guidance that
-                 made the 9-tile grid's 추천 다음 조치 safe to drop. -->
-            <section class="verdict-block">
-              <div class="verdict-indicators">
-                <div class="verdict-indicator">
-                  <span class="verdict-label">판정 단계</span>
-                  <span class="verdict-value">${escapeHtml(formatAlert(level))}</span>
-                </div>
-                <div class="verdict-indicator">
-                  <span class="verdict-label">AI 초안 판정</span>
-                  <span class="verdict-value">${escapeHtml(safeAiDraftVerdictForExport(result))}</span>
-                </div>
-                <!-- CARD-SIMPLIFY: the 근거 수준 number indicator is OFF the verdict
-                     block. Display only — policy_confidence_score stays stored and
-                     keeps driving verdict_label / alert gates / the 뜨는순 sort. -->
-                <div class="verdict-indicator">
-                  <span class="verdict-label">공식 출처 상태</span>
-                  <span class="verdict-value">${escapeHtml(officialStatusLabel(result))}</span>
-                </div>
-              </div>
-              <div class="verdict-reasoning">
-                <h3>왜 이렇게 판단했나요?</h3>
-                ${renderBulletList(decisionReasonBullets(userContext, 3))}
-              </div>
-            </section>
-
-            <!-- CARD-3LAYER S4b: 리뷰 상태 + 사람 검토됨 badge and the fixed honesty
-                 line, HOISTED byte-identical from the verification-card below —
-                 layer 1 shows claim + verdict + status badge + honesty framing
-                 before anything dense. Markup/strings unchanged, only moved. -->
-            <div class="verification-intro">
-              <div class="summary-tile">
-                <span class="label">리뷰 상태</span>
-                <strong>${escapeHtml(formatReviewStatus(verification.review_status))}</strong>
-                ${result.human_reviewed_at ? `<span class="review-status review-approved">${escapeHtml(HUMAN_REVIEWED_LABEL)}</span>` : ""}
-              </div>
-            </div>
+            <!-- DETAIL-IA: the honesty reader-note is the ONE always-visible
+                 AI-draft line (beside the kicker badge). The verdict block,
+                 리뷰 상태 tile and reading guide moved — byte-identical — into
+                 the collapsed 우리가 어떻게 판단했나 block below the evidence
+                 (judgementSection). Moves, not removals. -->
             <div class="reader-note">
               현재 수집된 기사와 공식 자료 기준의 검증 초안입니다. 절대적 결론이 아니라, 확인 가능한 근거를 바탕으로 한 판단입니다.
             </div>
 
-            <!-- CARD-TOPFIX 3b: reading guide MOVED here (was after the spread
-                 placeholder, too late for a first-time reader) — right after the
-                 verdict block, before the dense sections. Kept collapsed,
-                 content unchanged. -->
-            ${renderCollapsibleSection("이 리포트는 이렇게 읽으면 됩니다", renderReadingGuide(userContext), false, "처음 보는 분을 위한 안내입니다. 판정 단계·공식 출처·근거를 어떻게 읽으면 되는지 설명합니다.")}
-
-            <!-- SPREAD-TIMELINE Slice 2 / CARD-3LAYER S4a: circulation annotation
-                 placeholder (유통 정보만 — 판정 아님), PROMOTED here as the endgame
-                 layer 2 — prominent right after the verdict/guide block instead of
-                 buried late. Stays hidden until /api/spread/{id} returns found +
-                 outlet_count>=2; found:false / singleton / fetch failure all render
-                 NOTHING (fail-silent). Hydrated AFTER the innerHTML pass by
-                 loadSpreadAnnotations() via [data-spread-id] — position-independent.
-                 Detail view only, and only when the card knows its analysis id. -->
-            ${(hasFocus || displayResults.length === 1) && Number(result.result_id) > 0 ? `<section class="public-source-section spread-section" data-spread-id="${Number(result.result_id)}" hidden></section>` : ""}
+            <!-- DETAIL-IA MERGE — 얼마나 퍼졌나: ONE spread section. The static
+                 <h3> and the ONE consolidated caveat live on this WRAPPER; the
+                 two async hydrators (loadSpreadAnnotations /api/spread,
+                 loadTopicTimeline /api/topic-timeline) fill their child divs
+                 independently and unhide the wrapper — the wrapper stays hidden
+                 until at least one child has content, so heading/caveat never
+                 render alone. The trajectory child is variance-gated (renders
+                 for 1 of 653 lineages) and the section reads complete without
+                 it. found:false / singleton / fetch failure per child renders
+                 NOTHING (fail-silent, unchanged gates). Circulation only —
+                 유통 정보만, 판정 아님. -->
+            ${(hasFocus || displayResults.length === 1) && Number(result.result_id) > 0 ? `<section class="public-source-section spread-merged-section" hidden>
+              <h3>얼마나 퍼졌나</h3>
+              <div class="spread-section" data-spread-id="${Number(result.result_id)}" hidden></div>
+              <div class="topic-timeline-section" data-timeline-id="${Number(result.result_id)}" hidden></div>
+              <div class="reader-note">확산 정보는 유통 규모와 그 변화를 보여줄 뿐, 사실 여부에 대한 검증이 아닙니다.</div>
+            </section>` : ""}
 
             <!-- CLUSTER-SURFACE S-a: sibling-coverage placeholder (같은 클러스터의
                  다른 보도 — 유통 정보만, 판정 아님), right after the spread section
-                 as part of the layer-2 cluster context. Stays hidden until
+                 as part of the layer-1 cluster context. Stays hidden until
                  /api/cluster/{id}/members returns found + members; found:false /
                  empty / fetch failure all render NOTHING (fail-silent). Hydrated
                  AFTER the innerHTML pass by loadClusterMembers() — position-
                  independent. Same gate as the spread placeholder. -->
             ${(hasFocus || displayResults.length === 1) && Number(result.result_id) > 0 ? `<section class="public-source-section cluster-members-section" data-cluster-id="${Number(result.result_id)}" hidden></section>` : ""}
-
-            <!-- TEMPORAL-MAP v1: cluster trajectory placeholder (확산 추이 —
-                 유통 정보만, 판정 아님). Hidden until /api/topic-timeline/{id}
-                 returns found + >=2 points; found:false / singleton / single
-                 point / fetch failure all render NOTHING (fail-silent).
-                 Hydrated AFTER the innerHTML pass by loadTopicTimeline() via
-                 [data-timeline-id] — position-independent. Same gate as the
-                 spread placeholder. Measurement only: dates + outlet counts;
-                 no sentiment, no 여론, no verdict vocabulary. -->
-            ${(hasFocus || displayResults.length === 1) && Number(result.result_id) > 0 ? `<section class="public-source-section topic-timeline-section" data-timeline-id="${Number(result.result_id)}" hidden></section>` : ""}
 
             <!-- STEP 2 item 3: the news CONTENT lead (the article's own claim quote)
                  + the muted verification note, just under the verdict so the reader
@@ -6218,6 +6223,17 @@
             <!-- STEP 2 item 5: 근거와 출처 요약. -->
             ${renderPublicSourceCards(result)}
 
+            <!-- DETAIL-IA: 원문 보기 moved UP into layer 1 — the original
+                 article stays reachable without opening any collapsible. -->
+            <div class="source-link">
+              <a class="source-button" href="${url}" target="_blank" rel="noopener noreferrer">원문 보기</a>
+            </div>
+
+            <!-- DETAIL-IA Layer 2: the collapsed 우리가 어떻게 판단했나 block
+                 (verdict indicators + bullets + 리뷰 상태 + reading guide —
+                 moved verbatim from the top; see judgementSection above). -->
+            ${judgementSection}
+
             <!-- STEP 2 items 6+7: the AI 종합 검증 판단 residual card. STEP 3c removed
                  the duplicate 초안 판정 tile (now led by the top verdict block); kept:
                  리뷰 상태 + 핵심 주장 + the advanced collapsible. STEP 5: the advanced
@@ -6240,9 +6256,6 @@
                  spread placeholder's conditional, byte-identical markup/condition;
                  stays low near the footer while the spread section sits up top. -->
             ${(hasFocus || displayResults.length === 1) && Number(result.result_id) > 0 ? `<div class="report-error-link"><button type="button" class="secondary" data-share-image="${Number(result.result_id)}" data-share-title="${title}" data-share-official="${escapeHtml(officialStatusLabel(result))}">이미지로 공유</button></div>` : ""}
-            <div class="source-link">
-              <a class="source-button" href="${url}" target="_blank" rel="noopener noreferrer">원문 보기</a>
-            </div>
             <div class="report-error-link">
               <a href="mailto:contact@tickedin.org?subject=${encodeURIComponent('[tickedin 오류신고] 분석 오류 제보')}">이 분석에 오류가 있나요? 신고하기</a>
             </div>
