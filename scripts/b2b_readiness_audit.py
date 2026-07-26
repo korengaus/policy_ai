@@ -81,7 +81,28 @@ EMAIL_LATEST = "2026-07-19"
 EXPECTED_WEEKLY_LATEST = "2026-07-14"
 EXPECTED_SNAPSHOT_LATEST = "2026-07-20"
 DAILY_ADD_BAND = (90, 160)
-KNOWN_NULL_VERDICTS = 3
+
+# AUDIT-BASELINES C4 — null verdict_label baseline, measured 2026-07-27.
+# These are ids 1-11, ALL created 2026-04-30 (first deploy day), before the
+# verdict_label column existed (added 2026-05-02 as an additive ALTER). Zero
+# new occurrences in the weeks since, the card renders its safe neutral
+# fallback, and they sit far below any recent feed — a fossil, not a live
+# defect. Recorded as an ID SET, not just a count, so the check reports
+# CHANGE instead of restating a known state on every run:
+#   * a RISE names the new ids (a live row losing its label),
+#   * a DROP is surfaced too — rows do not un-null themselves, so a
+#     disappearance means something WROTE to them.
+# The rows themselves are never touched: this records a state, it does not
+# repair one, and it silences nothing that changes.
+KNOWN_NULL_VERDICT_IDS = frozenset(range(1, 12))
+KNOWN_NULL_VERDICTS = len(KNOWN_NULL_VERDICT_IDS)
+
+# AUDIT-BASELINES C5 — the memory-outage day. 2026-07-25 recorded 73 adds
+# (below the band) during an OOM outage. It is RECORDED, never exempted: the
+# day still counts as out-of-band and still WARNs; the annotation only tells
+# the operator which known event the flagged day corresponds to, and the day
+# ages out of the 3-day window on its own.
+KNOWN_LOW_ADD_DAYS = {"2026-07-25": "memory outage (OOM); 73 adds recorded"}
 
 # Honesty strings the pages MUST show (source: prompt + web/*.html copy).
 S_NOT_VERIFICATION = "검증이 아닙니다"
@@ -632,13 +653,36 @@ def run_audit(base: str) -> int:
                        "FROM analysis_results GROUP BY 1 ORDER BY 2 DESC")
             illegal = [(v, n) for v, n in labels
                        if v not in LEGAL_VERDICT_LABELS and v != "<null>"]
-            nullish = sum(n for v, n in labels if v in ("", "<null>"))
-            label_status = ("FAIL" if illegal else
-                            ("WARN" if nullish > KNOWN_NULL_VERDICTS else "PASS"))
+            # AUDIT-BASELINES: compare the null set against the recorded
+            # baseline IDS (not just the count) — a same-size set with
+            # different members is still a change, and a count alone could
+            # not name what moved.
+            null_ids = {int(r[0]) for r in q(
+                "SELECT id FROM analysis_results "
+                "WHERE verdict_label IS NULL OR verdict_label = ''")}
+            nullish = len(null_ids)
+            new_nulls = sorted(null_ids - KNOWN_NULL_VERDICT_IDS)
+            gone_nulls = sorted(KNOWN_NULL_VERDICT_IDS - null_ids)
+            if illegal:
+                label_status = "FAIL"
+            elif new_nulls or gone_nulls:
+                label_status = "WARN"
+            else:
+                label_status = "PASS"
+            baseline_note = ("at baseline %d (ids 1-11, 2026-04-30 pre-column "
+                             "fossils)" % KNOWN_NULL_VERDICTS)
+            if new_nulls:
+                baseline_note = ("ROSE to %d — NEW null ids=%s"
+                                 % (nullish, new_nulls))
+            if gone_nulls:
+                baseline_note = (("%s; " % baseline_note if new_nulls else "")
+                                 + "FELL to %d — baseline ids no longer null=%s "
+                                   "(rows do not un-null themselves: something "
+                                   "wrote to them)" % (nullish, gone_nulls))
             rep.add("C4 verdict_label", label_status,
-                    "distinct=%s illegal=%s null/empty=%d (known %d)"
+                    "distinct=%s illegal=%s null/empty=%d %s"
                     % ([(v, n) for v, n in labels], illegal or "none",
-                       nullish, KNOWN_NULL_VERDICTS),
+                       nullish, baseline_note),
                     "a label above draft_* reads as a confirmed verdict")
             rep.add("C4 fabricated-inst", "SKIP",
                     "no anomaly-scan script in scripts/; 7/21 full-corpus scan "
@@ -646,21 +690,44 @@ def run_audit(base: str) -> int:
                     "-")
 
             # C5 — freshness.
+            # AUDIT-BASELINES C5 — judge COMPLETE UTC days only. The current UTC
+            # day is partial BY DEFINITION: its count is reported and explicitly
+            # labelled "not judged" instead of being compared to a full-day band.
+            # (The band arithmetic already ran on today-3..today-1; naming the
+            # boundary in the output is what was missing — the operator could not
+            # see which days were judged and which was the partial one.) Signal
+            # is preserved exactly: a COMPLETE day outside the band still WARNs,
+            # and a COMPLETE day at ZERO still FAILs — collection stopping is the
+            # failure this check exists to catch, so zero is never softened.
             today = datetime.now(timezone.utc).date()
             day_rows = dict(q(
                 "SELECT substr(created_at,1,10) AS d, COUNT(*) "
                 "FROM analysis_results WHERE created_at >= :cut "
                 "GROUP BY 1 ORDER BY 1", cut=str(today - timedelta(days=4))))
-            last3 = [str(today - timedelta(days=i)) for i in (3, 2, 1)]
-            adds = {d: int(day_rows.get(d, 0)) for d in last3}
+            complete_days = [str(today - timedelta(days=i)) for i in (3, 2, 1)]
+            adds = {d: int(day_rows.get(d, 0)) for d in complete_days}
             lo, hi = DAILY_ADD_BAND
-            fresh_status = ("FAIL" if any(v == 0 for v in adds.values())
-                            else ("WARN" if any(not lo <= v <= hi for v in adds.values())
-                                  else "PASS"))
+            zero_days = [d for d, v in adds.items() if v == 0]
+            off_band = [d for d, v in adds.items() if v and not lo <= v <= hi]
+            fresh_status = ("FAIL" if zero_days
+                            else ("WARN" if off_band else "PASS"))
+            # A recorded outage day is ANNOTATED, never exempted — it keeps its
+            # WARN and ages out of the window on its own. The annotation is
+            # withheld from a ZERO day even at a recorded date: zero is a FAIL
+            # about TODAY's collection, and a "known" tag next to it would read
+            # as an excuse for a failure that has not been explained.
+            flagged = "; ".join(
+                "%s=%d%s" % (d, adds[d],
+                             " [known: %s]" % KNOWN_LOW_ADD_DAYS[d]
+                             if d in off_band and d in KNOWN_LOW_ADD_DAYS else "")
+                for d in zero_days + off_band)
             max_id = q("SELECT MAX(id) FROM analysis_results")[0][0]
             rep.add("C5 daily adds", fresh_status,
-                    "max_id=%s adds=%s today(partial)=%s band=%d-%d"
-                    % (max_id, adds, day_rows.get(str(today), 0), lo, hi),
+                    "max_id=%s judged(complete UTC days)=%s band=%d-%d%s | "
+                    "%s=%s partial — reported, not judged"
+                    % (max_id, adds, lo, hi,
+                       (" | out-of-band: %s" % flagged) if flagged else "",
+                       today, day_rows.get(str(today), 0)),
                     "stale data — 'today's briefing' built from old rows")
 
             wk = q("SELECT week_start FROM weekly_reports ORDER BY id DESC LIMIT 1")
