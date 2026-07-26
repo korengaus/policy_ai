@@ -725,11 +725,18 @@ def _process_news_item_phase_a(
     # logging lives in providers/policy_briefing.py (pin-OUT); the only
     # observability in this pinned file is the in-memory counter below.
     policy_briefing_count = None
+    # SILENT-FAILURE-FLAG: status ("ok"/"error") distinguishes "looked and
+    # found nothing" from "could not look" (the 07-14/15 outage stored 1,624
+    # indistinguishable zeros). Metadata about our own lookup ONLY — stored in
+    # debug_summary below, never read by any scorer/verdict path. None when
+    # the lane is disabled (key then absent, mirroring policy_briefing_count).
+    policy_briefing_status = None
     if config.policy_briefing_enabled():
         from providers.policy_briefing import fetch_and_build_policy_briefing_candidates
 
-        policy_briefing_candidates, policy_briefing_count = (
-            fetch_and_build_policy_briefing_candidates(normalized_claims)
+        policy_briefing_candidates, policy_briefing_count, policy_briefing_status = (
+            fetch_and_build_policy_briefing_candidates(normalized_claims,
+                                                       return_status=True)
         )
         if policy_briefing_candidates:
             source_candidates = source_candidates + policy_briefing_candidates
@@ -906,6 +913,14 @@ def _process_news_item_phase_a(
     # debug_summary stays byte-identical to pre-M21 (mirrors naver_api_count).
     if policy_briefing_count is not None:
         debug_summary["policy_briefing_count"] = policy_briefing_count
+    # SILENT-FAILURE-FLAG: in-branch-only additive key beside the count —
+    # "ok" = the lookup answered (a 0-count is a real absence); "error" = we
+    # could not look (outage). NEW rows only; absent on old/disabled rows and
+    # every reader must treat absence as UNKNOWN, never as failure or success.
+    # Pure data key (no log call site — 331/16 pins unmoved); never read by
+    # any scorer/verdict path.
+    if policy_briefing_status is not None:
+        debug_summary["policy_briefing_status"] = policy_briefing_status
     # M23: in-branch-only debug key. national_law_count is None on the disabled
     # path, so this key is NOT added there — disabled debug_summary stays
     # byte-identical (mirrors policy_briefing_count).

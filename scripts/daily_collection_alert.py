@@ -83,6 +83,37 @@ def read_max_id():
         return None
 
 
+def read_briefing_status(min_id):
+    """SILENT-FAILURE-FLAG: (error_rows, keyed_rows) among rows with
+    id > min_id, read from debug_summary.policy_briefing_status. Rows WITHOUT
+    the key (old rows / disabled lane) are UNKNOWN and excluded from both
+    numbers — absence is never counted as failure or success. None on ANY
+    failure (best-effort, mirrors read_max_id; never raises)."""
+    import os
+
+    url = (os.environ.get("DATABASE_URL") or "").strip()
+    if not url or min_id is None:
+        return None
+    try:
+        import psycopg
+        import weekly_spine
+
+        url = weekly_spine.normalize_db_url(url)
+        with psycopg.connect(url, connect_timeout=15) as conn:
+            row = conn.execute(
+                "SELECT "
+                "COUNT(*) FILTER (WHERE debug_summary LIKE "
+                "'%\"policy_briefing_status\": \"error\"%'), "
+                "COUNT(*) FILTER (WHERE debug_summary LIKE "
+                "'%\"policy_briefing_status\"%') "
+                "FROM analysis_results WHERE id > %s", (min_id,)).fetchone()
+        return (int(row[0] or 0), int(row[1] or 0))
+    except Exception as exc:
+        print("[collection-alert] briefing-status query failed: %s"
+              % type(exc).__name__)
+        return None
+
+
 def run_child():
     """Run the collection unchanged, output inherited. Returns the exit code
     (a child killed by signal N maps to 128+N so Render sees non-zero)."""
@@ -96,9 +127,13 @@ def run_child():
     return rc if rc >= 0 else 128 + abs(rc)
 
 
-def run(child_runner, max_id_reader, notifier):
+def run(child_runner, max_id_reader, notifier, briefing_reader=None):
     """Orchestrate one wrapped run. Pure enough to selftest with fakes.
-    Returns the exit code to pass through (ALWAYS the child's)."""
+    Returns the exit code to pass through (ALWAYS the child's).
+    briefing_reader (SILENT-FAILURE-FLAG, optional): min_id -> (error_rows,
+    keyed_rows) or None; when MOST keyed new rows report a failed
+    policy-briefing lookup, the ONE existing notification carries it —
+    no second alerting path, exit code untouched."""
     started = time.time()
     before = max_id_reader()
     rc = child_runner()
@@ -118,6 +153,26 @@ def run(child_runner, max_id_reader, notifier):
         title = "일일 수집 실패 — rc=%d, %s" % (rc, delta_text)
         message = "%s · %.0f분 · scheduler.py --once rc=%d" % (delta_text, minutes, rc)
         priority = "high"
+
+    # SILENT-FAILURE-FLAG: the 07-14/15 briefing outage was invisible for 11
+    # days because failures stored as plain zeros. If most keyed new rows say
+    # "error", say so loudly in the SAME notification. Best-effort: a failed
+    # or absent reader changes nothing; rows without the key are unknown and
+    # already excluded by the reader.
+    if briefing_reader is not None:
+        try:
+            briefing = briefing_reader(before)
+        except Exception as exc:
+            print("[collection-alert] briefing reader raised %s — ignored"
+                  % type(exc).__name__)
+            briefing = None
+        if briefing:
+            error_rows, keyed_rows = briefing
+            if keyed_rows > 0 and error_rows * 2 >= keyed_rows:
+                title += " · 정책브리핑 조회 장애 의심"
+                message += (" · 정책브리핑 조회 실패 %d/%d건 — 0건이 '없음'이"
+                            " 아니라 '못 봄'일 수 있음" % (error_rows, keyed_rows))
+                priority = "high"
 
     # Belt over weekly_spine.notify's own braces: even a RAISING notifier
     # must never change the run's exit code.
@@ -140,7 +195,8 @@ def main(argv=None) -> int:
 
     import weekly_spine
 
-    return run(run_child, read_max_id, weekly_spine.notify)
+    return run(run_child, read_max_id, weekly_spine.notify,
+               briefing_reader=read_briefing_status)
 
 
 # ---------------------------------------------------------------------------
@@ -215,10 +271,43 @@ def selftest() -> int:
     run(lambda: 0, fake_reader([100, None]), notifier)
     check("5b count unknown", sent and "신규 건수 미상" in sent[0][0])
 
+    # 6. SILENT-FAILURE-FLAG: majority-failed briefing lookup surfaces in the
+    # ONE notification (title + message + high priority), rc untouched.
+    sent.clear()
+    rc = run(lambda: 0, fake_reader([100, 110]), notifier,
+             briefing_reader=lambda min_id: (8, 10))
+    check("6 rc 0", rc == 0)
+    check("6 title flag", sent and "정책브리핑 조회 장애 의심" in sent[0][0])
+    check("6 message detail", sent and "정책브리핑 조회 실패 8/10건" in sent[0][1])
+    check("6 priority high", sent and sent[0][2] == "high")
+
+    # 6b. minority failures / no keyed rows / reader failure -> unchanged.
+    sent.clear()
+    run(lambda: 0, fake_reader([100, 110]), notifier,
+        briefing_reader=lambda min_id: (1, 10))
+    check("6b minority silent", sent and "장애 의심" not in sent[0][0])
+    sent.clear()
+    run(lambda: 0, fake_reader([100, 110]), notifier,
+        briefing_reader=lambda min_id: (0, 0))
+    check("6b zero-keyed silent", sent and "장애 의심" not in sent[0][0])
+    sent.clear()
+    run(lambda: 0, fake_reader([100, 110]), notifier,
+        briefing_reader=lambda min_id: None)
+    check("6b reader-none silent", sent and "장애 의심" not in sent[0][0])
+
+    def raising_briefing(min_id):
+        raise RuntimeError("db down")
+
+    sent.clear()
+    rc = run(lambda: 0, fake_reader([100, 110]), notifier,
+             briefing_reader=raising_briefing)
+    check("6c raising reader swallowed", rc == 0 and sent
+          and "장애 의심" not in sent[0][0])
+
     if failures:
         print("SELFTEST FAILED: " + ", ".join(failures))
         return 1
-    print("SELFTEST PASSED (6 cases)")
+    print("SELFTEST PASSED (11 cases)")
     return 0
 
 

@@ -630,6 +630,11 @@ def _fetch_window_paginated(
     ``max_pages=1`` reproduces the pre-FIN-5 single-page fetch EXACTLY (one call,
     page 1) — the short-page check never even runs a second iteration."""
     documents: List[Dict[str, Any]] = []
+    # SILENT-FAILURE-FLAG: surface whether any page fetch FAILED (result.error
+    # set by the provider's fail-closed paths) so the caller can distinguish
+    # "looked and found nothing" from "could not look". Behaviour otherwise
+    # unchanged — errors still stop the page loop via the short-page rule.
+    had_error = False
     for page_no in range(1, max_pages + 1):
         result = provider.fetch_press_releases(
             start_date=start_date,
@@ -637,23 +642,36 @@ def _fetch_window_paginated(
             page_no=page_no,
             num_of_rows=num_of_rows,
         )
+        if result.get("error"):
+            had_error = True
         page_docs = result.get("documents") or []
         documents.extend(page_docs)
         if len(page_docs) < num_of_rows:  # short-page-stop (incl. empty/error)
             break
-    return documents
+    return documents, had_error
 
 
 def fetch_and_build_policy_briefing_candidates(
     normalized_claims: List[Dict[str, Any]],
     *,
     max_releases: Optional[int] = None,
-) -> tuple[List[Dict[str, Any]], int]:
+    return_status: bool = False,
+):
     """Top-level entry called by the pipeline (Option A). Covers the last
     ``POLICY_BRIEFING_LOOKBACK_DAYS`` days via looped non-overlapping 3-day KST
     windows (FIN-5), paginating each window, then shapes the merged + deduped
     releases into official source candidates. Never raises; returns ([], 0) on
     any failure / empty.
+
+    SILENT-FAILURE-FLAG: with ``return_status=True`` returns
+    ``(candidates, count, status)`` where status is ``"ok"`` (every window
+    fetch answered — a 0-count is a genuine absence) or ``"error"`` (at least
+    one window fetch failed — we could NOT fully look; the 07-14/15 outage
+    stored 16 hours of such zeros indistinguishable from absences). The
+    default 2-tuple stays byte-compatible for existing callers; the fail-open
+    contract is unchanged — errors still yield an empty list, never a raise
+    (the whole body is additionally belt-wrapped so even an unexpected
+    exception returns ([], 0[, "error"]) instead of breaking collection).
 
     DEFAULT (lookback=3, max=15): exactly ONE window (today-2..today), PAGE 1
     ONLY (``max_pages=1``), dedup is a no-op on a single page, top-15 selection
@@ -663,43 +681,55 @@ def fetch_and_build_policy_briefing_candidates(
 
     The CALLER gates this behind ``config.policy_briefing_enabled()`` so the
     disabled path constructs nothing and hits no network."""
-    provider = get_document_provider("policy_briefing")
+    try:
+        provider = get_document_provider("policy_briefing")
 
-    if max_releases is None:
-        max_releases = config.policy_briefing_max_releases()
-    lookback_days = config.policy_briefing_lookback_days()
-    windows = max(1, math.ceil(lookback_days / DATE_WINDOW_DAYS))
-    # FIN-7 — per-window pages from config (default 1). The data.go.kr
-    # pressReleaseList API IGNORES pageNo (proven 2026-06: page 1 == page 2,
-    # byte-identical items), so page 1 already holds the whole window; pages 2+
-    # were duplicates that dedup discarded while occasionally paying a 10s
-    # read-timeout. Capping at 1 removes those no-op calls — zero data lost. The
-    # real recall lever is the multi-window loop below (windows), untouched.
-    max_pages = max(1, config.policy_briefing_max_pages())
+        if max_releases is None:
+            max_releases = config.policy_briefing_max_releases()
+        lookback_days = config.policy_briefing_lookback_days()
+        windows = max(1, math.ceil(lookback_days / DATE_WINDOW_DAYS))
+        # FIN-7 — per-window pages from config (default 1). The data.go.kr
+        # pressReleaseList API IGNORES pageNo (proven 2026-06: page 1 == page 2,
+        # byte-identical items), so page 1 already holds the whole window; pages 2+
+        # were duplicates that dedup discarded while occasionally paying a 10s
+        # read-timeout. Capping at 1 removes those no-op calls — zero data lost. The
+        # real recall lever is the multi-window loop below (windows), untouched.
+        max_pages = max(1, config.policy_briefing_max_pages())
 
-    reference = _now_kst()
-    seen_ids: set = set()
-    documents: List[Dict[str, Any]] = []
-    for window_index in range(windows):
-        window_ref = reference - timedelta(days=DATE_WINDOW_DAYS * window_index)
-        start_date, end_date = date_window(reference=window_ref)
-        for doc in _fetch_window_paginated(
-            provider,
-            start_date,
-            end_date,
-            num_of_rows=DEFAULT_NUM_OF_ROWS,
-            max_pages=max_pages,
-        ):
-            dedup_key = doc.get("id") or doc.get("original_url") or ""
-            if dedup_key and dedup_key in seen_ids:
-                continue
-            if dedup_key:
-                seen_ids.add(dedup_key)
-            documents.append(doc)
+        reference = _now_kst()
+        seen_ids: set = set()
+        documents: List[Dict[str, Any]] = []
+        any_error = False
+        for window_index in range(windows):
+            window_ref = reference - timedelta(days=DATE_WINDOW_DAYS * window_index)
+            start_date, end_date = date_window(reference=window_ref)
+            window_docs, window_error = _fetch_window_paginated(
+                provider,
+                start_date,
+                end_date,
+                num_of_rows=DEFAULT_NUM_OF_ROWS,
+                max_pages=max_pages,
+            )
+            if window_error:
+                any_error = True
+            for doc in window_docs:
+                dedup_key = doc.get("id") or doc.get("original_url") or ""
+                if dedup_key and dedup_key in seen_ids:
+                    continue
+                if dedup_key:
+                    seen_ids.add(dedup_key)
+                documents.append(doc)
 
-    return to_official_source_candidates(
-        documents, normalized_claims, max_releases=max_releases
-    )
+        candidates, count = to_official_source_candidates(
+            documents, normalized_claims, max_releases=max_releases
+        )
+        status = "error" if any_error else "ok"
+    except Exception:
+        log.warning("policy_briefing.entry_failed", exc_info=True)
+        candidates, count, status = [], 0, "error"
+    if return_status:
+        return candidates, count, status
+    return candidates, count
 
 
 _DEFAULT_MOCK_ITEMS: List[Dict[str, Any]] = [
