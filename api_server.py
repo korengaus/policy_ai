@@ -801,7 +801,42 @@ def brainmap_graph() -> Response:
 #     inserts a newer row.
 # ---------------------------------------------------------------------------
 _SPREAD_NOT_FOUND_JSON = '{"found": false}'
-_SPREAD_CACHE: dict = {"row_id": None, "indexes": None}
+# corpus (CLAIM-GRAPHS): the outlet-count distribution rides the SAME
+# row-keyed cache; kept beside — not inside — the pinned indexes shape.
+_SPREAD_CACHE: dict = {"row_id": None, "indexes": None, "corpus": None}
+
+
+# CLAIM-GRAPHS: corpus outlet-count histogram buckets (inclusive ranges;
+# None = unbounded). Shared shape with the claim page's distribution chart.
+_CORPUS_OUTLET_BUCKETS = ((1, 1), (2, 2), (3, 5), (6, 10), (11, 50), (51, None))
+
+
+def _build_corpus_distribution(graph: dict) -> dict:
+    """Pure (CLAIM-GRAPHS): graph JSON -> outlet-count histogram over ALL
+    claim clusters including singletons (unclustered nodes = 1-outlet
+    claims). Computed ONCE per graph row alongside the spread indexes —
+    O(nodes) at parse, O(1) per request — and NEVER written into a page as
+    a constant, where it would silently go stale and become a false
+    statement. Kept OUT of _build_spread_indexes' return value: its exact
+    shape is pinned (test_spread_endpoint)."""
+    outlet_values = [
+        cluster.get("outlet_count") or 1
+        for cluster in graph.get("clusters") or []
+        if cluster.get("cluster_id") is not None
+    ]
+    outlet_values += [
+        1 for node in graph.get("nodes") or []
+        if node.get("cluster_id") is None and node.get("id") is not None
+    ]
+    return {
+        "cluster_total": len(outlet_values),
+        "outlet_buckets": [
+            {"min": lo, "max": hi,
+             "count": sum(1 for v in outlet_values
+                          if v >= lo and (hi is None or v <= hi))}
+            for lo, hi in _CORPUS_OUTLET_BUCKETS
+        ],
+    }
 
 
 def _build_spread_indexes(graph: dict) -> dict:
@@ -871,6 +906,7 @@ def _load_spread_indexes():
     indexes = _build_spread_indexes(graph)
     _SPREAD_CACHE["row_id"] = row_id
     _SPREAD_CACHE["indexes"] = indexes
+    _SPREAD_CACHE["corpus"] = _build_corpus_distribution(graph)
     return indexes
 
 
@@ -1599,8 +1635,208 @@ def _fetch_claim_member_rows(member_ids):
         return conn.execute(stmt, {"ids": list(member_ids)}).fetchall()
 
 
+# ---------------------------------------------------------------------------
+# MATCHER-GUARD period-mismatch predicate — Python PORT of the one shared
+# display predicate in frontend/scripts/main.js (officialPeriodicEditionMismatch
+# + parseKoreanPeriodTokens). main.js is the REFERENCE implementation; keep
+# the two in sync. Ported (not duplicated as a new rule) because the
+# genuine-official member COUNT on /api/claim must not count a card whose
+# 공식 근거 확인 the card surfaces themselves suppress; equivalence against the
+# live JS was verified over every clustered member at CLAIM-GRAPHS Phase 2.
+# Same narrow measured rule: both sides must look like editions of the same
+# periodic release family — never the naive periods-must-agree rule (27% FP).
+# ---------------------------------------------------------------------------
+_OFFICIAL_PERIODIC_FAMILY_RE = re.compile(r"동향|지수|변동률")
+_RE_PERIOD_YEAR_MONTH = re.compile(r"(20\d{2})년\s*(\d{1,2})월")
+_RE_PERIOD_DOTTED = re.compile(r"(20\d{2})[.\-/](\d{1,2})(?![\d.\-/])")
+_RE_PERIOD_SHORT_YM = re.compile(r"(?:^|[^0-9])(\d{2})년\s*(\d{1,2})월")
+_RE_PERIOD_YEAR_ONLY = re.compile(r"(20\d{2})년")
+_RE_PERIOD_LONE_MONTH = re.compile(r"(?:^|[^년\d.\-/])(\d{1,2})월")
+
+
+def _parse_korean_period_tokens(raw_text):
+    """Port of main.js parseKoreanPeriodTokens: text -> [(year, month|None)]."""
+    text = raw_text if isinstance(raw_text, str) else (
+        "" if raw_text is None else str(raw_text))
+    if not text:
+        return []
+    periods: list = []
+    seen: set = set()
+
+    def push(year_value, month_value):
+        try:
+            year = int(year_value)
+            month = None if month_value is None else int(month_value)
+        except (TypeError, ValueError):
+            return
+        if not 2000 <= year <= 2099:
+            return
+        if month is not None and not 1 <= month <= 12:
+            return
+        key = (year, month)
+        if key not in seen:
+            seen.add(key)
+            periods.append(key)
+
+    for m in _RE_PERIOD_YEAR_MONTH.finditer(text):
+        push(m.group(1), m.group(2))
+    for m in _RE_PERIOD_DOTTED.finditer(text):
+        push(m.group(1), m.group(2))
+    # 2-digit editions ("26년 6월") — [^0-9] guard keeps "2026년"'s tail out.
+    for m in _RE_PERIOD_SHORT_YM.finditer(text):
+        push(2000 + int(m.group(1)), m.group(2))
+    had_explicit_pair = bool(periods)
+    years: list = []
+    for m in _RE_PERIOD_YEAR_ONLY.finditer(text):
+        year = int(m.group(1))
+        if year not in years:
+            years.append(year)
+    # "2021년, 11월" shape: a lone year + standalone month(s), no explicit pair.
+    if not had_explicit_pair and years:
+        for m in _RE_PERIOD_LONE_MONTH.finditer(text):
+            push(years[0], m.group(1))
+    for year in years:
+        if not any(p[0] == year for p in periods):
+            push(year, None)
+    return periods
+
+
+def _official_periods_agree(a, b):
+    return a[0] == b[0] and (a[1] is None or b[1] is None or a[1] == b[1])
+
+
+def _coerce_json_array(value):
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str) and value.strip().startswith("["):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, list) else []
+        except (TypeError, ValueError):
+            return []
+    return []
+
+
+def _official_periodic_edition_mismatch(source_candidates, normalized_claims,
+                                        claims):
+    """Port of main.js officialPeriodicEditionMismatch (see block comment).
+    True = the card's 공식 근거 확인 is display-suppressed: (a) a primary
+    official candidate titled as a periodic-release edition, (b) the claim
+    side parses an explicit period, (c) no claim period agrees with any
+    parseable official-candidate title period."""
+    try:
+        doc_periods: list = []
+        has_periodic_edition = False
+        for cand in _coerce_json_array(source_candidates):
+            if not isinstance(cand, dict):
+                continue
+            if cand.get("verification_role") != "primary_evidence":
+                continue
+            if cand.get("source_type") not in ("official_government",
+                                               "public_institution"):
+                continue
+            title = cand.get("title")
+            title = title if isinstance(title, str) else (
+                "" if title is None else str(title))
+            periods = _parse_korean_period_tokens(title)
+            if not periods:
+                continue
+            doc_periods.extend(periods)
+            if _OFFICIAL_PERIODIC_FAMILY_RE.search(title):
+                has_periodic_edition = True
+        if not (has_periodic_edition and doc_periods):
+            return False
+        claim_periods: list = []
+        normalized = _coerce_json_array(normalized_claims)
+        for claim in normalized:
+            if isinstance(claim, dict) and claim.get("date_or_time"):
+                claim_periods.extend(
+                    _parse_korean_period_tokens(claim["date_or_time"]))
+        if not claim_periods:
+            for claim in normalized:
+                if isinstance(claim, dict) and claim.get("claim_text"):
+                    claim_periods.extend(
+                        _parse_korean_period_tokens(claim["claim_text"]))
+            for claim in _coerce_json_array(claims):
+                if isinstance(claim, str):
+                    claim_periods.extend(_parse_korean_period_tokens(claim))
+        if not claim_periods:
+            return False
+        return not any(_official_periods_agree(c, d)
+                       for c in claim_periods for d in doc_periods)
+    except Exception:
+        return False  # any parse surprise degrades to today's display (JS parity)
+
+
+def _fetch_official_period_columns(member_ids):
+    """{id: (source_candidates, normalized_claims, claims)} for the suppression
+    check — fetched ONLY for members already flagged genuine (typically few),
+    never the whole cluster. None on failure so the caller reports unknown
+    rather than a possibly contaminated count."""
+    if not member_ids:
+        return {}
+    import sqlalchemy as sa
+
+    import postgres_storage
+
+    try:
+        engine = postgres_storage.get_engine()
+        if engine is None:
+            return None
+        stmt = sa.text(
+            "SELECT id, source_candidates, normalized_claims, claims "
+            "FROM analysis_results WHERE id IN :ids"
+        ).bindparams(sa.bindparam("ids", expanding=True))
+        with engine.connect() as conn:
+            rows = conn.execute(stmt, {"ids": list(member_ids)}).fetchall()
+        return {rid: (cand, nclaims, claims)
+                for rid, cand, nclaims, claims in rows}
+    except Exception:
+        logger.exception("Failed to fetch official period columns")
+        return None
+
+
+def _count_genuine_official_members(rows):
+    """COUNT of member articles whose official support is genuine AND not
+    period-suppressed — the same MATCHER-GUARD predicate the cards apply, so
+    a match the cards refuse to display is never counted here. A count, not
+    a boolean: one wrong match must not contaminate an any-aggregation.
+    None = unknown (no genuine flags parseable is still 0; a failed
+    suppression fetch is None, never a possibly wrong number)."""
+    try:
+        genuine_ids = []
+        for row in rows:
+            srs_json = row[6]
+            if not srs_json:
+                continue
+            try:
+                srs = json.loads(srs_json)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(srs, dict) and srs.get(
+                    "has_genuine_official_support") is True:
+                genuine_ids.append(row[0])
+        if not genuine_ids:
+            return 0
+        columns = _fetch_official_period_columns(genuine_ids)
+        if columns is None:
+            return None
+        count = 0
+        for rid in genuine_ids:
+            cand, nclaims, claims = columns.get(rid, (None, None, None))
+            if _official_periodic_edition_mismatch(cand, nclaims, claims):
+                continue
+            count += 1
+        return count
+    except Exception:
+        logger.exception("Failed to count genuine official members")
+        return None
+
+
 def _build_claim_payload(requested_lineage: str, cluster_meta: dict,
-                         member_ids, rows, superseded: bool) -> dict:
+                         member_ids, rows, superseded: bool,
+                         corpus=None,
+                         genuine_official_member_count=None) -> dict:
     """Pure assembly. member_count comes from the GRAPH membership (the same
     count every other cluster surface reports); timeline/earliest/latest come
     from ALL fetched rows, independent of the member-rows cap."""
@@ -1654,7 +1890,20 @@ def _build_claim_payload(requested_lineage: str, cluster_meta: dict,
             "member_count": len(list(member_ids)),
             "earliest_member_published_at": dated[0] if dated else None,
             "latest_member_published_at": dated[-1] if dated else None,
+            # CLAIM-GRAPHS additive — same graph-build fields /api/spread
+            # carries; .get() keeps pre-B5d-2a graph rows null-safe.
+            "near_anchor_outlet_count": cluster_meta.get(
+                "near_anchor_outlet_count"),
+            "syndication_framing": cluster_meta.get("syndication_framing"),
         },
+        # CLAIM-GRAPHS additive: the corpus outlet-count histogram (computed
+        # once per graph row in _build_spread_indexes — never a page constant)
+        # and the genuine-official member COUNT (period-suppression applied;
+        # null = unknown). Per-claim, subject-named facts only — NEVER a
+        # corpus-wide official-basis rate, which our own gap probe showed we
+        # cannot support.
+        "corpus_outlet_distribution": corpus,
+        "genuine_official_support_member_count": genuine_official_member_count,
         "timeline": {
             # gaps_omitted: only days with >=1 dated member appear; zero-days
             # between points are NOT emitted (consistent, stated shape).
@@ -1697,8 +1946,13 @@ def claim_by_lineage(lineage_id: str) -> Response:
         if not member_ids:
             return _spread_response(_CLAIM_NOT_FOUND_JSON)
         rows = _fetch_claim_member_rows(member_ids)
-        payload = _build_claim_payload(requested, cluster_meta, member_ids,
-                                       rows, superseded)
+        # corpus comes from the row-keyed cache, NOT the indexes dict (its
+        # shape is pinned). A patched/stale loader leaves it None -> the
+        # claim page hides the distribution panel, never a wrong histogram.
+        payload = _build_claim_payload(
+            requested, cluster_meta, member_ids, rows, superseded,
+            corpus=_SPREAD_CACHE.get("corpus"),
+            genuine_official_member_count=_count_genuine_official_members(rows))
         return _spread_response(json.dumps(payload, ensure_ascii=False))
     except Exception:
         logger.exception("Failed to build claim payload")
