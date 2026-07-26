@@ -511,7 +511,35 @@ def _require_policy_shaped_query(query: str) -> None:
         raise HTTPException(status_code=400, detail=_POLICY_QUERY_MESSAGE)
 
 
-@app.post("/analyze", response_model=AnalyzeResponse, dependencies=[Depends(analyze_rate_limiter)])
+# ---------------------------------------------------------------------------
+# ANALYZE-EXPOSURE — the three analyze routes trigger the PAID pipeline and
+# WRITE rows into analysis_results (the sold corpus; the weekly report and
+# the distribution histogram read from it), so they are operator-only.
+# Enforcement REUSES require_admin (AUTH-2d signed session — no new auth
+# mechanism) and turns on wherever a REAL session secret is configured,
+# which production always is (same env pair config.session_secret_key()
+# reads). Offline test/dev runs (no SESSION_SECRET_KEY / SECRET_KEY —
+# per-process random key) keep the historical open behavior so the pinned
+# endpoint suites (test_v2_endpoints / test_v2_endpoints_e2e / test_jobs /
+# test_search_fix_guards) run unchanged without session fixtures.
+# Follow-up pass: make enforcement unconditional + give those suites logins.
+# Daily collection is unaffected: scheduler.py calls analyze_pipeline
+# IN-PROCESS (scheduler.py:6,123), never over HTTP.
+# ---------------------------------------------------------------------------
+def _analyze_gate_enforced() -> bool:
+    return bool((os.environ.get("SESSION_SECRET_KEY")
+                 or os.environ.get("SECRET_KEY") or "").strip())
+
+
+def analyze_admin_gate(request: Request) -> None:
+    """Admin-session gate for the analyze surface (see block comment).
+    Listed BEFORE the rate limiter so an anonymous 401 never consumes
+    rate-limit budget."""
+    if _analyze_gate_enforced():
+        require_admin(request)
+
+
+@app.post("/analyze", response_model=AnalyzeResponse, dependencies=[Depends(analyze_admin_gate), Depends(analyze_rate_limiter)])
 def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
     query = (request.query or "").strip()
     if not query:
@@ -2552,7 +2580,7 @@ async def _execute_job(job_id: str, query: str, max_news: int, timeout_seconds: 
             logger.exception("Failed to record job failure: id=%s", job_id)
 
 
-@app.post("/jobs/analyze", response_model=JobStatusResponse, dependencies=[Depends(analyze_rate_limiter)])
+@app.post("/jobs/analyze", response_model=JobStatusResponse, dependencies=[Depends(analyze_admin_gate), Depends(analyze_rate_limiter)])
 async def jobs_analyze(request: JobCreateRequest) -> JobStatusResponse:
     query = (request.query or "").strip()
     if not query:
@@ -2729,7 +2757,7 @@ def _v2_serialize_job_status(payload: dict) -> dict:
     }
 
 
-@app.post("/v2/analyze", response_model=V2AnalyzeResponse, status_code=202, dependencies=[Depends(analyze_rate_limiter)])
+@app.post("/v2/analyze", response_model=V2AnalyzeResponse, status_code=202, dependencies=[Depends(analyze_admin_gate), Depends(analyze_rate_limiter)])
 def v2_analyze(request: AnalyzeRequest) -> V2AnalyzeResponse:
     """Enqueue an analysis job and return immediately with a job_id.
 

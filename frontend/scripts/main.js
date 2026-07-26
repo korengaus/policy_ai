@@ -8084,11 +8084,22 @@
 
     function renderAnalyzeOffer(query) {
       metricsEl.style.display = "none";
+      // ANALYZE-EXPOSURE: anonymous visitors are never OFFERED a paid analysis
+      // (the pipeline writes rows into the curated corpus the weekly report
+      // and distribution histogram read from). A search miss shows the offer's
+      // own existing first sentence, nothing more — the read-only search path
+      // is untouched. The full offer stays for the operator behind the SAME
+      // operator_tools flag as every other operator affordance; the server
+      // additionally enforces the admin session on all three analyze routes,
+      // so this toggle is convenience, not the protection.
+      const operatorOffer = operatorToolsFlagSet()
+        ? `지금 분석해드릴까요? (최대 1분)
+          <br><br>
+          <button type="button" class="primary" data-run-analyze-offer>지금 분석하기</button>`
+        : "";
       resultsEl.innerHTML = `
         <div class="empty-state">
-          '${escapeHtml(query)}'에 대한 기존 분석이 없습니다. 지금 분석해드릴까요? (최대 1분)
-          <br><br>
-          <button type="button" class="primary" data-run-analyze-offer>지금 분석하기</button>
+          '${escapeHtml(query)}'에 대한 기존 분석이 없습니다. ${operatorOffer}
         </div>
       `;
       const offerButton = resultsEl.querySelector("[data-run-analyze-offer]");
