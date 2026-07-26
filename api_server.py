@@ -1196,20 +1196,52 @@ def spread_annotation(analysis_id: int) -> Response:
 # GET /api/cluster/{result_id}/members finds the card's cluster in the NEWEST
 # brainmap_graph (the SAME cached indexes /api/spread uses — no second parse,
 # no rebuild needed) and returns the OTHER member articles' {analysis_id,
-# title} so the card detail can render "이 주장을 보도한 다른 기사들".
+# title, original_url, outlet_host} so the card detail can render
+# "이 주장을 보도한 다른 기사들" with links to the ORIGINAL articles.
 #
 # SAFETY / HONESTY:
-#   * READ-ONLY: stable_id / outlet_count / member ids / node titles ONLY.
-#     NO verdict/score/confidence column anywhere. The payload is sibling
-#     CIRCULATION (같은 주장을 다룬 다른 보도), never 검증 — the note says so.
+#   * READ-ONLY: stable_id / outlet_count / member ids / node titles /
+#     original_url + its normalized host ONLY. NO verdict/score/confidence
+#     column anywhere. The payload is sibling CIRCULATION (같은 주장을 다룬
+#     다른 보도), never 검증 — the note says so, and a link to an original
+#     article implies nothing about its verification.
+#   * outlet_host is a RECORDED FACT (normalized original_url host, the same
+#     normalizer the graph's 매체 count uses) — never a quality signal.
 #   * NEVER 500: id not clustered, single-member cluster, no graph, PG off,
-#     or any failure -> {"found": false, "members": []} at HTTP 200.
+#     or any failure -> {"found": false, "members": []} at HTTP 200. A failed
+#     URL join degrades to ""-valued fields, never an emptied member list.
 #   * Node `domain` is the TOPIC domain, not the outlet — deliberately not
-#     surfaced. published_at / outlet host are deferred.
+#     surfaced. published_at is deferred.
 # ---------------------------------------------------------------------------
 _CLUSTER_MEMBERS_EMPTY_JSON = '{"found": false, "members": []}'
 _CLUSTER_MEMBERS_CAP = 10
 _CLUSTER_MEMBERS_NOTE = "같은 주장을 다룬 다른 보도 — 검증이 아닙니다"
+
+
+def _fetch_member_original_urls(member_ids):
+    """Read-only {analysis id: original_url} for the sibling list — a slim
+    two-column SELECT (the same analysis_results join _fetch_claim_member_rows
+    uses; the graph deliberately stores no URLs). Any failure -> {} so
+    siblings still render title-only rather than vanishing or 500ing."""
+    if not member_ids:
+        return {}
+    try:
+        import sqlalchemy as sa
+
+        import postgres_storage
+
+        engine = postgres_storage.get_engine()
+        if engine is None:
+            return {}
+        stmt = sa.text(
+            "SELECT id, original_url FROM analysis_results WHERE id IN :ids"
+        ).bindparams(sa.bindparam("ids", expanding=True))
+        with engine.connect() as conn:
+            rows = conn.execute(stmt, {"ids": list(member_ids)}).fetchall()
+        return {rid: url or "" for rid, url in rows}
+    except Exception:
+        logger.exception("Failed to fetch sibling original urls")
+        return {}
 
 
 @app.get("/api/cluster/{result_id}/members")
@@ -1232,6 +1264,14 @@ def cluster_members(result_id: int) -> Response:
         # .get: a pre-title_of in-process cache entry lacks the key; empty
         # titles then fall back client-side rather than erroring here.
         title_of = indexes.get("title_of") or {}
+        # SIBLING-LINKS: outlet identity = the builder's own normalizer,
+        # imported (not reimplemented) so the host can never drift from the
+        # graph's 매체 count.
+        try:
+            from scripts.build_brainmap_graph import normalize_outlet_host
+        except ImportError:  # scripts/ directly on sys.path (test-harness layout)
+            from build_brainmap_graph import normalize_outlet_host
+        url_of = _fetch_member_original_urls(sibling_ids)
         payload = {
             "found": True,
             "cluster": {
@@ -1239,7 +1279,12 @@ def cluster_members(result_id: int) -> Response:
                 "outlet_count": cluster_meta.get("outlet_count"),
             },
             "members": [
-                {"analysis_id": mid, "title": title_of.get(mid) or ""}
+                {
+                    "analysis_id": mid,
+                    "title": title_of.get(mid) or "",
+                    "original_url": url_of.get(mid) or "",
+                    "outlet_host": normalize_outlet_host(url_of.get(mid) or ""),
+                }
                 for mid in sibling_ids
             ],
             "note": _CLUSTER_MEMBERS_NOTE,

@@ -11879,9 +11879,24 @@
           const data = await response.json();
           const members = Array.isArray(data?.members) ? data.members : [];
           if (!data?.found || !members.length) continue;
+          // SIBLING-LINKS: outlet host is a recorded fact — plain text, the
+          // same for every row (no per-outlet badge/score/styling), order
+          // untouched (server order). Titles link to the ORIGINAL article;
+          // a member without a usable original_url renders as plain text —
+          // no dead link, no placeholder, no internal fallback.
           const items = members
             .filter((m) => Number(m?.analysis_id) > 0)
-            .map((m) => `<li><a href="/?result_id=${encodeURIComponent(Number(m.analysis_id))}">${escapeHtml(m.title || `기사 #${Number(m.analysis_id)}`)}</a></li>`)
+            .map((m) => {
+              const title = escapeHtml(m.title || `기사 #${Number(m.analysis_id)}`);
+              const host = typeof m.outlet_host === "string" && m.outlet_host.trim()
+                ? `<span class="cluster-member-outlet">${escapeHtml(m.outlet_host.trim())}</span> · `
+                : "";
+              const href = safeUrl(m.original_url);
+              const titleHtml = href !== "#"
+                ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${title}</a>`
+                : title;
+              return `<li>${host}${titleHtml}</li>`;
+            })
             .join("");
           if (!items) continue;
           // CLAIM-LINK-CARD: the full-record link rides the SAME timeline
