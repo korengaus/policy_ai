@@ -5614,6 +5614,52 @@
             </div>`;
     }
 
+    // DETAIL-IA-3 — the one answer sentence under the title. Assembled ONLY
+    // from counted values (/api/spread outlet_count + timeline.span_days) and
+    // the data-answer-official mode the template stamped from the
+    // suppression-aware predicate. OMISSION RULES (each avoids a false or
+    // nonsensical sentence): span 0/null → duration clause out ("0일에 걸쳐"
+    // is not meaningful); spread found=false → spread clause out ENTIRELY
+    // ("0개 매체" would be false); official mode "omit" (market_commercial
+    // without genuine support) → official clause out. Every remaining
+    // combination stays grammatical: 보도됐+"고, …" / 보도됐+"습니다."; the
+    // official-only sentence keeps US as the implicit subject — never a claim
+    // that no official basis exists in the world. All clauses empty → the
+    // line stays hidden. textContent only; fail-silent.
+    async function loadAnswerLines() {
+      const placeholders = document.querySelectorAll(".answer-line[data-answer-id]");
+      for (const line of placeholders) {
+        const id = Number(line.getAttribute("data-answer-id"));
+        if (!Number.isInteger(id) || id <= 0) continue;
+        try {
+          const officialMode = line.getAttribute("data-answer-official") || "omit";
+          let spreadStem = "";
+          const response = await fetch(`${API_BASE}/api/spread/${encodeURIComponent(id)}`);
+          if (response.ok) {
+            const data = await response.json();
+            const outletCount = Number(data?.cluster?.outlet_count);
+            if (data?.found === true && Number.isFinite(outletCount) && outletCount > 0) {
+              const spanDays = Number(data?.timeline?.span_days);
+              const duration = Number.isFinite(spanDays) && spanDays > 0 ? `${spanDays}일에 걸쳐 ` : "";
+              spreadStem = `이 주장은 ${outletCount}개 매체에서 ${duration}보도됐`;
+            }
+          }
+          const officialClause = officialMode === "found"
+            ? "정부 공식 자료에서 대응 문서를 찾았습니다"
+            : (officialMode === "none" ? "정부 공식 자료에서 대응 문서를 찾지 못했습니다" : "");
+          let sentence = "";
+          if (spreadStem && officialClause) sentence = `${spreadStem}고, ${officialClause}.`;
+          else if (spreadStem) sentence = `${spreadStem}습니다.`;
+          else if (officialClause) sentence = `${officialClause}.`;
+          if (!sentence) continue;
+          line.textContent = sentence;
+          line.hidden = false;
+        } catch (error) {
+          // fail-silent: the answer line is optional context, never an error state
+        }
+      }
+    }
+
     async function loadSpreadAnnotations() {
       const placeholders = document.querySelectorAll(".spread-section[data-spread-id]");
       for (const section of placeholders) {
@@ -6132,6 +6178,18 @@
           `,
           false
         );
+        // DETAIL-IA-3: official clause mode for the answer line, decided at
+        // template time from cardHasGenuineOfficial — which getResultPipelineParts
+        // computes via officialEvidenceIsGenuine AFTER the
+        // officialPeriodicEditionMismatch stamp (main.js:5247-5248). NEVER a
+        // stored-field read: a period-suppressed card reaches here as false and
+        // must produce the 찾지 못했습니다 variant. market_commercial without
+        // genuine support omits the clause entirely (the NOISE-1 condition) —
+        // saying no government basis was found on a market-price article would
+        // imply we expected one. Boolean only, NEVER a count.
+        const answerOfficialMode = ((result.content_nature ?? null) === "market_commercial" && !cardHasGenuineOfficial)
+          ? "omit"
+          : (cardHasGenuineOfficial ? "found" : "none");
 
         return `
           <article class="result-card">
@@ -6151,6 +6209,12 @@
                 <a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a>
               </h2>
               <div class="ai-status-note">${escapeHtml(buildAiStatusDescriptor(getResultAiStatus(result).status).note)}</div>
+              <!-- DETAIL-IA-3: the one ANSWER LINE — counted values + the
+                   stamped official boolean only, never a verdict. Hydrated by
+                   loadAnswerLines() from the same /api/spread response; renders
+                   NOTHING (no spinner, no partial sentence) until the data is
+                   in hand. Plain text, no colour/badge/gauge. -->
+              ${(hasFocus || displayResults.length === 1) && Number(result.result_id) > 0 ? `<div class="answer-line" data-answer-id="${Number(result.result_id)}" data-answer-official="${answerOfficialMode}" style="margin-top:8px;" hidden></div>` : ""}
             </div>
 
             <!-- CARD-AISUMMARY: the 핵심 주장 claim summary MOVED here from the
@@ -6268,6 +6332,8 @@
       // CLUSTER-SURFACE S-a: hydrate the sibling-coverage placeholder the same way.
       loadClusterMembers();
       loadTopicTimeline();
+      // DETAIL-IA-3: hydrate the answer line the same way (fail-silent).
+      loadAnswerLines();
     }
 
     function renderHistory(rows) {
