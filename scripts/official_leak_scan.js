@@ -68,6 +68,13 @@ const SOURCE_PINS = [
   // per-candidate reason swap (MATCHER-GUARD)
   ["candidate-reason wiring", 'const reasonSuppressed = periodSuppressed && source.verification_role === "primary_evidence";'],
   ["candidate-reason guard", "guardStoredProse(source.reliability_reason"],
+  // FIELD-VALUE-GUARD (surface 6 — field VALUES, the fifth leak's class):
+  // the gated sites must keep their suppression wiring, and the mixed-scale
+  // denominator must stay scale-aware.
+  ["snippet field gate", "const fieldSuppressed = periodSuppressed && isOfficialLikeSource(snippet);"],
+  ["candidate field gate", "const fieldValueSuppressed = periodSuppressed && isOfficialLikeSource(source);"],
+  ["public-card strength gate", "periodSuppressed && isOfficialLikeSource(source)"],
+  ["scale-aware denominator", "scoreValue > 5"],
 ];
 // answer-line mode ternary (drift pin, same as the folded-in answer-line scan)
 const MODE_EXPR = `const answerOfficialMode = ((result.content_nature ?? null) === "market_commercial" && !cardHasGenuineOfficial)
@@ -87,7 +94,42 @@ const src = [
   extract("function officialEvidenceIsGenuine(summary, debug) {"),
   extract("function officialStatusLabel(result) {"),
   extract("async function loadAnswerLines() {"),
+  // FIELD-VALUE-GUARD: the real snippet renderer + the real formatters whose
+  // OUTPUT is the assertion, + the real official-source detector. Their other
+  // presentation deps are stubbed in the sandbox (stubs render values
+  // verbatim, so assertions cannot hide in a stub).
+  extract("function renderEvidenceSnippets(claims, evidenceSnippets"),
+  extract("function formatEvidenceType(value) {"),
+  extract("function formatSupportsClaim(value) {"),
+  extract("function isOfficialLikeSource(source) {"),
+  extract("function escapeHtml(value) {"),
+  extract("function safeUrl(value) {", "\n      }\n    }"),
 ].join("\n");
+
+// Presentation stubs for renderEvidenceSnippets' non-asserting deps —
+// identity/pass-through so every VALUE reaches the output for scanning.
+const RENDER_STUBS = `
+  const advDefList = (pairs) => pairs.map(([l, v]) => v === "" || v == null ? "" : l + ": " + String(v)).filter(Boolean).join("\\n");
+  const userFacingReportText = (t, f) => (t == null || t === "" ? f : String(t));
+  const publicInstitutionName = (t) => String(t == null ? "" : t);
+  const limitClaimSentences = (t) => String(t == null ? "" : t);
+  const cleanArticleTextForPolicyAnalysis = (t) => String(t == null ? "" : t);
+  const CLAIM_MAX_CHARS = 400;
+  const formatTechnicalLabel = (v) => String(v == null ? "" : v);
+  const formatExtractionConfidence = (v) => String(v == null ? "" : v);
+  const formatDiagnosticText = (v) => String(v == null ? "" : v);
+`;
+// Synthetic official snippet carrying the exact 13977-shape assertive FIELD
+// VALUES. The claim/doc data is irrelevant here — the WeakSet stamp comes
+// from the row's REAL srs object; this fixture only exercises the renderer.
+const ASSERTIVE_SNIPPET = {
+  claim_index: 0,
+  evidence_text: "고용률은 70.2%로 전년동월대비 0.1%p 하락",
+  source_title: "고용노동부 보도자료", publisher: "고용노동부",
+  source_url: "https://www.korea.kr/briefing/pressReleaseView.do?newsId=1",
+  evidence_type: "direct_support", supports_claim: "supports",
+  relevance_score: 90, evidence_quality_score: 100,
+};
 
 // Assertions that must never appear on a period-suppressed row's surfaces.
 const AFFIRMATIVE_LABEL = "공식 근거 확인";
@@ -122,7 +164,9 @@ async function scanRow(id, row) {
     API_BASE: "", encodeURIComponent, Number, String, console,
   };
   vm.createContext(sandbox);
-  vm.runInContext(`${src}
+  vm.runInContext(`const sanitizeDisplayText = (v) => String(v == null ? "" : v);
+    ${RENDER_STUBS}
+    ${src}
     const result = ${JSON.stringify(result)};
     __suppressed = officialPeriodicEditionMismatch(result);           // stamp
     __label = officialStatusLabel(result);                            // surface 1 (+2 via pins)
@@ -130,6 +174,12 @@ async function scanRow(id, row) {
     __prose = guardStoredProse(${JSON.stringify(row.evidence_summary || "")}, result.source_reliability_summary);   // surface 3
     __reason = guardStoredProse(${JSON.stringify(row.source_reliability_reason || "")}, result.source_reliability_summary); // surface 4
     __assertRe = STORED_PROSE_ASSERT_RE;
+    // surface 6 (FIELD-VALUE-GUARD): the real snippet renderer against the
+    // row's REAL stamped srs object, with the assertive fixture; plus an
+    // unsuppressed control proving the renderer would assert without the gate.
+    const FIXTURE = ${JSON.stringify(ASSERTIVE_SNIPPET)};
+    __fieldOut = renderEvidenceSnippets(["테스트 주장"], [FIXTURE], result.source_reliability_summary);
+    __fieldCtl = renderEvidenceSnippets(["테스트 주장"], [FIXTURE], {});
     ${MODE_EXPR.replace("const answerOfficialMode", "var answerOfficialMode")
       .replace("cardHasGenuineOfficial", "__genuine").replace("cardHasGenuineOfficial", "__genuine")}
     __mode = answerOfficialMode;`, sandbox);
@@ -140,6 +190,7 @@ async function scanRow(id, row) {
     prose: sandbox.__prose, reason: sandbox.__reason,
     assertRe: sandbox.__assertRe,
     sentence: line.hidden ? "" : line.textContent,
+    fieldOut: sandbox.__fieldOut, fieldCtl: sandbox.__fieldCtl,
   };
 }
 
@@ -162,6 +213,19 @@ async function scanRow(id, row) {
     if (r.sentence.includes(ANSWER_AFFIRMATIVE)) {
       failures.push(`id ${id}: answer sentence says ${ANSWER_AFFIRMATIVE}`);
     }
+    // surface 6 — assertive FIELD VALUES (the fifth leak's class):
+    if (r.fieldOut.includes("직접 근거")) {
+      failures.push(`id ${id}: snippet field 근거 유형 still asserts 직접 근거`);
+    }
+    if (/주장 지지: *지지/.test(r.fieldOut)) {
+      failures.push(`id ${id}: snippet field 주장 지지 still asserts 지지`);
+    }
+    if (!(r.fieldOut.includes("90") && r.fieldOut.includes("100"))) {
+      failures.push(`id ${id}: NEVER-RENUMBER violated — a stored number vanished from the snippet block`);
+    }
+    if (!r.fieldCtl.includes("직접 근거")) {
+      failures.push(`id ${id}: control render lost 직접 근거 — the field check is vacuous`);
+    }
     console.log(`suppressed id ${id}: label=${r.label} | sentence=${r.sentence || "(hidden)"}`);
   }
   // guard-the-guard: the known suppressed cards, when present in the input,
@@ -181,5 +245,5 @@ async function scanRow(id, row) {
     for (const f of failures) console.error("LEAK-SCAN FAIL:", f);
     process.exit(1);
   }
-  console.log(`LEAK SCAN PASSED: ${suppressedSeen.length} suppressed row(s) [${suppressedSeen}] assert nothing on all 5 surfaces (${Object.keys(rows).length} rows scanned)`);
+  console.log(`LEAK SCAN PASSED: ${suppressedSeen.length} suppressed row(s) [${suppressedSeen}] assert nothing on all 6 surfaces incl. field values (${Object.keys(rows).length} rows scanned)`);
 })().catch((e) => { console.error("LEAK-SCAN CRASH:", e); process.exit(1); });

@@ -1195,7 +1195,14 @@
             const sourceType = escapeHtml(clampAuthority
               ? "공식 약한 후보"
               : formatSourceType(source.source_type));
-            const score = escapeHtml(source.reliability_score ?? "-");
+            const scoreValue = source.reliability_score;
+            const score = escapeHtml(scoreValue ?? "-");
+            // FIELD-VALUE-GUARD DEFECT 2: this stored field mixes scales —
+            // 0-5 for news sources, 0-100 for official documents — and a
+            // fixed "/5" rendered 95/5. Scale-aware DENOMINATOR only: the
+            // number is untouched (never renumbered, never rescaled); values
+            // above 5 are on the 0-100 scale and drop the wrong "/5".
+            const scoreDisplay = (typeof scoreValue === "number" && scoreValue > 5) ? score : `${score}/5`;
             const reason = escapeHtml(clampAuthority
               ? "공식 후보이지만 상세 본문 또는 직접 일치가 제한적입니다."
               : userFacingReportText(guardStoredProse(source.reliability_reason || "", reliabilitySummary), ""));
@@ -1205,11 +1212,11 @@
             return `
               <div class="evidence-source">
                 <div class="evidence-source-title">${titleHtml}</div>
-                <!-- SCORE-CLARITY FIX C: this IS the genuine 0-5 source grade, so
-                     "/5" stays — but the bare "신뢰도" collided with the claim's
-                     0-100 근거 수준 shown above on the same screen. "출처 신뢰도"
-                     names whose reliability this is: the SOURCE's, not the claim's. -->
-                <div class="evidence-source-meta">출처 유형: ${sourceType} · 출처 신뢰도: ${score}/5</div>
+                <!-- SCORE-CLARITY FIX C: "출처 신뢰도" names whose reliability this
+                     is (the SOURCE's, not the claim's). FIELD-VALUE-GUARD: the
+                     "/5" appears only for genuine 0-5 values (news grades);
+                     official documents store 0-100 here and render bare. -->
+                <div class="evidence-source-meta">출처 유형: ${sourceType} · 출처 신뢰도: ${scoreDisplay}</div>
                 <div class="evidence-source-meta">${reason || "출처의 세부 관련성은 추가 확인이 필요합니다."}</div>
               </div>
             `;
@@ -1696,7 +1703,18 @@
       `;
     }
 
-    function renderEvidenceSnippets(claims, evidenceSnippets) {
+    // FIELD-VALUE-GUARD: on a period-suppressed row an OFFICIAL-source
+    // snippet's stored FIELD VALUES still asserted the suppressed match
+    // (13977: 근거 유형 직접 근거 / 주장 지지 지지 — the fifth assertion
+    // surface; the three earlier guards matched PROSE, these are values, so
+    // the scan could not see them). Labels demote to EXISTING closed
+    // vocabulary from these same formatters (공식 출처 참조 / 불명확); the
+    // stored NUMBERS (관련도/품질 점수) stay on screen untouched — the 7/21
+    // never-renumber rule. News-source snippets and non-suppressed rows
+    // render byte-identically; legacy callers omit the new arg (unchanged).
+    function renderEvidenceSnippets(claims, evidenceSnippets, reliabilitySummary = null) {
+      const periodSuppressed = !!(reliabilitySummary && typeof reliabilitySummary === "object"
+        && OFFICIAL_PERIOD_SUPPRESSED_SUMMARIES.has(reliabilitySummary));
       const claimList = Array.isArray(claims) ? claims : [];
       const snippets = Array.isArray(evidenceSnippets) ? evidenceSnippets : [];
       if (!snippets.length) {
@@ -1713,6 +1731,7 @@
           <div class="evidence-snippet">
             <div class="normalized-claim-text">claim #${index + 1}: ${escapeHtml(limitClaimSentences(cleanArticleTextForPolicyAnalysis(claim) || "기사 제목과 요약 기준으로 핵심 주장을 추가 확인해야 합니다.", 2, CLAIM_MAX_CHARS))}</div>
             ${related.length ? related.map((snippet) => {
+              const fieldSuppressed = periodSuppressed && isOfficialLikeSource(snippet);
               const sourceTitle = escapeHtml(userFacingReportText(publicInstitutionName(snippet.source_title || snippet.source_url || "출처"), "출처"));
               const sourceUrl = escapeHtml(safeUrl(snippet.source_url || ""));
               const sourceHtml = snippet.source_url
@@ -1730,11 +1749,11 @@
                   ${advDefList([
                     ["출처", sourceHtml, { html: true }],
                     ["발행처", snippet.publisher ? publicInstitutionName(snippet.publisher) : ""],
-                    ["근거 유형", snippet.evidence_type ? formatEvidenceType(snippet.evidence_type) : ""],
+                    ["근거 유형", snippet.evidence_type ? formatEvidenceType(fieldSuppressed && ["direct_support", "indirect_support"].includes(snippet.evidence_type) ? "official_reference" : snippet.evidence_type) : ""],
                     ["관련도", snippet.relevance_score ?? ""],
                     ["품질 점수", snippet.evidence_quality_score ?? ""],
                     ["품질 등급", snippet.evidence_quality_label ? formatTechnicalLabel(snippet.evidence_quality_label) : ""],
-                    ["주장 지지", snippet.supports_claim ? formatSupportsClaim(snippet.supports_claim) : ""],
+                    ["주장 지지", snippet.supports_claim ? formatSupportsClaim(fieldSuppressed && snippet.supports_claim === "supports" ? "unclear" : snippet.supports_claim) : ""],
                     ["추출 신뢰도", snippet.extraction_confidence ? formatExtractionConfidence(snippet.extraction_confidence) : ""],
                     ["추출 방식", snippet.extraction_method ? formatDiagnosticText(snippet.extraction_method) : ""],
                   ])}
@@ -1809,9 +1828,16 @@
           ["본문 확보", source.raw_text_available ? "예" : "아니오"],
           ["공식 본문 수집", source.official_body_fetched ? "예" : "아니오"],
           ["공식 본문 길이", source.official_body_length ?? ""],
-          ["공식 본문 매칭", source.official_body_match ? "예" : "아니오"],
+          // FIELD-VALUE-GUARD: on a period-suppressed row these two label
+          // rows asserted the suppressed match as field VALUES ("예" /
+          // "공식 본문 직접 근거 확인"). Demoted to the EXISTING 공식 상세
+          // 근거 부족 vocabulary; every score row keeps its stored number.
+          ["공식 본문 매칭", (() => {
+            const fieldValueSuppressed = periodSuppressed && isOfficialLikeSource(source);
+            return fieldValueSuppressed ? "공식 상세 근거 부족" : (source.official_body_match ? "예" : "아니오");
+          })()],
           ["공식 매칭 점수", source.official_body_match_score ?? ""],
-          ["공식 직접 매칭", officialDirectMatchLabel(source)],
+          ["공식 직접 매칭", (periodSuppressed && isOfficialLikeSource(source)) ? "공식 상세 근거 부족" : officialDirectMatchLabel(source)],
           ["공식 직접 점수", source.official_final_direct_match_score ?? source.official_body_match_score ?? ""],
           ["URL 해소 점수", source.official_url_score ?? ""],
           ["의미 매칭", source.semantic_match_score ?? ""],
@@ -4737,6 +4763,11 @@
           </section>
         `;
       }
+      // FIELD-VALUE-GUARD: 근거 강도's VALUE (강함/지지…) is a field-value
+      // assertion — on a period-suppressed row an official card's line
+      // demotes to the EXISTING 불명확 (formatSupportsClaim's closed set).
+      const periodSuppressed = !!(reliability && typeof reliability === "object"
+        && OFFICIAL_PERIOD_SUPPRESSED_SUMMARIES.has(reliability));
       return `
         <section class="public-source-section">
           <h3>근거와 출처 요약</h3>
@@ -4761,7 +4792,7 @@
                   <div class="source-support-badge ${escapeHtml(trace.className)}">${escapeHtml(trace.label)}</div>
                   <div class="public-source-meta">기관/도메인: ${escapeHtml(org)}</div>
                   <div class="public-source-meta">출처 유형: ${escapeHtml(publicSourceTypeLabel(source))}</div>
-                  ${(source.evidence_strength || source.evidence_quality_label || source.supports_claim) ? `<div class="public-source-meta">근거 강도: ${escapeHtml(formatTechnicalLabel(source.evidence_strength || source.evidence_quality_label || source.supports_claim))}</div>` : ""}
+                  ${(source.evidence_strength || source.evidence_quality_label || source.supports_claim) ? `<div class="public-source-meta">근거 강도: ${escapeHtml((periodSuppressed && isOfficialLikeSource(source)) ? formatSupportsClaim("unclear") : formatTechnicalLabel(source.evidence_strength || source.evidence_quality_label || source.supports_claim))}</div>` : ""}
                   ${score !== "-" ? `<div class="public-source-meta">신뢰/관련 점수: ${escapeHtml(score)}</div>` : ""}
                   <div class="public-source-meta">링크: ${url ? `<a href="${escapeHtml(safeUrl(url))}" target="_blank" rel="noopener noreferrer">원문 보기</a>` : "URL 없음"}</div>
                   <div class="public-source-meta">${escapeHtml(reason)}</div>
@@ -6074,7 +6105,7 @@
           ),
           renderCollapsibleSection(
             "근거 문장",
-            renderEvidenceSnippets(claims, evidenceSnippets),
+            renderEvidenceSnippets(claims, evidenceSnippets, sourceReliabilitySummary),
             false,
             "주장과 직접 또는 간접적으로 연결된 기사·출처 문장입니다."
           ),
