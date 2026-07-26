@@ -54,11 +54,25 @@ except Exception:
 ROOT = Path(__file__).resolve().parent.parent
 
 DEFAULT_BASE = "https://tickedin.org"
-MAX_LIVE_REQUESTS = 58          # hard stop under the ~60 budget
+# AUDIT-HARDENING: cap covers ~55 first attempts + retry headroom (each
+# failed request may retry twice with backoff). Still sequential + delayed —
+# a fully healthy run uses the same ~55 as before; retries spend budget only
+# when something already failed.
+MAX_LIVE_REQUESTS = 90
 REQUEST_DELAY_S = 0.25          # sequential + polite, never hammering
 
 FLAGSHIP_LINEAGE = "48e3baa51df2"
 FLAGSHIP_REPRESENTATIVE = 8523
+
+# AUDIT-HARDENING C7 — matcher-consistency baseline. The period-mismatch
+# predicate (ported into api_server.py during CLAIM-GRAPHS; reused here, never
+# a third copy) is EXPECTED to be non-zero over stored genuine-flagged rows:
+# suppression happens at display, stored values are deliberately untouched.
+# What this check catches is GROWTH — a new wrong-period attachment displayed
+# as confirmed would be the fourth instance of the defect fixed three times.
+# Baseline measured 2026-07-27: exactly these three cards (MATCHER-GUARD).
+MATCHER_MISMATCH_KNOWN_IDS = frozenset({7871, 9534, 13977})
+MATCHER_MISMATCH_BASELINE = 3
 EMAIL_OUTLETS = 78
 EMAIL_MEMBERS = 156
 EMAIL_EARLIEST = "2026-06-30"
@@ -265,31 +279,61 @@ class Budget:
         self.used = 0
 
 
+# AUDIT-HARDENING: paths that stayed unreachable after retries. A non-empty
+# list becomes the NET reachability FAIL row — a network failure is VISIBLE
+# and blocking, never a silent pass, and never a crash (this run died twice
+# on prod transients before this hardening).
+NETWORK_FAILURES: list = []
+RETRY_BACKOFF_S = (1.0, 2.5)  # short, courteous; sequential requests
+
+
 def http_get(base, path, budget, as_json=True, timeout=30):
-    """One budgeted GET. Returns (status, body_or_payload). Never raises for
-    HTTP errors; raises RuntimeError only when the request budget is gone."""
-    if budget.used >= budget.cap:
-        raise RuntimeError("live request budget exhausted (%d)" % budget.cap)
-    budget.used += 1
-    time.sleep(REQUEST_DELAY_S)
+    """One budgeted GET with retry/backoff. Returns (status, payload).
+
+    Distinguishes "the check failed" from "we could not look": transient
+    failures (DNS/timeout/5xx/non-JSON body on a 200) are retried with
+    backoff; after the last retry the path is recorded in NETWORK_FAILURES
+    and (None, None) is returned — every consumer's isinstance guard then
+    takes its negative branch, and the NET row at the end blocks the verdict.
+    A non-JSON 4xx body returns (status, None) without retry (a real answer,
+    just not JSON). Never raises; never hands a str to a dict consumer (the
+    crash class this removes)."""
     url = base.rstrip("/") + path
-    req = urllib.request.Request(url, headers={
-        "User-Agent": "b2b-readiness-audit/1.0 (read-only preflight)"})
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = resp.read().decode("utf-8", errors="replace")
-            status = resp.status
-    except urllib.error.HTTPError as err:
-        body = err.read().decode("utf-8", errors="replace") if err.fp else ""
-        status = err.code
-    except Exception as err:  # DNS/timeout — report, don't crash the audit
-        return (0, "request failed: %s" % err)
-    if as_json:
+    last_err = "unknown"
+    for attempt in range(1 + len(RETRY_BACKOFF_S)):
+        if budget.used >= budget.cap:
+            NETWORK_FAILURES.append("%s (budget exhausted at %d)" % (path, budget.cap))
+            return (None, None)
+        budget.used += 1
+        if attempt:
+            time.sleep(RETRY_BACKOFF_S[attempt - 1])
+        time.sleep(REQUEST_DELAY_S)
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "b2b-readiness-audit/1.0 (read-only preflight)"})
         try:
-            return (status, json.loads(body))
-        except ValueError:
-            return (status, body)
-    return (status, body)
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                body = resp.read().decode("utf-8", errors="replace")
+                status = resp.status
+        except urllib.error.HTTPError as err:
+            body = err.read().decode("utf-8", errors="replace") if err.fp else ""
+            status = err.code
+            if status >= 500:  # transient server side — retry
+                last_err = "http %s" % status
+                continue
+        except Exception as err:  # DNS/timeout/reset — retry
+            last_err = str(err)[:120]
+            continue
+        if as_json:
+            try:
+                return (status, json.loads(body))
+            except ValueError:
+                if status == 200:  # 200 with an HTML error page — transient
+                    last_err = "non-JSON body (http %s)" % status
+                    continue
+                return (status, None)
+        return (status, body)
+    NETWORK_FAILURES.append("%s (%s)" % (path, last_err))
+    return (None, None)
 
 
 # ---------------------------------------------------------------------------
@@ -339,7 +383,10 @@ class Report:
         self.rows.append((check, status, observed, impact))
 
     def worst(self):
-        order = {"FAIL": 2, "WARN": 1, "PASS": 0, "SKIP": 0, "INFO": 0}
+        # ERROR (a check crashed / could not run) blocks like FAIL — an
+        # unverified gate must never read as passable.
+        order = {"FAIL": 2, "ERROR": 2, "WARN": 1, "PASS": 0, "SKIP": 0,
+                 "INFO": 0}
         return max((order.get(s, 0) for _, s, _, _ in self.rows), default=0)
 
 
@@ -461,10 +508,15 @@ def run_audit(base: str) -> int:
     total_entries = sum(t for _, t, _ in resolution.values())
     total_resolved = sum(r for r, _, _ in resolution.values())
     all_misses = [m for _, _, ms in resolution.values() for m in ms]
-    rep.add("C3 weekly links", "PASS" if not all_misses else "WARN",
+    # AUDIT-HARDENING: 0 verified entries is a vacuous pass (typically an
+    # upstream fetch failure) — never PASS on nothing.
+    wl_status = ("WARN" if total_entries == 0
+                 else ("PASS" if not all_misses else "WARN"))
+    rep.add("C3 weekly links", wl_status,
             "%d/%d resolved over %d weeks%s"
             % (total_resolved, total_entries, len(resolution),
-               ("; misses: " + ", ".join(all_misses)) if all_misses else ""),
+               ("; misses: " + ", ".join(all_misses)) if all_misses
+               else ("" if total_entries else "; NOTHING VERIFIED")),
             "an entry renders with no claim link (safe, but a dead end)")
 
     sample_ids = []
@@ -487,9 +539,13 @@ def run_audit(base: str) -> int:
             hist_ok += 1
         else:
             hist_bad.append("%s(http=%s)" % (rid, st))
-    rep.add("C3 member rows", "PASS" if not hist_bad else "FAIL",
+    # AUDIT-HARDENING: an empty sample is a vacuous pass — never PASS on nothing.
+    mr_status = ("WARN" if not sample_ids
+                 else ("PASS" if not hist_bad else "FAIL"))
+    rep.add("C3 member rows", mr_status,
             "%d/%d renderable%s" % (hist_ok, len(sample_ids),
-                                    ("; bad: " + ", ".join(hist_bad)) if hist_bad else ""),
+                                    ("; bad: " + ", ".join(hist_bad)) if hist_bad
+                                    else ("" if sample_ids else "; NOTHING VERIFIED")),
             "clicking a member article 404s from the claim page")
 
     pages = [
@@ -539,7 +595,8 @@ def run_audit(base: str) -> int:
     # ---------------- CHECKS 4-6 — database -------------------------------
     engine, db_err = build_readonly_engine()
     if engine is None:
-        for cid in ("C4 invariants", "C5 freshness", "C6 recent quality"):
+        for cid in ("C4 invariants", "C5 freshness", "C6 recent quality",
+                    "C7 matcher-consistency", "C7 leak-scan"):
             rep.add(cid, "FAIL", db_err, "unverified corpus before outreach")
     else:
         import sqlalchemy as sa
@@ -652,9 +709,110 @@ def run_audit(base: str) -> int:
                     "claim_text=%d (reported only)" % (promo_boiler, len(recent),
                                                        promo_rate, raw_boiler),
                     "copyright furniture shown as an article's core claim")
+        # ---- CHECK 7 — matcher consistency + official-leak scan ------------
+        # (AUDIT-HARDENING; both crash-guarded so a failure here still lets
+        # the rest of the audit report.)
+        import subprocess
+        import sys as _sys
+        import tempfile
+
+        rows7 = []
+        try:
+            with engine.connect() as conn:
+                rows7 = conn.execute(sa.text(
+                    "SELECT id, content_nature, source_candidates, "
+                    "normalized_claims, claims, source_reliability_summary, "
+                    "debug_summary, evidence_summary, source_reliability_reason "
+                    "FROM analysis_results WHERE source_reliability_summary "
+                    "LIKE '%\"has_genuine_official_support\": true%'")).fetchall()
+        except Exception as err:
+            rep.add("C7 matcher-consistency", "ERROR",
+                    "genuine-row fetch crashed: %s" % str(err)[:120],
+                    "wrong-period matches could grow unseen")
+
+        if rows7:
+            # Reuse THE ported predicate (api_server.py, CLAIM-GRAPHS) — never
+            # a third copy. Importing api_server builds the FastAPI app object
+            # in memory; it starts no server, opens no DB connection and makes
+            # no network call at import (the offline test suite imports it the
+            # same way).
+            try:
+                if str(ROOT) not in _sys.path:
+                    _sys.path.insert(0, str(ROOT))
+                from api_server import _official_periodic_edition_mismatch
+                mismatch_ids = sorted(
+                    r[0] for r in rows7
+                    if _official_periodic_edition_mismatch(r[2], r[3], r[4]))
+                grown = sorted(set(mismatch_ids) - MATCHER_MISMATCH_KNOWN_IDS)
+                mm_status = "WARN" if grown else "PASS"
+                rep.add("C7 matcher-consistency", mm_status,
+                        "genuine-flagged rows=%d period-mismatch=%d (baseline %d: %s)%s"
+                        % (len(rows7), len(mismatch_ids),
+                           MATCHER_MISMATCH_BASELINE,
+                           sorted(MATCHER_MISMATCH_KNOWN_IDS),
+                           ("; NEW ids=%s — GROWTH, investigate before send" % grown)
+                           if grown else ""),
+                        "a new wrong-period doc displayed as confirmed — the "
+                        "defect fixed three times, recurring")
+            except Exception as err:
+                rep.add("C7 matcher-consistency", "ERROR",
+                        "predicate run crashed: %s" % str(err)[:120],
+                        "wrong-period matches could grow unseen")
+
+            # Leak scan: the five official-assertion surfaces are frontend
+            # display logic, so the scan EXECUTES the real main.js chain in
+            # Node (scripts/official_leak_scan.js — committed, no scratch
+            # harness). The audit feeds it the genuine-flagged rows and FAILS
+            # if it cannot run: the gate is not passable while skipping it.
+            try:
+                dump = {str(r[0]): {
+                    "content_nature": r[1], "source_candidates": r[2],
+                    "normalized_claims": r[3], "claims": r[4],
+                    "source_reliability_summary": r[5], "debug_summary": r[6],
+                    "evidence_summary": r[7], "source_reliability_reason": r[8],
+                } for r in rows7}
+                with tempfile.NamedTemporaryFile(
+                        "w", suffix=".json", delete=False,
+                        encoding="utf-8") as tf:
+                    json.dump(dump, tf, ensure_ascii=False)
+                    scan_input = tf.name
+                proc = subprocess.run(
+                    ["node", str(ROOT / "scripts" / "official_leak_scan.js"),
+                     scan_input],
+                    capture_output=True, text=True, encoding="utf-8",
+                    errors="replace", timeout=180)
+                tail = (proc.stdout or "").strip().splitlines()[-1:] or [""]
+                if proc.returncode == 0:
+                    rep.add("C7 leak-scan", "PASS", tail[0],
+                            "an official-evidence assertion leaks on a "
+                            "suppressed card (4th recurrence)")
+                else:
+                    rep.add("C7 leak-scan", "FAIL",
+                            ((proc.stdout or "") + (proc.stderr or ""))
+                            .strip().replace("\n", " / ")[-220:],
+                            "an official-evidence assertion leaks on a "
+                            "suppressed card (4th recurrence)")
+            except FileNotFoundError:
+                rep.add("C7 leak-scan", "FAIL",
+                        "node not found — the gate REQUIRES the scan: install "
+                        "node or run `node scripts/official_leak_scan.js "
+                        "<dump.json>` alongside and re-audit",
+                        "the leak scan silently skipped")
+            except Exception as err:
+                rep.add("C7 leak-scan", "ERROR",
+                        "scan invocation crashed: %s" % str(err)[:120],
+                        "the leak scan silently skipped")
         engine.dispose()
 
     # ---------------- output ----------------------------------------------
+    if NETWORK_FAILURES:
+        rep.add("NET reachability", "FAIL",
+                "%d request(s) unreachable after retries: %s"
+                % (len(NETWORK_FAILURES),
+                   "; ".join(NETWORK_FAILURES[:6])
+                   + ("; …" if len(NETWORK_FAILURES) > 6 else "")),
+                "checks above may show failures caused by the OUTAGE, not the "
+                "product — fix connectivity and rerun; never send on this run")
     p("")
     p("| check | status | observed | if it failed, a customer sees |")
     p("|---|---|---|---|")
@@ -664,11 +822,14 @@ def run_audit(base: str) -> int:
     p("")
     p("live requests used: %d / %d" % (budget.used, budget.cap))
     worst = rep.worst()
-    fails = [c for c, s, _, _ in rep.rows if s == "FAIL"]
+    fails = [c for c, s, _, _ in rep.rows if s in ("FAIL", "ERROR")]
     warns = [c for c, s, _, _ in rep.rows if s == "WARN"]
     if worst == 2:
         p("VERDICT: fix %s first" % ", ".join(fails))
-    elif warns:
+        # AUDIT-HARDENING: the gate's exit code now carries the verdict so a
+        # scripted preflight cannot overlook a FAIL/ERROR table.
+        return 1
+    if warns:
         p("VERDICT: safe to send on 8/3 AFTER addressing warns: %s" % ", ".join(warns))
     else:
         p("VERDICT: safe to send on 8/3")
