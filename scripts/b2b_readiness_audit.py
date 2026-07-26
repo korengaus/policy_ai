@@ -717,6 +717,10 @@ def run_audit(base: str) -> int:
         import tempfile
 
         rows7 = []
+        # SUPPRESSION-UNIFY: the Python predicate's id set, for the parity
+        # cross-check against the JS chain (None = not computed -> ERROR row,
+        # never a silent skip).
+        mismatch_ids = None
         try:
             with engine.connect() as conn:
                 rows7 = conn.execute(sa.text(
@@ -729,8 +733,18 @@ def run_audit(base: str) -> int:
             rep.add("C7 matcher-consistency", "ERROR",
                     "genuine-row fetch crashed: %s" % str(err)[:120],
                     "wrong-period matches could grow unseen")
+            # The leak scan shares this input — it must FAIL VISIBLY too,
+            # never silently disappear from the table.
+            rep.add("C7 leak-scan", "ERROR",
+                    "input fetch crashed (see matcher-consistency) — scan "
+                    "did not run", "the leak scan silently skipped")
+            rep.add("C7 predicate-parity", "ERROR",
+                    "input fetch crashed — parity not compared",
+                    "screen and counts could disagree about official support")
 
-        if rows7:
+        if not rows7:
+            pass  # ERROR rows above already reported; nothing to scan
+        else:
             # Reuse THE ported predicate (api_server.py, CLAIM-GRAPHS) — never
             # a third copy. Importing api_server builds the FastAPI app object
             # in memory; it starts no server, opens no DB connection and makes
@@ -792,16 +806,62 @@ def run_audit(base: str) -> int:
                             .strip().replace("\n", " / ")[-220:],
                             "an official-evidence assertion leaks on a "
                             "suppressed card (4th recurrence)")
+                # SUPPRESSION-UNIFY: parity cross-check. The scan emits the id
+                # set the JS predicate chain flagged over the SAME rows the
+                # Python predicate just evaluated (mismatch_ids above). Any
+                # difference means the screen and the counts disagree about
+                # whether we assert official support — FAIL, never WARN.
+                # Additional assertion only: the baseline growth check above
+                # is untouched.
+                js_ids = None
+                for line in (proc.stdout or "").splitlines():
+                    if line.startswith("JS_SUPPRESSED_IDS="):
+                        try:
+                            js_ids = sorted(json.loads(line.split("=", 1)[1]))
+                        except ValueError:
+                            js_ids = None
+                if js_ids is None or mismatch_ids is None:
+                    rep.add("C7 predicate-parity", "ERROR",
+                            "id sets unavailable (js=%s py=%s) — parity not "
+                            "compared; rerun"
+                            % ("missing" if js_ids is None else "ok",
+                               "missing" if mismatch_ids is None else "ok"),
+                            "screen and counts could disagree about official "
+                            "support")
+                else:
+                    only_js = sorted(set(js_ids) - set(mismatch_ids))
+                    only_py = sorted(set(mismatch_ids) - set(js_ids))
+                    if only_js or only_py:
+                        rep.add("C7 predicate-parity", "FAIL",
+                                "JS and Python predicates DISAGREE: "
+                                "only_js=%s only_py=%s (js=%s py=%s) — one "
+                                "implementation was changed without the other"
+                                % (only_js, only_py, js_ids, mismatch_ids),
+                                "the screen suppresses a match the counts "
+                                "still include, or the reverse — the defect "
+                                "class that shipped three times")
+                    else:
+                        rep.add("C7 predicate-parity", "PASS",
+                                "JS set == Python set over %d rows: %s"
+                                % (len(rows7), js_ids),
+                                "screen and counts could disagree about "
+                                "official support")
             except FileNotFoundError:
                 rep.add("C7 leak-scan", "FAIL",
                         "node not found — the gate REQUIRES the scan: install "
                         "node or run `node scripts/official_leak_scan.js "
                         "<dump.json>` alongside and re-audit",
                         "the leak scan silently skipped")
+                rep.add("C7 predicate-parity", "ERROR",
+                        "scan did not run (node missing) — parity not compared",
+                        "screen and counts could disagree about official support")
             except Exception as err:
                 rep.add("C7 leak-scan", "ERROR",
                         "scan invocation crashed: %s" % str(err)[:120],
                         "the leak scan silently skipped")
+                rep.add("C7 predicate-parity", "ERROR",
+                        "scan invocation crashed — parity not compared",
+                        "screen and counts could disagree about official support")
         engine.dispose()
 
     # ---------------- output ----------------------------------------------

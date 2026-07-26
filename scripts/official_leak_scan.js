@@ -172,6 +172,11 @@ async function scanRow(id, row) {
       failures.push(`known suppressed id ${id} NOT detected — predicate chain broken or drifted`);
     }
   }
+  // SUPPRESSION-UNIFY: machine-readable id set for the audit's parity
+  // cross-check (the Python predicate evaluates the SAME input rows; the two
+  // implementations exist deliberately — see Phase 1 — and this line is how
+  // divergence becomes impossible to miss). Emitted on success AND failure.
+  console.log(`JS_SUPPRESSED_IDS=${JSON.stringify(suppressedSeen.sort((a, b) => a - b))}`);
   if (failures.length) {
     for (const f of failures) console.error("LEAK-SCAN FAIL:", f);
     process.exit(1);
