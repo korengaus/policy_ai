@@ -94,6 +94,11 @@
     font-family: inherit;
   }
   .map-reset:hover { color: var(--ink); border-color: var(--muted); }
+  /* BRAINMAP-FOCUS: the focus chip is the 리셋 button's chrome with the brand
+     accent, so an active focus is visible without inventing a new control
+     language. Not a data encoding — a UI state. */
+  .map-focus { border-color: var(--brand); color: var(--brand-ink); background: #eef4ff; }
+  .map-focus[disabled] { border-color: var(--line); color: var(--slate); background: var(--paper); cursor: default; }
   /* BRAINMAP-FEATURES: search input + spread dropdown share the 리셋 button's
      calm chrome (site tokens). The count is a muted live annotation. */
   .map-search {
@@ -190,6 +195,10 @@
       <option value="5">5개 매체 이상 보도</option>
       <option value="10">10개 매체 이상 보도</option>
     </select>
+    <!-- BRAINMAP-FOCUS: appears only while a cluster is focused (or the
+         one-shot arm is waiting). Lives in the same wrapping flex row as the
+         other controls, so it reflows onto its own line on a narrow screen. -->
+    <button type="button" id="focusChip" class="map-reset map-focus" style="display:none"></button>
     <button type="button" id="resetView" class="map-reset">리셋</button>
   </div>
   <p class="map-subtitle">
@@ -263,9 +272,23 @@
   var searchQuery = "";     // lowercased substring over node.title ("" = off)
   var spreadMin = 0;        // min cluster outlet_count (0 = off)
   var hasEdgeById = {};     // node id -> true when the node has >=1 edge
+  // BRAINMAP-FOCUS: two more conditions on the SAME AND chain in isActive.
+  // Neither adds a filtering path, a fetch, or a payload field — cluster_id
+  // and content_nature are already on every node.
+  //   focusCluster: a cluster_id whose constellation stays lit while the rest
+  //     of the map dims. null = off.
+  //   focusArmed: one-shot mode so a TAP can focus on touch, where there is no
+  //     modifier key. Disarms itself after one focus so a plain tap goes back
+  //     to opening the card — the mode can never get stuck on.
+  //   hideMarket: hides 시장·시세 items (content_nature === market_commercial).
+  var focusCluster = null;
+  var focusArmed = false;
+  var hideMarket = false;
+  var focusNoteTimer = null;
 
   function anyFilterActive() {
-    return activeFilter !== null || searchQuery !== "" || spreadMin > 0;
+    return activeFilter !== null || searchQuery !== "" || spreadMin > 0
+      || focusCluster !== null || hideMarket;
   }
 
   // View transform (pan/zoom). Screen = world * scale + offset. Initial
@@ -290,6 +313,13 @@
   // BRAINMAP-FEATURES: extended — domain/market AND spread-size AND search
   // must ALL pass. Each block returns false independently; no filter = pass.
   function isActive(n) {
+    // BRAINMAP-FOCUS: focus and content-nature join the SAME AND chain the
+    // domain/spread/search conditions already use — one predicate, one dimming
+    // path. A node is lit only if it passes every active condition.
+    if (focusCluster !== null) {
+      if (n.cluster_id !== focusCluster) return false;
+    }
+    if (hideMarket && n.content_nature === "market_commercial") return false;
     if (activeFilter) {
       if (activeFilter.type === "market") {
         if (n.content_nature !== "market_commercial") return false;
@@ -330,6 +360,15 @@
     }).join("");
     html += '<button type="button" class="key" data-filter="market">' +
             '<span class="dot hollow"></span>시장·시세 소식(빈 점)</button>';
+    // BRAINMAP-FOCUS: content-nature toggle. Same .key chip, same delegated
+    // click handler, same dimming — it only adds one AND condition. The label
+    // reuses the existing "시장·시세 소식" wording verbatim from the key above
+    // (and the home page's 시장·시세 chip); only the verb is new.
+    html += '<button type="button" class="key" data-filter="nature-hide">' +
+            '시장·시세 소식 숨기기</button>';
+    // BRAINMAP-FOCUS: one-shot arm for touch (no modifier key on a phone).
+    html += '<button type="button" class="key" data-filter="focus-arm">' +
+            '집중 모드: 다음 탭한 묶음만</button>';
     document.getElementById("legend").innerHTML = html;
   }
 
@@ -508,7 +547,9 @@
     canvas.style.cursor = "pointer";
     var spread = "";
     if (n.cluster_id !== null && n.cluster_id !== undefined && clusterById[n.cluster_id]) {
-      spread = '<div class="tip-spread">' + clusterById[n.cluster_id].size_label + "</div>";
+      spread = '<div class="tip-spread">' + clusterById[n.cluster_id].size_label +
+        // BRAINMAP-FOCUS: the modifier is discoverable at the moment of use.
+        (focusCluster === null ? " · Shift+클릭: 이 묶음만 보기" : "") + "</div>";
     }
     tooltip.innerHTML = escapeHtml(n.title || "(제목 없음)") + spread;
     tooltip.style.display = "block";
@@ -641,6 +682,9 @@
 
   function resetView() {
     view.scale = 1; view.offsetX = 0; view.offsetY = 0;
+    // BRAINMAP-FOCUS: 리셋 / dblclick release focus too — focus is a view
+    // state, so "back to the whole map" must mean it.
+    clearFocus(false);
     draw();
   }
 
@@ -651,9 +695,31 @@
     var btn = ev.target.closest(".key");
     if (!btn) return;
     var kind = btn.getAttribute("data-filter");
+    // BRAINMAP-FOCUS: the two new keys are INDEPENDENT toggles, not members of
+    // the mutually-exclusive activeFilter slot — they leave domain/market alone.
+    if (kind === "nature-hide") {
+      hideMarket = !hideMarket;
+      // "시장·시세만 보기" and "시장·시세 숨기기" are contradictory intents; if
+      // the isolate key was on, drop it rather than light an empty map.
+      if (hideMarket && activeFilter && activeFilter.type === "market") activeFilter = null;
+      updateLegendActive(); updateSearchCount(); draw();
+      return;
+    }
+    if (kind === "focus-arm") {
+      focusArmed = !focusArmed;
+      updateLegendActive(); updateFocusChip();
+      return;
+    }
     var next = null;
     if (kind === "domain") next = { type: "domain", value: btn.getAttribute("data-domain") };
-    else if (kind === "market") next = { type: "market" };
+    else if (kind === "market") {
+      next = { type: "market" };
+      // Mirror of the reconciliation above: isolating 시장·시세 while hiding it
+      // would light nothing, so the hide toggle yields to the newer intent.
+      hideMarket = false;
+    }
+    // "전체 보기" is the existing restore-all key — it now also releases focus.
+    else if (kind === "all") clearFocus(false);
     // Toggle off when re-clicking the active filter -> back to "전체 보기".
     if (next && activeFilter && next.type === activeFilter.type &&
         (next.type !== "domain" || next.value === activeFilter.value)) {
@@ -673,7 +739,9 @@
     var keys = document.querySelectorAll("#legend .key");
     for (var i = 0; i < keys.length; i++) {
       var k = keys[i], kind = k.getAttribute("data-filter"), on = false;
-      if (!activeFilter) on = (kind === "all");
+      if (kind === "nature-hide") on = hideMarket;
+      else if (kind === "focus-arm") on = focusArmed;
+      else if (!activeFilter) on = (kind === "all");
       else if (activeFilter.type === "market") on = (kind === "market");
       else on = (kind === "domain" && k.getAttribute("data-domain") === activeFilter.value);
       if (on) k.classList.add("active"); else k.classList.remove("active");
@@ -772,7 +840,77 @@
     if (dragDist > CLICK_MOVE_THRESHOLD) { dragDist = 0; return; }
     var rect = canvas.getBoundingClientRect();
     var n = nearestNode(ev.clientX - rect.left, ev.clientY - rect.top);
-    if (n && n.id) window.location.href = "/?result_id=" + encodeURIComponent(n.id);
+    if (!n) return;
+    // BRAINMAP-FOCUS: a MODIFIED click (or an armed one-shot tap) focuses the
+    // node's cluster; a plain click still opens the card exactly as before, so
+    // the card is no further away than it was.
+    if (ev.shiftKey || ev.altKey || ev.metaKey || focusArmed) {
+      setFocus(n);
+      return;
+    }
+    if (n.id) window.location.href = "/?result_id=" + encodeURIComponent(n.id);
+  }
+
+  // BRAINMAP-FOCUS: focus one cluster. An UNCLUSTERED node (9,678 of them) has
+  // no constellation to isolate, so focusing it would dim the entire map to a
+  // single dot and read as "this one matters". We decline and say why instead —
+  // having no cluster is the corpus's most common state, not an error.
+  function setFocus(n) {
+    var cid = (n && n.cluster_id !== null && n.cluster_id !== undefined)
+      ? n.cluster_id : null;
+    if (cid === null) {
+      focusArmed = false;
+      updateLegendActive();
+      showFocusNote("이 점은 아직 다른 기사와 연결되지 않아 집중할 묶음이 없습니다.");
+      return;
+    }
+    focusCluster = cid;
+    focusArmed = false;   // one-shot: a plain tap opens cards again
+    hoverNode = null;
+    tooltip.style.display = "none";
+    updateLegendActive();
+    updateFocusChip();
+    updateSearchCount();
+    draw();
+  }
+
+  // `redraw` false when the caller repaints itself (legend click path).
+  function clearFocus(redraw) {
+    if (focusCluster === null && !focusArmed) return;
+    focusCluster = null;
+    focusArmed = false;
+    updateLegendActive();
+    updateFocusChip();
+    updateSearchCount();
+    if (redraw !== false) draw();
+  }
+
+  function showFocusNote(text) {
+    var el = document.getElementById("focusChip");
+    if (!el) return;
+    el.textContent = text;
+    el.style.display = "";
+    el.disabled = true;
+    if (focusNoteTimer) clearTimeout(focusNoteTimer);
+    focusNoteTimer = setTimeout(function () { updateFocusChip(); }, 3200);
+  }
+
+  function updateFocusChip() {
+    var el = document.getElementById("focusChip");
+    if (!el) return;
+    if (focusNoteTimer) { clearTimeout(focusNoteTimer); focusNoteTimer = null; }
+    el.disabled = false;
+    if (focusCluster !== null) {
+      var c = clusterById[focusCluster];
+      // size_label is the builder's own circulation string ("N개 매체 보도 중").
+      el.textContent = "집중 해제" + (c && c.size_label ? " · " + c.size_label : "");
+      el.style.display = "";
+    } else if (focusArmed) {
+      el.textContent = "집중할 묶음을 탭하세요 · 취소";
+      el.style.display = "";
+    } else {
+      el.style.display = "none";
+    }
   }
 
   function escapeHtml(s) {
@@ -826,6 +964,17 @@
     canvas.addEventListener("touchcancel", onTouchEnd, { passive: false });
     var resetBtn = document.getElementById("resetView");
     if (resetBtn) resetBtn.addEventListener("click", resetView);
+    // BRAINMAP-FOCUS: the chip clears focus (or cancels a waiting arm).
+    var focusBtn = document.getElementById("focusChip");
+    if (focusBtn) focusBtn.addEventListener("click", function () { clearFocus(true); });
+    // Escape releases focus, matching 리셋 / dblclick. Ignored while the search
+    // box has the caret so Escape can still clear the query first.
+    window.addEventListener("keydown", function (ev) {
+      if (ev.key !== "Escape") return;
+      if (focusCluster === null && !focusArmed) return;
+      if (document.activeElement && document.activeElement.id === "mapSearch") return;
+      clearFocus(true);
+    });
     // BRAINMAP-HOVER A8: ?focus=<result_id> (from the card's 브레인맵에서 유사
     // 보도 보기 link) lands centered + hovered on that card's node, reusing the
     // existing view/hoverNode/draw machinery. Node ids ARE result ids (see
