@@ -80,6 +80,15 @@ REPORTS_DIR = Path("reports")
 ANALYSIS_CACHE_PATH = Path(".cache") / "analysis_result_cache.json"
 ANALYSIS_CACHE_TTL_SECONDS = 30 * 60
 ANALYSIS_CACHE_VERSION = "official_source_retrieval_v4_claim_specific"
+# OOM-FIX — hard ceiling on entries kept in the analysis cache file.
+# TTL pruning alone bounds the file to one TTL window, but a batch run
+# packs ~18 queries into 30 minutes, so the window bound is still ~25MB.
+# This is a CACHE bound, not a verdict/score threshold: 12 is a CHOSEN
+# number, safe because eviction only costs a cache miss (the query is
+# re-analysed normally, same verdict). 12 x ~1.4MB entries ~= 17MB
+# ceiling, and 12 distinct queries inside a 30-minute TTL covers the
+# interactive re-run pattern this cache exists to serve.
+ANALYSIS_CACHE_MAX_ENTRIES = 12
 
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -154,6 +163,43 @@ def _analysis_cache_fresh(entry: dict) -> bool:
         return age <= ANALYSIS_CACHE_TTL_SECONDS
     except Exception:
         return False
+
+
+def _prune_analysis_cache(cache: dict) -> dict:
+    """OOM-FIX — drop what the cache can no longer serve, before writing.
+
+    The TTL was previously a READ-side freshness check only: expired
+    entries were re-read and re-serialised forever, so a 42-query batch
+    run grew the file to ~60-80MB and re-parsed it twice per query. The
+    crash landed at a query boundary (the ``_load_analysis_cache`` read).
+
+    An expired entry can never produce a cache hit -- ``_get_cached_
+    analysis_report`` already gates on ``_analysis_cache_fresh`` -- so
+    dropping it here is behaviour-preserving: no lookup that succeeds
+    today starts failing. ``_analysis_cache_fresh`` returns False for
+    malformed entries too, so corrupt rows are swept out on the same
+    pass. Silent by contract: main.py is pin-IN, so this adds no log.*
+    call site (pins 331/16 unchanged).
+    """
+    if not isinstance(cache, dict):
+        # A non-dict cache file is already unusable downstream; returning
+        # {} here is strictly safer than propagating it into the write.
+        return {}
+    fresh = {
+        key: entry
+        for key, entry in cache.items()
+        if _analysis_cache_fresh(entry)
+    }
+    if len(fresh) <= ANALYSIS_CACHE_MAX_ENTRIES:
+        return fresh
+    # Over the cap: keep the newest entries. cached_at is an ISO-8601 UTC
+    # stamp from utc_now_iso(), so lexical sort == chronological sort.
+    newest_first = sorted(
+        fresh.items(),
+        key=lambda item: item[1].get("cached_at") or "",
+        reverse=True,
+    )
+    return dict(newest_first[:ANALYSIS_CACHE_MAX_ENTRIES])
 
 
 def _apply_analysis_cache_debug(
@@ -258,6 +304,9 @@ def _store_analysis_report(
         "news_identities": [_news_identity(news, index) for index, news in enumerate(news_results or [])],
         "news_results": sanitize_data(report_items),
     }
+    # OOM-FIX — prune AFTER inserting: the entry just written carries the
+    # newest cached_at, so it is always fresh and always survives the cap.
+    cache = _prune_analysis_cache(cache)
     _save_analysis_cache(cache)
     log.info(f"[AnalysisCache] Cache stored: key={analysis_cache_key} ttl={ANALYSIS_CACHE_TTL_SECONDS}s")
 
