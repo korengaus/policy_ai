@@ -307,6 +307,15 @@
   // at any zoom, and the hover hit test uses a constant screen-px radius.
   var view = { scale: 1, offsetX: 0, offsetY: 0 };
 
+  // BRAINMAP-DEPTH-STYLE: rendering constants. Coordinates NEVER move; only
+  // how a node is painted changes. Everything here is IDENTICAL for every
+  // node, so none of it encodes anything.
+  var R_CLUSTERED = 3.0;    // was 3.4 — small trim against bright-on-dark
+  var R_UNCLUSTERED = 1.9;  // was 2.1 —   irradiation (hue mapping untouched)
+  var RING_W = 1.25;        // separation ring in the page background colour
+  var BG_COLOR = "#0b1220"; // must equal --canvas
+  var spriteCache = {};     // (color|radius|hollow|dpr) -> prerendered bead
+
   // BRAINMAP-ATMOSPHERE: presentation state only — none of it encodes data.
   var ARC_K = 0.12;    // edge arc height = 12% of chord length, EVERY edge
   var INTRO_MS = 1800; // entry settle duration
@@ -325,6 +334,66 @@
 
   function colorFor(domain) {
     return DOMAIN_COLORS[domain] || FALLBACK_COLOR;
+  }
+
+  // BRAINMAP-DEPTH-STYLE: prerendered node sprites — a bead with ONE light
+  // direction (up-left), ONE highlight position, ONE shading ramp, wrapped in
+  // a background-colour separation ring. All four are the same constants for
+  // every node, so the treatment encodes NOTHING; hue still = domain, radius
+  // still what it was (clustered vs not), position untouched. Prerendering
+  // ~28 tiny canvases once beats 13,847 gradients per frame.
+  function _mixChannel(hex, i, target, k) {
+    return Math.round(parseInt(hex.slice(i, i + 2), 16) * (1 - k) + target * k);
+  }
+  function _mix(hex, target, k) {
+    return "rgb(" + _mixChannel(hex, 1, target, k) + "," +
+      _mixChannel(hex, 3, target, k) + "," + _mixChannel(hex, 5, target, k) + ")";
+  }
+
+  function spriteFor(color, r, hollow) {
+    var dpr = window.devicePixelRatio || 1;
+    var key = color + "|" + r + "|" + (hollow ? 1 : 0) + "|" + dpr;
+    var hit = spriteCache[key];
+    if (hit) return hit;
+    var R = r + RING_W;
+    var size = Math.ceil(R * 2) + 1;
+    var c = document.createElement("canvas");
+    c.width = Math.ceil(size * dpr);
+    c.height = Math.ceil(size * dpr);
+    var g = c.getContext("2d");
+    g.scale(dpr, dpr);
+    var cx = size / 2, cy = size / 2;
+    // Separation ring: a disc of the page background under the bead. Where
+    // nodes overlap, the ring of the one drawn later punches a visible gap
+    // into the one below — identical width everywhere, encodes nothing.
+    g.beginPath();
+    g.arc(cx, cy, R, 0, Math.PI * 2);
+    g.fillStyle = BG_COLOR;
+    g.fill();
+    if (hollow) {
+      // market_commercial stays a hollow stroke (existing convention).
+      g.beginPath();
+      g.arc(cx, cy, r, 0, Math.PI * 2);
+      g.lineWidth = 1.4;
+      g.strokeStyle = color;
+      g.stroke();
+    } else {
+      // The bead: highlight offset 0.35r up-left of centre, base hue at the
+      // 55% stop, edge darkened 28% — same ramp for every domain colour, so
+      // a large and a small node of one domain read as the same colour.
+      var grad = g.createRadialGradient(
+        cx - r * 0.35, cy - r * 0.35, r * 0.1, cx, cy, r);
+      grad.addColorStop(0, _mix(color, 255, 0.45));
+      grad.addColorStop(0.55, color);
+      grad.addColorStop(1, _mix(color, 0, 0.28));
+      g.beginPath();
+      g.arc(cx, cy, r, 0, Math.PI * 2);
+      g.fillStyle = grad;
+      g.fill();
+    }
+    hit = { c: c, size: size, half: size / 2 };
+    spriteCache[key] = hit;
+    return hit;
   }
 
   // BRAINMAP-FILTER: is this node in the active filter's set? (all -> always).
@@ -490,26 +559,21 @@
 
     // Nodes on top. Clustered nodes slightly larger; market_commercial hollow.
     // Radii are constant screen px (positions transform, sizes do not).
+    // BRAINMAP-DEPTH-STYLE: each node is a prerendered bead sprite (ring +
+    // shaded disc) STAMPED at its unchanged coordinate — one drawImage per
+    // node instead of one path-fill per node. Alphas are the pre-existing
+    // interaction/visual states, byte-identical to before.
     graph.nodes.forEach(function (n, i) {
       if (filtering && !isActive(n)) return;
       var clustered = n.cluster_id !== null && n.cluster_id !== undefined;
-      var r = clustered ? 3.4 : 2.1;
+      var r = clustered ? R_CLUSTERED : R_UNCLUSTERED;
       var isMarket = n.content_nature === "market_commercial";
-      ctx.beginPath();
-      ctx.arc(toScreenX(wx(i)), toScreenY(wy(i)), r, 0, Math.PI * 2);
-      if (isMarket) {
-        ctx.globalAlpha = 0.75;
-        ctx.lineWidth = 1.4;
-        ctx.strokeStyle = colorFor(n.domain);
-        ctx.stroke();
-        ctx.globalAlpha = 1;
-      } else {
-        ctx.globalAlpha = clustered ? 0.95 : 0.6;
-        ctx.fillStyle = colorFor(n.domain);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-      }
+      var s = spriteFor(colorFor(n.domain), r, isMarket);
+      ctx.globalAlpha = isMarket ? 0.75 : (clustered ? 0.95 : 0.6);
+      ctx.drawImage(s.c, toScreenX(wx(i)) - s.half, toScreenY(wy(i)) - s.half,
+                    s.size, s.size);
     });
+    ctx.globalAlpha = 1;
 
     // Hover glow + ring — marks the POINTER only, never a data value, and is
     // identical for every node it touches.
