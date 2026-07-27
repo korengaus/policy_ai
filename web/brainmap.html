@@ -312,12 +312,14 @@
   // node, so none of it encodes anything.
   var R_CLUSTERED = 3.0;    // was 3.4 — small trim against bright-on-dark
   var R_UNCLUSTERED = 1.9;  // was 2.1 —   irradiation (hue mapping untouched)
-  var RING_W = 1.25;        // separation ring in the page background colour
+  // LEGIBILITY: ring thinned 1.25 -> 0.5 and drawn INSET, so a node's
+  // footprint is exactly its radius (was r+1.25 — a 1.9px node wore a
+  // 3.15px footprint and read as a hollow donut). Uniform for every node.
+  var RING_W = 0.5;         // separation ring in the page background colour
   var BG_COLOR = "#0b1220"; // must equal --canvas
   var spriteCache = {};     // (color|radius|hollow|dpr) -> prerendered sprite
 
   // BRAINMAP-ATMOSPHERE: presentation state only — none of it encodes data.
-  var ARC_K = 0.12;    // edge arc height = 12% of chord length, EVERY edge
   var INTRO_MS = 1800; // entry settle duration
   var CAM_MS = 450;    // eased-camera duration (search centring)
   var reducedMotion = false;
@@ -345,35 +347,37 @@
     var key = color + "|" + r + "|" + (hollow ? 1 : 0) + "|" + dpr;
     var hit = spriteCache[key];
     if (hit) return hit;
-    var R = r + RING_W;
-    var size = Math.ceil(R * 2) + 1;
+    // LEGIBILITY: INSET ring — the sprite's footprint is exactly r. The bg
+    // disc fills radius r; the colour disc sits at r-RING_W, leaving a thin
+    // background-colour rim INSIDE the radius. Where nodes overlap, the rim
+    // of the one drawn later still punches the visible gap into the one
+    // below — identical width everywhere, encodes nothing — but a node no
+    // longer wears a footprint larger than its own radius.
+    var size = Math.ceil(r * 2) + 1;
     var c = document.createElement("canvas");
     c.width = Math.ceil(size * dpr);
     c.height = Math.ceil(size * dpr);
     var g = c.getContext("2d");
     g.scale(dpr, dpr);
     var cx = size / 2, cy = size / 2;
-    // Separation ring: a disc of the page background under the bead. Where
-    // nodes overlap, the ring of the one drawn later punches a visible gap
-    // into the one below — identical width everywhere, encodes nothing.
     g.beginPath();
-    g.arc(cx, cy, R, 0, Math.PI * 2);
+    g.arc(cx, cy, r, 0, Math.PI * 2);
     g.fillStyle = BG_COLOR;
     g.fill();
     if (hollow) {
-      // market_commercial stays a hollow stroke (existing convention).
+      // market_commercial stays a hollow stroke (existing convention),
+      // pulled inside the rim so the footprint stays r.
       g.beginPath();
-      g.arc(cx, cy, r, 0, Math.PI * 2);
+      g.arc(cx, cy, Math.max(0.5, r - RING_W - 0.7), 0, Math.PI * 2);
       g.lineWidth = 1.4;
       g.strokeStyle = color;
       g.stroke();
     } else {
-      // BEAD-REVERT: flat disc. The shaded bead read as a donut at these
-      // radii on a real screen, so the gradient is gone; the sprite path
-      // stays because ring+disc as ONE stamp is both the simpler draw loop
-      // and half the per-frame path work of drawing the pair directly.
+      // BEAD-REVERT: flat disc (the shaded bead read as a donut on a real
+      // screen). Sprite path kept: ring+disc as ONE stamp is the simpler
+      // draw loop and half the per-frame path work of the direct pair.
       g.beginPath();
-      g.arc(cx, cy, r, 0, Math.PI * 2);
+      g.arc(cx, cy, Math.max(0.5, r - RING_W), 0, Math.PI * 2);
       g.fillStyle = color;
       g.fill();
     }
@@ -499,32 +503,26 @@
     // BRAINMAP-FEATURES: "filtering" now covers domain OR search OR spread.
     var filtering = anyFilterActive();
 
-    // Edges — symmetric arcs bowing above the chord. HONESTY: ONE rule for
-    // every edge (control point = chord midpoint + upward perpendicular x
-    // ARC_K of chord length). Its only inputs are the two endpoint positions
-    // already on screen: height never varies with similarity, spread, or
-    // recency, and the curve is identical under endpoint exchange — no
-    // direction is implied. Control point rides the same affine view
-    // transform as the endpoints, so the shape is stable under pan/zoom.
-    ctx.lineWidth = 0.7;
-    ctx.strokeStyle = "rgba(148, 170, 205, 0.16)";
+    // Edges — straight lines again (LEGIBILITY). Measured: the arc added
+    // only +0.95% length / +0.23pp coverage — the distance layout itself
+    // tripled edge ink (327k -> 1,138k px) by drawing edges at their honest
+    // similarity length. So the arc bought curvature noise without being
+    // the cause, and prominence is managed below instead: thinner stroke +
+    // zoom-graduated alpha. STYLE, NOT ENCODING: one width and one alpha
+    // for EVERY edge at any given moment (alpha varies only with the view's
+    // zoom, identically for all). Edges are never removed — faint at the
+    // overview where 6,353 of them cannot be read anyway, full where zoom
+    // makes them readable. Nodes are NEVER faded or hidden this way.
+    var edgeAlpha = 0.10 + 0.06 * Math.min(1, Math.max(0, view.scale - 1));
+    ctx.lineWidth = 0.5;
+    ctx.strokeStyle = "rgba(148, 170, 205, " + edgeAlpha.toFixed(3) + ")";
     ctx.beginPath();
     graph.edges.forEach(function (e) {
       var a = nodeById[e.src], b = nodeById[e.dst];
       if (!a || !b) return;
       if (filtering && !(isActive(a) && isActive(b))) return;
-      var ax = wx(a._i), ay = wy(a._i), bx = wx(b._i), by = wy(b._i);
-      var dx = bx - ax, dy = by - ay;
-      var len = Math.sqrt(dx * dx + dy * dy) || 1;
-      var ux = dy / len, uy = -dx / len;   // unit perpendicular to the chord
-      // Pick the upward side by the CHORD alone (ties: rightward), so the
-      // same unordered pair always bows the same way — src/dst order can
-      // never flip the arc, which would read as direction.
-      if (uy > 0 || (uy === 0 && ux < 0)) { ux = -ux; uy = -uy; }
-      var arcH = len * ARC_K;
-      var cxw = (ax + bx) / 2 + ux * arcH, cyw = (ay + by) / 2 + uy * arcH;
-      ctx.moveTo(toScreenX(ax), toScreenY(ay));
-      ctx.quadraticCurveTo(toScreenX(cxw), toScreenY(cyw), toScreenX(bx), toScreenY(by));
+      ctx.moveTo(toScreenX(wx(a._i)), toScreenY(wy(a._i)));
+      ctx.lineTo(toScreenX(wx(b._i)), toScreenY(wy(b._i)));
     });
     ctx.stroke();
 
