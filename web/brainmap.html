@@ -314,11 +314,84 @@
   // depth fade: opacity encodes nothing). z is layout, never a variable.
   var mode3d = false;
   var has3d = false;          // payload carries x3/y3/z3 (older rows do not)
-  var ROT0 = { yaw: -0.30, pitch: 0.22 };  // gentle initial tilt
-  var rot = { yaw: ROT0.yaw, pitch: ROT0.pitch };
+  var ROT0 = { yaw: -0.30, pitch: 0.22 };  // gentle initial tilt (unchanged)
   var drawOrder = null;       // far-to-near node order (3D only; null in 2D)
-  var dragRotating = false;   // current drag is a rotation (3D, no Shift)
-  var lastDragX = 0, lastDragY = 0;
+  var dragRotating = false;   // current drag is a rotation (3D, no pan modifier)
+
+  // BRAINMAP-3D-CONTROLS: orientation is a 3x3 ROTATION MATRIX (row-major
+  // flat 9), not Euler angles — an arcball produces arbitrary axes that
+  // yaw/pitch cannot represent. `_mat3FromYawPitch` reproduces the previous
+  // initial tilt EXACTLY, so the default 3D view is unchanged.
+  function _mat3FromYawPitch(yaw, pitch) {
+    var cy = Math.cos(yaw), sy = Math.sin(yaw);
+    var cp = Math.cos(pitch), sp = Math.sin(pitch);
+    return [cy, 0, sy,
+            sp * sy, cp, -sp * cy,
+            -cp * sy, sp, cp * cy];
+  }
+  function _mat3Mul(a, b) {   // a * b
+    var o = new Array(9);
+    for (var r = 0; r < 3; r++) {
+      for (var c = 0; c < 3; c++) {
+        o[r * 3 + c] = a[r * 3] * b[c] + a[r * 3 + 1] * b[3 + c] + a[r * 3 + 2] * b[6 + c];
+      }
+    }
+    return o;
+  }
+  // Gram-Schmidt: float error over many drags would slowly shear the basis.
+  // Applied only when a drag ENDS, so reversibility within a drag is exact.
+  function _mat3Orthonormalize(m) {
+    function nrm(v) {
+      var l = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) || 1;
+      return [v[0] / l, v[1] / l, v[2] / l];
+    }
+    var r0 = nrm([m[0], m[1], m[2]]);
+    var d = m[3] * r0[0] + m[4] * r0[1] + m[5] * r0[2];
+    var r1 = nrm([m[3] - d * r0[0], m[4] - d * r0[1], m[5] - d * r0[2]]);
+    var r2 = [r0[1] * r1[2] - r0[2] * r1[1],
+              r0[2] * r1[0] - r0[0] * r1[2],
+              r0[0] * r1[1] - r0[1] * r1[0]];
+    return [r0[0], r0[1], r0[2], r1[0], r1[1], r1[2], r2[0], r2[1], r2[2]];
+  }
+  var ROT0_M = _mat3FromYawPitch(ROT0.yaw, ROT0.pitch);
+  var rotM = ROT0_M.slice();
+  var arcStart = null;        // unit sphere vector at press
+  var rotAtPress = null;      // orientation snapshot at press
+
+  // Shoemake sphere mapping. Inside the virtual sphere -> the point lifts off
+  // the screen (tumble); ON OR OUTSIDE the radius -> clamped to the rim with
+  // z=0, which yields pure in-plane ROLL. So a press that starts outside is
+  // never rejected and never jumps: it is simply a roll grab, and the same
+  // clamp applies while dragging beyond the rim.
+  function sphereVec(mx, my) {
+    var rect = canvas.parentElement.getBoundingClientRect();
+    var w = Math.max(320, rect.width), h = Math.max(280, rect.height);
+    var radius = 0.45 * Math.min(w, h);
+    var ux = (mx - w / 2) / radius, uy = (my - h / 2) / radius;
+    var d2 = ux * ux + uy * uy;
+    if (d2 <= 1) return [ux, uy, Math.sqrt(1 - d2)];
+    var inv = 1 / Math.sqrt(d2);
+    return [ux * inv, uy * inv, 0];
+  }
+
+  // Rotation taking unit vector a onto unit vector b, by the EXACT arc angle
+  // (not Shoemake's doubled quaternion) so the grabbed point tracks the
+  // cursor 1:1. Rodrigues; degenerate cases fall back cleanly.
+  function rotBetween(a, b) {
+    var vx = a[1] * b[2] - a[2] * b[1];
+    var vy = a[2] * b[0] - a[0] * b[2];
+    var vz = a[0] * b[1] - a[1] * b[0];
+    var s2 = vx * vx + vy * vy + vz * vz;
+    var c = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    if (s2 < 1e-12) {
+      if (c > 0) return [1, 0, 0, 0, 1, 0, 0, 0, 1];   // same point: identity
+      return [-1, 0, 0, 0, -1, 0, 0, 0, 1];            // antipodal: 180 deg roll
+    }
+    var k = (1 - c) / s2;
+    return [c + vx * vx * k,      vx * vy * k - vz,     vx * vz * k + vy,
+            vy * vx * k + vz,     c + vy * vy * k,      vy * vz * k - vx,
+            vz * vx * k - vy,     vz * vy * k + vx,     c + vz * vz * k];
+  }
 
   // BRAINMAP-DEPTH-STYLE: rendering constants. Coordinates NEVER move; only
   // how a node is painted changes. Everything here is IDENTICAL for every
@@ -485,8 +558,9 @@
       // `positions` stays the single world layer — every consumer (draw,
       // hit-test, hover, centring, labels) reads projected coordinates and
       // works unchanged. Depth exists ONLY as paint order (far-to-near).
-      var cy = Math.cos(rot.yaw), sy = Math.sin(rot.yaw);
-      var cp = Math.cos(rot.pitch), sp = Math.sin(rot.pitch);
+      // BRAINMAP-3D-CONTROLS: one matrix multiply per node (was inline
+      // yaw/pitch trig) — same cost, arbitrary axes.
+      var m = rotM;
       // Fixed fit: a unit cube's rotated extent never exceeds sqrt(3)/2
       // from centre; 1.28 ~= a snug constant frame at every angle.
       var s3 = Math.min(w, h - PAD) / 1.28;
@@ -494,11 +568,9 @@
       var depth = new Array(graph.nodes.length);
       positions = graph.nodes.map(function (n, i) {
         var vx = n.x3 - 0.5, vy = n.y3 - 0.5, vz = n.z3 - 0.5;
-        var rx = vx * cy + vz * sy;
-        var tz = -vx * sy + vz * cy;
-        var ry = vy * cp - tz * sp;
-        var rz = vy * sp + tz * cp;
-        depth[i] = rz;
+        var rx = m[0] * vx + m[1] * vy + m[2] * vz;
+        var ry = m[3] * vx + m[4] * vy + m[5] * vz;
+        depth[i] = m[6] * vx + m[7] * vy + m[8] * vz;
         return { px: cxs + rx * s3, py: cys + ry * s3 };
       });
       // Far-to-near paint order: nearer nodes occlude farther ones — the
@@ -696,10 +768,12 @@
       hoverNode = null;
       tooltip.style.display = "none";
       if (dragRotating) {
-        // BRAINMAP-3D-VIEW: plain drag ROTATES in 3D (Shift+drag pans).
-        // Incremental deltas; pitch clamped so the cloud cannot flip.
-        applyRotate(ev.clientX - lastDragX, ev.clientY - lastDragY);
-        lastDragX = ev.clientX; lastDragY = ev.clientY;
+        // BRAINMAP-3D-CONTROLS: ARCBALL. Always computed from the PRESS
+        // anchor (arcStart/rotAtPress), never accumulated frame to frame —
+        // that is what makes it exactly reversible: returning the cursor to
+        // the press point makes the delta the identity, restoring the
+        // orientation bit for bit.
+        applyArcball(mx, my);
         return;
       }
       // Pan: move the offset by the raw mouse delta; track distance so a
@@ -729,11 +803,18 @@
   function onDown(ev) {
     skipIntro(); cancelCamera();
     isDragging = true;
-    // BRAINMAP-3D-VIEW: in 3D a plain drag rotates; Shift+drag pans (the
-    // Shift+CLICK focus gesture is untouched — it fires only under the
-    // existing CLICK_MOVE_THRESHOLD, exactly as in 2D).
-    dragRotating = (mode3d && has3d && !ev.shiftKey);
-    lastDragX = ev.clientX; lastDragY = ev.clientY;
+    // BRAINMAP-3D-CONTROLS: in 3D a plain LEFT drag rotates; RIGHT-drag and
+    // Shift+drag pan (two ways to reach the same thing). The Shift+CLICK
+    // focus gesture is untouched — it fires only under CLICK_MOVE_THRESHOLD,
+    // exactly as in 2D. In 2D `dragRotating` is always false, so the entire
+    // 2D drag path below is byte-identical to before.
+    var panModifier = ev.shiftKey || ev.button === 2;
+    dragRotating = (mode3d && has3d && !panModifier);
+    if (dragRotating) {
+      var r0 = canvas.getBoundingClientRect();
+      arcStart = sphereVec(ev.clientX - r0.left, ev.clientY - r0.top);
+      rotAtPress = rotM.slice();
+    }
     dragStartX = ev.clientX; dragStartY = ev.clientY;
     startOffsetX = view.offsetX; startOffsetY = view.offsetY;
     dragDist = 0;
@@ -741,15 +822,25 @@
   }
 
   function onUp() {
-    if (isDragging) { isDragging = false; dragRotating = false; canvas.style.cursor = "grab"; }
+    if (isDragging) {
+      isDragging = false;
+      if (dragRotating) {
+        // Re-orthonormalize only at drag END: within a drag the matrix is
+        // rebuilt from the press anchor, so reversibility stays exact.
+        rotM = _mat3Orthonormalize(rotM);
+        dragRotating = false;
+        arcStart = null; rotAtPress = null;
+      }
+      canvas.style.cursor = "grab";
+    }
   }
 
-  // BRAINMAP-3D-VIEW: shared rotate step (mouse + touch). Rotation is the
-  // reader's camera, never data; relayout recomputes projection + paint
-  // order (the depth sort runs only on these frames, not on pan/zoom).
-  function applyRotate(dx, dy) {
-    rot.yaw += dx * 0.006;
-    rot.pitch = Math.max(-1.35, Math.min(1.35, rot.pitch + dy * 0.006));
+  // BRAINMAP-3D-CONTROLS: arcball step (mouse + one-finger touch share it).
+  // Rotation is the reader's camera, never data; relayout recomputes the
+  // projection + paint order (the depth sort runs only on these frames).
+  function applyArcball(mx, my) {
+    if (!arcStart || !rotAtPress) return;
+    rotM = _mat3Mul(rotBetween(arcStart, sphereVec(mx, my)), rotAtPress);
     layout();
     draw();
   }
@@ -792,6 +883,13 @@
   var touchPanId = null;   // identifier of the finger currently driving a pan
   var pinchGap = 0;        // finger distance at the previous pinch frame
   var touchMoved = false;  // gesture panned/pinched => suppress the synthesized click
+  // BRAINMAP-3D-CONTROLS: two-finger gestures LATCH to one interpretation.
+  // twoMode null = undecided; "pinch" = zoom; "pan" = translate. Deciding
+  // once (and holding it until the finger count changes) is what stops an
+  // ambiguous gesture from doing both weakly.
+  var twoMode = null;
+  var twoStartGap = 0, twoStartMidX = 0, twoStartMidY = 0;
+  var TWO_DECIDE_PX = 12;  // movement needed before committing to a reading
 
   function fingerGap(a, b) {
     var dx = a.clientX - b.clientX, dy = a.clientY - b.clientY;
@@ -811,10 +909,24 @@
     if (ev.touches.length === 1) {
       seatTouchPan(ev.touches[0]);
       touchMoved = false;
+      if (mode3d && has3d) {
+        // One finger = arcball grab; anchor it exactly like the mouse press.
+        var r0 = canvas.getBoundingClientRect();
+        arcStart = sphereVec(ev.touches[0].clientX - r0.left,
+                             ev.touches[0].clientY - r0.top);
+        rotAtPress = rotM.slice();
+      }
     } else if (ev.touches.length === 2) {
-      // Second finger down — hand off from pan to pinch.
+      // Second finger down — hand off from one-finger to a two-finger
+      // gesture whose meaning is not yet decided.
       touchPanId = null;
+      arcStart = null; rotAtPress = null;
       pinchGap = fingerGap(ev.touches[0], ev.touches[1]);
+      twoMode = null;
+      twoStartGap = pinchGap;
+      twoStartMidX = (ev.touches[0].clientX + ev.touches[1].clientX) / 2;
+      twoStartMidY = (ev.touches[0].clientY + ev.touches[1].clientY) / 2;
+      startOffsetX = view.offsetX; startOffsetY = view.offsetY;
       touchMoved = true;
     }
   }
@@ -829,11 +941,11 @@
       hoverNode = null;
       tooltip.style.display = "none";
       if (mode3d && has3d) {
-        // BRAINMAP-3D-VIEW: one finger ROTATES in 3D. Stated plainly: touch
-        // then has NO pan gesture (two fingers are pinch-zoom) — a real
-        // limitation of 3D on a phone, reported rather than worked around.
-        applyRotate(touches[0].clientX - dragStartX, touches[0].clientY - dragStartY);
-        dragStartX = touches[0].clientX; dragStartY = touches[0].clientY;
+        // BRAINMAP-3D-CONTROLS: one finger = arcball, anchored at the press
+        // (same reversibility guarantee as the mouse). Two-finger pan below
+        // now supplies the gesture touch was missing.
+        var rr = canvas.getBoundingClientRect();
+        applyArcball(touches[0].clientX - rr.left, touches[0].clientY - rr.top);
         return;
       }
       // Same pan math as onMove: offset moves by the raw finger delta.
@@ -845,13 +957,31 @@
     if (touches.length === 2) {
       ev.preventDefault();
       var gap = fingerGap(touches[0], touches[1]);
-      if (pinchGap > 0 && gap > 0) {
+      var midX = (touches[0].clientX + touches[1].clientX) / 2;
+      var midY = (touches[0].clientY + touches[1].clientY) / 2;
+      // BRAINMAP-3D-CONTROLS: decide pinch vs pan ONCE, then latch.
+      // Separating fingers changes the GAP; sliding them together moves the
+      // MIDPOINT. Whichever exceeds TWO_DECIDE_PX first wins the gesture and
+      // holds it until a finger lifts — an ambiguous move resolves to one
+      // reading instead of half-zooming and half-panning.
+      if (twoMode === null) {
+        var dGap = Math.abs(gap - twoStartGap);
+        var dMid = Math.abs(midX - twoStartMidX) + Math.abs(midY - twoStartMidY);
+        if (Math.max(dGap, dMid) > TWO_DECIDE_PX) {
+          twoMode = (dGap > dMid) ? "pinch" : "pan";
+        }
+      }
+      if (twoMode === "pan") {
+        // Both modes pan identically — this is view translation, which 3D
+        // needs as much as 2D.
+        view.offsetX = startOffsetX + (midX - twoStartMidX);
+        view.offsetY = startOffsetY + (midY - twoStartMidY);
+        hoverNode = null;
+        tooltip.style.display = "none";
+        draw();
+      } else if (twoMode === "pinch" && pinchGap > 0 && gap > 0) {
         var rect = canvas.getBoundingClientRect();
-        zoomAt(
-          (touches[0].clientX + touches[1].clientX) / 2 - rect.left,
-          (touches[0].clientY + touches[1].clientY) / 2 - rect.top,
-          gap / pinchGap
-        );
+        zoomAt(midX - rect.left, midY - rect.top, gap / pinchGap);
       }
       pinchGap = gap;
       touchMoved = true;
@@ -864,13 +994,28 @@
     // moved past the threshold) is left alone, so its synthesized click reaches
     // onClick and node navigation keeps working on touch.
     if (touchMoved) ev.preventDefault();
+    // BRAINMAP-3D-CONTROLS: the finger count changed, so the two-finger
+    // latch is void — the next two-finger gesture decides afresh.
+    twoMode = null;
     if (ev.touches.length === 1) {
-      // A finger lifted out of a pinch — re-anchor the pan on the survivor so the
+      // A finger lifted out of a pinch/pan — re-anchor on the survivor so the
       // view doesn't jump by the old finger's offset.
       seatTouchPan(ev.touches[0]);
+      if (mode3d && has3d) {
+        // Re-seat the arcball on the surviving finger too, so a two-to-one
+        // transition rotates from where that finger IS, without a jump.
+        var r1 = canvas.getBoundingClientRect();
+        arcStart = sphereVec(ev.touches[0].clientX - r1.left,
+                             ev.touches[0].clientY - r1.top);
+        rotAtPress = rotM.slice();
+      }
     } else if (ev.touches.length === 0) {
       touchPanId = null;
       pinchGap = 0;
+      if (arcStart) {
+        rotM = _mat3Orthonormalize(rotM);
+        arcStart = null; rotAtPress = null;
+      }
     }
   }
 
@@ -879,7 +1024,8 @@
     view.scale = 1; view.offsetX = 0; view.offsetY = 0;
     // BRAINMAP-3D-VIEW: reset restores the initial tilt too (and is a
     // no-op for rotation in 2D). layout() is cheap and mode-aware.
-    rot.yaw = ROT0.yaw; rot.pitch = ROT0.pitch;
+    rotM = ROT0_M.slice();
+    arcStart = null; rotAtPress = null; twoMode = null;
     if (mode3d && has3d) layout();
     // BRAINMAP-FOCUS: 리셋 / dblclick release focus too — focus is a view
     // state, so "back to the whole map" must mean it.
@@ -918,7 +1064,8 @@
       // animation: the two layouts are different solutions, and morphing
       // between them would imply a correspondence that does not exist.
       mode3d = !mode3d;
-      rot.yaw = ROT0.yaw; rot.pitch = ROT0.pitch;
+      rotM = ROT0_M.slice();
+      arcStart = null; rotAtPress = null; twoMode = null;
       view.scale = 1; view.offsetX = 0; view.offsetY = 0;
       hoverNode = null;
       tooltip.style.display = "none";
@@ -1186,7 +1333,8 @@
     var el = document.getElementById("modeHint");
     if (!el) return;
     if (mode3d) {
-      el.textContent = "회전: 드래그 · 이동: Shift+드래그 · 확대: 휠/두 손가락";
+      el.textContent = "회전: 드래그 · 이동: 오른쪽 드래그/Shift+드래그, "
+        + "두 손가락으로 밀기 · 확대: 휠/두 손가락 벌리기";
       el.style.display = "";
     } else {
       el.style.display = "none";
@@ -1263,6 +1411,11 @@
     canvas.addEventListener("click", onClick);
     canvas.addEventListener("wheel", onWheel, { passive: false });
     canvas.addEventListener("dblclick", resetView);
+    // BRAINMAP-3D-CONTROLS: right-drag pans, so the context menu must not
+    // interrupt it. Bound on the CANVAS ELEMENT ONLY (not document/window),
+    // so right-click keeps working normally everywhere else on the page —
+    // header, legend chips, links, the tooltip.
+    canvas.addEventListener("contextmenu", function (ev) { ev.preventDefault(); });
     // MOBILE-POLISH H: touch pan/pinch. passive:false — every one of these calls
     // preventDefault on a real gesture, which a passive listener may not do.
     canvas.addEventListener("touchstart", onTouchStart, { passive: false });
