@@ -307,6 +307,19 @@
   // at any zoom, and the hover hit test uses a constant screen-px radius.
   var view = { scale: 1, offsetX: 0, offsetY: 0 };
 
+  // BRAINMAP-3D-VIEW: DISPOSABLE comparison mode (decision by 8/1; if 3D
+  // loses it is deleted). Default is ALWAYS 2D — mode3d flips only via the
+  // legend chip. The 3D pass projects the builder's x3/y3/z3 with an
+  // ORTHOGRAPHIC camera (no perspective scaling: size = outlet count; no
+  // depth fade: opacity encodes nothing). z is layout, never a variable.
+  var mode3d = false;
+  var has3d = false;          // payload carries x3/y3/z3 (older rows do not)
+  var ROT0 = { yaw: -0.30, pitch: 0.22 };  // gentle initial tilt
+  var rot = { yaw: ROT0.yaw, pitch: ROT0.pitch };
+  var drawOrder = null;       // far-to-near node order (3D only; null in 2D)
+  var dragRotating = false;   // current drag is a rotation (3D, no Shift)
+  var lastDragX = 0, lastDragY = 0;
+
   // BRAINMAP-DEPTH-STYLE: rendering constants. Coordinates NEVER move; only
   // how a node is painted changes. Everything here is IDENTICAL for every
   // node, so none of it encodes anything.
@@ -446,6 +459,14 @@
     // BRAINMAP-FOCUS: one-shot arm for touch (no modifier key on a phone).
     html += '<button type="button" class="key" data-filter="focus-arm">' +
             '집중 모드: 다음 탭한 묶음만</button>';
+    // BRAINMAP-3D-VIEW: opt-in comparison mode. "보기" reuses the legend's
+    // own vocabulary (전체 보기); the chip appears only when the payload
+    // carries 3D coordinates. Default is ALWAYS the 2D map.
+    if (has3d) {
+      html += '<button type="button" class="key" data-filter="mode3d">' +
+              '입체 보기</button>' +
+              '<span id="modeHint" class="search-count" style="display:none"></span>';
+    }
     document.getElementById("legend").innerHTML = html;
   }
 
@@ -457,12 +478,43 @@
     canvas.height = Math.round(h * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    positions = graph.nodes.map(function (n) {
-      return {
-        px: PAD + n.x * (w - PAD * 2),
-        py: PAD + n.y * (h - PAD * 2)
-      };
-    });
+    if (mode3d && has3d) {
+      // BRAINMAP-3D-VIEW: rotate the x3/y3/z3 cube about its centre (yaw
+      // around the vertical axis, then pitch), project orthographically,
+      // and fit with a FIXED scale so rotation never rescales the cloud.
+      // `positions` stays the single world layer — every consumer (draw,
+      // hit-test, hover, centring, labels) reads projected coordinates and
+      // works unchanged. Depth exists ONLY as paint order (far-to-near).
+      var cy = Math.cos(rot.yaw), sy = Math.sin(rot.yaw);
+      var cp = Math.cos(rot.pitch), sp = Math.sin(rot.pitch);
+      // Fixed fit: a unit cube's rotated extent never exceeds sqrt(3)/2
+      // from centre; 1.28 ~= a snug constant frame at every angle.
+      var s3 = Math.min(w, h - PAD) / 1.28;
+      var cxs = w / 2, cys = h / 2;
+      var depth = new Array(graph.nodes.length);
+      positions = graph.nodes.map(function (n, i) {
+        var vx = n.x3 - 0.5, vy = n.y3 - 0.5, vz = n.z3 - 0.5;
+        var rx = vx * cy + vz * sy;
+        var tz = -vx * sy + vz * cy;
+        var ry = vy * cp - tz * sp;
+        var rz = vy * sp + tz * cp;
+        depth[i] = rz;
+        return { px: cxs + rx * s3, py: cys + ry * s3 };
+      });
+      // Far-to-near paint order: nearer nodes occlude farther ones — the
+      // one honest depth cue besides motion parallax. Recomputed only when
+      // rotation/layout changes, not on pan/zoom frames.
+      drawOrder = depth.map(function (d, i) { return i; });
+      drawOrder.sort(function (a, b) { return depth[a] - depth[b]; });
+    } else {
+      drawOrder = null;
+      positions = graph.nodes.map(function (n) {
+        return {
+          px: PAD + n.x * (w - PAD * 2),
+          py: PAD + n.y * (h - PAD * 2)
+        };
+      });
+    }
 
     // Top-N cluster label placements at each cluster's centroid.
     var byCluster = {};
@@ -547,16 +599,21 @@
     // disc) STAMPED at its unchanged coordinate — one drawImage per node
     // instead of one path-fill per node. Alphas are the pre-existing
     // interaction/visual states, byte-identical to before.
-    graph.nodes.forEach(function (n, i) {
-      if (filtering && !isActive(n)) return;
+    // BRAINMAP-3D-VIEW: in 3D the pass runs FAR-TO-NEAR (drawOrder) so
+    // nearer nodes occlude farther ones — geometry, not a filter; every
+    // node is still stamped. In 2D drawOrder is null and order is natural.
+    for (var oi = 0; oi < graph.nodes.length; oi++) {
+      var ni = drawOrder ? drawOrder[oi] : oi;
+      var n = graph.nodes[ni];
+      if (filtering && !isActive(n)) continue;
       var clustered = n.cluster_id !== null && n.cluster_id !== undefined;
       var r = clustered ? R_CLUSTERED : R_UNCLUSTERED;
       var isMarket = n.content_nature === "market_commercial";
       var s = spriteFor(colorFor(n.domain), r, isMarket);
       ctx.globalAlpha = isMarket ? 0.75 : (clustered ? 0.95 : 0.6);
-      ctx.drawImage(s.c, toScreenX(wx(i)) - s.half, toScreenY(wy(i)) - s.half,
+      ctx.drawImage(s.c, toScreenX(wx(ni)) - s.half, toScreenY(wy(ni)) - s.half,
                     s.size, s.size);
-    });
+    }
     ctx.globalAlpha = 1;
 
     // Hover glow + ring — marks the POINTER only, never a data value, and is
@@ -634,14 +691,21 @@
     var rect = canvas.getBoundingClientRect();
     var mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
     if (isDragging) {
-      // Pan: move the offset by the raw mouse delta; track distance so a
-      // genuine click (below threshold) still navigates to the card.
       var ddx = ev.clientX - dragStartX, ddy = ev.clientY - dragStartY;
       dragDist = Math.max(dragDist, Math.abs(ddx) + Math.abs(ddy));
-      view.offsetX = startOffsetX + ddx;
-      view.offsetY = startOffsetY + ddy;
       hoverNode = null;
       tooltip.style.display = "none";
+      if (dragRotating) {
+        // BRAINMAP-3D-VIEW: plain drag ROTATES in 3D (Shift+drag pans).
+        // Incremental deltas; pitch clamped so the cloud cannot flip.
+        applyRotate(ev.clientX - lastDragX, ev.clientY - lastDragY);
+        lastDragX = ev.clientX; lastDragY = ev.clientY;
+        return;
+      }
+      // Pan: move the offset by the raw mouse delta; track distance so a
+      // genuine click (below threshold) still navigates to the card.
+      view.offsetX = startOffsetX + ddx;
+      view.offsetY = startOffsetY + ddy;
       draw();
       return;
     }
@@ -665,6 +729,11 @@
   function onDown(ev) {
     skipIntro(); cancelCamera();
     isDragging = true;
+    // BRAINMAP-3D-VIEW: in 3D a plain drag rotates; Shift+drag pans (the
+    // Shift+CLICK focus gesture is untouched — it fires only under the
+    // existing CLICK_MOVE_THRESHOLD, exactly as in 2D).
+    dragRotating = (mode3d && has3d && !ev.shiftKey);
+    lastDragX = ev.clientX; lastDragY = ev.clientY;
     dragStartX = ev.clientX; dragStartY = ev.clientY;
     startOffsetX = view.offsetX; startOffsetY = view.offsetY;
     dragDist = 0;
@@ -672,7 +741,17 @@
   }
 
   function onUp() {
-    if (isDragging) { isDragging = false; canvas.style.cursor = "grab"; }
+    if (isDragging) { isDragging = false; dragRotating = false; canvas.style.cursor = "grab"; }
+  }
+
+  // BRAINMAP-3D-VIEW: shared rotate step (mouse + touch). Rotation is the
+  // reader's camera, never data; relayout recomputes projection + paint
+  // order (the depth sort runs only on these frames, not on pan/zoom).
+  function applyRotate(dx, dy) {
+    rot.yaw += dx * 0.006;
+    rot.pitch = Math.max(-1.35, Math.min(1.35, rot.pitch + dy * 0.006));
+    layout();
+    draw();
   }
 
   // Zoom by `factor`, anchored so the world point under the screen point (mx,my)
@@ -745,13 +824,21 @@
     if (touches.length === 1 && touchPanId !== null
         && touches[0].identifier === touchPanId) {
       ev.preventDefault();
-      // Same pan math as onMove: offset moves by the raw finger delta.
       var ddx = touches[0].clientX - dragStartX, ddy = touches[0].clientY - dragStartY;
       if (Math.abs(ddx) + Math.abs(ddy) > CLICK_MOVE_THRESHOLD) touchMoved = true;
-      view.offsetX = startOffsetX + ddx;
-      view.offsetY = startOffsetY + ddy;
       hoverNode = null;
       tooltip.style.display = "none";
+      if (mode3d && has3d) {
+        // BRAINMAP-3D-VIEW: one finger ROTATES in 3D. Stated plainly: touch
+        // then has NO pan gesture (two fingers are pinch-zoom) — a real
+        // limitation of 3D on a phone, reported rather than worked around.
+        applyRotate(touches[0].clientX - dragStartX, touches[0].clientY - dragStartY);
+        dragStartX = touches[0].clientX; dragStartY = touches[0].clientY;
+        return;
+      }
+      // Same pan math as onMove: offset moves by the raw finger delta.
+      view.offsetX = startOffsetX + ddx;
+      view.offsetY = startOffsetY + ddy;
       draw();
       return;
     }
@@ -790,6 +877,10 @@
   function resetView() {
     skipIntro(); cancelCamera();
     view.scale = 1; view.offsetX = 0; view.offsetY = 0;
+    // BRAINMAP-3D-VIEW: reset restores the initial tilt too (and is a
+    // no-op for rotation in 2D). layout() is cheap and mode-aware.
+    rot.yaw = ROT0.yaw; rot.pitch = ROT0.pitch;
+    if (mode3d && has3d) layout();
     // BRAINMAP-FOCUS: 리셋 / dblclick release focus too — focus is a view
     // state, so "back to the whole map" must mean it.
     clearFocus(false);
@@ -817,6 +908,24 @@
     if (kind === "focus-arm") {
       focusArmed = !focusArmed;
       updateLegendActive(); updateFocusChip();
+      return;
+    }
+    if (kind === "mode3d") {
+      // BRAINMAP-3D-VIEW: mode switch. Filters, focus, and search all carry
+      // over (they are coordinate-independent); only the camera resets —
+      // rotation to the initial tilt, pan/zoom to default — so the reader
+      // lands on a clean, whole view of the other layout. No transition
+      // animation: the two layouts are different solutions, and morphing
+      // between them would imply a correspondence that does not exist.
+      mode3d = !mode3d;
+      rot.yaw = ROT0.yaw; rot.pitch = ROT0.pitch;
+      view.scale = 1; view.offsetX = 0; view.offsetY = 0;
+      hoverNode = null;
+      tooltip.style.display = "none";
+      updateLegendActive();
+      updateModeHint();
+      layout();
+      draw();
       return;
     }
     var next = null;
@@ -850,6 +959,7 @@
       var k = keys[i], kind = k.getAttribute("data-filter"), on = false;
       if (kind === "nature-hide") on = hideMarket;
       else if (kind === "focus-arm") on = focusArmed;
+      else if (kind === "mode3d") on = mode3d;
       else if (!activeFilter) on = (kind === "all");
       else if (activeFilter.type === "market") on = (kind === "market");
       else on = (kind === "domain" && k.getAttribute("data-domain") === activeFilter.value);
@@ -1070,6 +1180,19 @@
     focusNoteTimer = setTimeout(function () { updateFocusChip(); }, 3200);
   }
 
+  // BRAINMAP-3D-VIEW: gesture hint while 3D is on — rotation replaced the
+  // plain drag, so say where pan went. Pure chrome, encodes nothing.
+  function updateModeHint() {
+    var el = document.getElementById("modeHint");
+    if (!el) return;
+    if (mode3d) {
+      el.textContent = "회전: 드래그 · 이동: Shift+드래그 · 확대: 휠/두 손가락";
+      el.style.display = "";
+    } else {
+      el.style.display = "none";
+    }
+  }
+
   function updateFocusChip() {
     var el = document.getElementById("focusChip");
     if (!el) return;
@@ -1101,6 +1224,12 @@
     }
     graph = data;
     graph.nodes.forEach(function (n, i) { n._i = i; nodeById[n.id] = n; });
+    // BRAINMAP-3D-VIEW: the comparison mode exists only when the builder
+    // emitted 3D coordinates; older payloads simply never show the chip.
+    has3d = graph.nodes.length > 0 && graph.nodes.every(function (n) {
+      return typeof n.x3 === "number" && typeof n.y3 === "number"
+        && typeof n.z3 === "number";
+    });
     (graph.clusters || []).forEach(function (c) { clusterById[c.cluster_id] = c; });
     // BRAINMAP-FEATURES: has-an-edge index (drives the 연결됨 count + stats).
     graph.edges.forEach(function (e) {
