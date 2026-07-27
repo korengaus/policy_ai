@@ -269,6 +269,59 @@ def _sgd_layout_2d(X, Xn, edge_i, edge_j, init=None):
     return out
 
 
+def _sgd_layout_3d(X, Xn, edge_i, edge_j, init=None):
+    """LAYOUT-3D: the SAME stress layout re-optimised in three dimensions
+    (probe: edge fidelity +0.91 vs +0.82 in 2D). DELIBERATELY a separate
+    near-copy of _sgd_layout_2d rather than a dim parameter: the 2D pass
+    must stay byte-identical to what the live map renders, so it is not
+    touched at all. Disposable comparison — if 3D loses on a real screen,
+    this function and its emitted fields simply go away.
+    Same objective, same seed discipline, same [0,1] contract per axis.
+    """
+    import numpy as np
+
+    n = int(Xn.shape[0])
+    if n == 0:
+        return np.zeros((0, 3))
+    if n == 1:
+        return np.full((1, 3), 0.5)
+    if init is not None:
+        P = np.asarray(init, dtype=np.float64).copy()
+    else:
+        cen = np.asarray(X, dtype=np.float64)
+        cen = cen - cen.mean(axis=0, keepdims=True)
+        _, _, vt = np.linalg.svd(cen, full_matrices=False)
+        P = cen @ vt[:3].T
+        P *= (1.2 / max(1e-9, float(np.abs(P).max())))
+    rng = np.random.default_rng(LAYOUT_SGD_SEED)
+    ei = np.asarray(edge_i, dtype=np.int64)
+    ej = np.asarray(edge_j, dtype=np.int64)
+    for ep in range(LAYOUT_SGD_EPOCHS):
+        eta = 0.1 * (1.0 - ep / LAYOUT_SGD_EPOCHS) + 0.002
+        bi = rng.integers(0, n, LAYOUT_SGD_BATCH)
+        bj = rng.integers(0, n, LAYOUT_SGD_BATCH)
+        m = bi != bj
+        bi = np.concatenate([bi[m], ei])
+        bj = np.concatenate([bj[m], ej])
+        if not len(bi):
+            continue
+        tgt = np.arccos(np.clip(
+            np.einsum("ij,ij->i", Xn[bi], Xn[bj]), -1.0, 1.0)).astype(np.float64)
+        d = P[bi] - P[bj]
+        dist = np.maximum(np.linalg.norm(d, axis=1), 1e-9)
+        w = np.minimum(1.0 / np.maximum(tgt, 0.15) ** 2, 40.0)
+        step = (eta * np.clip(w * (dist - tgt), -4.0, 4.0) / dist)[:, None] * d * 0.5
+        np.add.at(P, bi, -step)
+        np.add.at(P, bj, step)
+    lo, hi = P.min(axis=0), P.max(axis=0)
+    span = hi - lo
+    out = np.full_like(P, 0.5)
+    for axis in range(3):
+        if span[axis] > 0:
+            out[:, axis] = (P[:, axis] - lo[axis]) / span[axis]
+    return out
+
+
 # LAYOUT-ANCHOR: working-frame span for the anchored init. Targets are
 # angular distances (~1.4 rad for a typical pair), so the previous build's
 # [0,1] coordinates are re-centred and scaled to this span before the SGD
@@ -324,6 +377,61 @@ def _anchored_init(X, ids, prev_coords):
         cen = cen - cen.mean(axis=0, keepdims=True)
         _, _, vt = np.linalg.svd(cen, full_matrices=False)
         pca = cen @ vt[:2].T
+        a = P[known_mask]
+        b = pca[known_mask]
+        am = a - a.mean(axis=0)
+        bm = b - b.mean(axis=0)
+        u, s, vvt = np.linalg.svd(bm.T @ am)
+        rot = u @ vvt
+        scale = s.sum() / max(1e-12, float((bm ** 2).sum()))
+        P[~known_mask] = a.mean(axis=0) + ((pca[~known_mask] - b.mean(axis=0)) * scale) @ rot
+    return P, n_known, n - n_known
+
+
+def _prev_coords3_from_graph(prev_graph):
+    """LAYOUT-3D: {node_id: (x3, y3, z3)} from a previous build, keeping only
+    well-formed finite triples in [0,1]. Empty on anything odd — including a
+    PCA-era or 2D-only previous graph that has no 3D fields at all, which is
+    exactly the FIRST anchored 3D run: it finds no anchor and lays out fresh."""
+    out = {}
+    try:
+        for node in (prev_graph or {}).get("nodes") or []:
+            nid = node.get("id")
+            triple = (node.get("x3"), node.get("y3"), node.get("z3"))
+            if nid is None:
+                continue
+            if not all(isinstance(v, (int, float)) for v in triple):
+                continue
+            if not all(0.0 <= float(v) <= 1.0 for v in triple):
+                continue
+            out[nid] = tuple(float(v) for v in triple)
+    except Exception:
+        return {}
+    return out
+
+
+def _anchored_init_3d(X, ids, prev_coords3):
+    """LAYOUT-3D: anchored start for the 3D pass — the exact 2D recipe one
+    dimension up. Known nodes at their previous [0,1] triple rescaled to the
+    working frame; new nodes at their 3-component PCA position mapped in by
+    similarity Procrustes on the known nodes. None -> caller falls back to
+    the fresh PCA init. Deterministic (no randomness)."""
+    import numpy as np
+
+    n = len(ids)
+    known_mask = np.array([rid in prev_coords3 for rid in ids], dtype=bool)
+    n_known = int(known_mask.sum())
+    if n_known < 2:
+        return None, n_known, n - n_known
+    P = np.zeros((n, 3), dtype=np.float64)
+    prev = np.array([prev_coords3[rid] for rid, k in zip(ids, known_mask) if k],
+                    dtype=np.float64)
+    P[known_mask] = (prev - 0.5) * LAYOUT_ANCHOR_SPAN
+    if (~known_mask).any():
+        cen = np.asarray(X, dtype=np.float64)
+        cen = cen - cen.mean(axis=0, keepdims=True)
+        _, _, vt = np.linalg.svd(cen, full_matrices=False)
+        pca = cen @ vt[:3].T
         a = P[known_mask]
         b = pca[known_mask]
         am = a - a.mean(axis=0)
@@ -511,12 +619,33 @@ def build_graph(ids, titles, domains, content_natures, X,
                 print("[brainmap] layout: anchored to previous build "
                       "(known=%d new=%d)" % (n_known, n_new))
     edge_keys = sorted(edge_set)
-    coords = _sgd_layout_2d(
-        X, Xn,
-        [i for (i, _) in edge_keys],
-        [j for (_, j) in edge_keys],
-        init=init,
-    )
+    edge_is = [i for (i, _) in edge_keys]
+    edge_js = [j for (_, j) in edge_keys]
+    coords = _sgd_layout_2d(X, Xn, edge_is, edge_js, init=init)
+    # LAYOUT-3D — a SECOND, independent pass in three dimensions (additive
+    # x3/y3/z3 fields; the x/y above are produced by the untouched 2D pass
+    # and stay byte-identical). Same anchoring contract: previous build's 3D
+    # coords when they exist, fresh otherwise — a PCA-era or 2D-only prev
+    # graph has none, so the FIRST 3D run is always fresh, and says so.
+    init3 = None
+    if fresh_layout:
+        print("[brainmap] layout-3d: FRESH (--fresh-layout) — anchor ignored")
+    elif prev_graph is None:
+        print("[brainmap] layout-3d: fresh (no previous graph to anchor to)")
+    else:
+        prev_coords3 = _prev_coords3_from_graph(prev_graph)
+        if not prev_coords3:
+            print("[brainmap] layout-3d: fresh (previous graph carries no "
+                  "usable 3D coordinates)")
+        else:
+            init3, k3, w3 = _anchored_init_3d(X, ids, prev_coords3)
+            if init3 is None:
+                print("[brainmap] layout-3d: fresh (previous graph shares <2 "
+                      "nodes with this corpus)")
+            else:
+                print("[brainmap] layout-3d: anchored to previous build "
+                      "(known=%d new=%d)" % (k3, w3))
+    coords3 = _sgd_layout_3d(X, Xn, edge_is, edge_js, init=init3)
     nodes = []
     for i in range(n):
         nodes.append({
@@ -525,6 +654,11 @@ def build_graph(ids, titles, domains, content_natures, X,
             "cluster_id": cluster_of.get(i),
             "x": round(float(coords[i, 0]), 4),
             "y": round(float(coords[i, 1]), 4),
+            # LAYOUT-3D comparison coords — additive; no consumer reads them
+            # yet, and dropping them later breaks nothing.
+            "x3": round(float(coords3[i, 0]), 4),
+            "y3": round(float(coords3[i, 1]), 4),
+            "z3": round(float(coords3[i, 2]), 4),
             "domain": domains[i],
             "content_nature": content_natures[i],
         })
