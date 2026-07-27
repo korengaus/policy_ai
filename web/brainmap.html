@@ -314,7 +314,7 @@
   var R_UNCLUSTERED = 1.9;  // was 2.1 —   irradiation (hue mapping untouched)
   var RING_W = 1.25;        // separation ring in the page background colour
   var BG_COLOR = "#0b1220"; // must equal --canvas
-  var spriteCache = {};     // (color|radius|hollow|dpr) -> prerendered bead
+  var spriteCache = {};     // (color|radius|hollow|dpr) -> prerendered sprite
 
   // BRAINMAP-ATMOSPHERE: presentation state only — none of it encodes data.
   var ARC_K = 0.12;    // edge arc height = 12% of chord length, EVERY edge
@@ -336,20 +336,10 @@
     return DOMAIN_COLORS[domain] || FALLBACK_COLOR;
   }
 
-  // BRAINMAP-DEPTH-STYLE: prerendered node sprites — a bead with ONE light
-  // direction (up-left), ONE highlight position, ONE shading ramp, wrapped in
-  // a background-colour separation ring. All four are the same constants for
-  // every node, so the treatment encodes NOTHING; hue still = domain, radius
-  // still what it was (clustered vs not), position untouched. Prerendering
-  // ~28 tiny canvases once beats 13,847 gradients per frame.
-  function _mixChannel(hex, i, target, k) {
-    return Math.round(parseInt(hex.slice(i, i + 2), 16) * (1 - k) + target * k);
-  }
-  function _mix(hex, target, k) {
-    return "rgb(" + _mixChannel(hex, 1, target, k) + "," +
-      _mixChannel(hex, 3, target, k) + "," + _mixChannel(hex, 5, target, k) + ")";
-  }
-
+  // BRAINMAP-DEPTH-STYLE (bead reverted): prerendered node sprites — a flat
+  // domain-colour disc wrapped in a background-colour separation ring, the
+  // same treatment for every node, so it encodes NOTHING; hue still = domain,
+  // position untouched. One stamp per node beats two path-fills per node.
   function spriteFor(color, r, hollow) {
     var dpr = window.devicePixelRatio || 1;
     var key = color + "|" + r + "|" + (hollow ? 1 : 0) + "|" + dpr;
@@ -378,17 +368,13 @@
       g.strokeStyle = color;
       g.stroke();
     } else {
-      // The bead: highlight offset 0.35r up-left of centre, base hue at the
-      // 55% stop, edge darkened 28% — same ramp for every domain colour, so
-      // a large and a small node of one domain read as the same colour.
-      var grad = g.createRadialGradient(
-        cx - r * 0.35, cy - r * 0.35, r * 0.1, cx, cy, r);
-      grad.addColorStop(0, _mix(color, 255, 0.45));
-      grad.addColorStop(0.55, color);
-      grad.addColorStop(1, _mix(color, 0, 0.28));
+      // BEAD-REVERT: flat disc. The shaded bead read as a donut at these
+      // radii on a real screen, so the gradient is gone; the sprite path
+      // stays because ring+disc as ONE stamp is both the simpler draw loop
+      // and half the per-frame path work of drawing the pair directly.
       g.beginPath();
       g.arc(cx, cy, r, 0, Math.PI * 2);
-      g.fillStyle = grad;
+      g.fillStyle = color;
       g.fill();
     }
     hit = { c: c, size: size, half: size / 2 };
@@ -559,9 +545,9 @@
 
     // Nodes on top. Clustered nodes slightly larger; market_commercial hollow.
     // Radii are constant screen px (positions transform, sizes do not).
-    // BRAINMAP-DEPTH-STYLE: each node is a prerendered bead sprite (ring +
-    // shaded disc) STAMPED at its unchanged coordinate — one drawImage per
-    // node instead of one path-fill per node. Alphas are the pre-existing
+    // BRAINMAP-DEPTH-STYLE: each node is a prerendered sprite (ring + flat
+    // disc) STAMPED at its unchanged coordinate — one drawImage per node
+    // instead of one path-fill per node. Alphas are the pre-existing
     // interaction/visual states, byte-identical to before.
     graph.nodes.forEach(function (n, i) {
       if (filtering && !isActive(n)) return;
