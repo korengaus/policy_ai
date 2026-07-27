@@ -35,16 +35,22 @@
   /* BRAINMAP-COHESION: tokens mirrored from the main site's design system
      (frontend/styles/main.css :root) so this standalone page reads as tickedin.
      Values copied, not linked — the page stays self-contained (no CDN). */
+  /* BRAINMAP-ATMOSPHERE: this page moves to a dark canvas so the domain
+     colours read as points of light. Tokens are PAGE-LOCAL (copied, never
+     linked) — the home page keeps its light, restrained treatment untouched.
+     Encodings are unchanged: x/y = embedding location, size = outlet count,
+     colour = domain. Only the atmosphere changes. */
   :root {
-    --ink: #0f172a;          /* headings / strong text */
-    --slate: #475569;        /* body text */
-    --muted: #94a3b8;        /* captions / secondary */
-    --line: #e2e8f0;         /* borders */
-    --paper: #ffffff;        /* card surface */
-    --canvas: #f6f8fb;       /* page background */
-    --brand: #1e5fd8;        /* tickedin blue */
-    --brand-ink: #1542a0;    /* darker blue: hover / links */
-    --shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+    color-scheme: dark;      /* native form controls (select) match the page */
+    --ink: #e8eef9;          /* headings / strong text */
+    --slate: #b6c2d6;        /* body text */
+    --muted: #8ea0ba;        /* captions / secondary */
+    --line: #24334e;         /* borders */
+    --paper: #101a2e;        /* header / card surface */
+    --canvas: #0b1220;       /* page background — the night canvas */
+    --brand: #4d86e8;        /* tickedin blue, lifted for dark */
+    --brand-ink: #9ec1ff;    /* light blue: hover / links / active text */
+    --shadow: 0 8px 24px rgba(2, 6, 16, 0.55);
     --radius-sm: 9px;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -97,7 +103,7 @@
   /* BRAINMAP-FOCUS: the focus chip is the 리셋 button's chrome with the brand
      accent, so an active focus is visible without inventing a new control
      language. Not a data encoding — a UI state. */
-  .map-focus { border-color: var(--brand); color: var(--brand-ink); background: #eef4ff; }
+  .map-focus { border-color: var(--brand); color: var(--brand-ink); background: #142642; }
   .map-focus[disabled] { border-color: var(--line); color: var(--slate); background: var(--paper); cursor: default; }
   /* BRAINMAP-FEATURES: search input + spread dropdown share the 리셋 button's
      calm chrome (site tokens). The count is a muted live annotation. */
@@ -140,15 +146,15 @@
     padding: 3px 10px; cursor: pointer; line-height: 1.15;
     transition: background .12s, border-color .12s, color .12s;
   }
-  .legend .key:hover { background: var(--paper); border-color: var(--line); color: var(--ink); }
+  .legend .key:hover { background: #17233a; border-color: var(--line); color: var(--ink); }
   .legend .key:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
   .legend .key.active {
-    background: #eef4ff; border-color: var(--brand); color: var(--brand-ink); font-weight: 700;
+    background: #142642; border-color: var(--brand); color: var(--brand-ink); font-weight: 700;
   }
   .legend .dot {
     width: 10px; height: 10px; border-radius: 50%; display: inline-block;
   }
-  .legend .dot.hollow { background: transparent !important; border: 2px solid #98a2b3; }
+  .legend .dot.hollow { background: transparent !important; border: 2px solid #8b9cb6; }
   main.map-body { position: relative; flex: 1 1 auto; min-height: 0; }
   /* MOBILE-POLISH H: touch-action:none is what lets the touch handlers below see a
      coherent gesture — the default (auto) hands one-finger drags and pinches to the
@@ -219,21 +225,24 @@
 (function () {
   "use strict";
 
-  // Fixed categorical palette per domain (calm, readable on the light bg).
+  // Fixed categorical palette per domain. BRAINMAP-ATMOSPHERE: the same HUE
+  // per domain as the original light-bg palette, lifted in lightness so the
+  // points read as lights on the dark canvas. The ENCODING (domain -> hue
+  // family) is unchanged — only luminance moved with the background.
   var DOMAIN_COLORS = {
-    "finance":      "#2b6cb0",
-    "welfare":      "#b7791f",
-    "agriculture":  "#2f855a",
-    "labor":        "#975a16",
-    "health":       "#c53030",
-    "environment":  "#2c7a7b",
-    "SMB":          "#6b46c1",
-    "realestate":   "#b83280",
-    "statistics":   "#4a5568",
-    "education":    "#4c51bf",
-    "scitech":      "#0e7490",
-    "trade":        "#9d174d",
-    "기타-미분류":   "#98a2b3"
+    "finance":      "#5aa2e8",
+    "welfare":      "#e0a84a",
+    "agriculture":  "#55c088",
+    "labor":        "#cf8a3d",
+    "health":       "#ef6a6a",
+    "environment":  "#4fc0c2",
+    "SMB":          "#a789ec",
+    "realestate":   "#e86ab4",
+    "statistics":   "#93a3ba",
+    "education":    "#8b90ef",
+    "scitech":      "#38b6d8",
+    "trade":        "#e0578f",
+    "기타-미분류":   "#8b97a8"
   };
   var DOMAIN_KO = {
     "finance": "금융", "welfare": "복지", "agriculture": "농어업",
@@ -297,6 +306,15 @@
   // node radii, line widths, and label fonts stay constant in SCREEN pixels
   // at any zoom, and the hover hit test uses a constant screen-px radius.
   var view = { scale: 1, offsetX: 0, offsetY: 0 };
+
+  // BRAINMAP-ATMOSPHERE: presentation state only — none of it encodes data.
+  var ARC_K = 0.12;    // edge arc height = 12% of chord length, EVERY edge
+  var INTRO_MS = 1800; // entry settle duration
+  var CAM_MS = 450;    // eased-camera duration (search centring)
+  var reducedMotion = false;
+  try { reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) {}
+  var intro = { active: false, ease: 0, raf: 0, done: false };
+  var camAnim = null;  // in-flight camera glide, or null
   var MIN_SCALE = 0.3, MAX_SCALE = 8;
   var isDragging = false, dragStartX = 0, dragStartY = 0,
       startOffsetX = 0, startOffsetY = 0, dragDist = 0;
@@ -412,36 +430,59 @@
     var h = canvas.height / (window.devicePixelRatio || 1);
     ctx.clearRect(0, 0, w, h);
 
+    // BRAINMAP-ATMOSPHERE: during the entry animation nodes travel from the
+    // canvas centre to their TRUE precomputed coordinates (kIntro: 0 -> 1).
+    // Presentation only — kIntro ends at exactly 1, so every node lands on
+    // its server-computed x/y. Never a different layout.
+    var kIntro = intro.active ? intro.ease : 1;
+    var icx = w / 2, icy = h / 2;
+    function wx(i) { var p = positions[i]; return kIntro === 1 ? p.px : icx + (p.px - icx) * kIntro; }
+    function wy(i) { var p = positions[i]; return kIntro === 1 ? p.py : icy + (p.py - icy) * kIntro; }
+
     // BRAINMAP-FILTER: when a domain is isolated, draw only edges whose BOTH
     // endpoints are in the active set (cross-domain edges are hidden).
     // BRAINMAP-FEATURES: "filtering" now covers domain OR search OR spread.
     var filtering = anyFilterActive();
 
-    // Edges first — thin, low-alpha. (Line width stays constant in screen px.)
+    // Edges — symmetric arcs bowing above the chord. HONESTY: ONE rule for
+    // every edge (control point = chord midpoint + upward perpendicular x
+    // ARC_K of chord length). Its only inputs are the two endpoint positions
+    // already on screen: height never varies with similarity, spread, or
+    // recency, and the curve is identical under endpoint exchange — no
+    // direction is implied. Control point rides the same affine view
+    // transform as the endpoints, so the shape is stable under pan/zoom.
     ctx.lineWidth = 0.7;
-    ctx.strokeStyle = "rgba(90, 101, 119, 0.16)";
+    ctx.strokeStyle = "rgba(148, 170, 205, 0.16)";
     ctx.beginPath();
     graph.edges.forEach(function (e) {
       var a = nodeById[e.src], b = nodeById[e.dst];
       if (!a || !b) return;
       if (filtering && !(isActive(a) && isActive(b))) return;
-      var pa = positions[a._i], pb = positions[b._i];
-      ctx.moveTo(toScreenX(pa.px), toScreenY(pa.py));
-      ctx.lineTo(toScreenX(pb.px), toScreenY(pb.py));
+      var ax = wx(a._i), ay = wy(a._i), bx = wx(b._i), by = wy(b._i);
+      var dx = bx - ax, dy = by - ay;
+      var len = Math.sqrt(dx * dx + dy * dy) || 1;
+      var ux = dy / len, uy = -dx / len;   // unit perpendicular to the chord
+      // Pick the upward side by the CHORD alone (ties: rightward), so the
+      // same unordered pair always bows the same way — src/dst order can
+      // never flip the arc, which would read as direction.
+      if (uy > 0 || (uy === 0 && ux < 0)) { ux = -ux; uy = -uy; }
+      var arcH = len * ARC_K;
+      var cxw = (ax + bx) / 2 + ux * arcH, cyw = (ay + by) / 2 + uy * arcH;
+      ctx.moveTo(toScreenX(ax), toScreenY(ay));
+      ctx.quadraticCurveTo(toScreenX(cxw), toScreenY(cyw), toScreenX(bx), toScreenY(by));
     });
     ctx.stroke();
 
     // BRAINMAP-FILTER: when filtering, draw the non-matching nodes first as a
-    // faint gray underlay — the selected domain pops while its place in the
-    // whole map stays visible (dim, not hide, to keep spatial context).
+    // faint underlay — the selected set pops while its place in the whole map
+    // stays visible (dim, not hide, to keep spatial context).
     if (filtering) {
-      ctx.fillStyle = "#94a3b8";
+      ctx.fillStyle = "#7e8ea8";
       graph.nodes.forEach(function (n, i) {
         if (isActive(n)) return;
-        var p = positions[i];
-        ctx.globalAlpha = 0.10;
+        ctx.globalAlpha = 0.14;
         ctx.beginPath();
-        ctx.arc(toScreenX(p.px), toScreenY(p.py), 1.8, 0, Math.PI * 2);
+        ctx.arc(toScreenX(wx(i)), toScreenY(wy(i)), 1.8, 0, Math.PI * 2);
         ctx.fill();
       });
       ctx.globalAlpha = 1;
@@ -451,12 +492,11 @@
     // Radii are constant screen px (positions transform, sizes do not).
     graph.nodes.forEach(function (n, i) {
       if (filtering && !isActive(n)) return;
-      var p = positions[i];
       var clustered = n.cluster_id !== null && n.cluster_id !== undefined;
       var r = clustered ? 3.4 : 2.1;
       var isMarket = n.content_nature === "market_commercial";
       ctx.beginPath();
-      ctx.arc(toScreenX(p.px), toScreenY(p.py), r, 0, Math.PI * 2);
+      ctx.arc(toScreenX(wx(i)), toScreenY(wy(i)), r, 0, Math.PI * 2);
       if (isMarket) {
         ctx.globalAlpha = 0.75;
         ctx.lineWidth = 1.4;
@@ -471,13 +511,21 @@
       }
     });
 
-    // Hover ring (constant screen-px radius, transformed position).
-    if (hoverNode) {
-      var hp = positions[hoverNode._i];
+    // Hover glow + ring — marks the POINTER only, never a data value, and is
+    // identical for every node it touches.
+    if (hoverNode && !intro.active) {
+      var hx = toScreenX(wx(hoverNode._i)), hy = toScreenY(wy(hoverNode._i));
+      var glow = ctx.createRadialGradient(hx, hy, 0, hx, hy, 16);
+      glow.addColorStop(0, "rgba(158, 193, 255, 0.35)");
+      glow.addColorStop(1, "rgba(158, 193, 255, 0)");
       ctx.beginPath();
-      ctx.arc(toScreenX(hp.px), toScreenY(hp.py), 6, 0, Math.PI * 2);
+      ctx.fillStyle = glow;
+      ctx.arc(hx, hy, 16, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(hx, hy, 6, 0, Math.PI * 2);
       ctx.lineWidth = 1.6;
-      ctx.strokeStyle = "#1c2430";
+      ctx.strokeStyle = "#dbe7f8";
       ctx.stroke();
     }
 
@@ -495,19 +543,23 @@
 
     // Always-on labels for the biggest clusters — stored spread label VERBATIM.
     // Font stays constant screen size; only the anchor point transforms.
+    // BRAINMAP-ATMOSPHERE: labels appear once the nodes have settled (their
+    // anchors are centroids of FINAL positions, so drawing them mid-flight
+    // would label empty space). Halo/ink swapped for the dark canvas.
+    if (intro.active) return;
     ctx.textAlign = "center";
     labelSpots.forEach(function (s) {
       if (filtering && !activeClusters[s.cluster_id]) return;
       var lx = toScreenX(s.x), ly = toScreenY(s.y);
       ctx.font = "600 12px sans-serif";
       ctx.lineWidth = 3;
-      ctx.strokeStyle = "rgba(247, 248, 250, 0.9)";
+      ctx.strokeStyle = "rgba(8, 13, 24, 0.85)";
       ctx.strokeText(s.title, lx, ly - 14);
-      ctx.fillStyle = "#1c2430";
+      ctx.fillStyle = "#dce6f4";
       ctx.fillText(s.title, lx, ly - 14);
       ctx.font = "11px sans-serif";
       ctx.strokeText(s.spread, lx, ly);
-      ctx.fillStyle = "#5a6577";
+      ctx.fillStyle = "#9fb0c8";
       ctx.fillText(s.spread, lx, ly);
     });
   }
@@ -527,6 +579,10 @@
   }
 
   function onMove(ev) {
+    // BRAINMAP-ATMOSPHERE: while nodes are still travelling, hover would
+    // tooltip a node that is not yet where the pointer is — suppress it.
+    // (A passing mouse does NOT skip the intro; deliberate input does.)
+    if (intro.active) return;
     var rect = canvas.getBoundingClientRect();
     var mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
     if (isDragging) {
@@ -559,6 +615,7 @@
   }
 
   function onDown(ev) {
+    skipIntro(); cancelCamera();
     isDragging = true;
     dragStartX = ev.clientX; dragStartY = ev.clientY;
     startOffsetX = view.offsetX; startOffsetY = view.offsetY;
@@ -590,6 +647,7 @@
 
   // Scroll-to-zoom, anchored so the world point under the cursor stays fixed.
   function onWheel(ev) {
+    skipIntro(); cancelCamera();
     ev.preventDefault();
     var rect = canvas.getBoundingClientRect();
     var mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
@@ -622,6 +680,7 @@
   }
 
   function onTouchStart(ev) {
+    skipIntro(); cancelCamera();
     if (ev.touches.length === 1) {
       seatTouchPan(ev.touches[0]);
       touchMoved = false;
@@ -681,6 +740,7 @@
   }
 
   function resetView() {
+    skipIntro(); cancelCamera();
     view.scale = 1; view.offsetX = 0; view.offsetY = 0;
     // BRAINMAP-FOCUS: 리셋 / dblclick release focus too — focus is a view
     // state, so "back to the whole map" must mean it.
@@ -692,6 +752,7 @@
   // Clicking the already-active filter (or "전체 보기") restores all. Zoom/pan
   // is untouched — filtering only changes which nodes are drawn/dimmed.
   function onLegendClick(ev) {
+    skipIntro();
     var btn = ev.target.closest(".key");
     if (!btn) return;
     var kind = btn.getAttribute("data-filter");
@@ -766,16 +827,78 @@
 
   // BRAINMAP-FEATURES: center+zoom on one node — the SAME math as the
   // ?focus=<id> deep-link path (scale 2.5, node at viewport center).
+  // BRAINMAP-ATMOSPHERE: entry animation — ARRIVAL, never a different layout.
+  // Nodes interpolate from the canvas centre to their true precomputed
+  // coordinates over INTRO_MS; any deliberate interaction cuts straight to
+  // the final state; it never re-runs (filter changes included); skipped
+  // entirely under prefers-reduced-motion.
+  function runIntro() {
+    if (intro.done || reducedMotion) { intro.done = true; return; }
+    intro.active = true;
+    var t0 = 0;
+    function tick(now) {
+      if (!intro.active) return;
+      if (!t0) t0 = now;
+      var t = Math.min(1, (now - t0) / INTRO_MS);
+      intro.ease = 1 - Math.pow(1 - t, 3);   // ease-out cubic
+      draw();
+      if (t < 1) intro.raf = requestAnimationFrame(tick);
+      else skipIntro();
+    }
+    intro.raf = requestAnimationFrame(tick);
+  }
+
+  function skipIntro() {
+    intro.done = true;
+    if (!intro.active) return;
+    intro.active = false;
+    intro.ease = 1;
+    try { cancelAnimationFrame(intro.raf); } catch (e) { /* stub-safe */ }
+    draw();
+  }
+
+  // Eased camera for search centring. Interruptible: any pan/zoom/touch
+  // cancels mid-flight and the view stays exactly where it was.
+  function cancelCamera() {
+    if (!camAnim) return;
+    try { cancelAnimationFrame(camAnim.raf); } catch (e) { /* stub-safe */ }
+    camAnim = null;
+  }
+
+  function animateViewTo(scale, ox, oy) {
+    cancelCamera();
+    if (reducedMotion) {
+      view.scale = scale; view.offsetX = ox; view.offsetY = oy;
+      draw();
+      return;
+    }
+    var s0 = view.scale, x0 = view.offsetX, y0 = view.offsetY, t0 = 0;
+    var anim = { raf: 0 };
+    camAnim = anim;
+    function tick(now) {
+      if (camAnim !== anim) return;   // interrupted — stay where we are
+      if (!t0) t0 = now;
+      var t = Math.min(1, (now - t0) / CAM_MS);
+      var k = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      view.scale = s0 + (scale - s0) * k;
+      view.offsetX = x0 + (ox - x0) * k;
+      view.offsetY = y0 + (oy - y0) * k;
+      draw();
+      if (t < 1) anim.raf = requestAnimationFrame(tick);
+      else camAnim = null;
+    }
+    anim.raf = requestAnimationFrame(tick);
+  }
+
   function centerOnNode(n) {
     var rect = canvas.parentElement.getBoundingClientRect();
     var fw = Math.max(320, rect.width), fh = Math.max(280, rect.height);
     var fp = positions[n._i];
-    view.scale = 2.5;
-    view.offsetX = fw / 2 - fp.px * view.scale;
-    view.offsetY = fh / 2 - fp.py * view.scale;
     hoverNode = n;
     tooltip.style.display = "none";
-    draw();
+    // BRAINMAP-ATMOSPHERE: glide to the target instead of jumping. Same
+    // destination as before (scale 2.5, node centred) — only the transition.
+    animateViewTo(2.5, fw / 2 - fp.px * 2.5, fh / 2 - fp.py * 2.5);
   }
 
   // BRAINMAP-FEATURES: search input — lightly debounced; ENTER jumps to the
@@ -783,6 +906,7 @@
   // active filters (domain/spread stay in force).
   var searchDebounce = null;
   function onSearchInput(ev) {
+    skipIntro();
     var q = String(ev.target.value || "").trim().toLowerCase();
     if (searchDebounce) clearTimeout(searchDebounce);
     searchDebounce = setTimeout(function () {
@@ -795,6 +919,7 @@
   }
 
   function onSearchKeydown(ev) {
+    skipIntro();
     if (ev.key !== "Enter") return;
     ev.preventDefault();
     // Apply any pending debounced value immediately, then jump.
@@ -809,6 +934,7 @@
 
   // BRAINMAP-FEATURES: spread-size dropdown (cluster outlet_count threshold).
   function onSpreadChange(ev) {
+    skipIntro();
     spreadMin = Number(ev.target.value) || 0;
     hoverNode = null;
     tooltip.style.display = "none";
@@ -836,6 +962,7 @@
   }
 
   function onClick(ev) {
+    skipIntro();
     // A drag past the threshold was a pan, not a click — do not navigate.
     if (dragDist > CLICK_MOVE_THRESHOLD) { dragDist = 0; return; }
     var rect = canvas.getBoundingClientRect();
@@ -945,7 +1072,10 @@
     var spreadEl = document.getElementById("spreadFilter");
     if (spreadEl) spreadEl.addEventListener("change", onSpreadChange);
     layout();
-    draw();
+    // BRAINMAP-ATMOSPHERE: arrive. Runs once per page load; a ?focus= deep
+    // link (below) skips it so the linked node is centred immediately.
+    runIntro();
+    if (!intro.active) draw();
     canvas.style.cursor = "grab";
     canvas.addEventListener("mousemove", onMove);
     canvas.addEventListener("mousedown", onDown);
@@ -970,6 +1100,8 @@
     // Escape releases focus, matching 리셋 / dblclick. Ignored while the search
     // box has the caret so Escape can still clear the query first.
     window.addEventListener("keydown", function (ev) {
+      // BRAINMAP-ATMOSPHERE: any keypress is deliberate input — settle now.
+      skipIntro();
       if (ev.key !== "Escape") return;
       if (focusCluster === null && !focusArmed) return;
       if (document.activeElement && document.activeElement.id === "mapSearch") return;
@@ -984,6 +1116,9 @@
       var focusId = new URLSearchParams(window.location.search).get("focus");
       var focusNode = focusId !== null ? nodeById[focusId] : null;
       if (focusNode) {
+        // BRAINMAP-ATMOSPHERE: a deep link means "show me THIS node" — the
+        // entry animation would delay that, so settle instantly instead.
+        skipIntro();
         var rect = canvas.parentElement.getBoundingClientRect();
         var fw = Math.max(320, rect.width), fh = Math.max(280, rect.height);
         var fp = positions[focusNode._i];
