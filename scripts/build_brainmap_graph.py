@@ -3,7 +3,7 @@
 # Reads the title+claim embeddings (written by scripts/embed_backfill.py) from
 # embedding_cache, builds the PROVEN 2c-experiment graph (cosine kNN k=10,
 # edges kept at sim>=0.80, union-find connected components = clusters),
-# computes numpy PCA-2D layout coords, picks degree-based cluster labels, and
+# computes distance-optimised SGD 2D layout coords, picks degree-based cluster labels, and
 # writes the WHOLE graph as ONE JSON row into the additive `brainmap_graph`
 # table (self-created via CREATE TABLE IF NOT EXISTS — mirrors
 # embedding_vectors' create-on-demand pattern; postgres_storage.py untouched,
@@ -191,6 +191,150 @@ def _pca_2d(X):
     return out
 
 
+# DISTANCE-LAYOUT — SGD stress parameters, EXACTLY as the Phase 1 probe
+# measured them (edge-pair fidelity +0.82 vs PCA-2D's +0.42). Frozen: the
+# measurement was taken at these settings, so they are not tuning knobs.
+LAYOUT_SGD_SEED = 42
+LAYOUT_SGD_EPOCHS = 120
+LAYOUT_SGD_BATCH = 80000
+
+
+def _sgd_layout_2d(X, Xn, edge_i, edge_j, init=None):
+    """DISTANCE-LAYOUT: 2-D stochastic stress layout.
+
+    Objective: drawn euclidean distance ~ TRUE angular distance
+    arccos(cosine sim) from the embeddings. Targets are computed for ALL
+    sampled pairs (not just edges), which is what positions the ~70%
+    edgeless nodes meaningfully instead of leaving them to repulsion; the
+    graph's edges are additionally appended to every batch so the drawn
+    relationships get optimised hardest.
+
+    DETERMINISM: fixed rng seed + a deterministic initialisation (PCA, or
+    the previous build's coordinates via `init`) + the corpus loader's
+    ORDER BY id row order. Same input + same previous graph -> identical
+    coordinates, verified by running the builder twice in Phases 2 and 3.
+    Output is min-max normalized to [0,1] per axis, same contract as the
+    _pca_2d it replaces. Layout only — clustering never reads coordinates.
+
+    LAYOUT-ANCHOR: `init` (optional (n,2) float array, already in the
+    working frame) replaces the PCA start so weekly rebuilds stay in place;
+    the SGD loop itself is byte-identical either way.
+    """
+    import numpy as np
+
+    n = int(Xn.shape[0])
+    if n == 0:
+        return np.zeros((0, 2))
+    if n == 1:
+        return np.full((1, 2), 0.5)
+    if init is not None:
+        P = np.asarray(init, dtype=np.float64).copy()
+    else:
+        # Deterministic init: top-2 SVD of the centered RAW matrix (the
+        # probe's init), scaled into the working range.
+        cen = np.asarray(X, dtype=np.float64)
+        cen = cen - cen.mean(axis=0, keepdims=True)
+        _, _, vt = np.linalg.svd(cen, full_matrices=False)
+        P = cen @ vt[:2].T
+        P *= (1.2 / max(1e-9, float(np.abs(P).max())))
+    rng = np.random.default_rng(LAYOUT_SGD_SEED)
+    ei = np.asarray(edge_i, dtype=np.int64)
+    ej = np.asarray(edge_j, dtype=np.int64)
+    for ep in range(LAYOUT_SGD_EPOCHS):
+        eta = 0.1 * (1.0 - ep / LAYOUT_SGD_EPOCHS) + 0.002
+        bi = rng.integers(0, n, LAYOUT_SGD_BATCH)
+        bj = rng.integers(0, n, LAYOUT_SGD_BATCH)
+        m = bi != bj
+        bi = np.concatenate([bi[m], ei])
+        bj = np.concatenate([bj[m], ej])
+        if not len(bi):
+            continue
+        tgt = np.arccos(np.clip(
+            np.einsum("ij,ij->i", Xn[bi], Xn[bj]), -1.0, 1.0)).astype(np.float64)
+        d = P[bi] - P[bj]
+        dist = np.maximum(np.linalg.norm(d, axis=1), 1e-9)
+        # Weighted stress step: short target distances matter most (that is
+        # where the edges live); weight capped so no pair dominates.
+        w = np.minimum(1.0 / np.maximum(tgt, 0.15) ** 2, 40.0)
+        step = (eta * np.clip(w * (dist - tgt), -4.0, 4.0) / dist)[:, None] * d * 0.5
+        np.add.at(P, bi, -step)
+        np.add.at(P, bj, step)
+    # Same [0,1] min-max contract as _pca_2d (degenerate axis -> 0.5).
+    lo, hi = P.min(axis=0), P.max(axis=0)
+    span = hi - lo
+    out = np.full_like(P, 0.5)
+    for axis in range(2):
+        if span[axis] > 0:
+            out[:, axis] = (P[:, axis] - lo[axis]) / span[axis]
+    return out
+
+
+# LAYOUT-ANCHOR: working-frame span for the anchored init. Targets are
+# angular distances (~1.4 rad for a typical pair), so the previous build's
+# [0,1] coordinates are re-centred and scaled to this span before the SGD
+# refines them. Probe-measured value; not a tuning knob.
+LAYOUT_ANCHOR_SPAN = 2.8
+
+
+def _prev_coords_from_graph(prev_graph):
+    """{node_id: (x, y)} from a previous build's graph_json, keeping only
+    well-formed finite coordinates in [0,1]. Empty dict on anything odd —
+    the caller treats that as 'no anchor' and falls back to PCA init."""
+    out = {}
+    try:
+        for node in (prev_graph or {}).get("nodes") or []:
+            nid, x, y = node.get("id"), node.get("x"), node.get("y")
+            if nid is None:
+                continue
+            if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
+                continue
+            if not (0.0 <= float(x) <= 1.0 and 0.0 <= float(y) <= 1.0):
+                continue
+            out[nid] = (float(x), float(y))
+    except Exception:
+        return {}
+    return out
+
+
+def _anchored_init(X, ids, prev_coords):
+    """LAYOUT-ANCHOR: SGD start positions anchored to the previous build.
+
+    Known nodes (present in prev_coords) start at their previous position,
+    rescaled into the working frame; genuinely NEW nodes start at their
+    full-corpus PCA position mapped into that same frame by a similarity
+    Procrustes fitted on the known nodes — exactly the method the drift
+    probe measured (raw weekly drift 0.403 -> 0.083 at unchanged +0.83
+    fidelity, no decay over a 4-week chain). Returns None when anchoring
+    is not possible (fewer than 2 known nodes) so the caller falls back
+    to the plain PCA init. Deterministic: no randomness anywhere here.
+    """
+    import numpy as np
+
+    n = len(ids)
+    known_mask = np.array([rid in prev_coords for rid in ids], dtype=bool)
+    n_known = int(known_mask.sum())
+    if n_known < 2:
+        return None, n_known, n - n_known
+    P = np.zeros((n, 2), dtype=np.float64)
+    prev = np.array([prev_coords[rid] for rid, k in zip(ids, known_mask) if k],
+                    dtype=np.float64)
+    P[known_mask] = (prev - 0.5) * LAYOUT_ANCHOR_SPAN
+    if (~known_mask).any():
+        cen = np.asarray(X, dtype=np.float64)
+        cen = cen - cen.mean(axis=0, keepdims=True)
+        _, _, vt = np.linalg.svd(cen, full_matrices=False)
+        pca = cen @ vt[:2].T
+        a = P[known_mask]
+        b = pca[known_mask]
+        am = a - a.mean(axis=0)
+        bm = b - b.mean(axis=0)
+        u, s, vvt = np.linalg.svd(bm.T @ am)
+        rot = u @ vvt
+        scale = s.sum() / max(1e-12, float((bm ** 2).sum()))
+        P[~known_mask] = a.mean(axis=0) + ((pca[~known_mask] - b.mean(axis=0)) * scale) @ rot
+    return P, n_known, n - n_known
+
+
 def _knn_topk(Xn, kk, block_rows=KNN_BLOCK_ROWS):
     """BRAINMAP-OOM Slice 1: memory-bounded top-k cosine neighbors.
 
@@ -234,9 +378,9 @@ def _syndication_anchor(members, ids, published_ats):
 
 def build_graph(ids, titles, domains, content_natures, X,
                 outlet_sets=None, k=KNN_K, sim_threshold=SIM_THRESHOLD,
-                published_ats=None):
+                published_ats=None, prev_graph=None, fresh_layout=False):
     """Pure compute: kNN(k) cosine graph -> edges at sim>=threshold ->
-    union-find components -> PCA-2D coords -> degree-based cluster labels.
+    union-find components -> distance-SGD 2D coords -> degree-based cluster labels.
     Returns the graph dict (without generated_at/params — main adds those).
     `X` is an already-loaded (n, dims) float matrix aligned with `ids`.
     `outlet_sets` (optional) is a per-node set of normalized outlet hosts
@@ -339,7 +483,40 @@ def build_graph(ids, titles, domains, content_natures, X,
             "syndication_framing": SYNDICATION_FRAMING,
         })
 
-    coords = _pca_2d(Xn)
+    # DISTANCE-LAYOUT: SGD stress coords replace PCA-2D (edge-pair fidelity
+    # +0.82 vs +0.42 — the map's "nearby = similar" promise, actually kept).
+    # Edge lists in sorted-key order (deterministic); X raw feeds the init,
+    # Xn the similarity targets — exactly the Phase 1 probe's method.
+    # LAYOUT-ANCHOR: when the previous build is available (and --fresh-layout
+    # was not passed), the SGD starts from its coordinates so weekly rebuilds
+    # stay in place. EVERY unavailable-anchor case (no prev graph, no
+    # overlapping nodes, malformed coords) falls back to the plain PCA init
+    # and SAYS SO — anchoring can never fail the build.
+    init = None
+    if fresh_layout:
+        print("[brainmap] layout: FRESH (--fresh-layout) — anchor ignored")
+    elif prev_graph is None:
+        print("[brainmap] layout: fresh (no previous graph to anchor to)")
+    else:
+        prev_coords = _prev_coords_from_graph(prev_graph)
+        if not prev_coords:
+            print("[brainmap] layout: fresh (previous graph carries no usable "
+                  "coordinates)")
+        else:
+            init, n_known, n_new = _anchored_init(X, ids, prev_coords)
+            if init is None:
+                print("[brainmap] layout: fresh (previous graph shares <2 "
+                      "nodes with this corpus)")
+            else:
+                print("[brainmap] layout: anchored to previous build "
+                      "(known=%d new=%d)" % (n_known, n_new))
+    edge_keys = sorted(edge_set)
+    coords = _sgd_layout_2d(
+        X, Xn,
+        [i for (i, _) in edge_keys],
+        [j for (_, j) in edge_keys],
+        init=init,
+    )
     nodes = []
     for i in range(n):
         nodes.append({
@@ -657,7 +834,7 @@ def run_selftest() -> int:
     # (b) PCA coords all within [0,1].
     b_ok = all(0.0 <= node["x"] <= 1.0 and 0.0 <= node["y"] <= 1.0
                for node in graph["nodes"])
-    print("  [%s] (b) PCA-2D coords normalized to [0,1]" % ("ok" if b_ok else "xx"))
+    print("  [%s] (b) layout coords normalized to [0,1]" % ("ok" if b_ok else "xx"))
     # (c) group C's label = the HUB's (highest-degree) title, though longest.
     c_meta = next(c for c in graph["clusters"]
                   if c["cluster_id"] == by_id[8]["cluster_id"])
@@ -830,7 +1007,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="build_brainmap_graph",
         description="Compute the brain-map cluster graph (title+claim kNN "
-                    "k=10 sim>=0.80, union-find clusters, PCA-2D coords, "
+                    "k=10 sim>=0.80, union-find clusters, distance-SGD 2D coords, "
                     "spread labels) and write ONE JSON row into the additive "
                     "brainmap_graph table.",
     )
@@ -838,6 +1015,10 @@ def main(argv=None) -> int:
                         help="Run the OFFLINE logic check (synthetic vectors, fake conn).")
     parser.add_argument("--dry-run", action="store_true",
                         help="Full compute + shape stats; NO CREATE TABLE, NO INSERT.")
+    parser.add_argument("--fresh-layout", action="store_true",
+                        help="ESCAPE HATCH: ignore the previous build's "
+                             "coordinates and lay out from scratch (PCA init). "
+                             "Use to reset if the anchored chain ever wanders.")
     args = parser.parse_args(argv)
 
     if args.selftest:
@@ -883,13 +1064,12 @@ def main(argv=None) -> int:
             cur.execute(SELECT_PUBLISHED_SQL)
             published_by_id = {row_id: value for row_id, value in cur.fetchall()}
         published_ats = [published_by_id.get(rid) for rid in ids]
-        graph = build_graph(ids, titles, domains, cns, vectors, outlet_sets,
-                            published_ats=published_ats)
-        print_stats(graph)
-        # STABLE-CLUSTER-ID — read the PREVIOUS build (this build's row is not
-        # inserted yet) and thread durable lineage ids. First-ever run (table
-        # absent) or unreadable JSON -> prev None -> every cluster mints its
-        # own lineage_id = stable_id. The failed SELECT poisons the psycopg
+        # STABLE-CLUSTER-ID / LAYOUT-ANCHOR — read the PREVIOUS build (this
+        # build's row is not inserted yet). ONE fetch now feeds BOTH the
+        # anchored layout init (before build) and the durable lineage ids
+        # (after build). First-ever run (table absent) or unreadable JSON ->
+        # prev None -> fresh PCA-init layout + every cluster mints its own
+        # lineage_id = stable_id. The failed SELECT poisons the psycopg
         # transaction, so roll back before maybe_write reuses the connection.
         prev_graph = None
         try:
@@ -901,6 +1081,11 @@ def main(argv=None) -> int:
         except Exception:
             conn.rollback()
             prev_graph = None
+        graph = build_graph(ids, titles, domains, cns, vectors, outlet_sets,
+                            published_ats=published_ats,
+                            prev_graph=prev_graph,
+                            fresh_layout=args.fresh_layout)
+        print_stats(graph)
         lineage_stats = assign_lineage_ids(prev_graph, graph)
         print("[brainmap] lineage: carried=%d minted=%d merged_away=%d%s"
               % (lineage_stats["carried"], lineage_stats["minted"],
