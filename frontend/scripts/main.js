@@ -517,7 +517,19 @@
     }
 
     function sanitizeDisplayText(value) {
-      return repairMojibake(value).replaceAll("\uFFFD", "").trim();
+      // DISPLAY-LEAK-FIX \u2014 HWP bullet glyphs stored as LITERAL backslash-u
+      // text (escaped surrogates, plane-16 private use, e.g. backslash-uDB80
+      // backslash-uDEB1) rendered verbatim on 4.3% of cards. Surrogate-range
+      // escapes decode to nothing readable and are stripped; a non-surrogate
+      // escape (e.g. backslash-uD25B) is a real character mis-stored as text
+      // and is decoded back to that character, so no genuine content can be
+      // deleted. Display-only.
+      return repairMojibake(value)
+        .replace(/\\u([0-9A-Fa-f]{4})/g, (m, hex) => {
+          const code = parseInt(hex, 16);
+          return code >= 0xd800 && code <= 0xdfff ? "" : String.fromCharCode(code);
+        })
+        .replaceAll("\uFFFD", "").trim();
     }
 
     // MOBILE-POLISH F \u2014 DISPLAY-ONLY strip of a leading decorative-marker run
@@ -600,6 +612,26 @@
         [/insufficient material policy concept overlap/gi, "공식 자료와 기사 핵심 주장 사이의 직접 일치 여부는 추가 확인이 필요합니다."],
         [/insufficient matched query\/material concept overlap/gi, "공식 자료가 기사 핵심 주장과 직접적으로 일치하는지 추가 확인이 필요합니다."],
         [/insufficient matched[^.!?。]*(?:[.!?。]|$)/gi, "공식 자료가 기사 핵심 주장과 직접적으로 일치하는지 추가 확인이 필요합니다."],
+        // DISPLAY-LEAK-FIX — the render audit measured these English reason
+        // strings surviving onto ~45% of public cards. Backend literals stay
+        // (official_crawler.py:1477 / verification_card.py:296-314); display
+        // maps to the EXISTING excluded/mismatch vocabulary only.
+        [/Official documents? excluded from verification:?\s*/gi, "공식 후보였으나 직접 근거에서 제외됨: "],
+        // this sentence's own map in formatDiagnosticText never fires: the
+        // classificationReasonLabels "search page" replace below runs first
+        // (via userFacingReportText) and breaks the match — launder it here,
+        // BEFORE that replace, reusing formatDiagnosticText's exact wording.
+        [/No official document candidate links found on search page\.?/gi, "공식 검색 결과에서 사용할 수 있는 상세 문서 링크를 찾지 못했습니다."],
+        // the comma inside this topic-mismatch variant defeats the generic
+        // [^,;]+ eater in formatDiagnosticText, leaving the tail on screen —
+        // map each verification_card.py variant in full, prefix or not.
+        [/(official document topic mismatch:\s*)?shares only generic concepts,? no material entity or specific policy terms?\.?/gi, "공식 문서가 기사 핵심 주제와 직접 맞지 않습니다."],
+        [/(official document topic mismatch:\s*)?financial-agency title lacks housing\/real-estate terms\.?/gi, "공식 문서가 기사 핵심 주제와 직접 맞지 않습니다."],
+        [/(official document topic mismatch:\s*)?housing\/real-estate query without matching document terms\.?/gi, "공식 문서가 기사 핵심 주제와 직접 맞지 않습니다."],
+        [/(official document topic mismatch:\s*)?missing material policy concepts\.?/gi, "공식 문서가 기사 핵심 주제와 직접 맞지 않습니다."],
+        [/\bexcluded document_type\s*:\s*/gi, "제외 문서 유형: "],
+        [/\bdocument_type\s*:\s*/gi, "문서 유형: "],
+        [/\bConnection reset by peer\b/gi, "공식 사이트 연결이 중단됐습니다"],
         [/matched query\/material concept overlap/gi, "공식 자료와 기사 핵심 주장의 직접 일치 여부"],
         [/query\/material concept overlap/gi, "공식 자료와 기사 핵심 주장의 직접 일치 여부"],
         [/FSC detail press URL(?:-like explanations)?/gi, "금융위원회 보도자료 상세 페이지"],
@@ -1028,6 +1060,20 @@
       let text = userFacingReportText(value ?? "", "-");
       if (!text || text === "-" || text === "null" || text === "undefined") return "-";
       const replacements = {
+        // DISPLAY-LEAK-FIX — retrieval_method enums the render audit found raw
+        // in the public 수집 방식 field (13,842 occurrences / 1,016-row sample).
+        // Institution words reuse the publicInstitutionName vocabulary
+        // (정책브리핑 / 금융감독원); backend enum values stay untouched.
+        policy_briefing_api: "정책브리핑 수집",
+        national_law_api: "국가법령정보 수집",
+        fss_bodo_api: "금융감독원 보도자료 수집",
+        official_evidence_resolved: "공식 자료 수집",
+        // DISPLAY-LEAK-FIX — contradiction_verdict_source enums reaching the
+        // 판정 근거 row raw (explicit_conflict on ~16% of cards). The label
+        // words reuse the formatContradictionStatus family (확인된 모순) and
+        // the existing 맥락/불일치 vocabulary.
+        explicit_conflict: "확인된 모순",
+        context_mismatch: "맥락 불일치",
         official_search_url_candidate: "공식 검색 후보",
         official_detail_missing: "상세 공식문서 미확인",
         official_detail_url_missing: "공식 상세 URL 부족",
@@ -1421,9 +1467,12 @@
         ["직접 근거 수", data.direct_support_count ?? 0],
         ["공식 참조 수", data.official_reference_count ?? 0],
         ["근거 부족 수", data.insufficient_evidence_count ?? 0],
-        ["품질 strong", data.total_strong_evidence ?? quality.strong ?? 0],
-        ["품질 medium", data.total_medium_evidence ?? quality.medium ?? 0],
-        ["품질 weak", data.total_weak_evidence ?? quality.weak ?? 0],
+        // DISPLAY-LEAK-FIX: label text reuses the formatTechnicalLabel
+        // strong/medium/weak vocabulary (강함/보통/약함) — raw enum words were
+        // rendering as label text on every card.
+        ["품질 강함", data.total_strong_evidence ?? quality.strong ?? 0],
+        ["품질 보통", data.total_medium_evidence ?? quality.medium ?? 0],
+        ["품질 약함", data.total_weak_evidence ?? quality.weak ?? 0],
         ["평균 품질", data.average_evidence_quality_score ?? quality.average_evidence_quality_score ?? 0],
       ];
       // DESIGN-DETAIL-5i FIX 2: if EVERY numeric field is 0 (no evidence collected at
@@ -1495,7 +1544,7 @@
         const statusLabel = formatContradictionStatus(check.contradiction_status);
         const hasScore = !advIsEmptyDisplay(check.contradiction_score);
         const expand = hasScore || conflicts.length > 0 || !!check.missing_evidence_warning;
-        const headLine = `<div class="vrf-claim-line">claim #${index + 1} — ${escapeHtml(statusLabel)}</div>`;
+        const headLine = `<div class="vrf-claim-line">주장 #${index + 1} — ${escapeHtml(statusLabel)}</div>`;
         if (!expand) {
           return `<div class="vrf-check-item">${headLine}</div>`;
         }
@@ -1729,7 +1778,7 @@
         // final_score/verdict gates); each snippet's own fields still render below.
         return `
           <div class="evidence-snippet">
-            <div class="normalized-claim-text">claim #${index + 1}: ${escapeHtml(limitClaimSentences(cleanArticleTextForPolicyAnalysis(claim) || "기사 제목과 요약 기준으로 핵심 주장을 추가 확인해야 합니다.", 2, CLAIM_MAX_CHARS))}</div>
+            <div class="normalized-claim-text">주장 #${index + 1}: ${escapeHtml(limitClaimSentences(cleanArticleTextForPolicyAnalysis(claim) || "기사 제목과 요약 기준으로 핵심 주장을 추가 확인해야 합니다.", 2, CLAIM_MAX_CHARS))}</div>
             ${related.length ? related.map((snippet) => {
               const fieldSuppressed = periodSuppressed && isOfficialLikeSource(snippet);
               const sourceTitle = escapeHtml(userFacingReportText(publicInstitutionName(snippet.source_title || snippet.source_url || "출처"), "출처"));
@@ -1857,7 +1906,7 @@
           <div class="evidence-source-meta"><strong>공식 문서 매칭 문장</strong></div>
           <ul class="compact-list">
             ${source.official_matched_sentences.slice(0, 2).map((match) => `
-              <li>${escapeHtml(match.sentence || "-")} <span class="vrf-cell-label">(${escapeHtml(match.score ?? "-")}점)</span></li>
+              <li>${escapeHtml(sanitizeDisplayText(String(match.sentence ?? "").replace(/<[^>]+>/g, " ")) || "-")} <span class="vrf-cell-label">(${escapeHtml(match.score ?? "-")}점)</span></li>
             `).join("")}
           </ul>
         ` : "";
