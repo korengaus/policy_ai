@@ -265,11 +265,16 @@ const ZERO = [
   ["html-markup-as-text", /<(p|span|div|br|a|strong|em|table|ul|li)[ >/]/,
     'x <p style="line-height:140%"> y'],
 ];
-// Generic snake_case identifiers are a CEILING, not a zero class: the
-// 2026-07-28 recording still carries a residue (possible_redirect risk flags,
-// news_context / primary_source / fact_check in evidence sources — 3.6% of
-// mod-14 rows). When those are fixed, move this into ZERO.
+// Generic snake_case identifiers — a ZERO class since DISPLAY-LEAK-FIX-2
+// laundered the last residue (possible_redirect risk flags; the
+// news_context/primary_source/fact_check legacy conflict echo). Tested
+// against URL-STRIPPED text: URLs quoted inside real article prose
+// legitimately contain underscores (heat_wave_night_leaflet.pdf) and are
+// content, not machine text. Vacuity-controlled below like every zero class.
 const SNAKE_RE = /(^|[^\w가-힣])[a-z]{2,}_[a-z]{2,}[a-z_]*\b/;
+const SNAKE_CONTROL = "판정 근거 explicit_conflict";
+const stripUrls = (t) => t.replace(/https?:\/\/\S+/g, " ")
+  .replace(/[\w.-]+\.(kr|com|org|net)\S*/g, " ");
 // mixed-scale needs its numeric predicate, kept as a special zero class
 const MIXED_SCALE_RE = /(신뢰도|점수|품질|관련도)[:\s]{0,4}(\d+)\s*\/\s*5(?!\d)/g;
 const MIXED_CONTROL = "출처 신뢰도: 95/5";
@@ -287,6 +292,8 @@ for (const [name, re, specimen] of ZERO) {
   if (!m.length || Number(m[0][2]) <= 5) failures.push(
     "VACUOUS DETECTOR: mixed-scale no longer matches its control");
 }
+if (!SNAKE_RE.test(stripUrls(SNAKE_CONTROL))) failures.push(
+  "VACUOUS DETECTOR: snake-case no longer matches its control");
 
 // ---------------------------------------------------------------------------
 // scan
@@ -345,8 +352,8 @@ for (const [win, ids] of Object.entries(windows)) {
     for (const m of t.matchAll(MIXED_SCALE_RE)) {
       if (Number(m[2]) > 5) { hit(win, "z:mixed-scale", id); break; }
     }
+    if (SNAKE_RE.test(stripUrls(t))) hit(win, "z:snake-case-identifier", id);
     // ceilings
-    if (SNAKE_RE.test(t)) hit(win, "c:snake_case_identifier", id);
     if (/[■-◿①-⓿⬚-⬯※▣◈▲△▴▷]/.test(t)) hit(win, "c:bullet_char", id);
     if (/[가-힣]\?[가-힣]/.test(t)) hit(win, "c:question_mojibake", id);
     if (/(습니다|입니다|한다|았다|었다|이다|된다|힌다)[.!?][가-힣]/.test(t)) hit(win, "c:sentence_join", id);
@@ -376,7 +383,7 @@ for (const [win, ids] of Object.entries(windows)) {
     failures.push(`BASELINES MISSING for window "${win}" in ${baselinePath}`);
     continue;
   }
-  for (const [name] of ZERO.concat([["mixed-scale"]])) {
+  for (const [name] of ZERO.concat([["mixed-scale"], ["snake-case-identifier"]])) {
     const e = (counts[win] || {})["z:" + name];
     if (e) failures.push(
       `ZERO-CLASS REGRESSION [${win}] ${name}: ${e.n} row(s) e.g. ids `

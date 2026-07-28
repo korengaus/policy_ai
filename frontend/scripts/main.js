@@ -632,6 +632,20 @@
         [/\bexcluded document_type\s*:\s*/gi, "제외 문서 유형: "],
         [/\bdocument_type\s*:\s*/gi, "문서 유형: "],
         [/\bConnection reset by peer\b/gi, "공식 사이트 연결이 중단됐습니다"],
+        // DISPLAY-LEAK-FIX-2 — the four enums the committed render scanner
+        // still measured raw on ~3.6% of cards (source_risk_flags'
+        // possible_redirect; news_context/primary_source/fact_check inside a
+        // legacy "Generated contradiction query" conflict echo). Word-boundary
+        // snake_case tokens cannot collide with prose. Labels reuse the
+        // formatTechnicalLabel / formatDiagnosticText vocabulary verbatim.
+        [/\bpossible_redirect\b/g, "리다이렉트 가능성"],
+        [/\bnews_context\b/g, "뉴스 맥락"],
+        [/\bprimary_source\b/g, "1차 출처"],
+        [/\bfact_check\b/g, "팩트체크"],
+        // legacy conflict echo title (no longer emitted by the backend) and
+        // the bare search operator inside its query text
+        [/Generated contradiction query/gi, "반박 후보"],
+        [/\bsite:[\w.-]+/gi, ""],
         [/matched query\/material concept overlap/gi, "공식 자료와 기사 핵심 주장의 직접 일치 여부"],
         [/query\/material concept overlap/gi, "공식 자료와 기사 핵심 주장의 직접 일치 여부"],
         [/FSC detail press URL(?:-like explanations)?/gi, "금융위원회 보도자료 상세 페이지"],
@@ -1575,7 +1589,7 @@
                     ["유형", conflict.conflict_type ? formatTechnicalLabel(conflict.conflict_type) : ""],
                     ["신뢰도", conflict.confidence ? formatTechnicalLabel(conflict.confidence) : ""],
                   ])}
-                  <div class="evidence-snippet-text">${escapeHtml(conflict.evidence_text || "-")}</div>
+                  <div class="evidence-snippet-text">${escapeHtml(userFacingReportText(conflict.evidence_text, "-"))}</div>
                 </div>
               `;
             }).join("")}
