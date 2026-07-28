@@ -318,6 +318,28 @@
   var drawOrder = null;       // far-to-near node order (3D only; null in 2D)
   var dragRotating = false;   // current drag is a rotation (3D, no pan modifier)
 
+  // BRAINMAP-3D-DEPTH: depth-sorted paint buckets so EDGES interleave with
+  // nodes instead of all being flushed underneath them. Node depth order was
+  // already correct (drawOrder); edges were not — every edge drew behind every
+  // node, so an edge passing in FRONT of a node looked like it passed behind.
+  // Buckets (not a full per-primitive sort) keep the batched stroke: one
+  // beginPath/stroke per bucket, far to near, with that bucket's nodes stamped
+  // on top. STYLE/ORDER ONLY — every edge is still drawn, at one shared width
+  // and alpha; ordering is geometry, not an encoding.
+  var DEPTH_BUCKETS = 24;
+  var bucketNodeStart = null; // Int32Array(DEPTH_BUCKETS+1): slices of drawOrder
+  var bucketEdges = null;     // Array(DEPTH_BUCKETS) of edge-index arrays
+  // BRAINMAP-3D-DEPTH (Part C): the cloud's own edge, as a WORLD-SPACE SPHERE
+  // around the 3D centroid. Projected orthographically a sphere is always a
+  // circle of the same radius, so this boundary is EXACTLY invariant under
+  // rotation — no hull to recompute, no jitter. cloud3 is computed once from
+  // x3/y3/z3; cloudProj is its projection into the `positions` (pre-view) layer.
+  var cloud3 = null;          // {cx, cy, cz, r} in unit-cube units
+  var cloudProj = null;       // {px, py, r} in the same space as `positions`
+  // BRAINMAP-3D-DEPTH (Part A): the node the search last centred on, so the
+  // search's CURRENT MATCH — not just its query text — survives a mode switch.
+  var searchMatchIndex = null;
+
   // BRAINMAP-3D-CONTROLS: orientation is a 3x3 ROTATION MATRIX (row-major
   // flat 9), not Euler angles — an arcball produces arbitrary axes that
   // yaw/pitch cannot represent. `_mat3FromYawPitch` reproduces the previous
@@ -358,20 +380,27 @@
   var arcStart = null;        // unit sphere vector at press
   var rotAtPress = null;      // orientation snapshot at press
 
-  // Shoemake sphere mapping. Inside the virtual sphere -> the point lifts off
-  // the screen (tumble); ON OR OUTSIDE the radius -> clamped to the rim with
-  // z=0, which yields pure in-plane ROLL. So a press that starts outside is
-  // never rejected and never jumps: it is simply a roll grab, and the same
-  // clamp applies while dragging beyond the rim.
+  // Sphere-plus-hyperbolic-sheet mapping (Bell/Holroyd), replacing the plain
+  // Shoemake clamp. WHY: the old mapping clamped anything at or beyond the
+  // virtual sphere's rim to z=0, and a z=0 grab is a pure in-plane ROLL — the
+  // behaviour reported as confusing. Worse, it made the rim a SECOND decision
+  // boundary competing with the cloud's edge (Part C), so the same screen
+  // position could tumble or roll depending on zoom.
+  //   Inside r/sqrt(2): the sphere, byte-identical to before.
+  //   Beyond it: a hyperbolic sheet z = (r^2/2)/d, which joins the sphere
+  //   smoothly (both give z = r/sqrt(2) at the seam) and is STRICTLY POSITIVE
+  //   everywhere. z never reaches 0, so no press anywhere on the canvas can
+  //   degenerate into a roll, and the rim stops being a boundary at all — it
+  //   is now only the sensitivity scale of one continuous mapping.
   function sphereVec(mx, my) {
     var rect = canvas.parentElement.getBoundingClientRect();
     var w = Math.max(320, rect.width), h = Math.max(280, rect.height);
     var radius = 0.45 * Math.min(w, h);
     var ux = (mx - w / 2) / radius, uy = (my - h / 2) / radius;
     var d2 = ux * ux + uy * uy;
-    if (d2 <= 1) return [ux, uy, Math.sqrt(1 - d2)];
-    var inv = 1 / Math.sqrt(d2);
-    return [ux * inv, uy * inv, 0];
+    var z = (d2 <= 0.5) ? Math.sqrt(1 - d2) : 0.5 / Math.sqrt(d2);
+    var len = Math.sqrt(d2 + z * z) || 1;
+    return [ux / len, uy / len, z / len];
   }
 
   // Rotation taking unit vector a onto unit vector b, by the EXACT arc angle
@@ -404,6 +433,61 @@
   var RING_W = 0.5;         // separation ring in the page background colour
   var BG_COLOR = "#0b1220"; // must equal --canvas
   var spriteCache = {};     // (color|radius|hollow|dpr) -> prerendered sprite
+
+  // BRAINMAP-3D-DEPTH (Part B1): in 3D, node radii grow with zoom so that
+  // occlusion — the ONE depth cue left to us — becomes perceptible. Measured on
+  // the live graph: at 4x zoom with today's 3px marks only 30.0% of on-screen
+  // nodes are visibly clipped by a neighbour (it reads as a flat scatter); at
+  // 6px that is 73.6% clipped while still only 1.0% fully hidden.
+  //   UNIFORM: one factor multiplies EVERY node's radius, so R_CLUSTERED /
+  //   R_UNCLUSTERED keep their exact ratio and size still encodes outlet count
+  //   precisely. Nothing per-node varies.
+  //   Floor 1: zooming OUT never shrinks a node, so the overview is unchanged.
+  //   Cap 2: takes effect at scale 4 (sqrt(4) = 2) and holds to MAX_SCALE 8,
+  //   so marks stop at 6.0px / 3.8px and never become blobs.
+  //   2D IS EXCLUDED — see radiusScale().
+  var R_ZOOM_CAP = 2;
+  function radiusScale() {
+    // 2D keeps constant-screen-px marks. Growing them there would add overlap
+    // that carries NO information (a 2D map has no depth to occlude), and it
+    // measurably costs separation: at 2x zoom the share of visibly clipped
+    // nodes would rise 32.4% -> 52.4%, at 4x 8.1% -> 29.3%. In 3D that same
+    // overlap IS the signal; in 2D it is only noise, so this is gated to 3D.
+    if (!(mode3d && has3d)) return 1;
+    var f = Math.max(1, Math.min(R_ZOOM_CAP, Math.sqrt(view.scale)));
+    // Quantised to 0.05 steps so the sprite cache stays small (a continuous
+    // factor would mint a fresh sprite per zoom step). The FACTOR is rounded,
+    // never the radius: both base radii are then multiplied by the SAME number,
+    // so R_CLUSTERED : R_UNCLUSTERED stays exactly 3.0 : 1.9 at every zoom and
+    // the size encoding is untouched. Rounding each radius separately would
+    // have skewed that ratio, which is precisely what must not happen.
+    return Math.round(f * 20) / 20;
+  }
+  function scaledRadius(base) {
+    return base * radiusScale();
+  }
+
+  // BRAINMAP-3D-DEPTH (Part C): the cloud's projected edge, in SCREEN space.
+  // Derived from cloudProj (a world-space sphere; see cloud3) so it moves with
+  // pan/zoom exactly as the cloud does and is invariant under rotation.
+  // Returns null in 2D — the gesture is 3D-only.
+  function cloudCircle() {
+    if (!(mode3d && has3d) || !cloudProj) return null;
+    return {
+      x: cloudProj.px * view.scale + view.offsetX,
+      y: cloudProj.py * view.scale + view.offsetY,
+      r: cloudProj.r * view.scale
+    };
+  }
+  // Press outside the cloud = pan; inside = rotate. This is the ONLY boundary
+  // consulted for that decision (the arcball's virtual sphere no longer decides
+  // anything — see sphereVec), so one screen position can never mean two things.
+  function pressOutsideCloud(mx, my) {
+    var c = cloudCircle();
+    if (!c) return false;
+    var dx = mx - c.x, dy = my - c.y;
+    return (dx * dx + dy * dy) > (c.r * c.r);
+  }
 
   // BRAINMAP-ATMOSPHERE: presentation state only — none of it encodes data.
   var INTRO_MS = 1800; // entry settle duration
@@ -578,8 +662,49 @@
       // rotation/layout changes, not on pan/zoom frames.
       drawOrder = depth.map(function (d, i) { return i; });
       drawOrder.sort(function (a, b) { return depth[a] - depth[b]; });
+      // BRAINMAP-3D-DEPTH: project the cloud's bounding sphere. Because the
+      // projection is linear, the projected centre is just the centre's
+      // projection, and an orthographic projection of a sphere is a circle of
+      // the SAME radius at every orientation — so cloudProj.r never changes as
+      // the map turns (measured: <=2.5% variation in the cloud's actual p99
+      // extent across 24 random orientations, i.e. it tracks the visible edge).
+      if (cloud3) {
+        var qx = cloud3.cx - 0.5, qy = cloud3.cy - 0.5, qz = cloud3.cz - 0.5;
+        cloudProj = {
+          px: cxs + (m[0] * qx + m[1] * qy + m[2] * qz) * s3,
+          py: cys + (m[3] * qx + m[4] * qy + m[5] * qz) * s3,
+          r: cloud3.r * s3
+        };
+      }
+      // BRAINMAP-3D-DEPTH: bucket nodes AND edges by depth so the draw pass can
+      // interleave them. Node buckets are contiguous slices of drawOrder (it is
+      // already depth-sorted); an edge takes the mean depth of its endpoints.
+      // Computed here — once per rotation — so pan/zoom frames pay nothing.
+      var dmin = depth[drawOrder[0]], dmax = depth[drawOrder[drawOrder.length - 1]];
+      var span = (dmax - dmin) || 1;
+      function bucketOf(d) {
+        var b = Math.floor((d - dmin) / span * DEPTH_BUCKETS);
+        return b < 0 ? 0 : (b >= DEPTH_BUCKETS ? DEPTH_BUCKETS - 1 : b);
+      }
+      bucketNodeStart = new Int32Array(DEPTH_BUCKETS + 1);
+      for (var bi = 0, oi = 0; bi < DEPTH_BUCKETS; bi++) {
+        bucketNodeStart[bi] = oi;
+        while (oi < drawOrder.length && bucketOf(depth[drawOrder[oi]]) === bi) oi++;
+        bucketNodeStart[bi + 1] = oi;
+      }
+      bucketNodeStart[DEPTH_BUCKETS] = drawOrder.length;
+      bucketEdges = [];
+      for (var bj = 0; bj < DEPTH_BUCKETS; bj++) bucketEdges.push([]);
+      graph.edges.forEach(function (e, ei) {
+        var a = nodeById[e.src], b2 = nodeById[e.dst];
+        if (!a || !b2) return;
+        bucketEdges[bucketOf((depth[a._i] + depth[b2._i]) / 2)].push(ei);
+      });
     } else {
       drawOrder = null;
+      cloudProj = null;
+      bucketNodeStart = null;
+      bucketEdges = null;
       positions = graph.nodes.map(function (n) {
         return {
           px: PAD + n.x * (w - PAD * 2),
@@ -638,17 +763,55 @@
     // overview where 6,353 of them cannot be read anyway, full where zoom
     // makes them readable. Nodes are NEVER faded or hidden this way.
     var edgeAlpha = 0.10 + 0.06 * Math.min(1, Math.max(0, view.scale - 1));
-    ctx.lineWidth = 0.5;
+    var edgeWidth = 0.5;
+    // BRAINMAP-3D-DEPTH (Part B2): in 3D ONLY, and only ABOVE 2x, edges keep
+    // strengthening as the view zooms in. Justified by count: 6,353 edges are
+    // on screen at 1x and still 6,082 at 2x (so the existing ramp correctly
+    // stops there), but only 3,877 at 4x and 1,488 at 8x — few enough to read.
+    // A stronger edge is also what makes the in-front/behind crossing of a node
+    // visible at all, which is the second depth cue. ZOOM ONLY, and IDENTICAL
+    // for every edge: still similarity with no direction, no per-edge variation.
+    // 2D and 3D-at-or-below-2x are byte-identical to before.
+    if (mode3d && has3d) {
+      var eBoost = Math.min(1, Math.max(0, (view.scale - 2) / 2));
+      edgeAlpha += 0.16 * eBoost;
+      edgeWidth += 0.40 * eBoost;
+    }
+    ctx.lineWidth = edgeWidth;
     ctx.strokeStyle = "rgba(148, 170, 205, " + edgeAlpha.toFixed(3) + ")";
-    ctx.beginPath();
-    graph.edges.forEach(function (e) {
-      var a = nodeById[e.src], b = nodeById[e.dst];
-      if (!a || !b) return;
-      if (filtering && !(isActive(a) && isActive(b))) return;
-      ctx.moveTo(toScreenX(wx(a._i)), toScreenY(wy(a._i)));
-      ctx.lineTo(toScreenX(wx(b._i)), toScreenY(wy(b._i)));
-    });
-    ctx.stroke();
+    // Stroke one batch of edges as a single path. `list` is an array of indexes
+    // into graph.edges, or null for "every edge" (the 2D path — no allocation).
+    function strokeEdges(list) {
+      ctx.globalAlpha = 1;   // node stamping below leaves this at an alpha
+      ctx.beginPath();
+      var count = list ? list.length : graph.edges.length;
+      for (var t = 0; t < count; t++) {
+        var e = graph.edges[list ? list[t] : t];
+        var a = nodeById[e.src], b = nodeById[e.dst];
+        if (!a || !b) continue;
+        if (filtering && !(isActive(a) && isActive(b))) continue;
+        ctx.moveTo(toScreenX(wx(a._i)), toScreenY(wy(a._i)));
+        ctx.lineTo(toScreenX(wx(b._i)), toScreenY(wy(b._i)));
+      }
+      ctx.stroke();
+    }
+    // Stamp one node by index (shared by the 2D and the 3D interleaved pass).
+    function stampNode(ni) {
+      var n = graph.nodes[ni];
+      if (filtering && !isActive(n)) return;
+      var clustered = n.cluster_id !== null && n.cluster_id !== undefined;
+      var isMarket = n.content_nature === "market_commercial";
+      var s = spriteFor(colorFor(n.domain),
+                        scaledRadius(clustered ? R_CLUSTERED : R_UNCLUSTERED),
+                        isMarket);
+      ctx.globalAlpha = isMarket ? 0.75 : (clustered ? 0.95 : 0.6);
+      ctx.drawImage(s.c, toScreenX(wx(ni)) - s.half, toScreenY(wy(ni)) - s.half,
+                    s.size, s.size);
+    }
+    // 2D: edges first, as one batch, exactly as before. In 3D the edges are
+    // deferred into the interleaved pass below so they can be occluded.
+    var interleave = mode3d && has3d && drawOrder && bucketEdges && bucketNodeStart;
+    if (!interleave) strokeEdges(null);
 
     // BRAINMAP-FILTER: when filtering, draw the non-matching nodes first as a
     // faint underlay — the selected set pops while its place in the whole map
@@ -674,17 +837,19 @@
     // BRAINMAP-3D-VIEW: in 3D the pass runs FAR-TO-NEAR (drawOrder) so
     // nearer nodes occlude farther ones — geometry, not a filter; every
     // node is still stamped. In 2D drawOrder is null and order is natural.
-    for (var oi = 0; oi < graph.nodes.length; oi++) {
-      var ni = drawOrder ? drawOrder[oi] : oi;
-      var n = graph.nodes[ni];
-      if (filtering && !isActive(n)) continue;
-      var clustered = n.cluster_id !== null && n.cluster_id !== undefined;
-      var r = clustered ? R_CLUSTERED : R_UNCLUSTERED;
-      var isMarket = n.content_nature === "market_commercial";
-      var s = spriteFor(colorFor(n.domain), r, isMarket);
-      ctx.globalAlpha = isMarket ? 0.75 : (clustered ? 0.95 : 0.6);
-      ctx.drawImage(s.c, toScreenX(wx(ni)) - s.half, toScreenY(wy(ni)) - s.half,
-                    s.size, s.size);
+    // BRAINMAP-3D-DEPTH: in 3D the edges ride along in the SAME far-to-near
+    // sweep, one depth bucket at a time, so an edge in front of a node now
+    // draws over it and an edge behind it is covered. Previously every edge
+    // was flushed underneath every node, which silently threw the cue away.
+    if (interleave) {
+      for (var bi = 0; bi < DEPTH_BUCKETS; bi++) {
+        strokeEdges(bucketEdges[bi]);
+        for (var oi = bucketNodeStart[bi]; oi < bucketNodeStart[bi + 1]; oi++) {
+          stampNode(drawOrder[oi]);
+        }
+      }
+    } else {
+      for (var oi2 = 0; oi2 < graph.nodes.length; oi2++) stampNode(oi2);
     }
     ctx.globalAlpha = 1;
 
@@ -808,12 +973,21 @@
     // focus gesture is untouched — it fires only under CLICK_MOVE_THRESHOLD,
     // exactly as in 2D. In 2D `dragRotating` is always false, so the entire
     // 2D drag path below is byte-identical to before.
+    // BRAINMAP-3D-DEPTH (Part C): a press on the BACKGROUND — outside the
+    // cloud's own projected edge — pans instead of rotating. That is the
+    // gesture the map was missing when zoomed out, where most of the canvas is
+    // background (81.4% of it at the default view, 39.2% at 2x, 0% at 4x).
+    // Right-drag / Shift+drag still pan from anywhere, which is what keeps pan
+    // reachable once the cloud fills the canvas and no background is left.
+    var r0 = canvas.getBoundingClientRect();
     var panModifier = ev.shiftKey || ev.button === 2;
-    dragRotating = (mode3d && has3d && !panModifier);
+    var onBackground = pressOutsideCloud(ev.clientX - r0.left, ev.clientY - r0.top);
+    dragRotating = (mode3d && has3d && !panModifier && !onBackground);
     if (dragRotating) {
-      var r0 = canvas.getBoundingClientRect();
       arcStart = sphereVec(ev.clientX - r0.left, ev.clientY - r0.top);
       rotAtPress = rotM.slice();
+    } else {
+      arcStart = null; rotAtPress = null;
     }
     dragStartX = ev.clientX; dragStartY = ev.clientY;
     startOffsetX = view.offsetX; startOffsetY = view.offsetY;
@@ -909,12 +1083,18 @@
     if (ev.touches.length === 1) {
       seatTouchPan(ev.touches[0]);
       touchMoved = false;
+      // BRAINMAP-3D-DEPTH (Part C): one finger INSIDE the cloud grabs the
+      // arcball; one finger on the background pans, matching the mouse exactly.
+      // Leaving arcStart null is what routes it to the pan branch in
+      // onTouchMove — two-finger pan is a separate branch and is unaffected.
+      arcStart = null; rotAtPress = null;
       if (mode3d && has3d) {
-        // One finger = arcball grab; anchor it exactly like the mouse press.
         var r0 = canvas.getBoundingClientRect();
-        arcStart = sphereVec(ev.touches[0].clientX - r0.left,
-                             ev.touches[0].clientY - r0.top);
-        rotAtPress = rotM.slice();
+        var tx0 = ev.touches[0].clientX - r0.left, ty0 = ev.touches[0].clientY - r0.top;
+        if (!pressOutsideCloud(tx0, ty0)) {
+          arcStart = sphereVec(tx0, ty0);
+          rotAtPress = rotM.slice();
+        }
       }
     } else if (ev.touches.length === 2) {
       // Second finger down — hand off from one-finger to a two-finger
@@ -940,10 +1120,12 @@
       if (Math.abs(ddx) + Math.abs(ddy) > CLICK_MOVE_THRESHOLD) touchMoved = true;
       hoverNode = null;
       tooltip.style.display = "none";
-      if (mode3d && has3d) {
+      if (mode3d && has3d && arcStart) {
         // BRAINMAP-3D-CONTROLS: one finger = arcball, anchored at the press
         // (same reversibility guarantee as the mouse). Two-finger pan below
         // now supplies the gesture touch was missing.
+        // BRAINMAP-3D-DEPTH: ...unless the press started on the background, in
+        // which case arcStart is null and this falls through to the pan below.
         var rr = canvas.getBoundingClientRect();
         applyArcball(touches[0].clientX - rr.left, touches[0].clientY - rr.top);
         return;
@@ -1001,13 +1183,18 @@
       // A finger lifted out of a pinch/pan — re-anchor on the survivor so the
       // view doesn't jump by the old finger's offset.
       seatTouchPan(ev.touches[0]);
+      // Re-seat the arcball on the surviving finger too, so a two-to-one
+      // transition rotates from where that finger IS, without a jump — but
+      // apply the SAME inside/outside test as a fresh press, or a finger left
+      // on the background would start rotating (BRAINMAP-3D-DEPTH Part C).
+      arcStart = null; rotAtPress = null;
       if (mode3d && has3d) {
-        // Re-seat the arcball on the surviving finger too, so a two-to-one
-        // transition rotates from where that finger IS, without a jump.
         var r1 = canvas.getBoundingClientRect();
-        arcStart = sphereVec(ev.touches[0].clientX - r1.left,
-                             ev.touches[0].clientY - r1.top);
-        rotAtPress = rotM.slice();
+        var tx1 = ev.touches[0].clientX - r1.left, ty1 = ev.touches[0].clientY - r1.top;
+        if (!pressOutsideCloud(tx1, ty1)) {
+          arcStart = sphereVec(tx1, ty1);
+          rotAtPress = rotM.slice();
+        }
       }
     } else if (ev.touches.length === 0) {
       touchPanId = null;
@@ -1026,6 +1213,9 @@
     // no-op for rotation in 2D). layout() is cheap and mode-aware.
     rotM = ROT0_M.slice();
     arcStart = null; rotAtPress = null; twoMode = null;
+    // BRAINMAP-3D-DEPTH: 리셋 means the whole map again, so the remembered
+    // search match stops steering the camera on a later mode switch.
+    searchMatchIndex = null;
     if (mode3d && has3d) layout();
     // BRAINMAP-FOCUS: 리셋 / dblclick release focus too — focus is a view
     // state, so "back to the whole map" must mean it.
@@ -1072,6 +1262,13 @@
       updateLegendActive();
       updateModeHint();
       layout();
+      // BRAINMAP-3D-DEPTH (Part A2): the camera CANNOT carry — the two layouts
+      // are different coordinate systems, so a pan/zoom in one has no
+      // counterpart in the other. But the reader's INTENT can. Refitting all
+      // 13,847 nodes when someone has narrowed to twelve is what made the
+      // switch read as a reset even though every filter survived intact.
+      // So: re-frame on whatever is currently lit, in the new layout.
+      frameLitSubset();
       draw();
       return;
     }
@@ -1195,6 +1392,49 @@
     anim.raf = requestAnimationFrame(tick);
   }
 
+  // BRAINMAP-3D-DEPTH (Part A2): frame the currently-lit subset in the CURRENT
+  // layout. Camera only — no coordinate, filter or encoding change; every node
+  // stays drawn, the dimmed ones included. Called on a mode switch, where the
+  // camera has no carry-over and the alternative is an unwanted full refit.
+  //   * a search that centred on a match keeps that match centred (its "current
+  //     match" survives the switch, not just the query text),
+  //   * otherwise any active filter's lit set is fitted with a margin,
+  //   * with nothing filtered, the whole-cloud default view is left untouched.
+  var FIT_MAX_SCALE = 2.5;   // same zoom the search/deep-link centring uses
+  function frameLitSubset() {
+    var rect = canvas.parentElement.getBoundingClientRect();
+    var w = Math.max(320, rect.width), h = Math.max(280, rect.height);
+    if (searchMatchIndex !== null && graph.nodes[searchMatchIndex]
+        && isActive(graph.nodes[searchMatchIndex])) {
+      var mp = positions[searchMatchIndex];
+      view.scale = FIT_MAX_SCALE;
+      view.offsetX = w / 2 - mp.px * view.scale;
+      view.offsetY = h / 2 - mp.py * view.scale;
+      hoverNode = graph.nodes[searchMatchIndex];
+      return;
+    }
+    if (!anyFilterActive()) return;   // whole map: keep the default framing
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, lit = 0;
+    for (var i = 0; i < graph.nodes.length; i++) {
+      if (!isActive(graph.nodes[i])) continue;
+      lit++;
+      var p = positions[i];
+      if (p.px < minX) minX = p.px;
+      if (p.px > maxX) maxX = p.px;
+      if (p.py < minY) minY = p.py;
+      if (p.py > maxY) maxY = p.py;
+    }
+    if (!lit) return;                 // filter matches nothing: leave the view
+    var pad = PAD * 2;
+    var bw = Math.max(1, maxX - minX), bh = Math.max(1, maxY - minY);
+    var s = Math.min((w - pad * 2) / bw, (h - pad * 2) / bh);
+    // Clamped to the view's own limits, and never past the centring zoom — a
+    // two-node subset must not slam to MAX_SCALE and lose all context.
+    view.scale = Math.max(MIN_SCALE, Math.min(FIT_MAX_SCALE, Math.min(MAX_SCALE, s)));
+    view.offsetX = w / 2 - (minX + maxX) / 2 * view.scale;
+    view.offsetY = h / 2 - (minY + maxY) / 2 * view.scale;
+  }
+
   function centerOnNode(n) {
     var rect = canvas.parentElement.getBoundingClientRect();
     var fw = Math.max(320, rect.width), fh = Math.max(280, rect.height);
@@ -1215,6 +1455,9 @@
     var q = String(ev.target.value || "").trim().toLowerCase();
     if (searchDebounce) clearTimeout(searchDebounce);
     searchDebounce = setTimeout(function () {
+      // BRAINMAP-3D-DEPTH (Part A1): a new query invalidates the remembered
+      // match — only a match the reader actually jumped to is worth carrying.
+      if (q !== searchQuery) searchMatchIndex = null;
       searchQuery = q;
       hoverNode = null;
       tooltip.style.display = "none";
@@ -1228,12 +1471,21 @@
     if (ev.key !== "Enter") return;
     ev.preventDefault();
     // Apply any pending debounced value immediately, then jump.
+    var prevQuery = searchQuery;
     searchQuery = String(ev.target.value || "").trim().toLowerCase();
+    if (searchQuery !== prevQuery) searchMatchIndex = null;
     updateSearchCount();
-    if (!searchQuery) { draw(); return; }
+    if (!searchQuery) { searchMatchIndex = null; draw(); return; }
     for (var i = 0; i < graph.nodes.length; i++) {
-      if (isActive(graph.nodes[i])) { centerOnNode(graph.nodes[i]); return; }
+      if (isActive(graph.nodes[i])) {
+        // BRAINMAP-3D-DEPTH (Part A1): remember WHICH node the search centred
+        // on, so a mode switch can re-centre it in the other layout.
+        searchMatchIndex = i;
+        centerOnNode(graph.nodes[i]);
+        return;
+      }
     }
+    searchMatchIndex = null;
     draw(); // no match — just repaint dimmed state
   }
 
@@ -1333,8 +1585,11 @@
     var el = document.getElementById("modeHint");
     if (!el) return;
     if (mode3d) {
-      el.textContent = "회전: 드래그 · 이동: 오른쪽 드래그/Shift+드래그, "
-        + "두 손가락으로 밀기 · 확대: 휠/두 손가락 벌리기";
+      // BRAINMAP-3D-DEPTH (Part C): the cloud's own edge now splits rotate from
+      // pan, so the hint says so in words. No ring is drawn on the canvas — the
+      // visible edge of the cloud IS the boundary.
+      el.textContent = "회전: 점 구름 안쪽 드래그 · 이동: 바깥쪽 드래그, "
+        + "오른쪽 드래그/Shift+드래그, 두 손가락으로 밀기 · 확대: 휠/두 손가락 벌리기";
       el.style.display = "";
     } else {
       el.style.display = "none";
@@ -1378,6 +1633,25 @@
       return typeof n.x3 === "number" && typeof n.y3 === "number"
         && typeof n.z3 === "number";
     });
+    // BRAINMAP-3D-DEPTH (Part C): the cloud's boundary, computed ONCE in 3D
+    // world space — the centroid of x3/y3/z3 plus the 99th percentile of the
+    // distance to it. A radius in 3D is a rotation INVARIANT, and an
+    // orthographic projection of a sphere is a circle of the same radius at
+    // every orientation, so the boundary cannot jitter as the map turns.
+    //   p99 rather than max: the outermost ~1% are stragglers, and a circle
+    //   drawn to the last stray dot would be 12% wider than the cloud anyone
+    //   can see (0.538 vs 0.479 units) while surrendering pannable background.
+    if (has3d) {
+      var c3x = 0, c3y = 0, c3z = 0, N3 = graph.nodes.length;
+      graph.nodes.forEach(function (n) { c3x += n.x3; c3y += n.y3; c3z += n.z3; });
+      c3x /= N3; c3y /= N3; c3z /= N3;
+      var d3 = graph.nodes.map(function (n) {
+        var dx = n.x3 - c3x, dy = n.y3 - c3y, dz = n.z3 - c3z;
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
+      }).sort(function (a, b) { return a - b; });
+      cloud3 = { cx: c3x, cy: c3y, cz: c3z,
+                 r: d3[Math.min(d3.length - 1, Math.floor(0.99 * (d3.length - 1)))] };
+    }
     (graph.clusters || []).forEach(function (c) { clusterById[c.cluster_id] = c; });
     // BRAINMAP-FEATURES: has-an-edge index (drives the 연결됨 count + stats).
     graph.edges.forEach(function (e) {
