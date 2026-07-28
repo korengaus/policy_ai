@@ -1,0 +1,33 @@
+{
+  "_comment": "CARD-RENDER-AUDIT baselines — recorded 2026-07-28 (corpus max_id=14245) from the two deterministic windows the scanner renders: mod14 (id%14==0, n=1016) and latest500 (id>max_id-500, n~460). Ceiling classes are ingest artefacts we live with: the check WARNS only when a rate rises past baseline+tol — the null-verdict-fossil / spine-artifact growth pattern. tol is roughly 3-5x the binomial sigma of the rate at the window's n, so deterministic drift noise never trips it but a systemic increase does; latest500 tolerances are wider because its n is smaller and its content mix moves with the news cycle. snake_case_identifier is a ceiling only because a residue still exists (possible_redirect risk flags; news_context/primary_source/fact_check in evidence sources) — after that fix, move it to the scanner's ZERO list and delete it here. Zero classes are not listed: they must be zero, always, in every window.",
+  "recorded": "2026-07-28",
+  "windows": {
+    "mod14": {
+      "n": 1016,
+      "ceilings": {
+        "bullet_char": { "rate": 0.607, "tol": 0.05 },
+        "question_mojibake": { "rate": 0.019, "tol": 0.015 },
+        "sentence_join": { "rate": 0.007, "tol": 0.01 },
+        "hero_digit_start": { "rate": 0.002, "tol": 0.008 },
+        "hero_restates_title": { "rate": 0.063, "tol": 0.03 },
+        "empty_section": { "rate": 0.0, "tol": 0.01 },
+        "snake_case_identifier": { "rate": 0.036, "tol": 0.02 }
+      },
+      "cand_tail": { "p90": 70, "p99": 132, "warn_factor": 1.3 }
+    },
+    "latest500": {
+      "n": 500,
+      "_note": "bullet_char is SATURATED in this window (recent ingest is press-release-heavy); it cannot meaningfully grow here, so its growth signal is the mod14 window's job",
+      "ceilings": {
+        "bullet_char": { "rate": 0.986, "tol": 0.02 },
+        "question_mojibake": { "rate": 0.04, "tol": 0.025 },
+        "sentence_join": { "rate": 0.002, "tol": 0.015 },
+        "hero_digit_start": { "rate": 0.008, "tol": 0.015 },
+        "hero_restates_title": { "rate": 0.082, "tol": 0.045 },
+        "empty_section": { "rate": 0.0, "tol": 0.015 },
+        "snake_case_identifier": { "rate": 0.044, "tol": 0.03 }
+      },
+      "cand_tail": { "p90": 96, "p99": 132, "warn_factor": 1.3 }
+    }
+  }
+}

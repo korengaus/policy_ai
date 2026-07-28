@@ -687,7 +687,8 @@ def run_audit(base: str) -> int:
     engine, db_err = build_readonly_engine()
     if engine is None:
         for cid in ("C4 invariants", "C5 freshness", "C6 recent quality",
-                    "C7 matcher-consistency", "C7 leak-scan"):
+                    "C7 matcher-consistency", "C7 leak-scan",
+                    "C8 render-scan"):
             rep.add(cid, "FAIL", db_err, "unverified corpus before outreach")
     else:
         import sqlalchemy as sa
@@ -999,6 +1000,82 @@ def run_audit(base: str) -> int:
                 rep.add("C7 predicate-parity", "ERROR",
                         "scan invocation crashed — parity not compared",
                         "screen and counts could disagree about official support")
+
+        # ---- CHECK 8 — card-render scan (CARD-RENDER-AUDIT) ----------------
+        # Executes the REAL main.js render chain (scripts/card_render_audit.js
+        # — committed sibling of the leak scan; baselines in
+        # scripts/card_render_baselines.json) over the deterministic mod-14
+        # sample + the latest-500 window and measures reader-visible defect
+        # classes. ZERO classes (fixed leaks: English sentences, raw enums,
+        # literal \uXXXX, mixed-scale, HTML-as-text) FAIL on ANY occurrence;
+        # CEILING classes (bullet furniture, hero-restates-title, …) WARN
+        # only on growth past their recorded baselines. An inability to run
+        # is an ERROR — the gate is not passable while skipping it. Adds
+        # ~35s (a ~13s dump of ~1,480 rows + a ~22s Node render pass).
+        RENDER_COLS = ("title", "claim_text", "content_nature", "claims",
+                       "normalized_claims", "evidence_snippets",
+                       "evidence_sources", "source_candidates",
+                       "source_reliability_summary",
+                       "source_reliability_reason", "evidence_summary",
+                       "debug_summary", "evidence_extraction_summary",
+                       "contradiction_summary", "contradiction_checks",
+                       "missing_context", "verdict_label",
+                       "policy_alert_level")
+        try:
+            with engine.connect() as conn:
+                max_id8 = conn.execute(sa.text(
+                    "SELECT MAX(id) FROM analysis_results")).scalar()
+                rows8 = conn.execute(sa.text(
+                    "SELECT id, %s FROM analysis_results "
+                    "WHERE MOD(id, 14) = 0 OR id > :cut ORDER BY id"
+                    % ", ".join(RENDER_COLS)),
+                    {"cut": (max_id8 or 0) - 500}).fetchall()
+            dump8 = {"_meta": {"max_id": max_id8},
+                     "rows": {str(r[0]): {
+                         c: (None if v is None else str(v))
+                         for c, v in zip(RENDER_COLS, r[1:])}
+                         for r in rows8}}
+            with tempfile.NamedTemporaryFile(
+                    "w", suffix=".json", delete=False,
+                    encoding="utf-8") as tf8:
+                json.dump(dump8, tf8, ensure_ascii=False)
+                render_input = tf8.name
+            proc8 = subprocess.run(
+                ["node", str(ROOT / "scripts" / "card_render_audit.js"),
+                 render_input],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=300)
+            out8 = (proc8.stdout or "") + (proc8.stderr or "")
+            tail8 = [ln for ln in out8.splitlines()
+                     if ln.startswith("RENDER SCAN")][-1:] or ["(no summary)"]
+            warn_lines8 = [ln for ln in out8.splitlines()
+                           if ln.startswith("RENDER-SCAN WARN:")]
+            if proc8.returncode != 0:
+                rep.add("C8 render-scan", "FAIL",
+                        out8.strip().replace("\n", " / ")[-260:],
+                        "machine text or a broken sentence reaches a "
+                        "reader's card — the classes we only ever caught "
+                        "by eye")
+            elif warn_lines8:
+                rep.add("C8 render-scan", "WARN",
+                        (tail8[0] + " / " + " / ".join(warn_lines8))[:260],
+                        "a display artefact is GROWING past its recorded "
+                        "baseline")
+            else:
+                rep.add("C8 render-scan", "PASS", tail8[0],
+                        "machine text or a broken sentence reaches a "
+                        "reader's card — the classes we only ever caught "
+                        "by eye")
+        except FileNotFoundError:
+            rep.add("C8 render-scan", "FAIL",
+                    "node not found — the gate REQUIRES the render scan: "
+                    "install node or run `node scripts/card_render_audit.js "
+                    "<dump.json>` alongside and re-audit",
+                    "the render scan silently skipped")
+        except Exception as err:
+            rep.add("C8 render-scan", "ERROR",
+                    "render-scan invocation crashed: %s" % str(err)[:140],
+                    "the render scan silently skipped")
         engine.dispose()
 
     # ---------------- output ----------------------------------------------
