@@ -8336,7 +8336,7 @@
       officialPeriodicEditionMismatch(result);
       const line = userFacingReportText(exportClaimText(result)
         || guardStoredProse(decision.decision_summary || verification.evidence_summary || "", verification.source_reliability_summary), "");
-      if (line) return String(line).slice(0, 115);
+      if (line) return truncateCardFaceClaim(String(line), CARD_FACE_MAX_CHARS);
       return evidenceQualityExplanation(quality, debug.evidence_strength_summary || {}, officialEvidenceIsGenuine(verification.source_reliability_summary || {}, debug));
     }
 
@@ -13040,6 +13040,10 @@
     // Minimum surviving length for a josa-trim to be worth doing — roughly one
     // full policy clause. Below it, an awkward tail beats a near-empty claim.
     const CLAIM_TRIM_FLOOR_CHARS = 40;
+    // CARD-TRUNCATION-FIX: the card-face claim budget. The value is the
+    // long-standing 115 that topSummaryLine sliced at — UNCHANGED, so no card
+    // gains or loses text; only the CUT changed (see truncateCardFaceClaim).
+    const CARD_FACE_MAX_CHARS = 115;
 
     function polishClaimEnding(text) {
       const value = String(text || "").trim();
@@ -13117,6 +13121,35 @@
         return polishClaimEnding(window.slice(0, lastEnd).trim());
       }
       return `${window.replace(/\s+\S*$/, "").trim()}...`;
+    }
+
+    // CARD-TRUNCATION-FIX: the card face used to cut with a bare
+    // String(line).slice(0, 115). Measured over the render sample that severed
+    // 33.6% of faces mid-eojeol (id 13700: "…수료증이 발급된", one character
+    // short of 발급된다) and left ALL 57.9% it cut unmarked, so a reader could
+    // not tell a claim from a fragment. This adds no second truncation rule: it
+    // delegates to the EXISTING boundary helper (truncateClaimOnBoundary — the
+    // same clause/sentence scan, with the same decimal guard, that the claim
+    // chain already uses) and only re-marks the cut with "…", the marker
+    // polishClaimEnding and the share-image line-wrapper already use. That
+    // helper's own ASCII "..." is left alone because it feeds the DETAIL view
+    // (limitClaimSentences → 핵심 주장 / 근거 문장 / 반박 검사), which renders
+    // correctly today and must stay byte-identical.
+    //
+    // Text within budget is returned BYTE-IDENTICAL — the ~42% of faces that
+    // were never truncated do not move, and no "…" is ever added to a claim
+    // that is whole. Card face only: topSummaryLine has a single caller
+    // (topicCardFromResult) and feeds only card.summary.
+    function truncateCardFaceClaim(text, maxLength) {
+      const value = String(text || "");
+      if (value.length <= maxLength) return value;
+      const cut = truncateClaimOnBoundary(value, maxLength).replace(/\.{3}$/, "");
+      if (/…$/.test(cut)) return cut;
+      // A boundary cut can land on a complete "…했다." — still a CUT claim, so
+      // it is marked too. The trailing full stop is dropped before "…" exactly
+      // as polishClaimEnding does; "?"/"!" are kept because dropping them would
+      // change what the sentence says.
+      return `${cut.replace(/[.\s]+$/, "")}…`;
     }
 
     // CLAIM-QUALITY FIX 3: do two claim strings say the same thing? Compared on

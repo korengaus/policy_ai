@@ -104,6 +104,9 @@ const PINNED_DEPS = [
   "renderSourceCandidates", "renderSourceReliabilitySummary",
   "renderSourceQueries", "renderEvidenceExtractionSummary",
   "renderContradictionSummary", "renderContradictionChecks",
+  // card face (home/feed card summary) + its truncation budget
+  "topSummaryLine", "stripCardFaceWrapper", "truncateCardFaceClaim",
+  "CARD_FACE_MAX_CHARS",
   // official-evidence predicate chain + status label + answer line
   "officialEvidenceIsGenuine", "officialStatusLabel", "isOfficialLikeSource",
   "loadAnswerLines",
@@ -241,8 +244,46 @@ function renderRow(id, row) {
           + renderContradictionChecks(r.claims, __contraChecks),
       },
       nCands: Array.isArray(r.source_candidates) ? r.source_candidates.length : 0,
+      // CARD FACE (home/feed card summary) — the surface topicCardFromResult
+      // renders. faceFull is the SAME string with the budget removed, so the
+      // check below can tell "this was cut" from "this is short" without
+      // guessing anything about Korean sentence shape.
+      face: stripCardFaceWrapper(topSummaryLine(r)),
+      faceFull: stripCardFaceWrapper(
+        userFacingReportText(exportClaimText(r), "")),
     };
   })()`, sandbox);
+}
+
+// ---------------------------------------------------------------------------
+// CARD-FACE TRUNCATION (id 13700: "…수료증이 발급된" — cut one character short
+// of 발급된다, unmarked). Found by eye because every detector here looked for
+// English, machine tokens, joins or mojibake, and a Korean sentence cut
+// mid-word is none of those.
+//
+// This check is deliberately MECHANICAL and asks nothing about how a Korean
+// sentence may legitimately end (headline-style noun endings are valid and
+// common — a linguistic "does this look finished" test measured 52% on real
+// cards and would be pure noise). It compares the rendered face against the
+// SAME string rendered without the budget and asserts two invariants:
+//   1. if the face is shorter than the full line, it must carry the site's
+//      "…" marker — a cut the reader cannot see is the actual defect;
+//   2. the cut must land on whitespace or punctuation in the full line, never
+//      inside an eojeol.
+// Invariant 2 is skipped when the retained body is not a literal prefix of the
+// full line (the boundary helper may trim a trailing comma/full stop), so the
+// check declines to fire rather than guess. Returns null = clean.
+const FACE_CUT_BOUNDARY = /[\s.,!?…·、，)\]"'」』]/;
+function cardFaceTruncationDefect(face, full) {
+  const f = String(face || "");
+  const g = String(full || "");
+  if (!f || !g || f === g) return null;
+  if (!/…$/.test(f)) return "cut without the … marker";
+  const body = f.replace(/…+$/, "").replace(/[.,\s]+$/, "");
+  if (!body || !g.startsWith(body)) return null;
+  const next = g.charAt(body.length);
+  if (next && !FACE_CUT_BOUNDARY.test(next)) return "cut inside a word";
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -294,6 +335,20 @@ for (const [name, re, specimen] of ZERO) {
 }
 if (!SNAKE_RE.test(stripUrls(SNAKE_CONTROL))) failures.push(
   "VACUOUS DETECTOR: snake-case no longer matches its control");
+// card-face controls: the 13700 shape (unmarked cut) and a mid-word cut that
+// merely carries the marker must BOTH be caught; a clean cut and an untruncated
+// face must NOT be.
+{
+  const FULL = "요건 충족 시 수료증이 발급된다";
+  if (!cardFaceTruncationDefect("요건 충족 시 수료증이 발급된", FULL)) failures.push(
+    "VACUOUS DETECTOR: card-face truncation misses the unmarked-cut control");
+  if (!cardFaceTruncationDefect("요건 충족 시 수료증이 발급된…", FULL)) failures.push(
+    "VACUOUS DETECTOR: card-face truncation misses the mid-word control");
+  if (cardFaceTruncationDefect("요건 충족 시 수료증이…", FULL)) failures.push(
+    "OVER-EAGER DETECTOR: card-face truncation fires on a clean marked cut");
+  if (cardFaceTruncationDefect(FULL, FULL)) failures.push(
+    "OVER-EAGER DETECTOR: card-face truncation fires on an untruncated face");
+}
 
 // ---------------------------------------------------------------------------
 // scan
@@ -324,7 +379,10 @@ for (const id of Object.keys(rows).map(Number).sort((a, b) => a - b)) {
   }
   const secs = Object.entries(out.sections).map(([k, v]) => [k, visible(v)]);
   for (const [k, v] of secs) if (v.replace(/\s+/g, "")) sectionSeen.add(k);
-  rendered[id] = { text: secs.map(([, v]) => v).join("\n"), secs, nCands: out.nCands };
+  rendered[id] = {
+    text: secs.map(([, v]) => v).join("\n"), secs, nCands: out.nCands,
+    faceDefect: cardFaceTruncationDefect(out.face, out.faceFull),
+  };
 }
 
 if (!failures.length) {
@@ -353,6 +411,7 @@ for (const [win, ids] of Object.entries(windows)) {
       if (Number(m[2]) > 5) { hit(win, "z:mixed-scale", id); break; }
     }
     if (SNAKE_RE.test(stripUrls(t))) hit(win, "z:snake-case-identifier", id);
+    if (r.faceDefect) hit(win, "z:card-face-truncation", id);
     // ceilings
     if (/[■-◿①-⓿⬚-⬯※▣◈▲△▴▷]/.test(t)) hit(win, "c:bullet_char", id);
     if (/[가-힣]\?[가-힣]/.test(t)) hit(win, "c:question_mojibake", id);
@@ -383,12 +442,13 @@ for (const [win, ids] of Object.entries(windows)) {
     failures.push(`BASELINES MISSING for window "${win}" in ${baselinePath}`);
     continue;
   }
-  for (const [name] of ZERO.concat([["mixed-scale"], ["snake-case-identifier"]])) {
+  for (const [name] of ZERO.concat(
+    [["mixed-scale"], ["snake-case-identifier"], ["card-face-truncation"]])) {
     const e = (counts[win] || {})["z:" + name];
     if (e) failures.push(
       `ZERO-CLASS REGRESSION [${win}] ${name}: ${e.n} row(s) e.g. ids `
-      + `${e.ids.join(",")} — this class was deliberately fixed to zero; a `
-      + "reader is seeing machine text again");
+      + `${e.ids.join(",")} — this class was deliberately fixed to zero and is `
+      + "back on the card in front of a reader");
   }
   for (const [cls, base] of Object.entries(winBase.ceilings)) {
     const e = (counts[win] || {})["c:" + cls] || { n: 0, ids: [] };
