@@ -43,7 +43,7 @@ import sys
 import time
 import urllib.request
 import urllib.error
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 try:
@@ -78,9 +78,79 @@ EMAIL_MEMBERS = 156
 EMAIL_EARLIEST = "2026-06-30"
 EMAIL_LATEST = "2026-07-19"
 
-EXPECTED_WEEKLY_LATEST = "2026-07-14"
-EXPECTED_SNAPSHOT_LATEST = "2026-07-20"
+# AUDIT-SPINE-BASELINE C5 — the spine-artifact expectation is DERIVED from the
+# clock, never hardcoded. Two pinned dates went stale the moment the spine ran
+# again: the check reported "expect 2026-07-14 / 2026-07-20" against NEWER
+# observed artifacts and still called them "an older batch", so it warned on
+# every run. A gate that always warns trains the operator to skim past it —
+# the same defect already fixed for the C4 null-verdict baseline.
+#
+# The rule follows the schedule and the two producing scripts, not a guess:
+#   * the spine's cron is Sunday 19:00 UTC (Monday 04:00 KST);
+#   * snapshot_brainmap_growth.py:298 sets snapshot_date = the run's UTC DATE,
+#     so a Sunday run stamps that Sunday;
+#   * generate_weekly_report.py:313 defaults week_start = today - 6 days (the
+#     spine forwards no --week-start on the unattended run), so a Sunday run
+#     stamps the preceding MONDAY.
+# Verified against the first true automated run: generated_at 2026-07-26 19:20
+# UTC (Sun) produced snapshot_date=2026-07-26 and week_start=2026-07-20 (Mon).
+#
+# GRACE: the expectation only comes due SPINE_GRACE_HOURS after the scheduled
+# time, so an audit run while the chain is still executing (it takes ~20 min)
+# cannot manufacture a false WARN.
+SPINE_WEEKDAY_UTC = 6           # Python weekday(): Mon=0 .. Sun=6
+SPINE_HOUR_UTC = 19
+SPINE_GRACE_HOURS = 6
 DAILY_ADD_BAND = (90, 160)
+
+
+def last_expected_spine_run(now_utc):
+    """The most recent Sunday 19:00 UTC spine run that is already DUE (i.e.
+    at least SPINE_GRACE_HOURS in the past). Pure — takes the clock as an
+    argument so the four staleness cases are selftestable."""
+    due = now_utc - timedelta(hours=SPINE_GRACE_HOURS)
+    anchor = due.replace(hour=SPINE_HOUR_UTC, minute=0, second=0, microsecond=0)
+    anchor -= timedelta(days=(anchor.weekday() - SPINE_WEEKDAY_UTC) % 7)
+    if anchor > due:
+        anchor -= timedelta(days=7)
+    return anchor
+
+
+def expected_spine_artifacts(now_utc):
+    """(expected_week_start, expected_snapshot_date) as ISO date strings for
+    the last DUE spine run — the OLDEST artifacts a healthy spine may hold."""
+    run_date = last_expected_spine_run(now_utc).date()
+    return (run_date - timedelta(days=6)).isoformat(), run_date.isoformat()
+
+
+def spine_artifact_status(wk_latest, snap_latest, now_utc):
+    """(status, detail) for the C5 spine-artifact check.
+
+    NOT weakened — the direction that matters is preserved exactly: an artifact
+    OLDER than the last due run still WARNs, because that is the failure this
+    check exists to catch (the spine did not run, or failed). What changes is
+    that an artifact at or NEWER than the expectation now PASSes, since a
+    manual rebuild legitimately runs ahead of the cron. A MISSING artifact is
+    a WARN, never a pass."""
+    exp_wk, exp_snap = expected_spine_artifacts(now_utc)
+    behind = []
+    for label, observed, expected in (("weekly", wk_latest, exp_wk),
+                                      ("snapshot", snap_latest, exp_snap)):
+        if observed is None or str(observed) == "":
+            behind.append("%s=missing" % label)
+        elif str(observed) < expected:
+            # Whole cycles missed, so the message says HOW stale, not just that
+            # it is: 6 days behind still means one missed Sunday.
+            days = (date.fromisoformat(expected)
+                    - date.fromisoformat(str(observed))).days
+            behind.append("%s=%s is %d cycle(s) behind %s"
+                          % (label, observed, -(-days // 7), expected))
+    detail = ("weekly=%s (expect >=%s) snapshot=%s (expect >=%s)"
+              % (wk_latest, exp_wk, snap_latest, exp_snap))
+    if behind:
+        # em-dash, not a pipe: the observed cell must not split the table.
+        return "WARN", detail + " — STALE: " + "; ".join(behind)
+    return "PASS", detail
 
 # AUDIT-BASELINES C4 — null verdict_label baseline, measured 2026-07-27.
 # These are ids 1-11, ALL created 2026-04-30 (first deploy day), before the
@@ -733,12 +803,12 @@ def run_audit(base: str) -> int:
             wk = q("SELECT week_start FROM weekly_reports ORDER BY id DESC LIMIT 1")
             wk_latest = wk[0][0] if wk else None
             snap = q("SELECT MAX(snapshot_date) FROM brainmap_snapshots")[0][0]
-            arts_status = ("PASS" if (wk_latest == EXPECTED_WEEKLY_LATEST
-                                      and str(snap) == EXPECTED_SNAPSHOT_LATEST)
-                           else "WARN")
-            rep.add("C5 spine artifacts", arts_status,
-                    "weekly=%s (expect %s) snapshot=%s (expect %s)"
-                    % (wk_latest, EXPECTED_WEEKLY_LATEST, snap, EXPECTED_SNAPSHOT_LATEST),
+            # AUDIT-SPINE-BASELINE: expectation derived from the clock, and the
+            # comparison is >= not ==, so only artifacts OLDER than the last due
+            # Sunday 19:00 UTC run warn. A manual rebuild running ahead is normal.
+            arts_status, arts_detail = spine_artifact_status(
+                wk_latest, snap, datetime.now(timezone.utc))
+            rep.add("C5 spine artifacts", arts_status, arts_detail,
                     "weekly page / brainmap serving an older batch than expected")
 
             cut7 = str(today - timedelta(days=7))
@@ -999,6 +1069,45 @@ def selftest() -> int:
 
     env = parse_env_file(Path(__file__))  # non-env file -> harmless keys only
     check("env-parse-type", isinstance(env, dict), True)
+
+    # AUDIT-SPINE-BASELINE — the derived spine expectation, pinned by CASE
+    # rather than by date, so this can never go stale the way the two
+    # hardcoded constants it replaced did.
+    tue = datetime(2026, 7, 28, 19, 0, tzinfo=timezone.utc)      # Tue
+    check("spine-anchor-tue", last_expected_spine_run(tue).isoformat(),
+          "2026-07-26T19:00:00+00:00")                            # prev Sunday
+    check("spine-expected-tue", expected_spine_artifacts(tue),
+          ("2026-07-20", "2026-07-26"))                           # Mon, Sun
+    # Grace: at Sunday 19:30 UTC the chain is still running, so the run that
+    # started 30 min ago is NOT yet due — the previous Sunday still governs.
+    sun_during = datetime(2026, 7, 26, 19, 30, tzinfo=timezone.utc)
+    check("spine-grace-during-run", expected_spine_artifacts(sun_during),
+          ("2026-07-13", "2026-07-19"))
+    # ...and once the grace has elapsed, that Sunday becomes the expectation.
+    sun_after = datetime(2026, 7, 27, 2, 0, tzinfo=timezone.utc)
+    check("spine-grace-elapsed", expected_spine_artifacts(sun_after),
+          ("2026-07-20", "2026-07-26"))
+
+    check("spine-current-passes",
+          spine_artifact_status("2026-07-20", "2026-07-26", tue)[0], "PASS")
+    check("spine-newer-manual-rebuild-passes",
+          spine_artifact_status("2026-07-27", "2026-08-02", tue)[0], "PASS")
+    one_stale = spine_artifact_status("2026-07-13", "2026-07-19", tue)
+    check("spine-one-cycle-stale-warns", one_stale[0], "WARN")
+    check("spine-one-cycle-stale-names-cycles",
+          "weekly=2026-07-13 is 1 cycle(s) behind 2026-07-20" in one_stale[1], True)
+    many_stale = spine_artifact_status("2026-06-29", "2026-07-05", tue)
+    check("spine-several-cycles-stale-warns", many_stale[0], "WARN")
+    check("spine-several-cycles-stale-counts",
+          "snapshot=2026-07-05 is 3 cycle(s) behind 2026-07-26" in many_stale[1], True)
+    # A partial miss (6 days, not a full 7) is still one missed Sunday.
+    check("spine-partial-cycle-counts-as-one",
+          "snapshot=2026-07-20 is 1 cycle(s) behind 2026-07-26"
+          in spine_artifact_status("2026-07-20", "2026-07-20", tue)[1], True)
+    check("spine-missing-artifact-warns",
+          spine_artifact_status(None, "2026-07-26", tue)[0], "WARN")
+    check("spine-missing-artifact-named",
+          "weekly=missing" in spine_artifact_status(None, "2026-07-26", tue)[1], True)
 
     weeks = {"2026-07-14": {"top": [
         {"rank": 1, "lineage_id": "abc123", "representative_analysis_id": 1},
