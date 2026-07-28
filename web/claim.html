@@ -37,7 +37,8 @@
       by score; no member is highlighted as strongest, confirming, or
       refuting. Sequence is not contradiction.
     * The header title is a REPRESENTATIVE ARTICLE title, labelled by the
-      rule that chose it (most recent published_at) — the /api/claim payload
+      rule that chose it (most recent published_at whose title carries no
+      leading bracketed format marker) — the /api/claim payload
       carries no representative field and picking by score would be
       cherry-picking. No member is ever labelled origin/source/최초 보도자:
       the earliest member can PREDATE the decision the cluster is about.
@@ -311,14 +312,37 @@
     // Deliberately NOT the earliest member and NEVER labelled 최초/원조/출처:
     // picking by score would be cherry-picking, and the earliest article can
     // predate the decision the cluster is about.
+    // CLAIM-TITLE: skip titles that LEAD with a bracketed format marker
+    // ([대담한K] [포토] [속보] — a broadcast segment / photo / wire tag, not
+    // content; measured 6% of 5+-member lineages). Mechanical rule only:
+    // eligibility = "does not start with [ … ]", order = recency, newest
+    // eligible wins. Never ranked by outlet, reliability, verdict or
+    // evidence — that would be an editorial judgement. When EVERY candidate
+    // carries a marker, fall back to the previous choice (newest member).
     var dated = members.filter(function (m) { return !!m.published_at; });
-    var headMember = dated.length ? dated[dated.length - 1] : members[members.length - 1];
+    var pool = dated.length ? dated : members;
+    var BRACKET_LEAD = /^\s*\[[^\]]{1,15}\]/;
+    var headMember = pool[pool.length - 1];
+    var pickedLatest = true;
+    for (var pi = pool.length - 1; pi >= 0; pi--) {
+      if (pool[pi] && pool[pi].title && !BRACKET_LEAD.test(pool[pi].title)) {
+        pickedLatest = pi === pool.length - 1;
+        headMember = pool[pi];
+        break;
+      }
+    }
     if (headMember && headMember.title) {
       document.getElementById("claimTitle").textContent = headMember.title;
       var rule = document.getElementById("titleRule");
-      rule.textContent = dated.length
+      // Disclosure stays accurate: "가장 최근 보도의 제목" only when the pick
+      // IS the newest member; otherwise the existing "제목 중 하나" wording
+      // (already used for undated pools) with 최근, since the pick is still
+      // the newest ELIGIBLE one.
+      rule.textContent = (dated.length && pickedLatest)
         ? "이 주장을 다룬 기사 중 가장 최근 보도의 제목입니다 (대표 기사이며, 주장 원문·최초 보도가 아닙니다)"
-        : "이 주장을 다룬 기사 제목 중 하나입니다 (대표 기사이며, 주장 원문·최초 보도가 아닙니다)";
+        : (dated.length
+          ? "이 주장을 다룬 최근 기사 제목 중 하나입니다 (대표 기사이며, 주장 원문·최초 보도가 아닙니다)"
+          : "이 주장을 다룬 기사 제목 중 하나입니다 (대표 기사이며, 주장 원문·최초 보도가 아닙니다)");
       rule.hidden = false;
     }
 

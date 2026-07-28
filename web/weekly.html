@@ -279,11 +279,24 @@
       main.appendChild(link);
 
       var meta = el("div", "top-meta");
+      // WINDOW-LABELS: outlet_count is ALL-TIME (graph-level) while the span
+      // beside it is usually THIS WEEK's window — unlabelled, "78개 매체 ·
+      // 확산 기간 07-20 → 07-20" read as 78 outlets in one day. Each number
+      // keeps its exact value; only the scope becomes visible. "전체 기간" is
+      // composed from this page's own words (전체 확산 매체 수 / 확산 기간);
+      // the window prefix reuses the EXISTING 이번 주/해당 주간 strings the
+      // 보도 count line already renders.
       var outlets = Number(item.outlet_count);
-      if (outlets > 0) meta.appendChild(el("span", "outlet-badge", outlets + "개 매체"));
-      var from = day(item.window_first_at) || day(item.first_at);
-      var to = day(item.window_last_at) || day(item.last_at);
-      if (from && to) meta.appendChild(el("span", null, "확산 기간 " + from + " → " + to));
+      if (outlets > 0) meta.appendChild(el("span", "outlet-badge", outlets + "개 매체 (전체 기간)"));
+      var winFrom = day(item.window_first_at), winTo = day(item.window_last_at);
+      var from = winFrom || day(item.first_at);
+      var to = winTo || day(item.last_at);
+      // Old report rows without window_* fields fall back to the ALL-TIME
+      // span — label them 전체 기간, never 이번 주, so the prefix cannot lie.
+      var spanScope = (winFrom && winTo)
+        ? (weekParam ? "해당 주간 " : "이번 주 ")
+        : "전체 기간 ";
+      if (from && to) meta.appendChild(el("span", null, spanScope + "확산 기간 " + from + " → " + to));
       if (Number(item.window_member_count) > 0) {
         // ARCHIVE-LABEL: on a past-week permalink (?week=...) "이번 주" is wrong —
         // reuse the "해당 주간" vocabulary already used by showEmpty above. The
