@@ -39,6 +39,7 @@
 # without USE_POSTGRES_WRITE=true) and fail-SAFE (skip when DB near full).
 
 import argparse
+import base64
 import os
 import subprocess
 import sys
@@ -165,6 +166,32 @@ def _ntfy_endpoint():
     return None
 
 
+def _header_title(title):
+    """ALERT-FIX: HTTP headers are latin-1 ONLY, so a Korean Title header made
+    urllib raise UnicodeEncodeError and the send failed every time — the daily
+    collection alert (title "일일 수집 완료 — 신규 N건") therefore NEVER reached
+    the operator, while the weekly spine's ASCII titles sent fine. Its absence
+    was being read as "the container died".
+
+    Fix: RFC 2047 encoded-word (=?UTF-8?B?<base64>?=), which ntfy decodes back
+    to the original text. Chosen over ntfy's JSON-body publishing because that
+    form POSTs the TOPIC in the body to the server ROOT, so it would have to
+    re-derive a base URL from NTFY_URL (which points at the topic, and may be a
+    self-hosted path) — a bigger, riskier change to a path the weekly spine
+    depends on. This keeps the endpoint, method and body byte-identical.
+
+    ASCII titles are returned UNCHANGED, so every request the weekly spine
+    makes today is byte-for-byte what it was before this fix."""
+    try:
+        title.encode("ascii")
+        return title
+    except UnicodeEncodeError:
+        # One single encoded-word (never folded): a header must stay on one
+        # line, so this deliberately does not use email.header's line wrapping.
+        blob = base64.b64encode(title.encode("utf-8")).decode("ascii")
+        return "=?UTF-8?B?%s?=" % blob
+
+
 def notify(title, message, priority="default"):
     """Send an ntfy notification if NTFY_URL / NTFY_TOPIC is set, else PRINT.
     Best-effort: any send failure degrades to a printed warning — a
@@ -179,7 +206,7 @@ def notify(title, message, priority="default"):
         req = urllib.request.Request(
             endpoint,
             data=message.encode("utf-8"),
-            headers={"Title": title, "Priority": priority},
+            headers={"Title": _header_title(title), "Priority": priority},
             method="POST",
         )
         urllib.request.urlopen(req, timeout=10).read()

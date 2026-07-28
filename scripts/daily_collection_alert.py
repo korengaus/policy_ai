@@ -101,14 +101,23 @@ def read_briefing_status(min_id):
         import weekly_spine
 
         url = weekly_spine.normalize_db_url(url)
+        # ALERT-FIX: the LIKE patterns used to be INLINE SQL literals, so their
+        # leading '%' sat next to a '"' and psycopg — which scans the whole
+        # string for placeholders whenever parameters are passed — rejected it
+        # with: ProgrammingError: only '%s', '%b', '%t' are allowed as
+        # placeholders, got '%"'. The query never reached Postgres.
+        # Passing the patterns AS PARAMETERS fixes it and is immune to the
+        # whole class of bug (nothing to double-escape, patterns are data).
+        # Still a pure SELECT — no write, no schema change.
+        error_pat = '%"policy_briefing_status": "error"%'
+        keyed_pat = '%"policy_briefing_status"%'
         with psycopg.connect(url, connect_timeout=15) as conn:
             row = conn.execute(
                 "SELECT "
-                "COUNT(*) FILTER (WHERE debug_summary LIKE "
-                "'%\"policy_briefing_status\": \"error\"%'), "
-                "COUNT(*) FILTER (WHERE debug_summary LIKE "
-                "'%\"policy_briefing_status\"%') "
-                "FROM analysis_results WHERE id > %s", (min_id,)).fetchone()
+                "COUNT(*) FILTER (WHERE debug_summary LIKE %s), "
+                "COUNT(*) FILTER (WHERE debug_summary LIKE %s) "
+                "FROM analysis_results WHERE id > %s",
+                (error_pat, keyed_pat, min_id)).fetchone()
         return (int(row[0] or 0), int(row[1] or 0))
     except Exception as exc:
         print("[collection-alert] briefing-status query failed: %s"
