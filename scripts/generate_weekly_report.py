@@ -24,9 +24,12 @@
 #     postgres_storage.py untouched, no Alembic). The table materializes on
 #     this script's first real run, NOT at deploy.
 #   * VERDICT-FREE: reads brainmap_graph.graph_json + analysis_results
-#     (id, published_at) ONLY. No verdict_label / policy_confidence_score /
-#     truth_claim / operator_review_required / has_genuine_official_support
-#     column is ever selected; the ranking key is circulation, never truth.
+#     (id, published_at, domain, content_nature) ONLY. No verdict_label /
+#     policy_confidence_score / truth_claim / operator_review_required /
+#     has_genuine_official_support column is ever selected; the ranking key
+#     is circulation, never truth. domain/content_nature feed ONLY the
+#     WEEKLY-CONTENT-GUARD strict-combo selection (both classifier fallback
+#     labels together = neither classifier could place the row).
 #   * HONESTY BOUNDARY: the stored payload carries the mandatory framing
 #     "확산 규모 기준 · 사실 검증 아님"; a write-time guard refuses to
 #     persist if any string THIS script generates carries verdict vocabulary
@@ -60,6 +63,16 @@ except Exception:
     pass
 
 from build_brainmap_graph import FORBIDDEN_LABEL_VOCAB  # noqa: E402 — honesty guard, shared
+# WEEKLY-CONTENT-GUARD: the STRICT-COMBO exclusion values, imported from the
+# classifiers that produce them (never hand-written here). Both are the
+# classifiers' explicit fail/fallback labels: a row carrying BOTH is one that
+# neither classifier could place — measured 64/14,240 corpus rows (0.45%), and
+# the only archived weekly top-10 row it matches is the child-homicide court
+# story (Phase 1b). The WIDE rule (기타-미분류 alone) was measured and
+# REJECTED: it also removes real policy claims the domain classifier missed
+# (여수시 추경 편성 — 45% of a 51-row sample read as genuine policy).
+from content_nature_classifier import FALLBACK_LABEL as NATURE_FALLBACK_LABEL  # noqa: E402
+from domain_classifier import FALLBACK_LABEL as DOMAIN_FALLBACK_LABEL  # noqa: E402
 
 DEFAULT_TOP_N = 10
 
@@ -69,6 +82,10 @@ SELECT_NEWEST_GRAPH_SQL = (
 )
 # id + published_at ONLY — deliberately no verdict/score column.
 SELECT_PUBLISHED_SQL = "SELECT id, published_at FROM analysis_results"
+# WEEKLY-CONTENT-GUARD: classifier fields for the strict-combo exclusion.
+# Still verdict-free: domain / content_nature are topic/format classifiers,
+# never a truth or confidence signal.
+SELECT_CLASSIFIER_SQL = "SELECT id, domain, content_nature FROM analysis_results"
 
 # The ONLY write this script performs — an additive, self-created table
 # (mirrors brainmap_graph's create-on-demand pattern verbatim).
@@ -94,12 +111,23 @@ FRAMING_TEXT = "확산 규모 기준 · 사실 검증 아님"
 
 
 def build_report(graph, published_by_id, week_start, week_end,
-                 top_n=DEFAULT_TOP_N):
+                 top_n=DEFAULT_TOP_N, classifier_by_id=None):
     """Pure compute: graph JSON dict + {analysis_id: published_at} ->
     the payload dict. A cluster qualifies when ANY member's published_at
     date falls inside [week_start, week_end] (inclusive, YYYY-MM-DD compare
     on the ISO-UTC TEXT). Ranking: outlet_count desc, tie-broken by
-    smallest member id (deterministic)."""
+    smallest member id (deterministic).
+
+    WEEKLY-CONTENT-GUARD: classifier_by_id (optional) maps analysis_id ->
+    (domain, content_nature). A cluster is excluded AT SELECTION — before
+    ranking, so the top-10 backfills naturally from the next eligible
+    cluster — when its REPRESENTATIVE row carries BOTH fallback labels
+    (domain=기타-미분류 AND content_nature=mixed_or_unclear): the strict
+    combo, both classifiers explicitly failing to place the row. A missing
+    row or a null/absent value in EITHER field NEVER excludes — absence is
+    not evidence. No number on any surviving entry is touched; ranking
+    stays sort(key=-outlet_count) exactly as before. classifier_by_id=None
+    (legacy callers, selftest baseline) disables the guard entirely."""
     members_by_cluster = {}
     titles_by_id = {}
     for node in graph.get("nodes") or []:
@@ -135,6 +163,15 @@ def build_report(graph, published_by_id, week_start, week_end,
             if label_title and titles_by_id.get(mid) == label_title:
                 representative_id = mid
                 break
+        # WEEKLY-CONTENT-GUARD (see docstring): strict-combo exclusion on the
+        # representative's stored classifier output. Both fields must be
+        # present AND equal to their classifier's fallback label.
+        if classifier_by_id is not None:
+            rep_domain, rep_nature = classifier_by_id.get(
+                representative_id, (None, None))
+            if (rep_domain == DOMAIN_FALLBACK_LABEL
+                    and rep_nature == NATURE_FALLBACK_LABEL):
+                continue
         entries.append({
             "stable_id": cluster.get("stable_id"),
             # CLAIM-LINK: the DURABLE lineage id (assign_lineage_ids), straight
@@ -276,10 +313,51 @@ def run_selftest() -> int:
     f_ok = payload["total_clusters_considered"] == 4 and payload["qualifying_clusters"] == 3
     print("  [%s] (f) considered/qualifying counts" % ("ok" if f_ok else "xx"))
 
-    ok = all([a_ok, b_ok, c_ok, d_ok, e_ok, f_ok])
+    # ---- WEEKLY-CONTENT-GUARD cases (situation-pinned, no dates beyond the
+    # synthetic window above; the guard values come from the classifier
+    # constants themselves, never re-typed here) ----
+    BOTH = (DOMAIN_FALLBACK_LABEL, NATURE_FALLBACK_LABEL)
+    # (g) both fields matching -> excluded, and the top backfills: with
+    # top_n=2, excluding "bbb" promotes "ddd" into the list.
+    cls = {4: BOTH}  # representative of cluster 1 ("bbb") is id 4
+    p = build_report(graph, published, "2026-07-04", "2026-07-10",
+                     top_n=2, classifier_by_id=cls)
+    got = [(e["stable_id"], e["rank"]) for e in p["top"]]
+    g_ok = got == [("aaa", 1), ("ddd", 2)]
+    print("  [%s] (g) strict combo excludes at selection; next cluster "
+          "backfills the top" % ("ok" if g_ok else "xx"))
+    # (h) only ONE field matching -> kept (both sub-cases).
+    p1 = build_report(graph, published, "2026-07-04", "2026-07-10",
+                      top_n=10, classifier_by_id={4: (DOMAIN_FALLBACK_LABEL, "government_policy")})
+    p2 = build_report(graph, published, "2026-07-04", "2026-07-10",
+                      top_n=10, classifier_by_id={4: ("finance", NATURE_FALLBACK_LABEL)})
+    h_ok = (len(p1["top"]) == 3 and len(p2["top"]) == 3)
+    print("  [%s] (h) one matching field alone never excludes"
+          % ("ok" if h_ok else "xx"))
+    # (i) both null / one null / row absent -> kept. Absence is not evidence.
+    p3 = build_report(graph, published, "2026-07-04", "2026-07-10",
+                      top_n=10, classifier_by_id={4: (None, None)})
+    p4 = build_report(graph, published, "2026-07-04", "2026-07-10",
+                      top_n=10, classifier_by_id={4: (DOMAIN_FALLBACK_LABEL, None)})
+    p5 = build_report(graph, published, "2026-07-04", "2026-07-10",
+                      top_n=10, classifier_by_id={})
+    i_ok = all(len(x["top"]) == 3 for x in (p3, p4, p5))
+    print("  [%s] (i) null/absent classifier fields never exclude"
+          % ("ok" if i_ok else "xx"))
+    # (j) surviving entries are BYTE-IDENTICAL to the unguarded run apart
+    # from rank (positions close up on backfill by design) — the guard
+    # selects, it never edits a number or a field.
+    strip_rank = lambda e: {k: v for k, v in e.items() if k != "rank"}
+    base = {e["stable_id"]: strip_rank(e) for e in payload["top"]}
+    j_ok = all(base[e["stable_id"]] == strip_rank(e) for e in p["top"])
+    print("  [%s] (j) surviving rows byte-identical to the unguarded ranking "
+          "(rank positions close up only)" % ("ok" if j_ok else "xx"))
+
+    ok = all([a_ok, b_ok, c_ok, d_ok, e_ok, f_ok, g_ok, h_ok, i_ok, j_ok])
     print()
     print("SELFTEST: %s" % ("PASS (ranking + window filter + representative + "
-                            "fallback + undated tolerance + honesty)" if ok else "FAIL"))
+                            "fallback + undated tolerance + honesty + "
+                            "content-guard)" if ok else "FAIL"))
     return 0 if ok else 1
 
 
@@ -350,9 +428,14 @@ def main(argv=None) -> int:
         with conn.cursor() as cur:
             cur.execute(SELECT_PUBLISHED_SQL)
             published_by_id = {row_id: value for row_id, value in cur.fetchall()}
+        with conn.cursor() as cur:
+            cur.execute(SELECT_CLASSIFIER_SQL)
+            classifier_by_id = {row_id: (domain, nature)
+                                for row_id, domain, nature in cur.fetchall()}
 
         payload = build_report(graph, published_by_id, week_start, week_end,
-                               top_n=args.top_n)
+                               top_n=args.top_n,
+                               classifier_by_id=classifier_by_id)
         payload["generated_at"] = generated_at
         payload["graph_build_ref"] = graph_build_ref
         payload["graph_generated_at"] = str(graph_generated_at or "")
