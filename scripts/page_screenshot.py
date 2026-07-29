@@ -63,12 +63,47 @@ except Exception:
 # Mirrors official_browser_crawler.py's context options (same UA/locale posture).
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-# Content-presence waits, in order of preference: the card detail container,
-# then any rendered result section. Waiting on a SELECTOR (not a sleep) is what
-# makes the capture deterministic on a slow cold start.
-WAIT_SELECTORS = ("#results .verification-card", "#results .result-card",
-                  "#results section", "#results")
+# PAGE-AWARE CONTENT WAITS. Waiting on a SELECTOR (never a sleep) is what
+# makes a capture deterministic on a cold start — but every page renders a
+# different root, so a card-page selector list stalls for the full timeout on
+# weekly.html. Each entry below was read from that page's OWN markup (file
+# cited); the first selector is the RENDERED content, later ones are the
+# static container it fills, so an empty-state page still resolves a real
+# target instead of failing.
+WAIT_RULES = (
+    # (url predicate, selectors, page label, markup source)
+    (lambda u, q: "result_id" in q,
+     ("#results .verification-card", "#results .result-card", "#results section",
+      "#results"),
+     "card view", "frontend/template.html:810 + rendered .verification-card"),
+    (lambda u, q: "/weekly.html" in u,
+     ("#topList .top-item", "#topList", "#status"),
+     "weekly report", "web/weekly.html:179 (#topList/.top-item), :178 (#status)"),
+    (lambda u, q: "/claim.html" in u,
+     ("#metaPanel:not([hidden])", "#metaRow", "#claimTitle"),
+     "claim page", "web/claim.html:206 (#metaPanel, unhidden at :362), :192"),
+    (lambda u, q: "/brainmap.html" in u,
+     ("canvas#map", "#mapStats", "#legend"),
+     "brain map", "web/brainmap.html:220 (canvas#map), :217 (#mapStats)"),
+    # site root last: it matches broadly, so every specific page wins first
+    (lambda u, q: True,
+     ("#hotTopics .topic-card", "#hotTopics", "#domainSections", "main"),
+     "site root / home feed",
+     "frontend/template.html:255 (#hotTopics.topic-card-grid) + .topic-card"),
+)
+# A page that renders quickly does not need 45s; a cold Render dyno still
+# resolves well inside this. Overridable with --timeout.
+DEFAULT_TIMEOUT_MS = 15000
 DEFAULT_VIEWPORTS = "1440x900,390x844"
+
+
+def wait_rule_for(url):
+    """(selectors, page label, markup source) chosen from the URL."""
+    query = urllib.parse.urlparse(url).query
+    for predicate, selectors, label, source in WAIT_RULES:
+        if predicate(url, query):
+            return selectors, label, source
+    return ("main",), "unknown", "fallback"
 
 
 def parse_viewports(spec):
@@ -89,20 +124,36 @@ def parse_viewports(spec):
 def label_from_url(url, explicit):
     if explicit:
         return re.sub(r"[^A-Za-z0-9_.-]+", "_", explicit)
-    query = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+    parsed = urllib.parse.urlparse(url)
+    query = urllib.parse.parse_qs(parsed.query)
     for key in ("result_id", "id", "week"):
         if query.get(key):
             return re.sub(r"[^A-Za-z0-9_.-]+", "_", query[key][0])
-    return "page"
+    # No id in the query: fall back to the page's own basename, so weekly.html
+    # and the site root do not both write page_*.png and silently overwrite
+    # each other's captures.
+    stem = os.path.splitext(os.path.basename(parsed.path.rstrip("/")))[0]
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", stem) if stem else "root"
 
 
-def wait_for_content(page, timeout_ms):
-    """Wait on CONTENT PRESENCE, never a fixed sleep. Returns the selector
-    that satisfied the wait (reported in the output) or None."""
-    for selector in WAIT_SELECTORS:
+def wait_for_content(page, timeout_ms, selectors, wait_text=""):
+    """Wait on CONTENT PRESENCE, never a fixed sleep. --wait-text wins when
+    given; otherwise the page-aware selector chain is tried in order. Returns
+    the target that satisfied the wait, or None (caller prints WAIT FAILED).
+    The per-attempt budget is split so the whole chain fits the timeout."""
+    if wait_text:
         try:
-            page.wait_for_selector(selector, state="attached",
-                                   timeout=timeout_ms)
+            page.wait_for_function(
+                """(needle) => document.body
+                     && document.body.innerText.includes(needle)""",
+                arg=wait_text, timeout=timeout_ms)
+            return "text %r" % wait_text
+        except Exception:
+            return None
+    share = max(2000, int(timeout_ms / max(1, len(selectors))))
+    for selector in selectors:
+        try:
+            page.wait_for_selector(selector, state="attached", timeout=share)
             return selector
         except Exception:
             continue
@@ -298,7 +349,12 @@ def main() -> int:
     ap.add_argument("--scale", type=float, default=3.0,
                     help="deviceScaleFactor for the region close-up (zoom "
                          "stays 100%%; this raises pixel density only)")
-    ap.add_argument("--timeout", type=int, default=45000)
+    ap.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_MS)
+    ap.add_argument("--wait-selector", default="",
+                    help="override the page-aware wait target with this CSS "
+                         "selector (any page can then be captured)")
+    ap.add_argument("--wait-text", default="",
+                    help="wait for this visible text instead of a selector")
     ap.add_argument("--collapsed", action="store_true",
                     help="capture the DEFAULT state, expanding nothing — what "
                          "a reader sees before clicking anything")
@@ -331,6 +387,15 @@ def main() -> int:
 
     viewports = parse_viewports(args.viewports)
     label = label_from_url(args.url, args.label)
+    rule_selectors, page_label, markup_source = wait_rule_for(args.url)
+    wait_selectors = ((args.wait_selector,) if args.wait_selector
+                      else rule_selectors)
+    print("WAIT TARGET [%s]: %s%s"
+          % (page_label,
+             ("text %r" % args.wait_text) if args.wait_text
+             else " | ".join(wait_selectors),
+             " (override)" if (args.wait_selector or args.wait_text)
+             else " — read from %s" % markup_source))
     os.makedirs(args.out, exist_ok=True)
     written = []
 
@@ -338,6 +403,10 @@ def main() -> int:
         browser = playwright.chromium.launch(headless=True)
         try:
             for width, height in viewports:
+              # ISOLATED PER VIEWPORT: a failure in one viewport (wait miss,
+              # navigation error, missing path step) must never drop the
+              # viewports after it — each gets its own status line.
+              try:
                 # FIXED 100% zoom: no page zoom is applied anywhere; the only
                 # magnification is deviceScaleFactor on the region capture.
                 context = browser.new_context(
@@ -349,11 +418,16 @@ def main() -> int:
                 page = context.new_page()
                 page.goto(args.url, wait_until="domcontentloaded",
                           timeout=args.timeout)
-                waited = wait_for_content(page, args.timeout)
+                waited = wait_for_content(page, args.timeout, wait_selectors,
+                                          args.wait_text)
                 if not waited:
-                    print("WAIT FAILED at %dx%d: none of %s appeared within "
-                          "%dms — capturing anyway, treat as incomplete"
-                          % (width, height, list(WAIT_SELECTORS), args.timeout))
+                    # Loud failure is deliberate and stays: a capture that
+                    # quietly omits content is worse than no capture.
+                    print("WAIT FAILED at %dx%d [%s]: none of %s appeared "
+                          "within %dms — capturing anyway, treat as INCOMPLETE"
+                          % (width, height, page_label,
+                             ([args.wait_text] if args.wait_text
+                              else list(wait_selectors)), args.timeout))
                 try:
                     page.wait_for_load_state("networkidle", timeout=8000)
                 except Exception:
@@ -449,7 +523,8 @@ def main() -> int:
                     rpage = rcontext.new_page()
                     rpage.goto(args.url, wait_until="domcontentloaded",
                                timeout=args.timeout)
-                    wait_for_content(rpage, args.timeout)
+                    wait_for_content(rpage, args.timeout, wait_selectors,
+                                     args.wait_text)
                     try:
                         rpage.wait_for_load_state("networkidle", timeout=8000)
                     except Exception:
@@ -475,6 +550,11 @@ def main() -> int:
                               % (args.region_selector, args.region_text))
                     rcontext.close()
                 context.close()
+              except Exception as exc:
+                # One viewport failing is reported and skipped; the rest run.
+                print("VIEWPORT %dx%d FAILED [%s]: %s — continuing with the "
+                      "remaining viewport(s)"
+                      % (width, height, page_label, str(exc).splitlines()[0][:120]))
         finally:
             browser.close()
 
