@@ -1587,7 +1587,10 @@
     // genuine/legacy cards so they render byte-identically.
     function conflictCandidateJoin(sourceCandidates, cardHasGenuineOfficial) {
       const joined = new Map();
-      if (cardHasGenuineOfficial !== false) return joined;
+      // GENUINE-GATE-REMOVAL: the contradiction path inherited the
+      // support-state gate; it is gone here too. Only an un-threaded (null)
+      // flag stays inert, for legacy-caller safety.
+      if (cardHasGenuineOfficial === null || cardHasGenuineOfficial === undefined) return joined;
       const list = Array.isArray(sourceCandidates) ? sourceCandidates : [];
       for (const source of list) {
         const key = String(source?.title || "").replace(/\s+/g, " ").trim();
@@ -2037,9 +2040,10 @@
       // no threshold. Genuine/legacy cards keep the original heading
       // byte-identical; counts and rows are untouched. The wording reuses the
       // existing per-candidate label vocabulary ("직접 근거에서 제외됨").
-      const excludedCount = cardHasGenuineOfficial === false
-        ? list.filter((s) => sourceExclusionLabel(s, {}, cardHasGenuineOfficial)).length
-        : 0;
+      // GENUINE-GATE-REMOVAL: heading follows the labels unconditionally —
+      // the support-state gate is gone; legacy null callers still count 0.
+      const excludedCount = list.filter(
+        (s) => sourceExclusionLabel(s, {}, cardHasGenuineOfficial)).length;
       const countLine = excludedCount === 0
         ? `공식 출처 후보 ${list.length}개`
         : (excludedCount === list.length
@@ -4750,12 +4754,18 @@
       // (official_body_fetched) and did NOT match (official_body_match false,
       // stored reason "제목/본문이 넓은 주제 수준에서만 겹칩니다") rendered with
       // no exclusion label because the per-candidate flag stayed None. Wire
-      // that stored pair to the EXISTING label. Gated on the card-level
-      // predicate being explicitly false (null keeps every legacy caller
-      // byte-identical — the sourceTraceability STEP 2 convention), so
-      // genuine-support cards render exactly as before. No new vocabulary,
-      // no number read, no row hidden.
-      if (cardHasGenuineOfficial === false
+      // that stored pair to the EXISTING label.
+      // GENUINE-GATE-REMOVAL: this branch was originally ALSO gated on
+      // cardHasGenuineOfficial === false, assuming a genuine-support card had
+      // excluded nothing. Measured wrong (13977: genuine support AND 41
+      // fetched-and-unmatched candidates, silent) — the well-evidenced card
+      // was the less honest one. The label is now driven by each candidate's
+      // OWN stored pair; a genuinely supporting document can never carry it
+      // because its official_body_match is true. The null check below is NOT
+      // a support-state gate — it only keeps legacy 2-arg callers
+      // (isPublicSupportingSource, un-threaded sourceTraceability paths)
+      // byte-identical, exactly as documented since the wiring shipped.
+      if (cardHasGenuineOfficial !== null && cardHasGenuineOfficial !== undefined
           && isOfficialLikeSource(source)
           && source?.official_body_fetched === true
           && source?.official_body_match === false) {
