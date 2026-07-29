@@ -72,7 +72,7 @@ STAMP = "공식 본문 불일치 가능성"  # post-13977 caveat chip, stripped 
 SYSTEM_PROMPT = """당신은 정책 뉴스 검증 카드의 화면 표시 심사관이다. 각 항목은 카드 상세 화면에서 독자에게 실제로 보이는 문자열 전체다(섹션 제목은 [ ]로 표시, […N자 생략]은 길이 제한 표시일 뿐 결함이 아니다).
 허용된 질문은 정확히 셋뿐이다:
 (a) genre — 이 카드의 주장이 정책 관련 보도가 아닌 장르인가? (형사사건, 사건사고, 시세, 부고, 광고)
-행사·포럼·설명회 개최 보도와 사업·교육 참가자 모집 공고는 정책 집행의 일부이므로 심사 대상에 포함된다. 이런 항목은 genre로도, 다른 어떤 질문으로도 flag하지 않는다.
+행사·포럼·설명회 개최 보도와 사업·교육 참가자 모집 공고는 정책 집행의 일부이므로 심사 대상에 포함된다. 이런 항목은 (a) genre에서만 제외된다 — 장르를 이유로는 어떤 표현으로도 flag하지 않는다. (b) surface와 (c) consistency는 이런 항목에도 그대로 전부 적용된다.
 (b) surface — 독자에게 기계 부스러기가 보이는가? (영어 코드 조각, enum 값, 원시 타임스탬프, 리터럴 이스케이프, HTML이 글자로 노출, 깨진 인코딩, 단어 중간에서 잘린 문장)
 (c) consistency — 화면에 보이는 것끼리 서로 모순되는가? (주장을 뒷받침한다고 제시된 공식 문서의 연도·시점이 주장과 동떨어짐, 라벨이 자기 숫자와 어긋남, 기간이 말이 안 됨, 제시된 문서들이 주장 내용과 무관함)
 구분 예시 — "이 공식 문서는 주장과 연도가 다르다"는 consistency 관찰이므로 허용. "이 주장은 거짓 같다", "이 출처는 신뢰할 수 없다"는 진위·신뢰 판정이므로 절대 금지. 주장의 사실 여부와 출처의 신뢰성은 어떤 표현으로도 평가하지 않는다.
@@ -89,6 +89,14 @@ SYSTEM_PROMPT = """당신은 정책 뉴스 검증 카드의 화면 표시 심사
 #   so drawing that line would be us judging. Left in, it flagged the weekly
 #   top one and two every single week — a gate that fires every run trains the
 #   operator to skim. PROMPT CHANGED AGAIN => determinism re-baselined.
+# ^ REVIEWER-GENRE-SCOPE-NARROW: the first wording ("다른 어떤 질문으로도
+#   flag하지 않는다") was too broad — 13700 (a recruitment notice carrying 88
+#   unrelated official documents) went CAUGHT -> MISSED with an empty note,
+#   i.e. the clause exempted the whole card rather than just its genre. The
+#   clause now exempts (a) genre ONLY and states that (b) surface and (c)
+#   consistency still apply in full. Determinism improving in that same run
+#   (4/17 -> 1/17) is NOT read as a gain: a reviewer looking at less also
+#   disagrees with itself less. PROMPT CHANGED AGAIN => re-baselined again.
 
 USER_TEMPLATE = """다음 {n}개 카드를 심사하라.
 
@@ -457,9 +465,10 @@ def main() -> int:
     run2, usage2 = run_reviewer(client, ordered_ids, cards)
     paths = (persist_run(1, run1, usage1), persist_run(2, run2, usage2))
     print("VERDICTS PERSISTED: %s + %s (re-readable; missed-drift sweep reads "
-          "these) | PROMPT CHANGED this revision (REVIEWER-GENRE-SCOPE: "
-          "단순 행사 안내 removed from genre, event/forum/recruitment stated "
-          "in scope) — determinism RE-BASELINED, not comparable to prior runs"
+          "these) | PROMPT CHANGED this revision (REVIEWER-GENRE-SCOPE-NARROW: "
+          "event/forum/recruitment exempt from GENRE ONLY; surface and "
+          "consistency still apply in full) — determinism RE-BASELINED, not "
+          "comparable to prior runs"
           % (os.path.basename(paths[0]), os.path.basename(paths[1])))
 
     print("HEADLINE VERDICTS (run 1, verbatim):")
