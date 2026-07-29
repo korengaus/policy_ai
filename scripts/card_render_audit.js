@@ -202,8 +202,21 @@ try {
 // card and the pipeline-debug section is operator-gated; neither is public)
 // ---------------------------------------------------------------------------
 const J = (v) => { try { return JSON.parse(v); } catch { return null; } };
-const decode = (s) => s.replace(/&amp;/g, "&").replace(/&lt;/g, "<")
-  .replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+// SCANNER-DECODE-FIX: decode exactly what main.js escapeHtml emits — &amp;
+// &lt; &gt; &quot; and the ZERO-PADDED numeric &#039;. The old map only knew
+// bare &#39;, so the scanner read correctly-escaped apostrophes as literal
+// text and reported its own blind spot as a reader-facing defect. Numeric
+// entities decode generically (bare, zero-padded, hex). &amp; decodes LAST
+// on purpose: a double-escaped &amp;#039; must surface as &#039; in decoded
+// output so the undecoded-html-entity zero class catches the real leak
+// instead of silently un-double-escaping it.
+// KEEP IN SYNC with visibleText in scripts/showcase_reviewer_card_probe.py.
+const cp = (n) => (n >= 0 && n <= 0x10ffff ? String.fromCodePoint(n) : "�");
+const decode = (s) => s
+  .replace(/&#(\d{1,7});/g, (_, d) => cp(Number(d)))
+  .replace(/&#x([0-9a-fA-F]{1,6});/g, (_, h) => cp(parseInt(h, 16)))
+  .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
+  .replace(/&amp;/g, "&");
 const visible = (html) => decode(String(html)
   .replace(/<[^>]*>/g, "\n")).replace(/[ \t]+/g, " ");
 
@@ -305,6 +318,14 @@ const ZERO = [
     "피싱 \\uDB80\\uDEB1 신종"],
   ["html-markup-as-text", /<(p|span|div|br|a|strong|em|table|ul|li)[ >/]/,
     'x <p style="line-height:140%"> y'],
+  // SCANNER-DECODE-FIX: after the completed decode above, NO entity shape may
+  // survive in reader-visible text — a survivor means a double-escape or an
+  // undecoded stored entity, i.e. a real leak the old blind spot was hiding.
+  // Prose ampersands (R&D, AT&T) cannot false-positive: the pattern requires
+  // a full entity shape ending in ";".
+  ["undecoded-html-entity",
+    /&#\d+;|&#x[0-9a-fA-F]+;|&(quot|amp|lt|gt|apos|nbsp);/,
+    "따옴표 &#039; 잔류"],
 ];
 // Generic snake_case identifiers — a ZERO class since DISPLAY-LEAK-FIX-2
 // laundered the last residue (possible_redirect risk flags; the

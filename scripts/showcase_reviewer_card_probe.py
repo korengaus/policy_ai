@@ -143,8 +143,16 @@ if (typeof ctx.renderRow !== "function") {
     + " - " + (execError && execError.message));
   process.exit(1);
 }
-const decode = (s) => s.replace(/&amp;/g, "&").replace(/&lt;/g, "<")
-  .replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+// SCANNER-DECODE-FIX — KEEP IN SYNC with `decode` in
+// scripts/card_render_audit.js (same map, same &amp;-last order, so the two
+// instruments read identical reader text; that file is the authoritative
+// copy and carries the full rationale).
+const cp = (n) => (n >= 0 && n <= 0x10ffff ? String.fromCodePoint(n) : "�");
+const decode = (s) => s
+  .replace(/&#(\d{1,7});/g, (_, d) => cp(Number(d)))
+  .replace(/&#x([0-9a-fA-F]{1,6});/g, (_, h) => cp(parseInt(h, 16)))
+  .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
+  .replace(/&amp;/g, "&");
 const visibleText = (html) => decode(String(html)
   .replace(/<[^>]*>/g, "\n")).replace(/[ \t]+/g, " ");
 const SECTION_NAMES = { hero: "핵심 문장", label: "상태 라벨", claims: "주장 목록",
