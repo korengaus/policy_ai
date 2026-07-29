@@ -24,11 +24,22 @@
 # json.loads — on claude-sonnet-5 adaptive thinking is ON by default and
 # max_tokens caps thinking + text TOGETHER, so one 50-item response can come
 # back with an empty or truncated text block. Now: items go in BATCHES of 10
-# (identical chunking both runs, so determinism stays valid), max_tokens 4000
-# per batch (~700 tokens of verdict JSON + headroom for thinking), fences and
+# (identical chunking both runs, so determinism stays valid), fences and
 # preamble are stripped before parsing, and ★any parse failure prints the
 # response structure (stop_reason, block types, first 400 chars) and exits 2 —
 # a parse failure can never look like a clean run or an empty result set.
+#
+# THINKING-OFF (post-second-run fix): the diagnostic then measured the cause
+# exactly — batch 1/5 returned stop_reason=max_tokens with ONE thinking block
+# and an empty text head: thinking exhausted the whole 4000-token cap before
+# a single verdict was written. Fix: thinking={"type": "disabled"} on every
+# call — this is a formatted-extraction task (three closed questions per item,
+# JSON out), not a reasoning task, so thinking is pure overhead here. A
+# thinking BUDGET is not an option on this model (budget_tokens returns 400 on
+# claude-sonnet-5; adaptive is the only on-mode). With thinking off, the full
+# 4000 max_tokens is text budget (~700 needed per 10-item batch). ★The run
+# SMOKE-CHECKS batch 1 first — stop_reason + parsed verdict count printed
+# before the remaining nine calls are made, so a repeat failure costs 1 call.
 #
 # Joe runs once in the Render Worker Shell (both env vars already exist there):
 #     PYTHONPATH=. python scripts/showcase_reviewer_probe.py
@@ -54,10 +65,11 @@ MODEL = "claude-sonnet-5"
 PRICE_STD = (3.0, 15.0)
 PRICE_INTRO = (2.0, 10.0)
 # 10 items per request keeps each verdict JSON small enough to be reliable;
-# 4000 max_tokens = thinking + text combined on this model, so ~3K of
-# headroom remains above the ~700-token verdict payload.
+# with thinking disabled the whole 4000 is text budget — ~3300 tokens of
+# headroom above the ~700-token verdict payload.
 BATCH_SIZE = 10
 MAX_TOKENS_PER_BATCH = 4000
+THINKING = {"type": "disabled"}  # extraction task; budget_tokens 400s on Sonnet 5
 
 # ---------------------------------------------------------------- prompt ----
 # THE PROMPT IS THE DESIGN. Printed verbatim below so the three-question
@@ -220,8 +232,10 @@ def _dump_response(resp, text, tag, exc):
     raise SystemExit(2)
 
 
-def run_reviewer(client, items):
-    """One full pass: identical batches of BATCH_SIZE, verdicts merged."""
+def run_reviewer(client, items, smoke=False):
+    """One full pass: identical batches of BATCH_SIZE, verdicts merged.
+    smoke=True prints batch 1's stop_reason + verdict count the moment it
+    parses — the one-call verification gate before the other nine calls."""
     verdicts, tokens_in, tokens_out = {}, 0, 0
     batches = [items[i:i + BATCH_SIZE] for i in range(0, len(items), BATCH_SIZE)]
     fmt = {"format": {"type": "json_schema", "schema": OUTPUT_SCHEMA}}
@@ -230,7 +244,8 @@ def run_reviewer(client, items):
             "- id=%s | 화면=%s\n  제목: %s\n  배지: %s"
             % (i["id"], i["screen"], i["title"], i["badges"]) for i in batch)
         kwargs = dict(
-            model=MODEL, max_tokens=MAX_TOKENS_PER_BATCH, system=SYSTEM_PROMPT,
+            model=MODEL, max_tokens=MAX_TOKENS_PER_BATCH, thinking=THINKING,
+            system=SYSTEM_PROMPT,
             messages=[{"role": "user",
                        "content": USER_TEMPLATE.format(n=len(batch), rows=rows)}])
         try:
@@ -247,6 +262,10 @@ def run_reviewer(client, items):
             batch_verdicts = _extract_json(text)["verdicts"]
         except (ValueError, KeyError, TypeError) as exc:
             _dump_response(resp, text, tag, exc)
+        if smoke and index == 1:
+            print("SMOKE (thinking off): %s stop_reason=%s, %d/%d verdicts "
+                  "parsed — continuing" % (tag, resp.stop_reason,
+                                           len(batch_verdicts), len(batch)))
         for verdict in batch_verdicts:
             verdicts[verdict["id"]] = verdict
         tokens_in += resp.usage.input_tokens
@@ -277,7 +296,7 @@ def main() -> int:
         items = load_sample(conn)
 
     client = anthropic.Anthropic()
-    run1, usage1, batches = run_reviewer(client, items)
+    run1, usage1, batches = run_reviewer(client, items, smoke=True)
     run2, usage2, _ = run_reviewer(client, items)
 
     print("SHOWCASE-REVIEWER PROBE — SELECT-only, %d items "
