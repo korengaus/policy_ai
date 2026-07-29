@@ -261,7 +261,10 @@ function renderRow(id, row) {
         // pre-join view and the reviewer would keep flagging a defect the app
         // no longer shows. (NB: this comment lives inside a template literal —
         // no backticks.)
-        contra: renderContradictionSummary(__contraSum)
+        // REBUTTAL-COUNT-RECONCILE mirror: the app summary call site now also
+        // receives the checks and the join (reconciling line).
+        contra: renderContradictionSummary(__contraSum, __contraChecks,
+              conflictCandidateJoin(r.source_candidates, genuine))
           + renderContradictionChecks(r.claims, __contraChecks,
               conflictCandidateJoin(r.source_candidates, genuine)),
       },

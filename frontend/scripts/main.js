@@ -1534,10 +1534,36 @@
       return labels[value] || formatTechnicalLabel(value);
     }
 
-    function renderContradictionSummary(summary) {
+    function renderContradictionSummary(summary, contradictionChecks = null, conflictExclusions = null) {
       const data = summary || {};
       const possibleCount = Number(data.possible_contradiction_count || 0)
         + Number(data.confirmed_contradiction_count || data.likely_contradiction_count || 0);
+      // REBUTTAL-COUNT-RECONCILE: with the exclusion label shipped on the
+      // conflicting-document rows, the summary counted a document the same
+      // screen says was set aside — the tally (STORED, counts CLAIMS with a
+      // per-check status) and the labels (documents) disagreed on screen.
+      // The counts must not move: excluding a labelled row would re-derive a
+      // stored judgement at render. Instead ONE reconciling line states what
+      // was counted and what happened after, composed from shipped fragments
+      // (the 후보/매칭 row's 매칭, the CANDIDATE-SECTION-FRAMING "N건 중 M건"
+      // construction, the roster's 직접 근거에서 제외됨). Rendered only when
+      // at least one matched document carries the label — every other card
+      // is byte-identical.
+      let reconcile = "";
+      if (conflictExclusions && conflictExclusions.size) {
+        const checks = Array.isArray(contradictionChecks) ? contradictionChecks : [];
+        let excludedEntries = 0;
+        for (const check of checks) {
+          for (const conflict of (Array.isArray(check?.conflicting_evidence) ? check.conflicting_evidence : [])) {
+            const key = String(conflict?.source_title || "").replace(/\s+/g, " ").trim();
+            if (key && conflictExclusions.get(key)) excludedEntries += 1;
+          }
+        }
+        if (excludedEntries > 0) {
+          const matched = Number(data.contradiction_candidates_matched ?? 0);
+          reconcile = `<div class="evidence-source-meta">매칭 ${matched}건 중 ${excludedEntries}건 직접 근거에서 제외됨</div>`;
+        }
+      }
       // DESIGN-DETAIL-5a: counts (incl. 0) are values and stay; only an empty
       // 판정 근거/위험도 collapses out.
       return advDefList([
@@ -1547,7 +1573,7 @@
         ["전체 모순 위험도", data.overall_contradiction_risk ? formatContradictionRisk(data.overall_contradiction_risk) : ""],
         ["후보/매칭", `${data.contradiction_candidates_searched ?? 0} / ${data.contradiction_candidates_matched ?? 0}`],
         ["판정 근거", formatDiagnosticText(data.contradiction_verdict_source || "-")],
-      ]);
+      ]) + reconcile;
     }
 
     // REBUTTAL-PATH-WIRING: render-time join from conflicting-evidence entries
@@ -6253,7 +6279,7 @@
           ),
           renderCollapsibleSection(
             "반박/모순 검사",
-            `${renderContradictionSummary(contradictionSummary)}${renderContradictionChecks(claims, contradictionChecks, conflictCandidateJoin(sourceCandidates, cardHasGenuineOfficial))}`,
+            `${renderContradictionSummary(contradictionSummary, contradictionChecks, conflictCandidateJoin(sourceCandidates, cardHasGenuineOfficial))}${renderContradictionChecks(claims, contradictionChecks, conflictCandidateJoin(sourceCandidates, cardHasGenuineOfficial))}`,
             false,
             "같은 대상과 시점에 대해 상충되는 근거가 있는지 보수적으로 확인합니다."
           ),
