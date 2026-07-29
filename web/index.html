@@ -8082,8 +8082,24 @@
       const VISIBLE = 6;
       const head = list.slice(0, VISIBLE);
       const overflow = list.slice(VISIBLE);
+      // CANDIDATE-SECTION-FRAMING: "공식 출처 후보 N개" read as "N pieces of
+      // candidate evidence" on cards whose roster is in fact swept-and-set-
+      // aside. The heading now states the split, reusing EXACTLY the shipped
+      // CANDIDATE-EXCLUSION-WIRING predicate (sourceExclusionLabel under the
+      // explicit cardHasGenuineOfficial === false gate) — no new condition,
+      // no threshold. Genuine/legacy cards keep the original heading
+      // byte-identical; counts and rows are untouched. The wording reuses the
+      // existing per-candidate label vocabulary ("직접 근거에서 제외됨").
+      const excludedCount = cardHasGenuineOfficial === false
+        ? list.filter((s) => sourceExclusionLabel(s, {}, cardHasGenuineOfficial)).length
+        : 0;
+      const countLine = excludedCount === 0
+        ? `공식 출처 후보 ${list.length}개`
+        : (excludedCount === list.length
+          ? `공식 출처 후보 ${list.length}개 — 모두 직접 근거에서 제외됨`
+          : `공식 출처 후보 ${list.length}개 중 ${excludedCount}개 직접 근거에서 제외됨`);
       return `
-        <div class="vrf-cand-count">공식 출처 후보 ${list.length}개</div>
+        <div class="vrf-cand-count">${countLine}</div>
         <div class="vrf-cand-list">${head.map(renderCand).join("")}</div>
         ${overflow.length ? `
           <details class="vrf-cand-more">
