@@ -44,6 +44,7 @@
 # from the environment ONLY, never printed. pin-OUT scripts/* — zero log.*
 # call sites, the 331/16 pins do not move. Output ≤ ~40 lines.
 
+import hashlib
 import json
 import os
 import re
@@ -74,7 +75,11 @@ SYSTEM_PROMPT = """당신은 정책 뉴스 검증 카드의 화면 표시 심사
 (b) surface — 독자에게 기계 부스러기가 보이는가? (영어 코드 조각, enum 값, 원시 타임스탬프, 리터럴 이스케이프, HTML이 글자로 노출, 깨진 인코딩, 단어 중간에서 잘린 문장)
 (c) consistency — 화면에 보이는 것끼리 서로 모순되는가? (주장을 뒷받침한다고 제시된 공식 문서의 연도·시점이 주장과 동떨어짐, 라벨이 자기 숫자와 어긋남, 기간이 말이 안 됨, 제시된 문서들이 주장 내용과 무관함)
 구분 예시 — "이 공식 문서는 주장과 연도가 다르다"는 consistency 관찰이므로 허용. "이 주장은 거짓 같다", "이 출처는 신뢰할 수 없다"는 진위·신뢰 판정이므로 절대 금지. 주장의 사실 여부와 출처의 신뢰성은 어떤 표현으로도 평가하지 않는다.
+카드에 표시된 필드 이름(예: 최고 신뢰 출처, 출처 신뢰도)을 문서를 지칭하기 위해 그대로 인용하는 것은 허용된다. 다만 출처의 신뢰성이나 주장의 사실 여부에 대한 당신 자신의 판단은 여전히 금지다.
 확신이 없으면 flag하지 않는다. 지시된 JSON으로만 답한다."""
+# ^ DRIFT-DETECTOR-AND-PERSISTENCE added the label-quotation line. PROMPT
+#   CHANGED => determinism is RE-BASELINED; the next run's disagreement count
+#   is not comparable to earlier runs.
 
 USER_TEMPLATE = """다음 {n}개 카드를 심사하라.
 
@@ -105,7 +110,58 @@ OUTPUT_SCHEMA = {
     "additionalProperties": False,
 }
 
-DRIFT_RE = re.compile(r"사실|허위|진위|거짓|신뢰|믿을|믿기")
+# DRIFT-DETECTOR-AND-PERSISTENCE: the bare-noun detector below fired on our
+# own field label (최고 신뢰 출처, main.js:1424) — the instrument reported
+# itself, the &#039; class of error. It is KEPT only for old-vs-new
+# comparison. The real detector masks UI label phrases EXTRACTED FROM main.js
+# (never hand-written; sentinel-pinned so a rename fails loudly like the 106
+# render pins) and then matches PREDICATE forms derived from the prompt's ban
+# (사실 여부·진위·신뢰도 판단 금지 + its two example sentences).
+OLD_DRIFT_RE = re.compile(r"사실|허위|진위|거짓|신뢰|믿을|믿기")
+DRIFT_PREDICATES = ("신뢰할 수 없", "신뢰하기 어렵", "신뢰할 만", "신뢰할 수 있",
+                    "믿기 어렵", "믿을 수 없", "믿을 만", "믿기 힘들",
+                    "사실이 아니", "사실과 다르", "사실로 보", "사실일 가능성",
+                    "사실 여부", "진위", "허위", "거짓")
+# Sentinel labels that MUST come out of the extraction — a rename in main.js
+# breaks the sentinel and the probe exits loudly instead of silently
+# under-masking (the pinned-dependency posture).
+LABEL_SENTINELS = ("최고 신뢰 출처", "출처 신뢰도", "사실 가능성 높음")
+# The real flagged note from the first Worker run — the label-quote control:
+# OLD must flag it (that was the artifact), NEW must not.
+LABEL_QUOTE_CONTROL = ("카드 핵심 주장은 2021년 11월 고용동향인데, 근거 문서와 "
+                       "최고 신뢰 출처로 제시된 자료는 2026년 6월 고용동향으로 "
+                       "시점이 전혀 다르다.")
+DRIFT_CONTROLS = ("이 출처는 신뢰할 수 없다", "이 주장은 거짓 같다")
+
+
+def load_ui_labels():
+    """Korean phrases containing 신뢰/사실/믿 extracted from main.js string
+    space (identifiers are ASCII, so Korean only occurs in literals/comments).
+    Sorted longest-first for greedy masking."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(root, "frontend", "scripts", "main.js"),
+              encoding="utf-8") as fh:
+        src = fh.read()
+    labels = {m.strip() for m in
+              re.findall(r"[가-힣0-9 /·]*(?:신뢰|사실|믿)[가-힣0-9 /·]*", src)
+              if m.strip()}
+    missing = [s for s in LABEL_SENTINELS if s not in labels]
+    if missing:
+        print("LABEL PIN LOST: %s — renamed or removed in main.js; drift "
+              "masking would silently under-cover. Review the rename, then "
+              "update LABEL_SENTINELS." % missing)
+        raise SystemExit(2)
+    return sorted(labels, key=len, reverse=True)
+
+
+def drift_flags(note, labels):
+    """(old_hit, new_hit): old = bare-noun regex on the raw note; new = mask
+    every extracted UI-label phrase, then match predicate forms only."""
+    masked = note
+    for label in labels:
+        masked = masked.replace(label, "▢")
+    return (bool(OLD_DRIFT_RE.search(note)),
+            any(p in masked for p in DRIFT_PREDICATES))
 
 RENDER_COLS = ("title", "claim_text", "content_nature", "claims",
                "normalized_claims", "evidence_snippets", "evidence_sources",
@@ -324,6 +380,30 @@ def flagged(v):
     return v and (v["genre"] or v["surface"] or v["consistency"])
 
 
+def persist_run(tag, verdicts, usage):
+    """Title-probe pattern: every verdict object from the pass, re-readable,
+    so drift claims can always be re-checked after the fact."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "probe_card_run_%d.json" % tag)
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump({"verdicts": verdicts,
+                   "usage": {"in": usage[0], "out": usage[1]}},
+                  fh, ensure_ascii=False, indent=1)
+    return path
+
+
+def load_cleared():
+    """Hashes of notes a HUMAN read and cleared (the flag-and-hold ledger).
+    The script only reads this file; the operator appends hashes to it."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "probe_card_drift_cleared.json")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return set(json.load(fh).get("cleared") or [])
+    except (OSError, ValueError):
+        return set()
+
+
 def main() -> int:
     if not os.environ.get("DATABASE_URL"):
         print("DATABASE_URL not set — run in the Render Worker Shell.")
@@ -334,6 +414,16 @@ def main() -> int:
 
     import anthropic
     import psycopg
+
+    # Detector vacuity controls — fail loudly BEFORE spending any API call.
+    labels = load_ui_labels()
+    old_q, new_q = drift_flags(LABEL_QUOTE_CONTROL, labels)
+    ctrl_new = [drift_flags(c, labels)[1] for c in DRIFT_CONTROLS]
+    if not (old_q and not new_q and all(ctrl_new)):
+        print("VACUOUS DRIFT DETECTOR: label-quote control (old=%s,new=%s) or "
+              "judgement controls %s no longer behave — fix the detector "
+              "before trusting any drift count." % (old_q, new_q, ctrl_new))
+        raise SystemExit(2)
 
     url = (os.environ["DATABASE_URL"]
            .replace("postgresql+psycopg://", "postgresql://")
@@ -356,6 +446,11 @@ def main() -> int:
     client = anthropic.Anthropic()
     run1, usage1 = run_reviewer(client, ordered_ids, cards, smoke=True)
     run2, usage2 = run_reviewer(client, ordered_ids, cards)
+    paths = (persist_run(1, run1, usage1), persist_run(2, run2, usage2))
+    print("VERDICTS PERSISTED: %s + %s (re-readable; missed-drift sweep reads "
+          "these) | PROMPT CHANGED this revision — determinism re-baselined, "
+          "not comparable to prior runs" % (os.path.basename(paths[0]),
+                                            os.path.basename(paths[1])))
 
     print("HEADLINE VERDICTS (run 1, verbatim):")
     for rid, expect in ((13977, "consistency"), (13700, "consistency")):
@@ -383,11 +478,28 @@ def main() -> int:
     print("DETERMINISM: %d/%d cards changed verdict between runs%s"
           % (len(changed), len(ordered_ids),
              " (" + ", ".join(changed[:6]) + ")" if changed else ""))
-    drift = [v for v in list(run1.values()) + list(run2.values())
-             if v["note"] and DRIFT_RE.search(v["note"])]
-    print("TRUTH-DRIFT CHECK: %d notes used truth/trust vocabulary%s"
-          % (len(drift), " — DESIGN FAILURE, quote: \"%s\"" % drift[0]["note"][:80]
-                if drift else ""))
+    # TRUTH-DRIFT gate — FLAG-AND-HOLD: never auto-pass, never auto-fail.
+    # Old detector counted for comparison only; NEW flags hold for a human
+    # read unless the note's hash is in probe_card_drift_cleared.json.
+    notes = [(pass_no, iid, v["note"]) for pass_no, run in ((1, run1), (2, run2))
+             for iid, v in run.items() if v["note"]]
+    old_n = sum(1 for _, _, n in notes if drift_flags(n, labels)[0])
+    new_hits = [(p, iid, n) for p, iid, n in notes if drift_flags(n, labels)[1]]
+    cleared = load_cleared()
+    held = []
+    print("TRUTH-DRIFT: old detector %d / new detector %d of %d non-empty notes"
+          % (old_n, len(new_hits), len(notes)))
+    for pass_no, iid, note in new_hits:
+        digest = hashlib.sha256(note.encode("utf-8")).hexdigest()[:12]
+        state = "CLEARED (read earlier)" if digest in cleared else "HOLD"
+        if digest not in cleared:
+            held.append(digest)
+        print("  [%s %s] pass%d %s: \"%s\"" % (state, digest, pass_no, iid, note[:110]))
+    if held:
+        print("HOLD FOR HUMAN READ: %d note(s) above need a person's judgement. "
+              "After reading, append each hash to scripts/"
+              "probe_card_drift_cleared.json {\"cleared\": [...]} so it is not "
+              "re-read next week. Exit 3 = held, NOT a layer verdict." % len(held))
     tokens_in = usage1[0] + usage2[0]
     tokens_out = usage1[1] + usage2[1]
     std = tokens_in / 1e6 * PRICE_STD[0] + tokens_out / 1e6 * PRICE_STD[1]
@@ -399,7 +511,7 @@ def main() -> int:
                                            per_item))
     print("  projected weekly (≈10 new detail cards, 1 pass) ≈ $%.3f std — "
           "vs the title layer's ~$0.013" % weekly)
-    return 0
+    return 3 if held else 0
 
 
 if __name__ == "__main__":
