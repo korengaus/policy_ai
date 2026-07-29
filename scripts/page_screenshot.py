@@ -22,6 +22,24 @@
 #     by CSS selector or by visible text, with padding so the element is seen
 #     in its surroundings — the capture that settles "broken or just small"
 #
+# DISCLOSURE STATES (the second question this tool answers). Expand-all is
+# right for INSPECTION — the text reviewer reads the fully expanded render and
+# that is how defects get found — and it stays the DEFAULT. But it is the wrong
+# measurement for "what does a reader see on open, before clicking anything",
+# which is what 100% of visitors (including a cold-email click) actually get.
+#   --collapsed        capture the default state, expanding NOTHING
+#   --expand-path A>B  open only that ordered path of disclosures, by the
+#                      visible summary text of each — the N-deliberate-clicks
+#                      view. A step that matches nothing is named and the run
+#                      stops rather than capturing a misleading state.
+#   --section TEXT     measure/crop ONE section: from the heading carrying TEXT
+#                      down to the next sibling section (not the heading box —
+#                      that is what made an earlier capture 643x64 and useless
+#                      for judging list length)
+#   --find TEXT        for every occurrence of TEXT: is it visible in the
+#                      DEFAULT collapsed state, and if not, how many
+#                      disclosures must be opened to reach it (click depth)
+#
 # USAGE (no credentials needed; the card page is public):
 #   python scripts/page_screenshot.py --url https://tickedin.org/?result_id=13592
 #   python scripts/page_screenshot.py --url ... --region-text "제외/불일치" --scale 3
@@ -130,6 +148,107 @@ def expand_all(page):
     return opened, failures
 
 
+def expand_path(page, steps):
+    """Open ONLY the named disclosures, in order, matching each step against
+    the visible <summary> text (normalized, substring). Each step is searched
+    among disclosures reachable AFTER the previous step opened, so a nested
+    path behaves like real clicks. Returns (opened_labels, missing_step)."""
+    opened = []
+    for step in steps:
+        found = page.evaluate(
+            """(needle) => {
+              const norm = (s) => String(s || '').replace(/\\s+/g, ' ').trim();
+              const want = norm(needle);
+              for (const d of Array.from(document.querySelectorAll('details'))) {
+                const s = d.querySelector('summary');
+                if (!s) continue;
+                if (!norm(s.textContent).includes(want)) continue;
+                // only reachable ones: every ancestor <details> already open
+                let p = d.parentElement, reachable = true;
+                while (p) {
+                  if (p.tagName === 'DETAILS' && !p.open) { reachable = false; break; }
+                  p = p.parentElement;
+                }
+                if (!reachable) continue;
+                d.open = true;
+                return norm(s.textContent).slice(0, 60);
+              }
+              return null;
+            }""", step)
+        if not found:
+            return opened, step
+        opened.append(found)
+        page.wait_for_timeout(150)
+    return opened, None
+
+
+def measure_section(page, heading_text):
+    """Height of ONE section: from the element carrying heading_text down to
+    the next sibling section. Returns a dict with the box, or None."""
+    return page.evaluate(
+        """(needle) => {
+          const norm = (s) => String(s || '').replace(/\\s+/g, ' ').trim();
+          const want = norm(needle);
+          const heads = Array.from(document.querySelectorAll(
+            'h1,h2,h3,h4,summary,.collapsible-section>summary,legend'))
+            .filter((el) => norm(el.textContent).includes(want));
+          if (!heads.length) return null;
+          const head = heads.find((el) => el.getBoundingClientRect().width > 0)
+            || heads[0];
+          // the block to measure = the heading's own section container
+          let block = head.closest('details,section,.collapsible-section') || head;
+          const r = block.getBoundingClientRect();
+          const top = r.top + window.scrollY;
+          const next = block.nextElementSibling;
+          const nr = next ? next.getBoundingClientRect() : null;
+          const bottom = nr && nr.height > 0 ? nr.top + window.scrollY : top + r.height;
+          return {
+            x: r.left + window.scrollX, y: top,
+            width: r.width, height: Math.max(r.height, bottom - top),
+            headingHeight: head.getBoundingClientRect().height,
+            open: block.tagName === 'DETAILS' ? !!block.open : null,
+            tag: block.tagName.toLowerCase(),
+          };
+        }""", heading_text)
+
+
+def find_occurrences(page, needle):
+    """For each occurrence of `needle`: is it visible right now, and how many
+    CLOSED ancestor <details> stand between it and the reader (click depth)."""
+    return page.evaluate(
+        """(needle) => {
+          const out = [];
+          const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+          const seen = new Set();
+          while (walk.nextNode()) {
+            const node = walk.currentNode;
+            if (!node.nodeValue || !node.nodeValue.includes(needle)) continue;
+            const el = node.parentElement;
+            if (!el || seen.has(el)) continue;
+            seen.add(el);
+            let depth = 0, p = el, labels = [];
+            while (p) {
+              if (p.tagName === 'DETAILS' && !p.open) {
+                depth += 1;
+                const s = p.querySelector('summary');
+                labels.unshift(String((s && s.textContent) || '')
+                  .replace(/\\s+/g, ' ').trim().slice(0, 40));
+              }
+              p = p.parentElement;
+            }
+            const r = el.getBoundingClientRect();
+            const styled = window.getComputedStyle(el);
+            const painted = r.width > 0 && r.height > 0
+              && styled.visibility !== 'hidden' && styled.display !== 'none';
+            out.push({
+              depth, painted, path: labels,
+              context: String(el.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 60),
+            });
+          }
+          return out;
+        }""", needle)
+
+
 def capture_region(page, out_path, selector=None, text=None, pad=24):
     """Close-up of ONE element at the context's deviceScaleFactor. Located by
     CSS selector, else by visible text (first VISIBLE match, so a hidden
@@ -180,7 +299,27 @@ def main() -> int:
                     help="deviceScaleFactor for the region close-up (zoom "
                          "stays 100%%; this raises pixel density only)")
     ap.add_argument("--timeout", type=int, default=45000)
+    ap.add_argument("--collapsed", action="store_true",
+                    help="capture the DEFAULT state, expanding nothing — what "
+                         "a reader sees before clicking anything")
+    ap.add_argument("--expand-path", default="",
+                    help="open ONLY this ordered path of disclosures, by "
+                         "visible summary text, e.g. 'A > B > C'")
+    ap.add_argument("--section", default="",
+                    help="measure and crop ONE section by its heading text "
+                         "(heading -> next sibling section)")
+    ap.add_argument("--find", default="",
+                    help="report every occurrence of this string: visible in "
+                         "the current state, else the click depth to reach it")
     args = ap.parse_args()
+    steps = [s.strip() for s in args.expand_path.split(">") if s.strip()]
+    if args.collapsed and steps:
+        print("--collapsed and --expand-path are mutually exclusive: the "
+              "first means expand NOTHING, the second means expand exactly "
+              "those. Pick one.")
+        return 2
+    state = ("collapsed (default reader view)" if args.collapsed
+             else ("path: " + " > ".join(steps)) if steps else "expand-all")
 
     try:
         from playwright.sync_api import sync_playwright
@@ -223,22 +362,82 @@ def main() -> int:
                     page.evaluate("() => document.fonts && document.fonts.ready")
                 except Exception:
                     pass
-                opened, failures = expand_all(page)
+                # --find is measured BEFORE any expansion in collapsed mode,
+                # so "visible without clicking" means exactly that.
+                if args.find:
+                    for occ in find_occurrences(page, args.find) or []:
+                        if occ["painted"] and occ["depth"] == 0:
+                            verdict = "VISIBLE in this state (0 clicks)"
+                        else:
+                            verdict = ("hidden — %d disclosure(s) to open: %s"
+                                       % (occ["depth"], " > ".join(occ["path"])
+                                          or "(unnamed)"))
+                        print("  FIND %r @%dpx: %s | ctx: %s"
+                              % (args.find, width, verdict, occ["context"]))
+                    if not find_occurrences(page, args.find):
+                        print("  FIND %r @%dpx: NOT PRESENT on the page at all"
+                              % (args.find, width))
+
+                if args.collapsed:
+                    opened, failures, note = 0, [], "expanded nothing"
+                elif steps:
+                    got, missing = expand_path(page, steps)
+                    if missing:
+                        print("EXPAND-PATH STEP NOT FOUND: %r (opened %s "
+                              "first) — nothing captured for this viewport, "
+                              "not a silent partial state"
+                              % (missing, got or "nothing"))
+                        context.close()
+                        continue
+                    opened, failures = len(got), []
+                    note = "opened path %s" % " > ".join(got)
+                else:
+                    opened, failures = expand_all(page)
+                    note = "expanded %d <details>" % opened
                 page.wait_for_timeout(250)
-                path = os.path.join(args.out, "%s_%dx%d.png"
-                                    % (label, width, height))
+                suffix = ("collapsed" if args.collapsed
+                          else "path" if steps else "expanded")
+                path = os.path.join(args.out, "%s_%dx%d_%s.png"
+                                    % (label, width, height, suffix))
                 page.screenshot(path=path, full_page=True)
                 size = page.evaluate(
                     """() => [document.documentElement.scrollWidth,
                               document.documentElement.scrollHeight]""")
                 written.append(path)
                 print("CAPTURED %s | viewport %dx%d @100%% zoom, dsf=1 | "
-                      "page %dx%d css px | waited on %s | expanded %d "
-                      "<details>%s"
-                      % (path, width, height, size[0], size[1],
-                         waited or "NOTHING", opened,
+                      "page %dx%d css px | state=%s | waited on %s | %s%s"
+                      % (path, width, height, size[0], size[1], state,
+                         waited or "NOTHING", note,
                          (" | FAILED TO OPEN: %s" % failures) if failures
-                         else " | none failed"))
+                         else ""))
+
+                if args.section:
+                    box = measure_section(page, args.section)
+                    if not box:
+                        print("  SECTION %r NOT FOUND at %dpx — nothing "
+                              "measured or cropped" % (args.section, width))
+                    else:
+                        print("  SECTION %r @%dpx: %dx%d css px (heading alone "
+                              "%dpx, <%s> open=%s)"
+                              % (args.section, width, round(box["width"]),
+                                 round(box["height"]), round(box["headingHeight"]),
+                                 box["tag"], box["open"]))
+                        spath = os.path.join(
+                            args.out, "%s_%dx%d_%s_section.png"
+                            % (label, width, height, suffix))
+                        if box["width"] < 1 or box["height"] < 1:
+                            print("  SECTION PNG SKIPPED: box is %gx%g — the "
+                                  "section is collapsed to nothing in this "
+                                  "state (not a silent skip)"
+                                  % (box["width"], box["height"]))
+                        else:
+                            # full_page=True so the clip may sit below the fold
+                            page.screenshot(path=spath, full_page=True, clip={
+                                "x": box["x"], "y": box["y"],
+                                "width": box["width"],
+                                "height": min(box["height"], 30000)})
+                            written.append(spath)
+                            print("  SECTION PNG %s" % spath)
 
                 if (args.region_selector or args.region_text) and width == viewports[0][0]:
                     rcontext = browser.new_context(
