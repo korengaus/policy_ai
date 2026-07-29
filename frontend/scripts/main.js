@@ -1853,7 +1853,11 @@
         const titleHtml = source.url
           ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a>`
           : title;
-        const exclusionLabel = sourceExclusionLabel(source);
+        // CANDIDATE-EXCLUSION-WIRING: pass the card-level flag; the summary
+        // argument stays {} on purpose — srs.official_mismatch_reasons is a
+        // ROW-level list and would light the label on every candidate of the
+        // card, the wrong granularity for a per-candidate judgement.
+        const exclusionLabel = sourceExclusionLabel(source, {}, cardHasGenuineOfficial);
         const trace = sourceTraceability(source, {}, cardHasGenuineOfficial);
         // STEP 3: on a non-genuine card the "핵심 근거" (primary_evidence) role suffix
         // is suppressed to the EXISTING context wording ("맥락 참고") so no rejected
@@ -4659,7 +4663,23 @@
         || ["official_government", "public_institution", "official_reference", "primary_evidence"].includes(type);
     }
 
-    function sourceExclusionLabel(source, sourceReliabilitySummary = {}) {
+    function sourceExclusionLabel(source, sourceReliabilitySummary = {}, cardHasGenuineOfficial = null) {
+      // CANDIDATE-EXCLUSION-WIRING: the stored M19-3 judgement was never
+      // surfaced — a swept-in official candidate whose body WAS checked
+      // (official_body_fetched) and did NOT match (official_body_match false,
+      // stored reason "제목/본문이 넓은 주제 수준에서만 겹칩니다") rendered with
+      // no exclusion label because the per-candidate flag stayed None. Wire
+      // that stored pair to the EXISTING label. Gated on the card-level
+      // predicate being explicitly false (null keeps every legacy caller
+      // byte-identical — the sourceTraceability STEP 2 convention), so
+      // genuine-support cards render exactly as before. No new vocabulary,
+      // no number read, no row hidden.
+      if (cardHasGenuineOfficial === false
+          && isOfficialLikeSource(source)
+          && source?.official_body_fetched === true
+          && source?.official_body_match === false) {
+        return "주제 불일치로 제외";
+      }
       const text = publicSourceFilterText(source, sourceReliabilitySummary);
       if (/official_topic_mismatch|topic_mismatch|body_mismatch|mismatch|not_directly_related|unrelated/i.test(text)) {
         return "주제 불일치로 제외";
@@ -4731,7 +4751,11 @@
     }
 
     function sourceTraceability(source, reliability = {}, cardHasGenuineOfficial = null) {
-      const exclusion = sourceExclusionLabel(source, reliability);
+      // CANDIDATE-EXCLUSION-WIRING: thread the card-level flag through so the
+      // collapsed-summary badge ("제외/불일치") and the 공개 표시 판단 row tell
+      // the same story as the exclusion label. Callers without the flag pass
+      // null and are byte-identical.
+      const exclusion = sourceExclusionLabel(source, reliability, cardHasGenuineOfficial);
       if (exclusion) {
         return { label: "제외/불일치", className: "trace-excluded", explanation: exclusion };
       }
