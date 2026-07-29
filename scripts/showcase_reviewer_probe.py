@@ -20,6 +20,16 @@
 # verbatim, recall against the 4 known defects, false positives (up to 3
 # quoted), disagreement count, drift check, tokens and dollars.
 #
+# PARSE-ROBUSTNESS (post-first-run fix): the first Worker run died inside
+# json.loads — on claude-sonnet-5 adaptive thinking is ON by default and
+# max_tokens caps thinking + text TOGETHER, so one 50-item response can come
+# back with an empty or truncated text block. Now: items go in BATCHES of 10
+# (identical chunking both runs, so determinism stays valid), max_tokens 4000
+# per batch (~700 tokens of verdict JSON + headroom for thinking), fences and
+# preamble are stripped before parsing, and ★any parse failure prints the
+# response structure (stop_reason, block types, first 400 chars) and exits 2 —
+# a parse failure can never look like a clean run or an empty result set.
+#
 # Joe runs once in the Render Worker Shell (both env vars already exist there):
 #     PYTHONPATH=. python scripts/showcase_reviewer_probe.py
 #
@@ -43,6 +53,11 @@ MODEL = "claude-sonnet-5"
 # $/MTok: standard, and intro pricing valid through 2026-08-31.
 PRICE_STD = (3.0, 15.0)
 PRICE_INTRO = (2.0, 10.0)
+# 10 items per request keeps each verdict JSON small enough to be reliable;
+# 4000 max_tokens = thinking + text combined on this model, so ~3K of
+# headroom remains above the ~700-token verdict payload.
+BATCH_SIZE = 10
+MAX_TOKENS_PER_BATCH = 4000
 
 # ---------------------------------------------------------------- prompt ----
 # THE PROMPT IS THE DESIGN. Printed verbatim below so the three-question
@@ -179,24 +194,64 @@ def load_sample(conn):
     return items
 
 
+def _extract_json(text):
+    """Parse the outermost JSON object; tolerate ``` fences and preamble."""
+    trimmed = text.strip()
+    if trimmed.startswith("```"):
+        trimmed = re.sub(r"^```[a-zA-Z]*\s*", "", trimmed)
+        trimmed = re.sub(r"\s*```$", "", trimmed)
+    start, end = trimmed.find("{"), trimmed.rfind("}")
+    if start != -1 and end > start:
+        return json.loads(trimmed[start:end + 1])
+    return json.loads(trimmed)  # empty/no-brace body — raises with real error
+
+
+def _dump_response(resp, text, tag, exc):
+    """★Never let a parse failure look like a clean run. Show what the API
+    actually returned (structure first, raw head second), then exit 2."""
+    kinds = ",".join(b.type for b in resp.content) or "NO CONTENT BLOCKS"
+    print("PARSE FAILURE on %s: %s" % (tag, exc))
+    print("  stop_reason=%s | %d content blocks [%s]"
+          % (resp.stop_reason, len(resp.content), kinds))
+    if resp.stop_reason == "max_tokens":
+        print("  -> response TRUNCATED at max_tokens=%d (thinking+text share "
+              "the cap) — raise MAX_TOKENS_PER_BATCH" % MAX_TOKENS_PER_BATCH)
+    print("  raw text head: %r" % text[:400])
+    raise SystemExit(2)
+
+
 def run_reviewer(client, items):
-    rows = "\n".join(
-        "- id=%s | 화면=%s\n  제목: %s\n  배지: %s"
-        % (i["id"], i["screen"], i["title"], i["badges"]) for i in items)
-    kwargs = dict(
-        model=MODEL, max_tokens=8000, system=SYSTEM_PROMPT,
-        messages=[{"role": "user",
-                   "content": USER_TEMPLATE.format(n=len(items), rows=rows)}])
+    """One full pass: identical batches of BATCH_SIZE, verdicts merged."""
+    verdicts, tokens_in, tokens_out = {}, 0, 0
+    batches = [items[i:i + BATCH_SIZE] for i in range(0, len(items), BATCH_SIZE)]
     fmt = {"format": {"type": "json_schema", "schema": OUTPUT_SCHEMA}}
-    try:
-        resp = client.messages.create(output_config=fmt, **kwargs)
-    except TypeError:  # older SDK without the typed kwarg — same wire param
-        resp = client.messages.create(extra_body={"output_config": fmt}, **kwargs)
-    if resp.stop_reason == "refusal":
-        raise RuntimeError("reviewer request refused (stop_reason=refusal)")
-    text = "".join(b.text for b in resp.content if b.type == "text")
-    verdicts = {v["id"]: v for v in json.loads(text)["verdicts"]}
-    return verdicts, (resp.usage.input_tokens, resp.usage.output_tokens)
+    for index, batch in enumerate(batches, start=1):
+        rows = "\n".join(
+            "- id=%s | 화면=%s\n  제목: %s\n  배지: %s"
+            % (i["id"], i["screen"], i["title"], i["badges"]) for i in batch)
+        kwargs = dict(
+            model=MODEL, max_tokens=MAX_TOKENS_PER_BATCH, system=SYSTEM_PROMPT,
+            messages=[{"role": "user",
+                       "content": USER_TEMPLATE.format(n=len(batch), rows=rows)}])
+        try:
+            resp = client.messages.create(output_config=fmt, **kwargs)
+        except TypeError:  # older SDK without the typed kwarg — same wire param
+            resp = client.messages.create(extra_body={"output_config": fmt},
+                                          **kwargs)
+        tag = "batch %d/%d" % (index, len(batches))
+        if resp.stop_reason == "refusal":
+            print("REVIEWER REQUEST REFUSED on %s (stop_reason=refusal)" % tag)
+            raise SystemExit(2)
+        text = "".join(b.text for b in resp.content if b.type == "text")
+        try:
+            batch_verdicts = _extract_json(text)["verdicts"]
+        except (ValueError, KeyError, TypeError) as exc:
+            _dump_response(resp, text, tag, exc)
+        for verdict in batch_verdicts:
+            verdicts[verdict["id"]] = verdict
+        tokens_in += resp.usage.input_tokens
+        tokens_out += resp.usage.output_tokens
+    return verdicts, (tokens_in, tokens_out), len(batches)
 
 
 def flagged(verdict):
@@ -221,14 +276,20 @@ def main() -> int:
     with psycopg.connect(url) as conn:
         items = load_sample(conn)
 
+    client = anthropic.Anthropic()
+    run1, usage1, batches = run_reviewer(client, items)
+    run2, usage2, _ = run_reviewer(client, items)
+
     print("SHOWCASE-REVIEWER PROBE — SELECT-only, %d items "
-          "(weekly top-10 rows + brainmap labels), model %s" % (len(items), MODEL))
+          "(weekly top-10 rows + brainmap labels), model %s, "
+          "2 passes × %d batches of ≤%d"
+          % (len(items), MODEL, batches, BATCH_SIZE))
     print("REVIEWER PROMPT (verbatim):")
     print(SYSTEM_PROMPT)
-
-    client = anthropic.Anthropic()
-    run1, usage1 = run_reviewer(client, items)
-    run2, usage2 = run_reviewer(client, items)
+    missing = [i["id"] for i in items if i["id"] not in run1 or i["id"] not in run2]
+    if missing:
+        print("WARNING: %d items got no verdict (%s…) — treat MISSED classes "
+              "below with suspicion" % (len(missing), ", ".join(missing[:5])))
 
     gt_ids = set()
     print("RECALL vs known defects (run 1):")
