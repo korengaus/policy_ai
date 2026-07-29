@@ -1084,9 +1084,19 @@
         official_evidence_resolved: "공식 자료 수집",
         // DISPLAY-LEAK-FIX — contradiction_verdict_source enums reaching the
         // 판정 근거 row raw (explicit_conflict on ~16% of cards). The label
-        // words reuse the formatContradictionStatus family (확인된 모순) and
-        // the existing 맥락/불일치 vocabulary.
-        explicit_conflict: "확인된 모순",
+        // words reuse the existing 맥락/불일치 vocabulary.
+        // REBUTTAL-PATH-WIRING: explicit_conflict used to render "확인된 모순"
+        // — a CONFIRMATION sitting above a card whose own status is only
+        // possible_contradiction ("반박 가능성"), every other string hedged.
+        // The enum names a MECHANISM (an explicit denial phrase was detected
+        // in a snippet, contradiction_agent._has_explicit_denial), not a
+        // conclusion. No existing single phrase fits that mechanism, so this
+        // is a NEW composite built from the section's own helper vocabulary
+        // ("상충되는 근거가 있는지 … 확인합니다"): it says a conflicting
+        // snippet was FOUND, and asserts nothing about the claim.
+        // "확인된 모순" remains only where it is true — the
+        // confirmed_contradiction STATUS in formatContradictionStatus.
+        explicit_conflict: "상충 근거 발견",
         context_mismatch: "맥락 불일치",
         official_search_url_candidate: "공식 검색 후보",
         official_detail_missing: "상세 공식문서 미확인",
@@ -1540,7 +1550,29 @@
       ]);
     }
 
-    function renderContradictionChecks(claims, contradictionChecks) {
+    // REBUTTAL-PATH-WIRING: render-time join from conflicting-evidence entries
+    // back to the card's OWN source_candidates rows, by whitespace-normalized
+    // title. Conflicting entries carry no match fields of their own
+    // (contradiction_agent.py:139), but the same document usually sits in the
+    // candidate roster where the stored judgement lives — so the label is
+    // computed by the SAME sourceExclusionLabel shipped in
+    // CANDIDATE-EXCLUSION-WIRING (same predicate, same wording, same
+    // genuine-card gate). Returns Map<normalized title, label>; empty on
+    // genuine/legacy cards so they render byte-identically.
+    function conflictCandidateJoin(sourceCandidates, cardHasGenuineOfficial) {
+      const joined = new Map();
+      if (cardHasGenuineOfficial !== false) return joined;
+      const list = Array.isArray(sourceCandidates) ? sourceCandidates : [];
+      for (const source of list) {
+        const key = String(source?.title || "").replace(/\s+/g, " ").trim();
+        if (!key || joined.has(key)) continue;
+        const label = sourceExclusionLabel(source, {}, cardHasGenuineOfficial);
+        if (label) joined.set(key, label);
+      }
+      return joined;
+    }
+
+    function renderContradictionChecks(claims, contradictionChecks, conflictExclusions = null) {
       const claimList = Array.isArray(claims) ? claims : [];
       const checks = Array.isArray(contradictionChecks) ? contradictionChecks : [];
       if (!checks.length) {
@@ -1582,9 +1614,16 @@
               const conflictHtml = conflict.source_url
                 ? `<a href="${conflictUrl}" target="_blank" rel="noopener noreferrer">${conflictTitle}</a>`
                 : conflictTitle;
+              // REBUTTAL-PATH-WIRING: when the card's own stored judgement
+              // already excluded this document (join above), say so with the
+              // roster's exact label and element — the finding, the document,
+              // the 모순 점수 and every count stay untouched.
+              const conflictKey = String(conflict.source_title || "").replace(/\s+/g, " ").trim();
+              const conflictExclusion = conflictExclusions ? conflictExclusions.get(conflictKey) : "";
               return `
                 <div class="evidence-source">
                   <div class="evidence-source-title">${conflictHtml}</div>
+                  ${conflictExclusion ? `<div class="vrf-cand-excl">${escapeHtml(conflictExclusion)}</div>` : ""}
                   ${advDefList([
                     ["유형", conflict.conflict_type ? formatTechnicalLabel(conflict.conflict_type) : ""],
                     ["신뢰도", conflict.confidence ? formatTechnicalLabel(conflict.confidence) : ""],
@@ -6214,7 +6253,7 @@
           ),
           renderCollapsibleSection(
             "반박/모순 검사",
-            `${renderContradictionSummary(contradictionSummary)}${renderContradictionChecks(claims, contradictionChecks)}`,
+            `${renderContradictionSummary(contradictionSummary)}${renderContradictionChecks(claims, contradictionChecks, conflictCandidateJoin(sourceCandidates, cardHasGenuineOfficial))}`,
             false,
             "같은 대상과 시점에 대해 상충되는 근거가 있는지 보수적으로 확인합니다."
           ),

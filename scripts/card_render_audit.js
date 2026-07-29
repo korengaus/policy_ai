@@ -104,6 +104,7 @@ const PINNED_DEPS = [
   "renderSourceCandidates", "renderSourceReliabilitySummary",
   "renderSourceQueries", "renderEvidenceExtractionSummary",
   "renderContradictionSummary", "renderContradictionChecks",
+  "conflictCandidateJoin",
   // card face (home/feed card summary) + its truncation budget
   "topSummaryLine", "stripCardFaceWrapper", "truncateCardFaceClaim",
   "CARD_FACE_MAX_CHARS",
@@ -253,8 +254,16 @@ function renderRow(id, row) {
         cands: renderSourceCandidates(r.source_candidates, genuine, r.source_reliability_summary),
         srs: renderSourceReliabilitySummary(r.source_reliability_summary, genuine),
         extract: renderEvidenceExtractionSummary(__extract),
+        // REBUTTAL-PATH-WIRING mirror: the app call site (main.js 반박 section
+        // builder) now threads conflictCandidateJoin(sourceCandidates,
+        // cardHasGenuineOfficial) as the third argument; the genuine const
+        // above IS that flag here. Without this the scanner renders the
+        // pre-join view and the reviewer would keep flagging a defect the app
+        // no longer shows. (NB: this comment lives inside a template literal —
+        // no backticks.)
         contra: renderContradictionSummary(__contraSum)
-          + renderContradictionChecks(r.claims, __contraChecks),
+          + renderContradictionChecks(r.claims, __contraChecks,
+              conflictCandidateJoin(r.source_candidates, genuine)),
       },
       nCands: Array.isArray(r.source_candidates) ? r.source_candidates.length : 0,
       // CARD FACE (home/feed card summary) — the surface topicCardFromResult
