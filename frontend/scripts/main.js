@@ -6645,7 +6645,29 @@
         } = parts;
         // MOBILE-POLISH F: strip before escaping (the detail header builds its own
         // title; this var also feeds data-share-title for the share image).
-        const title = escapeHtml(stripLeadingTitleMarker(publicInstitutionName(result.title || "제목 없음")));
+        // DETAIL-TITLE-TAIL: the byte-identical rule is retired for THIS LINE
+        // ONLY. Home showed "…등록센서스 발표" while the detail header showed
+        // "…등록센서스 발표 - 뉴스1" — two surfaces visibly disagreeing about one
+        // headline, which is a worse defect than the drift that rule guarded
+        // against. The caution was right while the strip was unproven; it is
+        // now shipped, covered by the z:title-outlet-tail zero class, and
+        // structurally unable to empty a string (shorten-or-nothing backstop
+        // in stripEchoedOutletTail).
+        //
+        // SCOPED so it cannot creep: the change is to this ONE const, which
+        // feeds exactly two reader-visible renderings of the headline — the
+        // detail header anchor and data-share-title for the share image. It is
+        // read by NO section renderer, so every other detail string keeps its
+        // byte-identical guarantee. The expression is character-for-character
+        // the one topicCardFromResult uses for the card title, so the two
+        // surfaces cannot drift apart again; the SAME pinned helper is reused
+        // and no second implementation exists. Unverifiable tails still stay,
+        // and the 발행처 / 기관·도메인 fields are untouched — a publisher named
+        // as data is not a tail.
+        const title = escapeHtml(stripVerifiedOutletTail(
+          stripLeadingTitleMarker(publicInstitutionName(result.title || "제목 없음")),
+          result.original_url || "",
+          feedOutletTailEvidence()));
         const url = escapeHtml(safeUrl(result.original_url || "#"));
         const topic = exportTopicLabel(result, currentReportContext?.query || queryInput?.value || "");
         // DETAIL-CLEANUP-V2: topSource*/recommendedAction/sourceTrustScore consts were

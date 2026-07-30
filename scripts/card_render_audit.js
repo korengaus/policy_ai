@@ -389,6 +389,25 @@ const NARROW_SURFACE_CLASSES = {
 };
 
 // ---------------------------------------------------------------------------
+// RECORDED NARROWING — the detail view's byte-identical rule (DETAIL-TITLE-TAIL).
+//
+// The detail view is held byte-identical on purpose. As of DETAIL-TITLE-TAIL
+// exactly ONE string is exempt: the detail TITLE LINE (main.js, the `const
+// title` in renderResults' per-result map, feeding the header anchor and
+// data-share-title). It now uses the same stripVerifiedOutletTail expression
+// as the card title, because the two surfaces were visibly disagreeing about
+// one headline. Every other detail string — claims, snippets, sources,
+// candidates, contradiction, reliability, publisher/기관·도메인 fields —
+// remains byte-identical, and the 발행처 value is data, never a tail.
+//
+// This needs no new class: titleShown already joins rendered[id].text, so the
+// existing z:title-outlet-tail scans this surface under the SURFACE RULE
+// above. It simply had nothing to catch here until the strip reached it.
+// Widening this exemption beyond the title line requires the same explicit
+// note, so the narrowing stays visible to anyone reading scope decisions.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
 // TITLE-OUTLET-TAIL (whole card). Fires when this row's VERIFIED tail — the
 // one its own original_url already proved — still ends a line that echoes the
 // shown title, ANYWHERE in the rendered card. The shape test is the measured
