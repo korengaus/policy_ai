@@ -6901,7 +6901,66 @@
           seen.add(key);
           return true;
         });
-      return sentences.join(" ").replace(/\s+/g, " ").trim();
+      // TAIL-LEAK-WHOLE-CARD: the last step of the UNIVERSAL display launderer.
+      // TITLE-TAIL-STRIP fixed the title line and 36 of 39 tailed rows still
+      // showed the tail across EIGHT other sections, because the strip lived at
+      // one call site. Every leaking renderer (근거 출처/근거 문장/대조 검토/
+      // 핵심 문장/카드 요약/주장 목록/공식 문서 후보) funnels its text through
+      // this function, so the rule belongs here — once — rather than at each
+      // surface we happen to notice next.
+      return stripEchoedOutletTail(sentences.join(" ").replace(/\s+/g, " ").trim());
+    }
+
+    // TAIL-LEAK-WHOLE-CARD: the row currently being rendered, as {tail, key}.
+    // Set once per row by setActiveOutletTailContext (card path AND detail
+    // path AND the audit's mirror); null whenever the row has no VERIFIED
+    // tail, which is the common case and makes the strip a no-op for it.
+    let activeOutletTailContext = null;
+
+    // Establish the per-row context. The tail is whatever the row's OWN url
+    // already proved (stripVerifiedOutletTail — unchanged, still the only
+    // verifier), so an unverifiable tail never reaches this machinery at all.
+    function setActiveOutletTailContext(result, evidence) {
+      activeOutletTailContext = null;
+      const title = String(result?.title || "");
+      if (!title) return;
+      const shown = stripVerifiedOutletTail(
+        title, result?.original_url || "", evidence || null);
+      if (shown === title) return;
+      const tail = title.slice(shown.length).replace(/^[\s\-–—]+/, "").trim();
+      if (!tail) return;
+      activeOutletTailContext = {
+        tail,
+        key: shown.replace(/\s+/g, "").slice(0, 16),
+      };
+    }
+
+    // THE MEASURED DISCRIMINATOR. Over the leaking rows it separated 198
+    // title-shaped occurrences from 62 that must be left alone. A tail is
+    // removed ONLY when it ENDS a line that ALSO echoes the shown title:
+    //   * a 발행처 field (bare "v.daum.net") ends with the tail but echoes no
+    //     title -> untouched, and the publisher stays named as data;
+    //   * a wire dateline ("[서울=뉴시스] 구무서 기자 =") and a citation
+    //     ("16일 뉴시스에 따르면") do not END on the tail -> untouched;
+    //   * article prose that merely mentions the outlet -> untouched.
+    // So prose and publisher fields are safe BY THE SHAPE TEST, not by which
+    // call site happened to be wired — which is the whole point of moving the
+    // rule into the shared launderer.
+    function stripEchoedOutletTail(text) {
+      const ctx = activeOutletTailContext;
+      const value = String(text || "");
+      if (!ctx || !ctx.tail || !ctx.key || value.indexOf(ctx.tail) === -1) {
+        return value;
+      }
+      return value.split("\n").map((line) => {
+        const trimmed = line.replace(/\s+$/, "");
+        if (!trimmed.endsWith(ctx.tail)) return line;
+        if (trimmed.replace(/\s+/g, "").indexOf(ctx.key) === -1) return line;
+        const cut = trimmed
+          .slice(0, trimmed.length - ctx.tail.length)
+          .replace(/[\s\-–—·|]+$/, "");
+        return cut.length >= 10 ? cut : line; // never leave a stub
+      }).join("\n");
     }
 
     function stripInternalDiagnosticText(value) {
@@ -7064,7 +7123,15 @@
       hiddenFragments.forEach((pattern) => {
         text = text.replace(pattern, "");
       });
-      return text.replace(/\s{2,}/g, " ").replace(/\s+([,.])/g, "$1").trim();
+      // TAIL-LEAK-WHOLE-CARD: this function's FIRST line falls back to
+      // sanitizeDisplayText(value) whenever cleanArticleTextForPolicyAnalysis
+      // returns "" — which it does for headline-shaped strings its boilerplate
+      // filter drops (measured on id 14314, "…남은 과제는? - v.daum.net").
+      // That fallback path skips the strip the clean() return applies, so the
+      // rule is re-applied here. Idempotent: a string already stripped is
+      // returned unchanged, so the double application costs nothing.
+      return stripEchoedOutletTail(
+        text.replace(/\s{2,}/g, " ").replace(/\s+([,.])/g, "$1").trim());
     }
 
     function userFacingReportText(value, fallback = "-") {
@@ -8752,6 +8819,14 @@
       // all domain sections, 최근 본 검증. The sidebar trending list cannot run
       // this rule (/api/trending rows carry no URL) and the detail view is
       // deliberately untouched.
+      // TAIL-LEAK-WHOLE-CARD: stamp the row context BEFORE any of this row's
+      // text is laundered, so the summary/claim chain below (topSummaryLine ->
+      // exportClaimText -> fallbackClaimFromTitle, which reads result.title
+      // raw) is covered by the shared launderer instead of needing its own
+      // strip. Same pinned verifier, same evidence map.
+      setActiveOutletTailContext(
+        { title: result?.title, original_url: result?.original_url || record?.original_url },
+        feedOutletTailEvidence());
       const cardTitle = stripVerifiedOutletTail(
         stripLeadingTitleMarker(publicInstitutionName(result?.title || record?.query || "검증 뉴스")),
         result?.original_url || record?.original_url || "",
@@ -12672,6 +12747,10 @@
       if (displayResults.length === 1) metricsEl.style.display = "none";
       renderSelectedIssueIntro(results, hasFocus ? focusIndex : 0);
       resultsEl.innerHTML = displayResults.map((result) => {
+        // TAIL-LEAK-WHOLE-CARD: the DETAIL surfaces (근거 출처 / 근거 문장 /
+        // 대조 검토 / 주장 목록 / 공식 문서 후보) launder through the same
+        // chokepoint, so they need the same per-row stamp the card path sets.
+        setActiveOutletTailContext(result, feedOutletTailEvidence());
         const parts = getResultPipelineParts(result);
         const {
           verification,

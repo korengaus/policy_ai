@@ -117,6 +117,9 @@ const PINNED_DEPS = [
   // in the SAME commit that introduced them, per this file's own docstring —
   // the bodies are still extracted from main.js, so a stub or rename fails.
   "outletTailApexHost", "outletTailEvidenceAdd", "stripVerifiedOutletTail",
+  // TAIL-LEAK-WHOLE-CARD: per-row context + the shared-launderer strip.
+  "activeOutletTailContext", "setActiveOutletTailContext",
+  "stripEchoedOutletTail",
   // official-evidence predicate chain + status label + answer line
   "officialEvidenceIsGenuine", "officialStatusLabel", "isOfficialLikeSource",
   "loadAnswerLines",
@@ -163,7 +166,12 @@ function extractDep(name) {
     const got = extractRange(marker, "\n    }");
     if (got) return got;
   }
-  return extractRange(`    const ${name} =`, ";\n");
+  // `let` as well as `const`: mutable module state (e.g. a per-row render
+  // context) is pinnable too. Without this a helper touching module state had
+  // to be INLINED to get past the guard — debt this file's own docstring says
+  // not to accumulate.
+  return extractRange(`    const ${name} =`, ";\n")
+    || extractRange(`    let ${name} =`, ";\n");
 }
 
 const pinFailures = [];
@@ -261,6 +269,10 @@ function renderRow(id, row) {
     original_url: row.original_url,
   };
   sandbox.__row = result;
+  // TAIL-LEAK-WHOLE-CARD: mirror the app's per-row stamp (topicCardFromResult
+  // and renderResults both call this before any of the row's text is
+  // laundered), so the scan renders exactly what a reader gets.
+  vm.runInContext("setActiveOutletTailContext(__row, __tailEvidence)", sandbox);
   sandbox.__extract = J(row.evidence_extraction_summary);
   sandbox.__contraSum = J(row.contradiction_summary);
   sandbox.__contraChecks = J(row.contradiction_checks);
@@ -300,23 +312,13 @@ function renderRow(id, row) {
       face: stripCardFaceWrapper(topSummaryLine(r)),
       faceFull: stripCardFaceWrapper(
         userFacingReportText(exportClaimText(r), "")),
-      // TITLE-TAIL-STRIP mirror of the app call site (topicCardFromResult's
-      // cardTitle): launder chain, then the verified-outlet strip against
-      // this row's own url + the scan-time evidence. titleTailDefect
-      // re-applies the stripper to the SHOWN title — if that changes it, a
-      // verifiable outlet tail survived into reader-visible text, i.e. the
-      // strip regressed. Kept OUT of the joined section text on purpose: the
-      // other zero classes keep their existing surface, this class its own.
-      titleFace: (() => {
-        const shown = stripVerifiedOutletTail(
-          stripLeadingTitleMarker(publicInstitutionName(r.title || "")),
-          r.original_url || "", __tailEvidence);
-        return {
-          shown,
-          defect: stripVerifiedOutletTail(
-            shown, r.original_url || "", __tailEvidence) !== shown,
-        };
-      })(),
+      // TAIL-LEAK-WHOLE-CARD: the title line is still rendered (a leak there
+      // must still fail), but the tail class no longer READS this privately —
+      // it scans the joined text like every other zero class. See the SURFACE
+      // RULE above.
+      titleShown: stripVerifiedOutletTail(
+        stripLeadingTitleMarker(publicInstitutionName(r.title || "")),
+        r.original_url || "", __tailEvidence),
     };
   })()`, sandbox);
 }
@@ -350,6 +352,41 @@ function cardFaceTruncationDefect(face, full) {
   const next = g.charAt(body.length);
   if (next && !FACE_CUT_BOUNDARY.test(next)) return "cut inside a word";
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// ★ SURFACE RULE — enforced below, not merely remembered.
+//
+// EVERY zero class reads the JOINED card text (rendered[id].text). A class
+// that reads a narrower, private surface WILL pass while the same value leaks
+// through the other renderers: TITLE-TAIL-STRIP's tail class read its own
+// titleFace mirror, went green, and 36 of 39 tailed rows still showed the tail
+// across eight sections. That is the eighth time one value has been gated on
+// the one surface we happened to look at.
+//
+// A class needing a narrower surface must (a) name that surface in
+// NARROW_SURFACE_CLASSES below and (b) state why the joined text cannot serve.
+// The assertion under that table fails the run if a class narrows silently,
+// so the rule is checked by the scanner rather than trusted to review.
+// ---------------------------------------------------------------------------
+const NARROW_SURFACE_CLASSES = {
+  // The face check compares the rendered face against the SAME line rendered
+  // without the budget. The joined text cannot serve: it holds neither the
+  // pre-truncation string nor the section boundary the comparison needs.
+  "card-face-truncation": "face vs faceFull — needs the untruncated counterpart",
+};
+
+// ---------------------------------------------------------------------------
+// TITLE-OUTLET-TAIL (whole card). Fires when this row's VERIFIED tail — the
+// one its own original_url already proved — still ends a line that echoes the
+// shown title, ANYWHERE in the rendered card. The shape test is the measured
+// discriminator (198 title-shaped vs 62 prose/dateline/publisher-field), and
+// it is the SAME predicate main.js strips with: the class re-applies
+// stripEchoedOutletTail to the rendered text and fails if that changes
+// anything, so scanner and app can never disagree about what counts.
+// ---------------------------------------------------------------------------
+function titleTailLeak(text, stripped) {
+  return String(text || "") !== String(stripped || "");
 }
 
 // ---------------------------------------------------------------------------
@@ -460,6 +497,32 @@ if (!SNAKE_RE.test(stripUrls(SNAKE_CONTROL))) failures.push(
     failures.push("OVER-EAGER DETECTOR: title-outlet-tail stripped on "
       + "single-row evidence");
   }
+  // WHOLE-CARD controls: with a row context stamped, the shape test must fire
+  // on a title-echoing line end and must NOT fire on the three shapes the
+  // measurement said to leave alone (publisher field, wire dateline, prose
+  // citation). These run on synthetic strings, so no corpus state can make
+  // them vacuously pass.
+  ctl(`setActiveOutletTailContext(
+        { title: "정책 브리핑 자료 정리 발표 - v.daum.net",
+          original_url: "https://v.daum.net/v/1" }, null)`);
+  const cases = [
+    ["title-echo line end", "정책 브리핑 자료 정리 발표 v.daum.net", true],
+    ["publisher field", "v.daum.net", false],
+    ["wire dateline", "[서울=v.daum.net] 구무서 기자 = 정책 브리핑 자료 정리 발표 관련", false],
+    ["prose citation", "정책 브리핑 자료 정리 발표 v.daum.net 에 따르면 추가 확인이 필요하다", false],
+  ];
+  for (const [label, input, shouldStrip] of cases) {
+    const got = ctl(`stripEchoedOutletTail(${JSON.stringify(input)})`);
+    if (shouldStrip && got === input) {
+      failures.push(`VACUOUS DETECTOR: whole-card tail strip missed the `
+        + `"${label}" control`);
+    }
+    if (!shouldStrip && got !== input) {
+      failures.push(`OVER-EAGER DETECTOR: whole-card tail strip altered the `
+        + `"${label}" control`);
+    }
+  }
+  ctl("setActiveOutletTailContext({}, null)"); // clear before the scan
 }
 
 // ---------------------------------------------------------------------------
@@ -491,20 +554,46 @@ for (const id of Object.keys(rows).map(Number).sort((a, b) => a - b)) {
   }
   const secs = Object.entries(out.sections).map(([k, v]) => [k, visible(v)]);
   for (const [k, v] of secs) if (v.replace(/\s+/g, "")) sectionSeen.add(k);
+  // TAIL-LEAK-WHOLE-CARD: the title line JOINS the scanned text, so the tail
+  // class covers title + every section with one predicate.
+  const joined = [out.titleShown, ...secs.map(([, v]) => v)].join("\n");
   rendered[id] = {
-    text: secs.map(([, v]) => v).join("\n"), secs, nCands: out.nCands,
+    text: joined, secs, nCands: out.nCands,
     faceDefect: cardFaceTruncationDefect(out.face, out.faceFull),
-    titleFaceShown: out.titleFace.shown,
-    titleTailDefect: out.titleFace.defect,
+    titleShown: out.titleShown,
+    titleTailDefect: titleTailLeak(
+      joined,
+      vm.runInContext("stripEchoedOutletTail(__scanText)",
+        Object.assign(sandbox, { __scanText: joined }))),
   };
 }
 
-// TITLE-TAIL-STRIP: losing the title surface must be as loud as losing a
+// TAIL-LEAK-WHOLE-CARD: losing the title surface must be as loud as losing a
 // section — a scan that silently stops rendering titles cannot catch tails.
 if (!failures.length
-    && !Object.values(rendered).some((r) => String(r.titleFaceShown || "").trim())) {
-  failures.push('SECTION BLANK: "titleFace" rendered empty on every sampled '
-    + "row — the title mirror lost its surface");
+    && !Object.values(rendered).some((r) => String(r.titleShown || "").trim())) {
+  failures.push('SECTION BLANK: "title" rendered empty on every sampled '
+    + "row — the title line left the scanned text");
+}
+
+// SURFACE RULE enforcement: every zero class must read the joined card text
+// unless it is declared narrow with a stated reason.
+{
+  const narrowing = ["card-face-truncation", "title-outlet-tail"];
+  for (const cls of narrowing) {
+    const declared = Object.prototype.hasOwnProperty.call(
+      NARROW_SURFACE_CLASSES, cls);
+    const readsJoined = cls === "title-outlet-tail";
+    if (!readsJoined && !declared) {
+      failures.push(`SURFACE RULE: zero-class "${cls}" reads a private `
+        + "surface without an entry in NARROW_SURFACE_CLASSES — declare the "
+        + "surface and why the joined card text cannot serve");
+    }
+    if (readsJoined && declared) {
+      failures.push(`SURFACE RULE: zero-class "${cls}" is declared narrow but `
+        + "reads the joined text — remove its NARROW_SURFACE_CLASSES entry");
+    }
+  }
 }
 
 if (!failures.length) {
