@@ -625,6 +625,162 @@ function heroEyebrowNamesRank(eyebrow, rank, note) {
   return eyebrow.includes(" " + rank + note.suffix);
 }
 
+// ---------------------------------------------------------------------------
+// ADAPTER-FIELD-CONTRACT (ZERO class). A rule can exist, be tested by nothing,
+// and never run: the hero skipped market_commercial rows for its whole life
+// while the mapper dropped content_nature, so the comparison read undefined.
+// Every other class here inspects RENDERED TEXT, and a rule that never fires
+// produces no text — so all of them are blind to this by construction.
+//
+// The assertion is a RELATIONSHIP, never a field list: for each adapter, every
+// field name read on an identifier assigned from that adapter must appear in
+// that adapter's own return literal. Both sides are parsed from source at scan
+// time and NO FIELD NAME IS TYPED ANYWHERE in this check — the read set comes
+// from the consumers, the produced set from the adapter's `return {}`, and the
+// built-in property names that must be ignored are taken by reflection off the
+// JS prototypes rather than listed.
+//
+// THREE THINGS IT REFUSES TO GUESS, each reported rather than passed:
+//   * a return literal containing a spread — absence cannot be concluded
+//     through `...x`, so the adapter is skipped and named;
+//   * an adapter with no provable holder — if nothing in the file is assigned
+//     from it, there is no consumer set to derive, so it is skipped and named;
+//   * an identifier assigned from the adapter but absent from its allow-entry
+//     — that is FAILURE, not a skip. `record`, `item` and `result` each denote
+//     several different objects in this file, so a new holder appearing must be
+//     reviewed by a person instead of silently widening the read set.
+// Reads are scoped to the enclosing function of each assignment, which is what
+// makes the identifier reuse tractable at all; cross-function flow (an array of
+// mapped rows read elsewhere) is NOT covered and is reported as such.
+// ---------------------------------------------------------------------------
+
+// allow-entry: identifiers (never field names) proven to hold each adapter's
+// output. A derived holder missing from this list fails the run.
+const ADAPTER_CONTRACTS = [
+  { fn: "mapHistoryRowToResult", holders: ["result", "fullResult"] },
+  { fn: "buildSlimResultSummary", holders: [] },
+  { fn: "buildSlimHistoryRecord", holders: [] },
+  { fn: "buildSlimReviewItem", holders: [] },
+  { fn: "topicCardFromResult", holders: ["card"] },
+  // Declared skip, reviewed: its output is assigned to `record`, a name this
+  // file also uses for localStorage history records and for the (never-passed)
+  // fourth parameter of topicCardFromResult. The reads that matter sit in a
+  // different function from the assignment, so no sound scope exists for it
+  // here. Excluded deliberately rather than by an empty allow-entry.
+  { fn: "buildLocalHistoryRecord", skip: "identifier `record` is reused across shapes" },
+  { fn: "buildReviewQueueItem", holders: [] },
+];
+
+// built-in member names, taken by reflection — not a typed list
+const BUILTIN_MEMBERS = new Set([
+  ...Object.getOwnPropertyNames(Object.prototype),
+  ...Object.getOwnPropertyNames(Array.prototype),
+  ...Object.getOwnPropertyNames(String.prototype),
+  ...Object.getOwnPropertyNames(Number.prototype),
+  ...Object.getOwnPropertyNames(Function.prototype),
+  ...Object.getOwnPropertyNames(Promise.prototype),
+  ...Object.getOwnPropertyNames(Map.prototype),
+  ...Object.getOwnPropertyNames(Set.prototype),
+]);
+
+function adapterBody(js, name) {
+  for (const marker of [`    function ${name}(`, `    async function ${name}(`]) {
+    const s = js.indexOf(marker);
+    if (s < 0) continue;
+    const e = js.indexOf("\n    }", s);
+    if (e < 0) continue;
+    return { start: s, end: e + 6 };
+  }
+  return null;
+}
+
+// the adapter's own return literal -> produced key set (or null on a spread)
+function adapterProducedKeys(js, name) {
+  const b = adapterBody(js, name);
+  if (!b) return null;
+  const body = js.slice(b.start, b.end);
+  const r = body.lastIndexOf("return {");
+  if (r < 0) return null;
+  const tail = body.slice(r);
+  if (/^\s+\.\.\./m.test(tail)) return { spread: true };
+  const keys = new Set();
+  for (const m of tail.matchAll(/^\s{6,}([A-Za-z_][A-Za-z0-9_]*)\s*:/gm)) keys.add(m[1]);
+  for (const m of tail.matchAll(/^\s{6,}([A-Za-z_][A-Za-z0-9_]*),\s*$/gm)) keys.add(m[1]);
+  return { spread: false, keys };
+}
+
+// identifiers assigned from the adapter, each with the function body it sits in
+function adapterHolderSites(js, name) {
+  const sites = [];
+  const re = new RegExp(
+    "(?:const|let|var)?\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*(?:await\\s+)?" + name + "\\(", "g");
+  let m;
+  while ((m = re.exec(js)) !== null) {
+    // enclosing function body: nearest preceding top-level function opener
+    let s = js.lastIndexOf("\n    function ", m.index);
+    const sa = js.lastIndexOf("\n    async function ", m.index);
+    if (sa > s) s = sa;
+    if (s < 0) continue;
+    const e = js.indexOf("\n    }", m.index);
+    if (e < 0) continue;
+    sites.push({ ident: m[1], start: s, end: e + 6 });
+  }
+  return sites;
+}
+
+// field names read on a holder inside its own assignment scope
+function adapterReadKeys(js, site) {
+  const scope = js.slice(site.start, site.end);
+  const keys = new Set();
+  const re = new RegExp("\\b" + site.ident + "\\s*(?:\\?\\.|\\.)\\s*([A-Za-z_][A-Za-z0-9_]*)", "g");
+  let m;
+  while ((m = re.exec(scope)) !== null) {
+    const before = scope.slice(0, m.index);
+    const lineStart = before.lastIndexOf("\n") + 1;
+    const line = scope.slice(lineStart, scope.indexOf("\n", m.index));
+    if (line.trim().startsWith("//") || line.trim().startsWith("*")) continue;
+    if (!BUILTIN_MEMBERS.has(m[1])) keys.add(m[1]);
+  }
+  return keys;
+}
+
+// returns { failures[], covered[], skipped[] } — pure, so it can be pointed at
+// any revision's main.js for the vacuity proof
+function adapterFieldContract(js) {
+  const out = { failures: [], covered: [], skipped: [] };
+  for (const c of ADAPTER_CONTRACTS) {
+    if (c.skip) { out.skipped.push([c.fn, c.skip]); continue; }
+    const produced = adapterProducedKeys(js, c.fn);
+    if (!produced) { out.skipped.push([c.fn, "no return literal found"]); continue; }
+    if (produced.spread) { out.skipped.push([c.fn, "return literal has a spread"]); continue; }
+    const sites = adapterHolderSites(js, c.fn);
+    if (!sites.length) { out.skipped.push([c.fn, "no provable holder assignment"]); continue; }
+    const allow = new Set(c.holders);
+    const unexpected = [...new Set(sites.map((s) => s.ident))].filter((i) => !allow.has(i));
+    if (unexpected.length) {
+      out.failures.push(`ADAPTER-FIELD-CONTRACT: ${c.fn} output is assigned to `
+        + `${unexpected.join(", ")}, which is not in its allow-entry. These names `
+        + "denote several shapes in this file, so widen the entry deliberately "
+        + "rather than letting the read set grow silently");
+      continue;
+    }
+    let checked = 0;
+    for (const site of sites) {
+      for (const key of adapterReadKeys(js, site)) {
+        checked += 1;
+        if (!produced.keys.has(key)) {
+          out.failures.push(`ADAPTER-FIELD-CONTRACT: ${c.fn} never returns `
+            + `"${key}", but ${site.ident}.${key} is read on its output — the `
+            + "comparison sees undefined, so whatever rule depends on it "
+            + "silently does not run");
+        }
+      }
+    }
+    out.covered.push([c.fn, sites.length, checked]);
+  }
+  return out;
+}
+
 function trendingRankMapsBeforeFilter(js) {
   const fn = js.indexOf("async function renderTrendingTop5");
   if (fn < 0) return null;
@@ -978,6 +1134,55 @@ if (!SNAKE_RE.test(stripUrls(SNAKE_CONTROL))) failures.push(
     if (((x) => x ?? null)(undefined) === skips.skipClass) {
       failures.push("VACUOUS DETECTOR: HERO-MARKET-SKIP cannot distinguish a "
         + "dropped field from a carried one");
+    }
+  }
+
+  // --- ADAPTER-FIELD-CONTRACT ---------------------------------------------
+  const contract = adapterFieldContract(mainJs);
+  for (const f of contract.failures) failures.push(f);
+  for (const [fn, sites, checked] of contract.covered) {
+    warns.push(`ADAPTER-FIELD-CONTRACT covered: ${fn} (${sites} holder site(s), `
+      + `${checked} field read(s) verified against its return literal)`);
+  }
+  for (const [fn, why] of contract.skipped) {
+    warns.push(`ADAPTER-FIELD-CONTRACT skipped: ${fn} — ${why}. Coverage of this `
+      + "class is INCOMPLETE by construction; absence of a finding here is not "
+      + "evidence the adapter is clean");
+  }
+  // vacuity: a synthetic adapter that drops a field its consumer reads must be
+  // caught, and one that carries it must not. No field name is typed — the
+  // specimen's own identifier is reused on both sides.
+  {
+    const bad = "    function __probeAdapter(row) {\n"
+      + "      return {\n        kept: row.kept,\n      };\n    }\n"
+      + "    function __probeConsumer() {\n"
+      + "      const result = __probeAdapter(x);\n"
+      + "      if (result.missing) return 1;\n    }\n";
+    const good = bad.replace("        kept: row.kept,", "        kept: row.kept,\n        missing: row.missing,");
+    const save = ADAPTER_CONTRACTS.slice();
+    ADAPTER_CONTRACTS.length = 0;
+    ADAPTER_CONTRACTS.push({ fn: "__probeAdapter", holders: ["result"] });
+    const badRun = adapterFieldContract(bad);
+    const goodRun = adapterFieldContract(good);
+    ADAPTER_CONTRACTS.length = 0;
+    for (const c of save) ADAPTER_CONTRACTS.push(c);
+    if (!badRun.failures.length) {
+      failures.push("VACUOUS DETECTOR: adapter-field-contract misses an adapter "
+        + "that drops a field its consumer reads");
+    }
+    if (goodRun.failures.length) {
+      failures.push("OVER-EAGER DETECTOR: adapter-field-contract fires on an "
+        + "adapter that carries the field its consumer reads");
+    }
+    // an unexpected holder must FAIL, not widen the read set
+    ADAPTER_CONTRACTS.length = 0;
+    ADAPTER_CONTRACTS.push({ fn: "__probeAdapter", holders: [] });
+    const ambiguous = adapterFieldContract(good);
+    ADAPTER_CONTRACTS.length = 0;
+    for (const c of save) ADAPTER_CONTRACTS.push(c);
+    if (!ambiguous.failures.length) {
+      failures.push("VACUOUS DETECTOR: adapter-field-contract accepts a holder "
+        + "absent from its allow-entry instead of failing on the ambiguity");
     }
   }
 
