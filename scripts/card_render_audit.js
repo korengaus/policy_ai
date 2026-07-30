@@ -50,6 +50,12 @@ const mainJs = fs.readFileSync(
 // neither can drift from the thing it polices.
 const mainCss = fs.readFileSync(
   path.join(ROOT, "frontend", "styles", "main.css"), "utf8");
+// TRENDING-LINEAGE-JOIN: the sidebar heading lives in the template and the
+// display join lives in the backend, so both are read here — each constant
+// comes from the file that owns it.
+const templateHtml = fs.readFileSync(
+  path.join(ROOT, "frontend", "template.html"), "utf8");
+const apiServerPy = fs.readFileSync(path.join(ROOT, "api_server.py"), "utf8");
 
 const dataPath = process.argv[2];
 if (!dataPath) {
@@ -470,6 +476,56 @@ function heroBudgetFromJs(js) {
 }
 
 // ---------------------------------------------------------------------------
+// TRENDING-LINEAGE-JOIN (ZERO classes). The sidebar rendered 1,2,4,5 under a
+// heading that says five, because a row arrived with a null representative and
+// the renderer maps rank BEFORE it filters. Two assertions, both with their
+// constants derived rather than typed.
+//
+// (1) HEADING vs SLICE. The heading's number is read from the heading string in
+//     frontend/template.html; the list length is read from the slice expression
+//     that bounds renderTrendingTop5 in main.js. A heading saying five while
+//     the code slices four fails on the mismatch, not on a literal.
+// (2) DURABLE JOIN. The api_server display join must consult the lineage id
+//     BEFORE the stable_id. This is the assertion that would have caught the
+//     original bug: stable_id is sha256(member set) and churns the moment a
+//     cluster gains a member, which is exactly what "trending" measures, so a
+//     join keyed on it silently drops the fastest-growing rows. Because the
+//     renderer maps rank before filtering, a null reaching it is also what
+//     produces the visible gap — so this assertion is what keeps the sequence
+//     gap-free, and the gap-shape note below records that coupling.
+// ---------------------------------------------------------------------------
+function trendingHeadingCount(templateHtml) {
+  // the sidebar panel heading, whatever number it currently names
+  const m = /확산\s*성장[^<]*?(\d+)/.exec(templateHtml);
+  return m ? Number(m[1]) : null;
+}
+function trendingSliceCount(js) {
+  const fn = js.indexOf("async function renderTrendingTop5");
+  if (fn < 0) return null;
+  const body = js.slice(fn, fn + 4000);
+  const m = /trending\s*\)\s*\?\s*body\.trending\.slice\(0,\s*(\d+)\)/.exec(body)
+    || /\.slice\(0,\s*(\d+)\)/.exec(body);
+  return m ? Number(m[1]) : null;
+}
+function trendingJoinPrefersLineage(apiPy) {
+  const i = apiPy.indexOf('display.get(entry');
+  if (i < 0) return null;                       // join moved or removed
+  const win = apiPy.slice(Math.max(0, i - 400), i + 400);
+  const lin = win.indexOf("cluster_lineage_id");
+  const sid = win.indexOf("cluster_stable_id");
+  return lin >= 0 && (sid < 0 || lin < sid);
+}
+// The renderer emits rank from the pre-filter index (map(...i+1).filter), so a
+// dropped row leaves a hole. Detected here so the coupling is recorded: if this
+// shape is present, assertion (2) is what must hold.
+function trendingRankMapsBeforeFilter(js) {
+  const fn = js.indexOf("async function renderTrendingTop5");
+  if (fn < 0) return null;
+  const body = js.slice(fn, fn + 4000);
+  return /rank-num[^]*?\$\{i \+ 1\}/.test(body) && /\.filter\(Boolean\)/.test(body);
+}
+
+// ---------------------------------------------------------------------------
 // ZERO classes — regressions of deliberate fixes; ANY hit FAILs. Each entry
 // carries a control specimen its regex MUST match (vacuity guard).
 // ---------------------------------------------------------------------------
@@ -660,6 +716,51 @@ if (!SNAKE_RE.test(stripUrls(SNAKE_CONTROL))) failures.push(
       failures.push(`HERO-CLAMP: claimTailIsSubjectParticle(${word}) = ${got}, `
         + `expected ${want} — the 이/가 discriminator drifted`);
     }
+  }
+
+  // --- TRENDING-LINEAGE-JOIN assertions -----------------------------------
+  const headN = trendingHeadingCount(templateHtml);
+  const sliceN = trendingSliceCount(mainJs);
+  if (headN === null) {
+    failures.push("TRENDING: cannot read the 확산 성장 heading number from "
+      + "frontend/template.html — the check is blind");
+  } else if (sliceN === null) {
+    failures.push("TRENDING: cannot read the slice bound from "
+      + "renderTrendingTop5 — the check is blind");
+  } else if (headN !== sliceN) {
+    failures.push(`TRENDING: the sidebar heading names ${headN} but the code `
+      + `slices ${sliceN} — the list cannot satisfy its own heading`);
+  }
+  const durable = trendingJoinPrefersLineage(apiServerPy);
+  if (durable === null) {
+    failures.push("TRENDING: cannot find the display join in api_server.py — "
+      + "the durable-key assertion is blind");
+  } else if (!durable) {
+    failures.push("TRENDING: the display join reads cluster_stable_id before "
+      + "cluster_lineage_id. stable_id is a hash of the member set, so it "
+      + "churns exactly on the growing clusters this panel ranks — a null "
+      + "representative and a gap in the sidebar numbering follow");
+  }
+  if (trendingRankMapsBeforeFilter(mainJs)) {
+    // Not a failure on its own: the renderer is unchanged by design this
+    // milestone. Recorded so the coupling is explicit — while rank is mapped
+    // before the filter, the durable-join assertion above is the ONLY thing
+    // keeping the sequence gap-free.
+    warns.push("TRENDING NOTE: renderTrendingTop5 still numbers rows before "
+      + "filtering, so any null representative reaching it leaves a hole; the "
+      + "durable-join assertion is what prevents that.");
+  }
+  // vacuity: both parsers must read their controls, and the join check must
+  // reject the pre-fix shape.
+  if (trendingHeadingCount('<h2>확산 성장 Top 7</h2>') !== 7) {
+    failures.push("VACUOUS DETECTOR: trendingHeadingCount cannot read its control");
+  }
+  if (trendingSliceCount("async function renderTrendingTop5() { body.trending.slice(0, 9) }") !== 9) {
+    failures.push("VACUOUS DETECTOR: trendingSliceCount cannot read its control");
+  }
+  if (trendingJoinPrefersLineage('display.get(entry["cluster_stable_id"])') !== false) {
+    failures.push("VACUOUS DETECTOR: trendingJoinPrefersLineage accepts the "
+      + "pre-fix stable_id-only join");
   }
 }
 

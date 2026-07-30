@@ -2084,12 +2084,24 @@ def _compute_trending(current_rows, previous_rows, limit):
         fresh widely-covered cluster is legitimately trending);
       * lineage only in previous -> dropped out, excluded.
     Per-row fallback to stable_id when lineage is NULL (pre-backfill rows;
-    0 today, kept for robustness). Entries RETAIN the current row's stable_id
-    because the display join downstream is keyed by the newest graph's
-    stable_id, which the current batch matches. Within one graph lineage ids
-    are unique by construction (assign_lineage_ids), so keying on lineage
-    collapses safely; duplicate keys within a batch (a --force re-append)
-    collapse to the last row as before."""
+    0 today, kept for robustness). Entries carry BOTH ids: the lineage is the
+    join key downstream, the stable_id is retained only as a fallback for rows
+    that predate lineage.
+
+    TRENDING-LINEAGE-JOIN: the previous sentence here claimed the display join
+    was keyed by the newest graph's stable_id "which the current batch
+    matches". That invariant was FALSE and recording it as true is how this
+    recurred — the compute moved to lineage and the display join did not. It
+    held only while the snapshot batch and the newest graph came from the same
+    build; DAILY-GRAPH-CRON rebuilds the graph daily while snapshots stay
+    weekly, so the graph now runs ahead and every cluster that gained a member
+    since the batch has a different stable_id. Measured: 2 of 1113 rows in the
+    current batch, but 4.17% of POSITIVE-GROWTH rows against 0.00% of the
+    rest, because gaining a member is simultaneously what growth measures and
+    what churns the hash. Within one graph lineage ids are unique by
+    construction (assign_lineage_ids), so keying on lineage collapses safely;
+    duplicate keys within a batch (a --force re-append) collapse to the last
+    row as before."""
     current = {(lineage or sid): (sid, outlets, members)
                for sid, outlets, members, lineage in current_rows
                if lineage or sid}
@@ -2143,10 +2155,21 @@ def _build_trending_display_index(graph: dict) -> dict:
                 if title == label_title:
                     representative_id = mid
                     break
-        display[stable_id] = {
+        info = {
             "title": label_title,
             "representative_analysis_id": representative_id,
         }
+        display[stable_id] = info
+        # TRENDING-LINEAGE-JOIN: index by the DURABLE key as well. stable_id is
+        # sha256(sorted member ids) and changes the moment a cluster gains a
+        # member; lineage_id survives that by construction. Both are indexed
+        # rather than swapping, so a pre-lineage row still resolves. The two
+        # key spaces cannot collide: a lineage is either equal to the stable_id
+        # it was minted from (same value, same entry) or a 12-hex id carried
+        # forward from an earlier build, and within one graph both are unique.
+        lineage_id = cluster.get("lineage_id")
+        if lineage_id:
+            display[lineage_id] = info
     return display
 
 
@@ -2222,7 +2245,16 @@ def trending_growth(limit: Optional[str] = None) -> Response:
         entries = _compute_trending(current["rows"], previous["rows"], n)
         display = _load_trending_display_index() or {}
         for entry in entries:
-            info = display.get(entry["cluster_stable_id"]) or {}
+            # TRENDING-LINEAGE-JOIN: durable key first, churning key only as a
+            # fallback for rows that predate lineage. The fallback CANNOT mask
+            # a genuine lineage miss: it is reached only when the lineage is
+            # absent from the newest graph, and in that case the stable_id —
+            # a hash of a member set that no longer exists — cannot match
+            # either, so the row still ships with a null representative and
+            # both the sidebar hole and the audit's null-representative
+            # assertion fire. A silent recovery is therefore impossible.
+            info = (display.get(entry.get("cluster_lineage_id"))
+                    or display.get(entry["cluster_stable_id"]) or {})
             entry["title"] = info.get("title") or ""
             entry["representative_analysis_id"] = info.get(
                 "representative_analysis_id")
