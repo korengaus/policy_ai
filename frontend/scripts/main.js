@@ -255,6 +255,13 @@
     // only a full render can do. Without this the page silently lost two cards
     // on the late-pick path (caught in validation, not by reading the code).
     let feedGridExcludedCount = 0;
+    // FEED-PAGE-DEDUP: result ids already rendered higher up the page (the hero
+    // plus the recent grid's current page slice), recorded at grid-write time
+    // and read by domainSectionTopCards so a domain section never repeats a
+    // card the reader has already passed. Rebuilt on every home render, so a
+    // sort/page/tab change re-derives it; emptied on any non-전체 render, where
+    // the sections are not shown at all.
+    let feedShownIds = new Set();
     // Backstop for a HUNG request only: every explicit failure path (fetch
     // rejected, !response.ok, empty trending, no qualifying entry) settles
     // immediately and does not wait for this. 3000ms because the slowest
@@ -2697,6 +2704,42 @@
     // renderTopicCardHtml + sortTopicCards verbatim (no card-render change). Returns
     // an innerHTML string (""→ no sections). Duplicates with the top feed are
     // allowed (top = 전체 인기/최신; sections = browse-by-category).
+    // FEED-PAGE-DEDUP: the cards ONE domain section renders — its own top-4,
+    // MINUS anything the recent grid (and the hero) already showed higher up
+    // the same page. 7 of the 12 grid cards were reappearing below, so a
+    // reader scrolling one page met the same card twice.
+    //
+    // WHY THE SECTION GIVES WAY AND NOT THE GRID. Excluding on the grid side
+    // was tried first and is RACY: the grid is written exactly once
+    // (HERO-PAINT-ORDER) and can only exclude domains whose fetch has already
+    // landed, so with the 13 per-domain fetches resolving at ~0.9-1.8s against
+    // a grid paint at ~2.3s it deduplicated only 2 of the 7 — a different
+    // subset on every load. Making it deterministic would mean either blocking
+    // the grid on 13 fetches or repainting it, and HERO-PAINT-ORDER exists to
+    // forbid the second. This direction has no race: renderDomainSections is
+    // called from renderHotTopics IMMEDIATELY AFTER the grid write, so the
+    // grid's ids are always already known here, and the later per-domain
+    // repaints (pre-existing behaviour, and confined to #feedDomainSections)
+    // re-read the same settled set. No new paint of any kind is introduced.
+    //
+    // NOTHING IS HIDDEN: a card removed here is on the page in the grid above,
+    // and the filter runs BEFORE the slice so each section still backfills to
+    // a full 4 from its own newest-12. Empty grid-id set (grid not yet painted,
+    // or a non-전체 tab) => no exclusion, i.e. today's behaviour exactly.
+    // Asserts nothing about sameness: it is one card shown once, not a group.
+    function domainSectionTopCards(d) {
+      const results = domainSectionCache.get(d);
+      if (!results || !results.length) return [];
+      const domainCards = results.map((result, index) =>
+        topicCardFromResult(result, index, "server"));
+      if (!domainCards.length) return [];
+      const shown = feedShownIds;
+      const eligible = (shown && shown.size)
+        ? domainCards.filter((c) => !(c.recordId && shown.has(String(c.recordId))))
+        : domainCards;
+      return sortTopicCards(eligible, "뜨는순").slice(0, 4);
+    }
+
     function renderDomainSections() {
       // HOME-SECTION-FIX A1: source each section from its OWN per-domain fetch
       // (domainSectionCache), not the global recent pool — so every domain with
@@ -2707,13 +2750,9 @@
       // so domainSectionCache + domainDisplayLabel resolve unchanged. DOMAIN_ORDER
       // itself is untouched (still drives ensureDomainSectionsLoaded's fetch loop).
       return TAB_ORDER.filter((d) => d !== "전체").map((d) => {
-        const results = domainSectionCache.get(d);
-        if (!results || !results.length) return "";
-        const domainCards = results.map((result, index) =>
-          topicCardFromResult(result, index, "server"));
-        if (!domainCards.length) return "";
+        const top3 = domainSectionTopCards(d);
+        if (!top3.length) return "";
         const label = domainDisplayLabel(d);
-        const top3 = sortTopicCards(domainCards, "뜨는순").slice(0, 4);
         return `<section class="domain-section">`
           + `<div class="domain-section-head">`
           + `<div class="domain-section-titles">`
@@ -2959,6 +2998,10 @@
         ? !(c.key === dailyPick.key
             || (c.recordId && String(c.recordId) === String(dailyPick.recordId)))
         : !heroKeys.has(c.key));
+      // HERO-PAINT-ORDER: counts the HERO hold-back only. Deliberately measured
+      // against poolBase, BEFORE the page-dedup filter below, so the band-only
+      // repaint shortcut keeps its exact meaning ("did a fallback band take
+      // cards out of the grid").
       if (isTrueHomeFeed) feedGridExcludedCount = filtered.length - poolBase.length;
       const poolSorted = sortTopicCards(poolBase, activeSort);
       // DESIGN-C3-2: ONE uniform 3-col grid, PAGE_SIZE (12) cards per page. gridPool =
@@ -3002,6 +3045,28 @@
       // is still in flight on the true home feed, nothing at a RESERVED height.
       // The grid write below runs on THIS pass either way, which is what makes
       // it the only grid write of a normal load.
+      // FEED-PAGE-DEDUP: record what THIS render places above the domain
+      // sections — the band's card(s) plus the grid's current page slice — so
+      // renderDomainSections, called a few lines below in this same pass, can
+      // skip a repeat. Rebuilt every render, so sort / page / tab changes
+      // re-derive it; left empty on a non-전체 render, where no sections show.
+      // Reads the SAME `dailyPick` / `hot` / `pageSlice` this pass renders, so
+      // it can never describe a card the page did not actually put up there.
+      feedShownIds = new Set();
+      if (isTrueHomeFeed) {
+        if (!heroPending) {
+          if (dailyPick) {
+            if (dailyPick.recordId) feedShownIds.add(String(dailyPick.recordId));
+          } else {
+            for (const c of hot.slice(0, 2)) {
+              if (c && c.recordId) feedShownIds.add(String(c.recordId));
+            }
+          }
+        }
+        for (const c of pageSlice) {
+          if (c && c.recordId) feedShownIds.add(String(c.recordId));
+        }
+      }
       if (heroPending) {
         hotTopicsTopEl.classList.add("hero-band-reserved");
         writeHeroBandHtml("");
