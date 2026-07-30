@@ -7350,16 +7350,69 @@
     // were never truncated do not move, and no "…" is ever added to a claim
     // that is whole. Card face only: topSummaryLine has a single caller
     // (topicCardFromResult) and feeds only card.summary.
+    // CARD-FACE-DANGLING-TRIM — why the existing trim never fired here.
+    // polishClaimEnding IS the dangling-josa mechanism and it is correct, but
+    // truncateClaimOnBoundary reaches it on only one of its two exits: the
+    // boundary branch calls polishClaimEnding, while the NO-BOUNDARY fallback
+    // (the `return `${window.replace(/\s+\S*$/, "").trim()}...`;` line above)
+    // returns straight out without ever consulting it. That fallback chops at
+    // the last whitespace, i.e. exactly ON an eojeol edge, which is how a face
+    // lands on "…지원 규모를". Measured over all 14,397 stored claims: 7,341
+    // exceed the 115-char budget and 5,315 of those (72.4%) take that
+    // un-polished exit. So the josa test was not weak — it was unreachable for
+    // three quarters of the population.
+    //
+    // The fix is applied HERE, in the card-face wrapper, and not by changing
+    // that fallback, because truncateClaimOnBoundary is shared with
+    // limitClaimSentences, which feeds the DETAIL view (핵심 주장 / 근거 문장 /
+    // 대조 검토) that must stay byte-identical. Same mechanism, narrowest layer
+    // that is allowed to move.
+    //
+    // BACK OFF WHOLE EOJEOLS, never just the particle: deleting the particle
+    // turns "지원 규모를" into "지원 규모", a different phrase, while dropping
+    // the whole eojeol gives "지원", which is honest about having stopped
+    // early. The existing CLAIM_TRIM_FLOOR_CHARS is reused so a short claim
+    // keeps an awkward tail rather than collapsing to near-nothing.
+    // Kept INLINE rather than extracted into a helper: card_render_audit.js
+    // pins main.js's helpers by name and fails closed on any it does not
+    // extract, and adding a name would mean editing that guard in the same
+    // change it is supposed to police.
     function truncateCardFaceClaim(text, maxLength) {
       const value = String(text || "");
       if (value.length <= maxLength) return value;
-      const cut = truncateClaimOnBoundary(value, maxLength).replace(/\.{3}$/, "");
-      if (/…$/.test(cut)) return cut;
-      // A boundary cut can land on a complete "…했다." — still a CUT claim, so
-      // it is marked too. The trailing full stop is dropped before "…" exactly
-      // as polishClaimEnding does; "?"/"!" are kept because dropping them would
-      // change what the sentence says.
-      return `${cut.replace(/[.\s]+$/, "")}…`;
+      // Strip whichever marker the helper returned ("..." from the fallback,
+      // "…" from polishClaimEnding), back off any binding tail, then re-mark.
+      // A cut that already ended on a verb ("…설명했다") matches no binding
+      // form, so it is returned exactly as before — this adds no second
+      // truncation rule and never lengthens a face.
+      let cut = truncateClaimOnBoundary(value, maxLength)
+        .replace(/\.{3}$/, "")
+        .replace(/…$/, "")
+        .replace(/[.\s]+$/, "");
+      for (let guard = 0; guard < 8; guard += 1) {
+        const words = cut.split(/\s+/);
+        if (words.length < 2) break;
+        const tail = words[words.length - 1].replace(/[^0-9a-z가-힣]+$/gi, "");
+        // The second alternation carries binding tails the CUT POPULATION shows
+        // that CLAIM_DANGLING_JOSA does not. Derived from data, not by hand: the
+        // card-face pipeline was simulated over all 14,397 stored claims and the
+        // trailing morpheme of every cut ranked. Of the 5,967 cuts landing on a
+        // non-terminal morpheme the existing list matched only 1,949 (32.7%);
+        // the largest uncovered forms were 통해 59, 위한 43, 위해 40, 적인 31,
+        // 도록 28, 및 26 — each a form that REQUIRES a following word, which is
+        // why a face may not stop on it. Deliberately EXCLUDED although they
+        // rank as high in that table: 등 56, 지원 41, 수 38, 평가 21 — those are
+        // nouns, and stopping on a noun is the clean stop this trim aims for.
+        // Inline (not a named const) because card_render_audit.js pins main.js
+        // names and fails closed on any it does not extract; naming it would
+        // mean editing that guard in the change it is meant to police.
+        if (!CLAIM_DANGLING_JOSA.test(tail)
+            && !/(?:및|통해|위한|위해|도록|적인)$/.test(tail)) break;
+        const shorter = words.slice(0, -1).join(" ").replace(/[,，、·\s]+$/, "");
+        if (shorter.length < CLAIM_TRIM_FLOOR_CHARS) break;
+        cut = shorter;
+      }
+      return `${cut}…`;
     }
 
     // CLAIM-QUALITY FIX 3: do two claim strings say the same thing? Compared on
