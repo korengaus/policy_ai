@@ -56,6 +56,8 @@ const mainCss = fs.readFileSync(
 const templateHtml = fs.readFileSync(
   path.join(ROOT, "frontend", "template.html"), "utf8");
 const apiServerPy = fs.readFileSync(path.join(ROOT, "api_server.py"), "utf8");
+// UNGATED-FIX-GATES: binding-tail alternation, read from main.js at load.
+let BINDING_TAIL_RE = null;
 
 const dataPath = process.argv[2];
 if (!dataPath) {
@@ -518,6 +520,72 @@ function trendingJoinPrefersLineage(apiPy) {
 // The renderer emits rank from the pre-filter index (map(...i+1).filter), so a
 // dropped row leaves a hole. Detected here so the coupling is recorded: if this
 // shape is present, assertion (2) is what must hold.
+// ---------------------------------------------------------------------------
+// UNGATED-FIX-GATES — three shipped fixes had no gate, which is the shape that
+// produces "fixed, then found again". One check each.
+//
+// (1) card-face-binding-tail  ZERO. The existing card-face class asks whether a
+//     cut is MARKED and whether it landed on a word boundary — and a hanging
+//     particle sits exactly ON a word boundary, so reverting
+//     CARD-FACE-DANGLING-TRIM passes it today. This asks the different
+//     question: does the face END on a tail that binds to a following word.
+//     NO SECOND COPY OF THE RULE: the two named parts are the pinned helpers
+//     themselves (CLAIM_DANGLING_JOSA, claimTailIsSubjectParticle) and the
+//     third is the binding-tail literal PARSED OUT OF main.js below, so editing
+//     the rule in main.js moves this check with it.
+// (2) grid-write-single-path  ZERO, source-shape. See the note at its call
+//     site: the real assertion (the grid is written once per load) needs a
+//     browser and cannot be made here.
+// (3) page-dedup-wiring       ZERO, source-shape. Same limitation.
+// ---------------------------------------------------------------------------
+
+// (set after the parser is defined; see below)
+
+// The binding-tail alternation as it currently exists inside
+// truncateCardFaceClaim. Read from source rather than restated: a drift in
+// main.js changes this check instead of silently disagreeing with it.
+function bindingTailReFromJs(js) {
+  const fn = js.indexOf("function truncateCardFaceClaim(");
+  if (fn < 0) return null;
+  const body = js.slice(fn, fn + 3000);
+  const m = /!\/\(\?:([^)]+)\)\$\/\.test\(tail\)/.exec(body);
+  return m ? new RegExp("(?:" + m[1] + ")$") : null;
+}
+
+// The face's own trailing eojeol, stripped of the site's cut marker and of any
+// non-word trailing punctuation — the same shape truncateCardFaceClaim tests.
+function faceTrailingTail(face) {
+  const body = String(face || "").replace(/…+$/, "").replace(/[.\s]+$/, "");
+  const words = body.split(/\s+/);
+  if (!words.length) return "";
+  return words[words.length - 1].replace(/[^0-9a-z가-힣]+$/gi, "");
+}
+
+// (2) The grid is written through exactly one function (writeFeedGridHtml), the
+// write-once guard HERO-PAINT-ORDER introduced. A regression that reintroduces
+// a direct `hotTopicsEl.innerHTML =` bypasses that guard and restores the
+// double paint. Counting the assignment sites is observable from source; the
+// paint COUNT itself is not (see the call site).
+function gridWriteSites(js) {
+  return (js.match(/hotTopicsEl\.innerHTML\s*=/g) || []).length;
+}
+
+// (3) FEED-PAGE-DEDUP made the domain sections skip ids the grid already
+// showed, by filtering their candidates against feedShownIds BEFORE the slice.
+// If that filter disappears, or moves after the slice, a card renders twice on
+// one page again.
+function pageDedupWired(js) {
+  const fn = js.indexOf("function domainSectionTopCards(");
+  if (fn < 0) return null;
+  const body = js.slice(fn, js.indexOf("\n    }", fn));
+  const filtered = /feedShownIds/.test(body) && /\.filter\(/.test(body);
+  const filterBeforeSlice = body.indexOf(".filter(") >= 0
+    && body.indexOf(".filter(") < body.indexOf(".slice(0, 4)");
+  return filtered && filterBeforeSlice;
+}
+
+BINDING_TAIL_RE = bindingTailReFromJs(mainJs);
+
 function trendingRankMapsBeforeFilter(js) {
   const fn = js.indexOf("async function renderTrendingTop5");
   if (fn < 0) return null;
@@ -762,6 +830,86 @@ if (!SNAKE_RE.test(stripUrls(SNAKE_CONTROL))) failures.push(
     failures.push("VACUOUS DETECTOR: trendingJoinPrefersLineage accepts the "
       + "pre-fix stable_id-only join");
   }
+
+  // --- UNGATED-FIX-GATES ---------------------------------------------------
+  // (1) binding-tail predicate must be composable and must actually fire.
+  if (!BINDING_TAIL_RE) {
+    failures.push("UNGATED-FIX: cannot read the binding-tail alternation from "
+      + "truncateCardFaceClaim in main.js — the dangling check is blind");
+  } else {
+    // controls: a bound tail must be caught by SOME limb, a clean noun must not
+    const bound = ["지원 규모를", "확대 및", "정책 통해", "요건 충족 시 수료증이"];
+    const clean = ["교육생 모집", "감축계획 수립", "정책포럼 개최"];
+    for (const s of bound) {
+      if (!faceDanglingDefect("공식 자료와 추가 대조가 필요한 정책 보도 내용의 세부 사항과 관련 기관 협의 결과에 따르면 " + s + "…", "공식 자료와 추가 대조가 필요한 정책 보도 내용의 세부 사항과 관련 기관 협의 결과에 따르면 추가 확인이 필요한 세부 항목과 후속 조치 계획에 대한 설명이 이어졌다 그리고 관계 부처는 이를 재확인했다 관계 부처는 후속 일정과 세부 지침을 다시 안내할 예정이라고 밝혔다", ctl)) {
+        failures.push(`VACUOUS DETECTOR: card-face-binding-tail misses "${s}"`);
+      }
+    }
+    for (const s of clean) {
+      if (faceDanglingDefect("공식 자료와 추가 대조가 필요한 정책 보도 내용의 세부 사항과 관련 기관 협의 결과에 따르면 " + s, "공식 자료와 추가 대조가 필요한 정책 보도 내용의 세부 사항과 관련 기관 협의 결과에 따르면 추가 확인이 필요한 세부 항목과 후속 조치 계획에 대한 설명이 이어졌다 그리고 관계 부처는 이를 재확인했다 관계 부처는 후속 일정과 세부 지침을 다시 안내할 예정이라고 밝혔다", ctl)) {
+        failures.push(`OVER-EAGER DETECTOR: card-face-binding-tail fires on "${s}"`);
+      }
+    }
+  }
+  // (2)/(3) source-shape guards must reject their pre-fix shapes.
+  if (gridWriteSites("hotTopicsEl.innerHTML = a; hotTopicsEl.innerHTML = b;") !== 2) {
+    failures.push("VACUOUS DETECTOR: gridWriteSites cannot count its control");
+  }
+  if (pageDedupWired("function domainSectionTopCards(d) {\n"
+      + "  return sortTopicCards(domainCards, x).slice(0, 4);\n    }") !== false) {
+    failures.push("VACUOUS DETECTOR: pageDedupWired accepts an unfiltered "
+      + "pre-fix domainSectionTopCards");
+  }
+
+  const sites = gridWriteSites(mainJs);
+  if (sites !== 1) {
+    failures.push(`UNGATED-FIX grid-write-single-path: ${sites} direct `
+      + "hotTopicsEl.innerHTML assignments (expected exactly 1, inside "
+      + "writeFeedGridHtml). A second write path bypasses the write-once guard "
+      + "and restores the double paint HERO-PAINT-ORDER removed");
+  }
+  const dedup = pageDedupWired(mainJs);
+  if (dedup === null) {
+    failures.push("UNGATED-FIX page-dedup-wiring: domainSectionTopCards not "
+      + "found — the dedup check is blind");
+  } else if (!dedup) {
+    failures.push("UNGATED-FIX page-dedup-wiring: domain sections no longer "
+      + "filter against feedShownIds before slicing, so a result id can render "
+      + "twice on one page again");
+  }
+}
+
+// (1) helper: does this face tail bind? Composed from the two PINNED helpers
+// plus the literal parsed from main.js — never a restatement of the rule.
+function faceTailBinds(tail, ctl) {
+  if (!tail) return false;
+  if (BINDING_TAIL_RE && BINDING_TAIL_RE.test(tail)) return true;
+  return !!ctl(`(CLAIM_DANGLING_JOSA.test(${JSON.stringify(tail)}) `
+    + `|| claimTailIsSubjectParticle(${JSON.stringify(tail)}))`);
+}
+
+// A face may legitimately keep a binding tail when backing off would leave less
+// than CLAIM_TRIM_FLOOR_CHARS — that exemption is part of the shipped trim, not
+// a defect, and it accounts for the residue CARD-FACE-DANGLING-TRIM recorded.
+// The floor is the PINNED constant, read from main.js through the sandbox, so
+// this cannot disagree with the trim about where the floor is.
+function faceDanglingDefect(face, faceFull, ctl) {
+  // SCOPE: the card-face trim only runs when the unbudgeted line EXCEEDS the
+  // budget — truncateCardFaceClaim returns early otherwise. A face that was
+  // already short arrived pre-cut from the claim chain (it still carries that
+  // path's ASCII "..."), so a binding tail there is not this fix regressing and
+  // must not be blamed on it. faceFull is the same line rendered without the
+  // budget, which the scanner already computes for the truncation class.
+  const budget = Number(ctl("CARD_FACE_MAX_CHARS")) || 0;
+  if (String(faceFull || "").length <= budget) return false;
+  const tail = faceTrailingTail(face);
+  if (!faceTailBinds(tail, ctl)) return false;
+  const body = String(face || "").replace(/…+$/, "").replace(/[.\s]+$/, "");
+  const words = body.split(/\s+/);
+  if (words.length < 2) return false;          // nothing to back off to
+  const shorter = words.slice(0, -1).join(" ").replace(/[,，、·\s]+$/, "");
+  const floor = Number(ctl("CLAIM_TRIM_FLOOR_CHARS")) || 0;
+  return shorter.length >= floor;              // the trim COULD have backed off
 }
 
 // ---------------------------------------------------------------------------
@@ -799,6 +947,8 @@ for (const id of Object.keys(rows).map(Number).sort((a, b) => a - b)) {
   rendered[id] = {
     text: joined, secs, nCands: out.nCands,
     faceDefect: cardFaceTruncationDefect(out.face, out.faceFull),
+    faceDangling: faceDanglingDefect(out.face, out.faceFull,
+      (e) => vm.runInContext(e, sandbox)),
     emptiedByStrip: strippedAwaySummary(out.face, out.faceNoStrip),
     titleShown: out.titleShown,
     titleTailDefect: titleTailLeak(
@@ -863,6 +1013,7 @@ for (const [win, ids] of Object.entries(windows)) {
     }
     if (SNAKE_RE.test(stripUrls(t))) hit(win, "z:snake-case-identifier", id);
     if (r.faceDefect) hit(win, "z:card-face-truncation", id);
+    if (r.faceDangling) hit(win, "z:card-face-binding-tail", id);
     if (r.titleTailDefect) hit(win, "z:title-outlet-tail", id);
     if (r.emptiedByStrip) hit(win, "z:summary-emptied-by-strip", id);
     // ceilings
