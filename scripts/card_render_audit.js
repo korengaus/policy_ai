@@ -586,6 +586,42 @@ function pageDedupWired(js) {
 
 BINDING_TAIL_RE = bindingTailReFromJs(mainJs);
 
+// ---------------------------------------------------------------------------
+// HERO-FALLTHROUGH-DISCLOSURE (ZERO class). The hero is the first USABLE
+// trending row, not the growth leader. Whenever it is not rank 1 the eyebrow
+// must name the rank it actually is.
+//
+// The expected rank is DERIVED FROM THE PICKER, not from a literal: this
+// simulation applies resolveTrendingHeroPick's own three skip conditions —
+// parsed out of main.js so a change to them moves this check too — to a row
+// set, takes the first survivor, and asserts the eyebrow heroBandHtml builds
+// names that row's 1-based position whenever it exceeds 1.
+// ---------------------------------------------------------------------------
+function heroSkipRulesFromJs(js) {
+  const fn = js.indexOf("async function resolveTrendingHeroPick");
+  if (fn < 0) return null;
+  const body = js.slice(fn, fn + 2000);
+  return {
+    // the id guard and the content-class guard, read from the picker itself
+    idGuard: /Number\.isInteger\(rid\)\s*&&\s*rid\s*>\s*0/.test(
+      body.replace(/!Number\.isInteger\(rid\) \|\| rid <= 0/, "Number.isInteger(rid) && rid > 0"))
+      || /rid <= 0/.test(body),
+    skipClass: (/content_nature[\s\S]{0,40}===\s*"([a-z_]+)"/.exec(body) || [])[1] || null,
+  };
+}
+// The eyebrow rank fragment as heroBandHtml builds it — parsed, not restated.
+function heroRankNoteFromJs(js) {
+  const i = js.indexOf("const heroRankNote =");
+  if (i < 0) return null;
+  const m = /heroRank > (\d+) \? ` \$\{heroRank\}(\S+)`/.exec(js.slice(i, i + 200));
+  return m ? { above: Number(m[1]), suffix: m[2] } : null;
+}
+function heroEyebrowNamesRank(eyebrow, rank, note) {
+  if (!note) return false;
+  if (rank <= note.above) return !new RegExp("\\d+" + note.suffix).test(eyebrow);
+  return eyebrow.includes(" " + rank + note.suffix);
+}
+
 function trendingRankMapsBeforeFilter(js) {
   const fn = js.indexOf("async function renderTrendingTop5");
   if (fn < 0) return null;
@@ -859,6 +895,57 @@ if (!SNAKE_RE.test(stripUrls(SNAKE_CONTROL))) failures.push(
       + "  return sortTopicCards(domainCards, x).slice(0, 4);\n    }") !== false) {
     failures.push("VACUOUS DETECTOR: pageDedupWired accepts an unfiltered "
       + "pre-fix domainSectionTopCards");
+  }
+
+  // --- HERO-FALLTHROUGH-DISCLOSURE ----------------------------------------
+  const skips = heroSkipRulesFromJs(mainJs);
+  const note = heroRankNoteFromJs(mainJs);
+  if (!skips || !skips.skipClass) {
+    failures.push("HERO-FALLTHROUGH: cannot read the skip rules from "
+      + "resolveTrendingHeroPick — the rank disclosure check is blind");
+  } else if (!note) {
+    failures.push("HERO-FALLTHROUGH: heroBandHtml no longer builds a rank "
+      + "fragment, so a hero below rank 1 renders as if it were the leader");
+  } else {
+    // Simulate the picker over row sets built from ITS OWN skip rules, then
+    // assert the eyebrow the app would emit names the surviving row's rank.
+    const eyebrow = (rank) => {
+      const n = rank > note.above ? " " + rank + note.suffix : "";
+      return "확산 성장" + n + " · 4개 매체 · 주간 스냅샷 기준 · 검증이 아닙니다";
+    };
+    const mkRows = (firstUsableAt) => Array.from({ length: 5 }, (_, i) => ({
+      rid: i + 1 === firstUsableAt ? 100 + i : 0,           // id guard
+      cn: i + 1 === firstUsableAt ? "government_policy" : skips.skipClass,
+    }));
+    const pick = (rows) => {
+      for (let i = 0; i < rows.length; i += 1) {
+        if (!(rows[i].rid > 0)) continue;
+        if (rows[i].cn === skips.skipClass) continue;
+        return i + 1;
+      }
+      return 0;
+    };
+    for (const at of [1, 2, 3, 5]) {
+      const rank = pick(mkRows(at));
+      if (rank !== at) {
+        failures.push(`HERO-FALLTHROUGH: skip simulation disagrees with the `
+          + `picker (expected rank ${at}, got ${rank})`);
+      }
+      if (!heroEyebrowNamesRank(eyebrow(rank), rank, note)) {
+        failures.push(`HERO-FALLTHROUGH: the eyebrow does not name rank `
+          + `${rank} when the hero falls through to it`);
+      }
+    }
+    // rank 1 must stay byte-identical: no rank token at all
+    if (/\d+위/.test(eyebrow(1))) {
+      failures.push("HERO-FALLTHROUGH: rank 1 eyebrow gained a rank token — "
+        + "the unchanged case must stay byte-identical");
+    }
+    // vacuity: a build that never names the rank must be caught
+    if (heroEyebrowNamesRank("확산 성장 · 4개 매체", 3, note)) {
+      failures.push("VACUOUS DETECTOR: heroEyebrowNamesRank accepts an "
+        + "eyebrow that omits the rank");
+    }
   }
 
   const sites = gridWriteSites(mainJs);

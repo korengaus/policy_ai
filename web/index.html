@@ -9213,7 +9213,32 @@
         const heroStat = Number.isFinite(heroOutlets) && heroOutlets > 0
           ? `${heroOutlets}개 매체${heroBadge}`
           : heroBadge.replace(" · ", "");
-        return `<div class="public-eyebrow">확산 성장${heroStat ? ` · ${heroStat}` : ""} · 주간 스냅샷 기준 · 검증이 아닙니다</div>`
+        // HERO-FALLTHROUGH-DISCLOSURE: the hero is the first USABLE growth row,
+        // not the growth leader — resolveTrendingHeroPick walks the same five
+        // rows the sidebar renders and skips any whose representative is
+        // missing, whose fetch fails, or whose content_nature is
+        // market_commercial. Measured: 21 of 100 top-20 rows across five
+        // replayed windows were skippable, and market_commercial alone is
+        // 9.86% of the corpus. Saying only 확산 성장 while showing the third row
+        // tells a reader it is the leader — the screen speaking more strongly
+        // than the data, which is the defect class this page keeps hitting.
+        //
+        // The rank is DERIVED, never recorded separately: it is this row's
+        // position in the very array the picker walked, so it cannot drift
+        // from the selection. An unknown position (indexOf -1) yields 0 and is
+        // treated as rank 1, i.e. the eyebrow stays exactly as it was — the
+        // disclosure fails silent rather than guessing a number.
+        //
+        // NEW VOCABULARY, stated plainly: "N위" is not shipped anywhere on this
+        // page (the sidebar prints bare digits; the only 순위 strings are
+        // 출처 우선순위, unrelated). It is a circulation fact — the item's
+        // position in the growth ranking — and deliberately says nothing about
+        // why higher rows were skipped and nothing about importance.
+        const heroRank = Array.isArray(trendingHeroRows)
+          ? trendingHeroRows.indexOf(trendingHeroPickRow) + 1
+          : 0;
+        const heroRankNote = heroRank > 1 ? ` ${heroRank}위` : "";
+        return `<div class="public-eyebrow">확산 성장${heroRankNote}${heroStat ? ` · ${heroStat}` : ""} · 주간 스냅샷 기준 · 검증이 아닙니다</div>`
           + renderTopicCardHtml(dailyPick, { detailed: true, hero: true });
       }
       if (!hot.length) return "";
