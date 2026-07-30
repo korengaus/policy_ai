@@ -6436,6 +6436,35 @@
     // endpoint the tabs use. Display only; no localStorage.
     const domainSectionCache = new Map();
     const domainSectionLoading = new Set();
+    // TITLE-TAIL-STRIP: tail->apex evidence folded (via the pure
+    // outletTailEvidenceAdd) over every row the page has loaded — the recent
+    // feed plus all per-domain caches. DERIVED AT LOAD TIME from the data
+    // itself; there is no stored outlet list anywhere. Memoized per cache
+    // shape: rebuilt only when a fetch lands and a cache grows, i.e. at most
+    // once per paint. A row present in two caches counts once (result_id key).
+    let outletTailEvidenceCache = null;
+    let outletTailEvidenceSig = "";
+    function feedOutletTailEvidence() {
+      let sig = `r${serverHotTopicResults.length}`;
+      for (const [k, v] of domainSectionCache) sig += `|s${k}:${(v || []).length}`;
+      for (const [k, v] of domainResultsCache) sig += `|d${k}:${(v || []).length}`;
+      if (outletTailEvidenceCache && sig === outletTailEvidenceSig) {
+        return outletTailEvidenceCache;
+      }
+      const evidence = {};
+      const fold = (rows) => {
+        for (const r of rows || []) {
+          outletTailEvidenceAdd(evidence, r?.title, r?.original_url,
+            r?.result_id || r?.original_url || "");
+        }
+      };
+      fold(serverHotTopicResults);
+      for (const rows of domainSectionCache.values()) fold(rows);
+      for (const rows of domainResultsCache.values()) fold(rows);
+      outletTailEvidenceSig = sig;
+      outletTailEvidenceCache = evidence;
+      return evidence;
+    }
     // ===== M29-A1 — pin-safe display label maps =====
     const ALERT_LABELS = {
       WATCH: "관찰",
@@ -6730,6 +6759,100 @@
     function stripLeadingTitleMarker(value) {
       const text = sanitizeDisplayText(value);
       return text.replace(LEADING_TITLE_MARKER_RE, "") || text;
+    }
+
+    // TITLE-TAIL-STRIP \u2014 remove a trailing " - <outlet>" from a rendered title
+    // ONLY when the row's own data proves the tail is this row's publisher.
+    // 419/14,408 stored titles (2.91%) carry such a tail; a frequency rule
+    // ("a segment trailing >=5 distinct titles") was measured and REJECTED \u2014
+    // it covers 139 of the 419 and misses 155 outlets that appear once. The
+    // rule here is SELF-VERIFYING per row instead: no outlet list exists
+    // anywhere, hand-written or generated.
+    //
+    // Registrable ("apex") host for grouping subdomain variants: go.seoul.co.kr
+    // and seoul.co.kr are the same outlet. The second-level suffixes tested
+    // for are the DNS-structural Korean public suffixes (co/or/go/ne/re/ac/
+    // pe.kr) \u2014 a fact about the .kr registry, not knowledge about outlets.
+    function outletTailApexHost(url) {
+      const m = /^[a-z][a-z0-9+.-]*:\/\/([^/:?#]+)/i.exec(String(url || "").trim());
+      if (!m) return "";
+      const host = m[1].toLowerCase().replace(/^www\./, "");
+      const labels = host.split(".").filter(Boolean);
+      if (labels.length <= 2) return labels.join(".");
+      const secondLevel = `${labels[labels.length - 2]}.${labels[labels.length - 1]}`;
+      const keep = /^(co|or|go|ne|re|ac|pe)\.kr$/.test(secondLevel) ? 3 : 2;
+      return labels.slice(-keep).join(".");
+    }
+
+    // One row's contribution to the tail evidence map. PURE fold step \u2014 the
+    // browser folds the rows it has loaded (feedOutletTailEvidence below) and
+    // scripts/card_render_audit.js folds its scan dump through this SAME
+    // function, so the two can never disagree on what counts as evidence.
+    // Evidence shape: { normTail: { keys:{rowKey:1}, apexes:{apex:count} } }.
+    // dedupeKey prevents one row loaded into two caches (recent feed + its
+    // domain section) from vouching for itself twice.
+    function outletTailEvidenceAdd(evidence, title, url, dedupeKey) {
+      if (!evidence) return evidence;
+      const m = / - ([^-]{2,40})$/.exec(String(title || "").trim());
+      const apex = outletTailApexHost(url);
+      if (!m || !apex) return evidence;
+      const normTail = m[1].toLowerCase().replace(/[^0-9a-z\uAC00-\uD7A3]/g, "");
+      if (normTail.length < 2) return evidence;
+      const key = String(dedupeKey || url || title);
+      const entry = evidence[normTail] || (evidence[normTail] = { keys: {}, apexes: {} });
+      if (entry.keys[key]) return evidence;
+      entry.keys[key] = 1;
+      entry.apexes[apex] = (entry.apexes[apex] || 0) + 1;
+      return evidence;
+    }
+
+    // The verifier + stripper. Two independent proofs, either suffices:
+    //   LITERAL \u2014 the tail IS this row's host ("- v.daum.net" on v.daum.net,
+    //   "- MSN" on msn.com, "- nhk.or.jp" on www3.nhk.or.jp): compared on
+    //   normalized text against the full host, the apex, and the apex's own
+    //   label. This is how a DOMAIN-shaped tail verifies with no evidence.
+    //   EVIDENCE \u2014 for Korean names ("- \uB274\uC2DC\uC2A4" on newsis.com), which cannot
+    //   be matched to a Latin host by any string rule: the tail must trail
+    //   >=2 DISTINCT loaded rows and this row's apex must hold the STRICT
+    //   MAJORITY of that tail's apexes. Majority, not sole-apex, because a
+    //   syndicated copy keeps the original outlet's tail while living on the
+    //   aggregator's host \u2014 those minority rows stay UNSTRIPPED by the same
+    //   test, which is correct: the tail is not *their* publisher.
+    //   A prose tail (a real subtitle) never matches a host and, being unique
+    //   to its article, never accumulates evidence \u2014 it stays.
+    // Unverifiable => returned byte-identical. Display-only; callers pass the
+    // rendered string, never write anything back.
+    function stripVerifiedOutletTail(title, url, evidence) {
+      const text = String(title || "");
+      const m = / - ([^-]{2,40})$/.exec(text);
+      if (!m) return text;
+      const head = text.slice(0, m.index).trim();
+      if (head.length < 10) return text; // never leave a stub headline
+      const norm = (s) => String(s).toLowerCase().replace(/[^0-9a-z\uAC00-\uD7A3]/g, "");
+      const normTail = norm(m[1]);
+      if (normTail.length < 2) return text;
+      const hostMatch = /^[a-z][a-z0-9+.-]*:\/\/([^/:?#]+)/i.exec(String(url || "").trim());
+      const host = hostMatch ? hostMatch[1].toLowerCase().replace(/^www\./, "") : "";
+      const apex = outletTailApexHost(url);
+      if (!host || !apex) return text;
+      const normHost = norm(host);
+      const normApex = norm(apex);
+      const apexLabel = norm(apex.split(".")[0]);
+      const literal = normTail.length >= 3 && (
+        normTail === normHost
+        || normTail === normApex
+        || (normTail === apexLabel && apexLabel.length >= 3)
+        || (normHost.endsWith(normTail) && normTail.length >= normApex.length));
+      let verified = literal;
+      if (!verified && evidence) {
+        const entry = evidence[normTail];
+        if (entry) {
+          const total = Object.values(entry.apexes).reduce((a, b) => a + b, 0);
+          const own = entry.apexes[apex] || 0;
+          verified = total >= 2 && own >= 2 && own * 2 > total;
+        }
+      }
+      return verified ? head : text;
     }
 
     const ARTICLE_NOISE_PATTERNS = [
@@ -8621,7 +8744,18 @@
       // summary-collapses-to-title compare below reuses this same string, so the
       // two stay in sync. Trending / detail / search-hits build titles on their
       // own paths and call the helper directly.
-      const cardTitle = stripLeadingTitleMarker(publicInstitutionName(result?.title || record?.query || "검증 뉴스"));
+      // TITLE-TAIL-STRIP: after the existing launder chain, drop a trailing
+      // " - <outlet>" when this row's own original_url proves the tail is its
+      // publisher (literal host match, or load-time evidence majority — see
+      // stripVerifiedOutletTail). Unverifiable tails render exactly as before.
+      // Covers every surface that reads card.title: grid, hero, secondary,
+      // all domain sections, 최근 본 검증. The sidebar trending list cannot run
+      // this rule (/api/trending rows carry no URL) and the detail view is
+      // deliberately untouched.
+      const cardTitle = stripVerifiedOutletTail(
+        stripLeadingTitleMarker(publicInstitutionName(result?.title || record?.query || "검증 뉴스")),
+        result?.original_url || record?.original_url || "",
+        feedOutletTailEvidence());
       const strippedSummary = stripCardFaceWrapper(topSummaryLine(result));
       const summaryNorm = normalizeForCompare(strippedSummary);
       const summaryCollapsesToTitle =

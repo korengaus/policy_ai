@@ -67,13 +67,18 @@ const rows = payload.rows || payload; // legacy flat form accepted
 const maxId = Number((payload._meta || {}).max_id) || Math.max(
   ...Object.keys(rows).map(Number));
 
+// TITLE-TAIL-STRIP: original_url joined the columns — the title-outlet-tail
+// zero class verifies a tail against the ROW'S OWN host, so a dump without
+// it leaves that class dormant (helpers no-op on an empty url; the vacuity
+// controls still exercise it). scripts/b2b_readiness_audit.py's RENDER_COLS
+// must gain the same column for the C8 gate to run the class on real rows.
 const ROW_COLUMNS = ["title", "claim_text", "content_nature", "claims",
   "normalized_claims", "evidence_snippets", "evidence_sources",
   "source_candidates", "source_reliability_summary",
   "source_reliability_reason", "evidence_summary", "debug_summary",
   "evidence_extraction_summary", "contradiction_summary",
   "contradiction_checks", "missing_context", "verdict_label",
-  "policy_alert_level"];
+  "policy_alert_level", "original_url"];
 
 // ---------------------------------------------------------------------------
 // SOURCE PINS — every helper the render chain needs, extracted from main.js
@@ -108,6 +113,10 @@ const PINNED_DEPS = [
   // card face (home/feed card summary) + its truncation budget
   "topSummaryLine", "stripCardFaceWrapper", "truncateCardFaceClaim",
   "CARD_FACE_MAX_CHARS",
+  // TITLE-TAIL-STRIP: outlet-tail verification chain (title surface). Pinned
+  // in the SAME commit that introduced them, per this file's own docstring —
+  // the bodies are still extracted from main.js, so a stub or rename fails.
+  "outletTailApexHost", "outletTailEvidenceAdd", "stripVerifiedOutletTail",
   // official-evidence predicate chain + status label + answer line
   "officialEvidenceIsGenuine", "officialStatusLabel", "isOfficialLikeSource",
   "loadAnswerLines",
@@ -198,6 +207,20 @@ try {
   process.exit(1);
 }
 
+// TITLE-TAIL-STRIP: tail->apex evidence REGENERATED FROM THE DUMP at every
+// scan, folded through the SAME pinned outletTailEvidenceAdd the browser
+// uses — never stored, never hand-written. Rows without original_url (older
+// dumps) contribute nothing and verify nothing, so the class goes dormant
+// rather than guessing.
+sandbox.__evidenceRows = Object.entries(rows)
+  .map(([id, r]) => [id, r.title || "", r.original_url || ""]);
+vm.runInContext(`
+  __tailEvidence = {};
+  for (const [id, t, u] of __evidenceRows) {
+    outletTailEvidenceAdd(__tailEvidence, t, u, id);
+  }
+`, sandbox);
+
 // ---------------------------------------------------------------------------
 // per-row render — all PUBLIC card-detail sections (bias sections are off the
 // card and the pipeline-debug section is operator-gated; neither is public)
@@ -235,6 +258,7 @@ function renderRow(id, row) {
     verdict_label: row.verdict_label,
     policy_alert_level: row.policy_alert_level,
     missing_context: row.missing_context,
+    original_url: row.original_url,
   };
   sandbox.__row = result;
   sandbox.__extract = J(row.evidence_extraction_summary);
@@ -276,6 +300,23 @@ function renderRow(id, row) {
       face: stripCardFaceWrapper(topSummaryLine(r)),
       faceFull: stripCardFaceWrapper(
         userFacingReportText(exportClaimText(r), "")),
+      // TITLE-TAIL-STRIP mirror of the app call site (topicCardFromResult's
+      // cardTitle): launder chain, then the verified-outlet strip against
+      // this row's own url + the scan-time evidence. titleTailDefect
+      // re-applies the stripper to the SHOWN title — if that changes it, a
+      // verifiable outlet tail survived into reader-visible text, i.e. the
+      // strip regressed. Kept OUT of the joined section text on purpose: the
+      // other zero classes keep their existing surface, this class its own.
+      titleFace: (() => {
+        const shown = stripVerifiedOutletTail(
+          stripLeadingTitleMarker(publicInstitutionName(r.title || "")),
+          r.original_url || "", __tailEvidence);
+        return {
+          shown,
+          defect: stripVerifiedOutletTail(
+            shown, r.original_url || "", __tailEvidence) !== shown,
+        };
+      })(),
     };
   })()`, sandbox);
 }
@@ -382,6 +423,44 @@ if (!SNAKE_RE.test(stripUrls(SNAKE_CONTROL))) failures.push(
   if (cardFaceTruncationDefect(FULL, FULL)) failures.push(
     "OVER-EAGER DETECTOR: card-face truncation fires on an untruncated face");
 }
+// title-outlet-tail controls — synthetic rows, so no corpus state can make
+// these vacuously pass. Both verification proofs are exercised (literal host
+// match; >=2-row same-apex evidence majority) and both refusal duties too
+// (a prose subtitle on a mismatched host; a single-row Korean tail).
+{
+  const ctl = (expr) => vm.runInContext(expr, sandbox);
+  if (ctl(`stripVerifiedOutletTail(
+        "정책 브리핑 자료 정리 발표 - v.daum.net", "https://v.daum.net/v/1", null)`)
+      !== "정책 브리핑 자료 정리 발표") {
+    failures.push("VACUOUS DETECTOR: title-outlet-tail literal (host) control "
+      + "no longer strips");
+  }
+  if (ctl(`(() => {
+        const e = {};
+        outletTailEvidenceAdd(e, "가상 정책 보도 자료 하나 - 가상매체", "https://news.fakeoutlet.co.kr/a", "1");
+        outletTailEvidenceAdd(e, "가상 정책 보도 자료 둘 - 가상매체", "https://m.fakeoutlet.co.kr/b", "2");
+        return stripVerifiedOutletTail(
+          "가상 정책 보도 자료 셋 - 가상매체", "https://fakeoutlet.co.kr/c", e);
+      })()`) !== "가상 정책 보도 자료 셋") {
+    failures.push("VACUOUS DETECTOR: title-outlet-tail evidence (majority) "
+      + "control no longer strips");
+  }
+  const PROSE = "통계 밖 청년들의 기록 - 일하고 싶지만 일할 수 없는";
+  if (ctl(`stripVerifiedOutletTail(${JSON.stringify(PROSE)},
+        "https://news.kbs.co.kr/x", null)`) !== PROSE) {
+    failures.push("OVER-EAGER DETECTOR: title-outlet-tail stripped an "
+      + "unverified prose tail");
+  }
+  const ONCE = "가상 정책 보도 자료 넷 - 한번매체";
+  if (ctl(`(() => {
+        const e = {};
+        outletTailEvidenceAdd(e, ${JSON.stringify(ONCE)}, "https://onceoutlet.kr/a", "1");
+        return stripVerifiedOutletTail(${JSON.stringify(ONCE)}, "https://onceoutlet.kr/a", e);
+      })()`) !== ONCE) {
+    failures.push("OVER-EAGER DETECTOR: title-outlet-tail stripped on "
+      + "single-row evidence");
+  }
+}
 
 // ---------------------------------------------------------------------------
 // scan
@@ -415,7 +494,17 @@ for (const id of Object.keys(rows).map(Number).sort((a, b) => a - b)) {
   rendered[id] = {
     text: secs.map(([, v]) => v).join("\n"), secs, nCands: out.nCands,
     faceDefect: cardFaceTruncationDefect(out.face, out.faceFull),
+    titleFaceShown: out.titleFace.shown,
+    titleTailDefect: out.titleFace.defect,
   };
+}
+
+// TITLE-TAIL-STRIP: losing the title surface must be as loud as losing a
+// section — a scan that silently stops rendering titles cannot catch tails.
+if (!failures.length
+    && !Object.values(rendered).some((r) => String(r.titleFaceShown || "").trim())) {
+  failures.push('SECTION BLANK: "titleFace" rendered empty on every sampled '
+    + "row — the title mirror lost its surface");
 }
 
 if (!failures.length) {
@@ -445,6 +534,7 @@ for (const [win, ids] of Object.entries(windows)) {
     }
     if (SNAKE_RE.test(stripUrls(t))) hit(win, "z:snake-case-identifier", id);
     if (r.faceDefect) hit(win, "z:card-face-truncation", id);
+    if (r.titleTailDefect) hit(win, "z:title-outlet-tail", id);
     // ceilings
     if (/[■-◿①-⓿⬚-⬯※▣◈▲△▴▷]/.test(t)) hit(win, "c:bullet_char", id);
     if (/[가-힣]\?[가-힣]/.test(t)) hit(win, "c:question_mojibake", id);
