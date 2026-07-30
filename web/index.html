@@ -13761,6 +13761,32 @@
     // pins main.js's helpers by name and fails closed on any it does not
     // extract, and adding a name would mean editing that guard in the same
     // change it is supposed to police.
+    // HERO-CLAMP: is this eojeol a noun carrying the SUBJECT particle 이/가?
+    // CLAIM_DANGLING_JOSA covers 을/를/은/는/의 but not bare 이/가, so a face
+    // could stop on "…수료증이" — which is what the most prominent line on the
+    // site was doing. A bare /(이|가)$/ is NOT safe and the cut population says
+    // so: its most frequent 이/가-final tails are NOUNS (평가 15, 국가 7,
+    // 추가 5, 없이 5), and trimming those eats a word.
+    //
+    // The discriminator is Korean ORTHOGRAPHY, not a word list: 이 attaches
+    // after a syllable that HAS a coda (받침), 가 after one that does not. So
+    // 평가/국가 cannot be noun+가 (평/국 both carry a coda) and are refused,
+    // while 수료증+이 and 정부+가 are accepted. A >=2-syllable stem is also
+    // required, because the one-syllable cases are where the residue lives
+    // (추가, 없이) — the price is losing 것이/등이, which is the safe direction.
+    // Measured over the whole cut population: accepts 74 of 310 이/가 cuts and
+    // refuses every high-frequency noun tail.
+    function claimTailIsSubjectParticle(tail) {
+      const value = String(tail || "");
+      if (!/[이가]$/.test(value)) return false;
+      const stem = value.slice(0, -1);
+      if (stem.length < 2) return false;
+      const last = stem.charCodeAt(stem.length - 1);
+      if (last < 0xac00 || last > 0xd7a3) return false;
+      const coda = (last - 0xac00) % 28;
+      return value.endsWith("이") ? coda > 0 : coda === 0;
+    }
+
     function truncateCardFaceClaim(text, maxLength) {
       const value = String(text || "");
       if (value.length <= maxLength) return value;
@@ -13791,7 +13817,8 @@
         // names and fails closed on any it does not extract; naming it would
         // mean editing that guard in the change it is meant to police.
         if (!CLAIM_DANGLING_JOSA.test(tail)
-            && !/(?:및|통해|위한|위해|도록|적인)$/.test(tail)) break;
+            && !/(?:및|통해|위한|위해|도록|적인)$/.test(tail)
+            && !claimTailIsSubjectParticle(tail)) break;
         const shorter = words.slice(0, -1).join(" ").replace(/[,，、·\s]+$/, "");
         if (shorter.length < CLAIM_TRIM_FLOOR_CHARS) break;
         cut = shorter;

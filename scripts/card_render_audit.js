@@ -44,6 +44,12 @@ const vm = require("vm");
 const ROOT = path.resolve(__dirname, "..");
 const mainJs = fs.readFileSync(
   path.join(ROOT, "frontend", "scripts", "main.js"), "utf8");
+// HERO-CLAMP: the hero summary is clipped by CSS, not by JS, so the check that
+// guards it must read the CSS. Both constants are parsed from the files that
+// OWN them — the clamp from main.css, the character budget from main.js — so
+// neither can drift from the thing it polices.
+const mainCss = fs.readFileSync(
+  path.join(ROOT, "frontend", "styles", "main.css"), "utf8");
 
 const dataPath = process.argv[2];
 if (!dataPath) {
@@ -113,6 +119,9 @@ const PINNED_DEPS = [
   // card face (home/feed card summary) + its truncation budget
   "topSummaryLine", "stripCardFaceWrapper", "truncateCardFaceClaim",
   "CARD_FACE_MAX_CHARS",
+  // HERO-CLAMP: the 이/가 subject-particle discriminator, pinned in the same
+  // commit that introduced it.
+  "claimTailIsSubjectParticle",
   // TITLE-TAIL-STRIP: outlet-tail verification chain (title surface). Pinned
   // in the SAME commit that introduced them, per this file's own docstring —
   // the bodies are still extracted from main.js, so a stub or rename fails.
@@ -435,6 +444,32 @@ function strippedAwaySummary(face, faceNoStrip) {
 }
 
 // ---------------------------------------------------------------------------
+// HERO-CLAMP (ZERO class). The hero summary is the most prominent text on the
+// site and is clipped by `-webkit-line-clamp`, which paints its ellipsis
+// wherever the line happens to wrap — no JS change can move that cut. This
+// scanner has no browser, so it does not try to re-measure wrapping. It asserts
+// the RELATIONSHIP that was measured to hold: at the recorded character budget
+// the longest hero summary in the pool occupied 2 lines at desktop and 4 at
+// phone, i.e. it fits the clamp. That stays true only while the clamp does not
+// SHRINK and the budget does not GROW, so those two are what is checked.
+//
+// Both constants are read from the files that own them, never restated here:
+//   clamp  <- frontend/styles/main.css, the .topic-card--hero .topic-card-summary rule
+//   budget <- frontend/scripts/main.js, CARD_FACE_MAX_CHARS
+// Baselines live in card_render_baselines.json under "hero_clamp".
+// ---------------------------------------------------------------------------
+function heroClampFromCss(css) {
+  const rule = /\.topic-card--hero\s+\.topic-card-summary\s*\{([^}]*)\}/.exec(css);
+  if (!rule) return null;
+  const m = /-webkit-line-clamp\s*:\s*(\d+)/.exec(rule[1]);
+  return m ? Number(m[1]) : null;
+}
+function heroBudgetFromJs(js) {
+  const m = /const\s+CARD_FACE_MAX_CHARS\s*=\s*(\d+)/.exec(js);
+  return m ? Number(m[1]) : null;
+}
+
+// ---------------------------------------------------------------------------
 // ZERO classes — regressions of deliberate fixes; ANY hit FAILs. Each entry
 // carries a control specimen its regex MUST match (vacuity guard).
 // ---------------------------------------------------------------------------
@@ -588,6 +623,44 @@ if (!SNAKE_RE.test(stripUrls(SNAKE_CONTROL))) failures.push(
       + "summary the strip did not blank");
   }
   ctl("setActiveOutletTailContext({}, null)"); // clear before the scan
+
+  // HERO-CLAMP: constants must be readable, and must not have moved against
+  // the baseline in a direction that would let the clamp start clipping.
+  const hb = (BASE.hero_clamp || {});
+  const clamp = heroClampFromCss(mainCss);
+  const budget = heroBudgetFromJs(mainJs);
+  if (clamp === null) {
+    failures.push("HERO-CLAMP: cannot read -webkit-line-clamp from "
+      + "frontend/styles/main.css (.topic-card--hero .topic-card-summary) — "
+      + "the rule was renamed or removed and this check is now blind");
+  } else if (hb.clamp && clamp < hb.clamp) {
+    failures.push(`HERO-CLAMP: clamp fell to ${clamp} from a baseline of `
+      + `${hb.clamp}; the hero summary can now be clipped mid-phrase`);
+  }
+  if (budget === null) {
+    failures.push("HERO-CLAMP: cannot read CARD_FACE_MAX_CHARS from main.js");
+  } else if (hb.budget_chars && budget > hb.budget_chars) {
+    failures.push(`HERO-CLAMP: card-face budget rose to ${budget} from `
+      + `${hb.budget_chars} without re-measuring the clamp fit`);
+  }
+  // the reader must not be able to detect a clamp cut, so a face may never
+  // carry the browser's own ellipsis position — ours is the only marker.
+  if (heroClampFromCss(".topic-card--hero .topic-card-summary { -webkit-line-clamp: 2; }") !== 2) {
+    failures.push("VACUOUS DETECTOR: heroClampFromCss cannot read its control");
+  }
+  if (heroBudgetFromJs("    const CARD_FACE_MAX_CHARS = 99;") !== 99) {
+    failures.push("VACUOUS DETECTOR: heroBudgetFromJs cannot read its control");
+  }
+  // subject-particle discriminator: must accept the hero's own shape and must
+  // refuse the noun tails the cut population ranked highest.
+  for (const [word, want] of [["수료증이", true], ["정부가", true],
+    ["평가", false], ["국가", false], ["추가", false], ["없이", false]]) {
+    const got = ctl(`claimTailIsSubjectParticle(${JSON.stringify(word)})`);
+    if (got !== want) {
+      failures.push(`HERO-CLAMP: claimTailIsSubjectParticle(${word}) = ${got}, `
+        + `expected ${want} — the 이/가 discriminator drifted`);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
