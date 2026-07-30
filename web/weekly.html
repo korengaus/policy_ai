@@ -367,6 +367,22 @@
         // latest view (no ?week) renders the exact same string as before.
         meta.appendChild(el("span", null, (weekParam ? "해당 주간 보도 " : "이번 주 보도 ") + Number(item.window_member_count) + "건"));
       }
+      // WEEKLY-ALLTIME-COUNT: member_count is the cluster's ALL-TIME article
+      // count and was stored-but-unrendered (generate_weekly_report.py:194).
+      // It sits directly beside the window count so the pair reads as one
+      // distribution fact — "N건 of the all-time M건 landed in this window" —
+      // and NEVER as importance. The scope prefix is this page's own existing
+      // vocabulary: 전체 기간 exactly as the outlet badge and the span scope
+      // above use it, 보도 N건 exactly as the window line renders it. It stays
+      // 전체 기간 on an archived permalink too (weekParam is deliberately NOT
+      // consulted — all-time is all-time, so 해당 주간 would be a lie).
+      // Rendered whenever positive, including when it EQUALS the window count:
+      // "all of this cluster's coverage fell inside the window" is itself the
+      // honest reading, and a conditional would leave gaps down the column.
+      // Stored value untouched; no existing number is read differently.
+      if (Number(item.member_count) > 0) {
+        meta.appendChild(el("span", null, "전체 기간 보도 " + Number(item.member_count) + "건"));
+      }
       // WEEKLY-PAGE-ENRICH: spread-speed span (first->last duration). Omitted when
       // the timestamps are missing/equal (spreadSpeed returns "").
       var speed = spreadSpeed(item.window_first_at || item.first_at,
