@@ -616,9 +616,24 @@
     // these ranges. Falls back to the unstripped text when a title is nothing but
     // markers, so a headline can never render blank.
     const LEADING_TITLE_MARKER_RE = /^[\s\u2022\u203B\u25A0-\u25FF\u2605\u2606]+/;
+    // SIDEBAR-TITLE-CLEANUP: the leading FORMAT-MARKER bracket, e.g.
+    // "[\uAE08\uC735 HOT \uB274\uC2A4] \u2026", "[\uD3EC\uD1A0] \u2026". This is the rule web/weekly.html and
+    // web/claim.html already carry; main.js never had it, so the trending
+    // sidebar AND the home cards both rendered the prefix while the weekly
+    // report stripped it. Extending the one pinned helper rather than adding a
+    // sidebar-local copy is deliberate: three copies of a display rule is how
+    // surfaces drift apart, and this file already carries that debt twice.
+    // Same shape as the shipped rule \u2014 bracket capped at 15 chars so a real
+    // bracketed clause in a headline is not eaten, and the caller's existing
+    // "|| text" fallback means a title that is NOTHING but a marker keeps its
+    // stored text rather than rendering empty. 7.63% of stored titles carry one.
+    const LEADING_TITLE_BRACKET_RE = /^\s*\[[^\]]{1,15}\]\s*/;
     function stripLeadingTitleMarker(value) {
       const text = sanitizeDisplayText(value);
-      return text.replace(LEADING_TITLE_MARKER_RE, "") || text;
+      const stripped = text
+        .replace(LEADING_TITLE_BRACKET_RE, "")
+        .replace(LEADING_TITLE_MARKER_RE, "");
+      return stripped || text;
     }
 
     // TITLE-TAIL-STRIP \u2014 remove a trailing " - <outlet>" from a rendered title

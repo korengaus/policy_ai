@@ -58,6 +58,8 @@ const templateHtml = fs.readFileSync(
 const apiServerPy = fs.readFileSync(path.join(ROOT, "api_server.py"), "utf8");
 // UNGATED-FIX-GATES: binding-tail alternation, read from main.js at load.
 let BINDING_TAIL_RE = null;
+// SIDEBAR-TITLE-CLEANUP: marker families, read from main.js at load.
+let MARKER_FAMILIES = [];
 
 const dataPath = process.argv[2];
 if (!dataPath) {
@@ -164,7 +166,9 @@ const PINNED_DEPS = [
   "CLAIM_QUOTE_CHARS", "CLAIM_SAID_VERBS", "CLAIM_SPEAKER_LEAD",
   "CLAIM_DEICTIC_MARK", "CLAIM_QUOTED_SPAN", "CLAIM_QUANTITY",
   "EVIDENCE_STATE_LABELS", "SOURCE_TYPE_LABELS",
-  "LEADING_TITLE_MARKER_RE",
+  // SIDEBAR-TITLE-CLEANUP: the bracket family, pinned in the same commit
+  // that introduced it.
+  "LEADING_TITLE_MARKER_RE", "LEADING_TITLE_BRACKET_RE",
 ];
 // The suppression-stamp block (WeakSet + predicate + guardStoredProse) is one
 // contiguous region, pinned the same way the leak scan pins it.
@@ -588,6 +592,7 @@ function pageDedupWired(js) {
 }
 
 BINDING_TAIL_RE = bindingTailReFromJs(mainJs);
+MARKER_FAMILIES = leadingMarkerFamilies(mainJs);
 
 // ---------------------------------------------------------------------------
 // HERO-FALLTHROUGH-DISCLOSURE (ZERO class). The hero is the first USABLE
@@ -779,6 +784,40 @@ function adapterFieldContract(js) {
     out.covered.push([c.fn, sites.length, checked]);
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// SIDEBAR-TITLE-CLEANUP (ZERO class). No rendered title may still begin with a
+// leading format marker. The check does not restate the pattern: it applies
+// the SHIPPED stripLeadingTitleMarker and fails if the result differs from the
+// input, so whatever that helper strips is what this enforces. Adding or
+// removing a marker family in main.js moves this check with it.
+// ---------------------------------------------------------------------------
+// The marker families are read as REGEX SOURCES from main.js and applied
+// directly. Calling stripLeadingTitleMarker instead would make the helper its
+// own oracle: a helper that strips nothing would render every title "clean"
+// and the class would be vacuously green in every direction. (That is exactly
+// what the first version of this check did, and the neutered-helper probe
+// caught it.) Reading the declared constants keeps the pattern out of this
+// file while still giving the check an independent opinion.
+function leadingMarkerFamilies(js) {
+  const out = [];
+  for (const re of [/const LEADING_TITLE_BRACKET_RE = \/(.*?)\/;/,
+                    /const LEADING_TITLE_MARKER_RE = \/(.*?)\/;/]) {
+    const m = re.exec(js);
+    if (m) { try { out.push(new RegExp(m[1])); } catch (e) { /* unusable */ } }
+  }
+  return out;
+}
+function leadingMarkerSurvives(title, families) {
+  const t = String(title || "");
+  if (!t.trim()) return false;
+  // A title that is NOTHING but a marker legitimately keeps its stored text
+  // (the strip shortens or does nothing), so it is not a finding.
+  for (const re of families) {
+    if (re.test(t) && t.replace(re, "").trim()) return true;
+  }
+  return false;
 }
 
 function trendingRankMapsBeforeFilter(js) {
@@ -978,6 +1017,37 @@ if (!SNAKE_RE.test(stripUrls(SNAKE_CONTROL))) failures.push(
     if (got !== want) {
       failures.push(`HERO-CLAMP: claimTailIsSubjectParticle(${word}) = ${got}, `
         + `expected ${want} — the 이/가 discriminator drifted`);
+    }
+  }
+
+  // SIDEBAR-TITLE-CLEANUP controls: every marker family the helper claims to
+  // strip must actually be caught, and a clean title must not fire. The
+  // specimens are built from the helper's OWN regex sources, so a family added
+  // to main.js is exercised here without being typed twice.
+  {
+    if (MARKER_FAMILIES.length < 2) {
+      failures.push("SIDEBAR-TITLE-CLEANUP: cannot read the leading-marker "
+        + "regexes from main.js — the marker check is blind");
+    }
+    for (const spec of ["[포토] 국산 농산물 공급 협력 업무협약 체결",
+                        "■ 불릿 마커가 붙은 정책 보도 제목"]) {
+      if (!leadingMarkerSurvives(spec, MARKER_FAMILIES)) {
+        failures.push("VACUOUS DETECTOR: title-leading-marker misses "
+          + JSON.stringify(spec));
+      }
+    }
+    for (const clean of ["한국거래소, 배출권거래제 정책포럼 개최",
+                         "통계청, 2025년 2/4분기 가계동향조사 결과 발표"]) {
+      if (leadingMarkerSurvives(clean, MARKER_FAMILIES)) {
+        failures.push("OVER-EAGER DETECTOR: title-leading-marker fires on "
+          + JSON.stringify(clean));
+      }
+    }
+    // shorten-or-nothing: a title that is ONLY a marker keeps its stored text
+    const only = ctl('stripLeadingTitleMarker("[포토]")');
+    if (!String(only || "").trim()) {
+      failures.push("SIDEBAR-TITLE-CLEANUP: a marker-only title rendered "
+        + "empty — the strip must shorten or do nothing");
     }
   }
 
@@ -1276,6 +1346,7 @@ for (const id of Object.keys(rows).map(Number).sort((a, b) => a - b)) {
       (e) => vm.runInContext(e, sandbox)),
     emptiedByStrip: strippedAwaySummary(out.face, out.faceNoStrip),
     titleShown: out.titleShown,
+    titleMarker: leadingMarkerSurvives(out.titleShown, MARKER_FAMILIES),
     titleTailDefect: titleTailLeak(
       joined,
       vm.runInContext("stripEchoedOutletTail(__scanText)",
@@ -1340,6 +1411,7 @@ for (const [win, ids] of Object.entries(windows)) {
     if (r.faceDefect) hit(win, "z:card-face-truncation", id);
     if (r.faceDangling) hit(win, "z:card-face-binding-tail", id);
     if (r.titleTailDefect) hit(win, "z:title-outlet-tail", id);
+    if (r.titleMarker) hit(win, "z:title-leading-marker", id);
     if (r.emptiedByStrip) hit(win, "z:summary-emptied-by-strip", id);
     // ceilings
     if (/[■-◿①-⓿⬚-⬯※▣◈▲△▴▷]/.test(t)) hit(win, "c:bullet_char", id);
@@ -1371,8 +1443,17 @@ for (const [win, ids] of Object.entries(windows)) {
     failures.push(`BASELINES MISSING for window "${win}" in ${baselinePath}`);
     continue;
   }
-  for (const [name] of ZERO.concat(
-    [["mixed-scale"], ["snake-case-identifier"], ["card-face-truncation"]])) {
+  // SIDEBAR-TITLE-CLEANUP: enforce EVERY class recorded under the "z:"
+  // prefix, derived from what the scan actually emitted rather than from a
+  // typed list. The old hand list silently omitted four classes
+  // (title-outlet-tail, card-face-binding-tail, summary-emptied-by-strip
+  // and this milestone's title-leading-marker): their hits were counted and
+  // then dropped on the floor, so a real corpus row could carry the defect
+  // without ever failing a run.
+  const zeroSeen = new Set(Object.keys(counts[win] || {})
+    .filter((k) => k.startsWith("z:")).map((k) => k.slice(2)));
+  for (const [name] of ZERO) zeroSeen.add(name);
+  for (const name of zeroSeen) {
     const e = (counts[win] || {})["z:" + name];
     if (e) failures.push(
       `ZERO-CLASS REGRESSION [${win}] ${name}: ${e.n} row(s) e.g. ids `
