@@ -6952,7 +6952,7 @@
       if (!ctx || !ctx.tail || !ctx.key || value.indexOf(ctx.tail) === -1) {
         return value;
       }
-      return value.split("\n").map((line) => {
+      const out = value.split("\n").map((line) => {
         const trimmed = line.replace(/\s+$/, "");
         if (!trimmed.endsWith(ctx.tail)) return line;
         if (trimmed.replace(/\s+/g, "").indexOf(ctx.key) === -1) return line;
@@ -6961,6 +6961,15 @@
           .replace(/[\s\-–—·|]+$/, "");
         return cut.length >= 10 ? cut : line; // never leave a stub
       }).join("\n");
+      // SHORTEN-OR-NOTHING, enforced HERE so it holds for every caller rather
+      // than at the one call site that broke: if removing the tail would leave
+      // nothing (or only whitespace) where there was text, the ORIGINAL is
+      // returned. A strip may shorten a string or do nothing; it may never
+      // make text vanish. The per-line >=10 floor above is the common case;
+      // this is the whole-string backstop for inputs the floor cannot see
+      // (a single short line, a string that is nothing but the tail).
+      if (value.trim() && !out.trim()) return value;
+      return out;
     }
 
     function stripInternalDiagnosticText(value) {

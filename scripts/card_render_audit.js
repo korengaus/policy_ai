@@ -312,6 +312,18 @@ function renderRow(id, row) {
       face: stripCardFaceWrapper(topSummaryLine(r)),
       faceFull: stripCardFaceWrapper(
         userFacingReportText(exportClaimText(r), "")),
+      // TAIL-STRIP-EMPTY-SUMMARY: the SAME card summary rendered with the
+      // row's tail context CLEARED. Comparing the two isolates one question —
+      // "did the strip make text vanish?" — from the separate, pre-existing
+      // rule that hides a summary which merely repeats the title. The constant
+      // is the render itself: no list, no threshold, just the same function
+      // run twice with the only variable being the strip.
+      faceNoStrip: (() => {
+        const saved = activeOutletTailContext;
+        activeOutletTailContext = null;
+        try { return stripCardFaceWrapper(topSummaryLine(r)); }
+        finally { activeOutletTailContext = saved; }
+      })(),
       // TAIL-LEAK-WHOLE-CARD: the title line is still rendered (a leak there
       // must still fail), but the tail class no longer READS this privately —
       // it scans the joined text like every other zero class. See the SURFACE
@@ -387,6 +399,20 @@ const NARROW_SURFACE_CLASSES = {
 // ---------------------------------------------------------------------------
 function titleTailLeak(text, stripped) {
   return String(text || "") !== String(stripped || "");
+}
+
+// ---------------------------------------------------------------------------
+// TAIL-STRIP-EMPTY-SUMMARY (ZERO class). A strip may SHORTEN a rendered string
+// or do nothing; it may never make text disappear. Fires when the card summary
+// is empty WITH the row's tail context applied but non-empty without it — i.e.
+// the strip itself blanked the line. Deliberately NOT "any empty summary":
+// hiding a summary that merely repeats the title is a separate, older and
+// intentional rule (NARRATIVE-3B), and 8 of 213 sampled rows already collapsed
+// that way before any tail work existed. A class that failed on those would be
+// asserting a policy this codebase does not hold.
+// ---------------------------------------------------------------------------
+function strippedAwaySummary(face, faceNoStrip) {
+  return !String(face || "").trim() && !!String(faceNoStrip || "").trim();
 }
 
 // ---------------------------------------------------------------------------
@@ -522,6 +548,26 @@ if (!SNAKE_RE.test(stripUrls(SNAKE_CONTROL))) failures.push(
         + `"${label}" control`);
     }
   }
+  // shorten-or-nothing controls: a string that is NOTHING BUT the tail, and a
+  // short title-echo, must both come back unchanged rather than blank.
+  ctl(`setActiveOutletTailContext(
+        { title: "짧은제목 - v.daum.net", original_url: "https://v.daum.net/v/1" }, null)`);
+  for (const input of ["v.daum.net", "짧은제목 v.daum.net"]) {
+    const got = ctl(`stripEchoedOutletTail(${JSON.stringify(input)})`);
+    if (!String(got || "").trim()) {
+      failures.push("SHORTEN-OR-NOTHING: stripEchoedOutletTail emptied "
+        + JSON.stringify(input));
+    }
+  }
+  // the class must fire when a strip DOES blank a line, and not otherwise
+  if (!strippedAwaySummary("", "본문 요약")) {
+    failures.push("VACUOUS DETECTOR: summary-emptied-by-strip misses its "
+      + "blanked-summary control");
+  }
+  if (strippedAwaySummary("", "") || strippedAwaySummary("본문", "본문 요약")) {
+    failures.push("OVER-EAGER DETECTOR: summary-emptied-by-strip fires on a "
+      + "summary the strip did not blank");
+  }
   ctl("setActiveOutletTailContext({}, null)"); // clear before the scan
 }
 
@@ -560,6 +606,7 @@ for (const id of Object.keys(rows).map(Number).sort((a, b) => a - b)) {
   rendered[id] = {
     text: joined, secs, nCands: out.nCands,
     faceDefect: cardFaceTruncationDefect(out.face, out.faceFull),
+    emptiedByStrip: strippedAwaySummary(out.face, out.faceNoStrip),
     titleShown: out.titleShown,
     titleTailDefect: titleTailLeak(
       joined,
@@ -624,6 +671,7 @@ for (const [win, ids] of Object.entries(windows)) {
     if (SNAKE_RE.test(stripUrls(t))) hit(win, "z:snake-case-identifier", id);
     if (r.faceDefect) hit(win, "z:card-face-truncation", id);
     if (r.titleTailDefect) hit(win, "z:title-outlet-tail", id);
+    if (r.emptiedByStrip) hit(win, "z:summary-emptied-by-strip", id);
     // ceilings
     if (/[■-◿①-⓿⬚-⬯※▣◈▲△▴▷]/.test(t)) hit(win, "c:bullet_char", id);
     if (/[가-힣]\?[가-힣]/.test(t)) hit(win, "c:question_mojibake", id);
