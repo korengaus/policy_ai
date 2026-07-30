@@ -4563,6 +4563,17 @@
         title: safeRow.title || "",
         original_url: safeRow.original_url || "",
         topic: safeRow.topic || "",
+        // HERO-MARKET-SKIP: carry the stored content class through the mapper.
+        // resolveTrendingHeroPick has always skipped a market_commercial row —
+        // the feed's own 뜨는순 sort ranks that class down, and promoting one to
+        // the hero would contradict the site's own policy — but this mapper
+        // dropped the field, so the comparison read undefined and the skip has
+        // never once run. Both /history/{id} and /history?limit= already send
+        // the column, so nothing on the backend changes. This makes an EXISTING
+        // rule effective; the rule itself, the ordering, the sidebar and the
+        // growth computation are untouched. Null/absent stays null, so a row
+        // without the field is never skipped — absence is not evidence.
+        content_nature: safeRow.content_nature ?? null,
         claims,
         normalized_claims: normalizedClaims,
         source_candidates: sourceCandidates,

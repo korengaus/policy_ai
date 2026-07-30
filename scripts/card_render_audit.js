@@ -133,6 +133,9 @@ const PINNED_DEPS = [
   // TITLE-TAIL-STRIP: outlet-tail verification chain (title surface). Pinned
   // in the SAME commit that introduced them, per this file's own docstring —
   // the bodies are still extracted from main.js, so a stub or rename fails.
+  // HERO-MARKET-SKIP: the mapper, so the gate can assert end-to-end that it
+  // carries content_nature. Pinned in the same commit.
+  "mapHistoryRowToResult", "parseMaybeJson",
   "outletTailApexHost", "outletTailEvidenceAdd", "stripVerifiedOutletTail",
   // TAIL-LEAK-WHOLE-CARD: per-row context + the shared-launderer strip.
   "activeOutletTailContext", "setActiveOutletTailContext",
@@ -945,6 +948,36 @@ if (!SNAKE_RE.test(stripUrls(SNAKE_CONTROL))) failures.push(
     if (heroEyebrowNamesRank("확산 성장 · 4개 매체", 3, note)) {
       failures.push("VACUOUS DETECTOR: heroEyebrowNamesRank accepts an "
         + "eyebrow that omits the rank");
+    }
+
+    // --- HERO-MARKET-SKIP -------------------------------------------------
+    // The picker skips rows of one content class, but for its whole life the
+    // mapper dropped that column, so the comparison read undefined and the
+    // rule never ran. The class name is READ FROM THE PICKER (skips.skipClass)
+    // rather than typed, so renaming the class moves this check with it.
+    // The assertion is end-to-end through the SHIPPED mapper: a row carrying
+    // the class must come out of mapHistoryRowToResult still carrying it, or
+    // the skip is dead again.
+    const mapped = (cn) => ctl(
+      `(mapHistoryRowToResult({ id: 1, title: "t", content_nature: `
+      + `${JSON.stringify(cn)} }).content_nature ?? null)`);
+    if (mapped(skips.skipClass) !== skips.skipClass) {
+      failures.push(`HERO-MARKET-SKIP: mapHistoryRowToResult drops `
+        + `content_nature, so the picker's ${skips.skipClass} skip compares `
+        + "against undefined and never fires — a row of that class can lead "
+        + "the page");
+    }
+    // absence must stay absence: a row without the column is never skipped
+    for (const empty of [null, undefined]) {
+      if (mapped(empty) !== null) {
+        failures.push("HERO-MARKET-SKIP: a row with no content_nature no "
+          + "longer maps to null — absence must not become a skip");
+      }
+    }
+    // vacuity: the assertion must reject a mapper that drops the field
+    if (((x) => x ?? null)(undefined) === skips.skipClass) {
+      failures.push("VACUOUS DETECTOR: HERO-MARKET-SKIP cannot distinguish a "
+        + "dropped field from a carried one");
     }
   }
 
