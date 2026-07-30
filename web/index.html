@@ -2574,6 +2574,22 @@
       padding-left: 24px;
     }
 
+    /* HERO-PAINT-ORDER: space reserved for the hero band while the pick is in
+       flight, so the grid below paints at its FINAL y-offset and does not move
+       when the band fills. Applied to #hotTopicsTop by renderHotTopics only
+       while pending, and removed on the single settled paint — the settled
+       layout is therefore byte-identical to before this class existed.
+       260px = the MEASURED height of the settled single-hero band (Branch A,
+       1440x900, production data). Branch A is reserved rather than the taller
+       333px two-card fallback (Branch B) because Branch A is the normal
+       outcome: reserving the common case gives it zero movement, and the
+       fallback grows into place once, only when the pick genuinely failed.
+       A longer hero headline can still exceed the reserve — this removes the
+       collapse-to-zero jump, it does not pin every possible band height. */
+    .hero-band-reserved {
+      min-height: 260px;
+    }
+
     /* DESIGN-C2: hero = the SAME card rendered larger (no inner element changed).
        Only type scale + spacing grow; every badge/tag/verdict/source block stays. */
     .topic-card--hero {
@@ -4912,6 +4928,12 @@
       #hotTopicsTop {
         order: 1;
       }
+      /* HERO-PAINT-ORDER: the band stacks below 960px, so the desktop 260px
+         reserve is far too short here. 407px = the MEASURED settled Branch A
+         height at 390x844. Same rule as desktop: reserve the common branch. */
+      .hero-band-reserved {
+        min-height: 407px;
+      }
       /* VERIFY-STRIP-RELOCATE: #verifyHowSection was moved OUT of .home-shell to a
          full-width sibling below it (above the domain sections), so its old order:2
          rule was inert — removed. As a block sibling after .home-shell (and before
@@ -6344,6 +6366,45 @@
     // is a DIFFERENT source (live graph vs snapshot) and is never paired with
     // the trending delta.
     let trendingHeroPickRow = null;
+    // HERO-PAINT-ORDER: the hero band used to paint TWICE on a home load —
+    // Branch B at feed arrival (pick still null), then Branch A ~240ms later
+    // when the chained /api/trending → /history/{id} resolve landed. Because
+    // BOTH branches rewrote hotTopicsEl.innerHTML, that second pass destroyed
+    // and rebuilt every grid card, which is what read as a whole-page glitch.
+    // The band is now painted ONCE, after the pick has SETTLED — resolved,
+    // explicitly failed, or the backstop timer below expired. Until then the
+    // band renders empty at a RESERVED height so the grid does not move when
+    // it fills. `heroBandSettled` is the single gate; it never resets, because
+    // the pick resolves at most once per page load.
+    let heroBandSettled = false;
+    let heroBandTimer = null;
+    // HERO-PAINT-ORDER: last markup written to each region. renderHotTopics is
+    // called from ~10 sites (init, feed arrival, sort, page, tab, popstate…)
+    // and several of them legitimately recompute the SAME markup — e.g. the
+    // feed landing after the pick already settled would otherwise rewrite the
+    // band identically, destroying and rebuilding the hero node for nothing.
+    // Comparing against the last string makes each region write only when its
+    // content actually changes. Purely a paint-count guard: any real change
+    // still writes, so no rendered output differs.
+    let heroBandHtmlCache = null;
+    let feedGridHtmlCache = null;
+    // HERO-PAINT-ORDER: how many cards the LAST true-home grid paint held back
+    // for the band. The band-only shortcut is only sound when this is 0 — if a
+    // fallback band already pulled hot[0]/hot[1] out of the grid and a late
+    // pick then replaces that band, those two cards have to be put BACK, which
+    // only a full render can do. Without this the page silently lost two cards
+    // on the late-pick path (caught in validation, not by reading the code).
+    let feedGridExcludedCount = 0;
+    // Backstop for a HUNG request only: every explicit failure path (fetch
+    // rejected, !response.ok, empty trending, no qualifying entry) settles
+    // immediately and does not wait for this. 3000ms because the slowest
+    // REAL settle measured against production was ~2.6s on a cold Render
+    // instance — a shorter timer would fire spuriously on a cold start and
+    // reintroduce the very double band paint this exists to prevent.
+    // DELIBERATELY NOT A CANCELLATION: if the pick lands after expiry it still
+    // upgrades the band (band-only, never the grid), so this timer changes
+    // WHEN the band paints and never WHICH card is the hero.
+    const HERO_BAND_SETTLE_TIMEOUT_MS = 3000;
     // SEARCH-ANALYZE S-i (bug b): the last corpus-search results, cached so a
     // BACK from a card opened off the results can re-render them (the card
     // overwrote #results in place). {query, hits} or null.
@@ -8843,11 +8904,126 @@
         if ((result.content_nature ?? null) === "market_commercial") continue;
         trendingHeroPick = result;
         trendingHeroPickRow = row;
-        // repaint-when-landed (the renderTrendingTop5 posture): the home
-        // render is idempotent, so this just upgrades the hero in place.
+        // HERO-PAINT-ORDER: was renderHotTopics() — a FULL repaint that
+        // rebuilt every grid node just to swap the band. Settling paints the
+        // band alone and leaves the grid's nodes untouched whenever the pick
+        // is absent from the feed pool (the normal case: trending
+        // representatives are usually older than the recent-50 window).
+        settleHeroBand();
+        return;
+      }
+      // Ran the whole trending list without a usable entry: that is a
+      // terminal state, not a pending one — settle to the fallback band now
+      // rather than making the reader wait out the backstop timer.
+      settleHeroBand();
+    }
+
+    // HERO-PAINT-ORDER: mark the pick settled and paint the band exactly once.
+    // Idempotent for the FIRST settle; a LATE pick arriving after a
+    // timer/failure settle is allowed through so the hero choice is never
+    // changed by timing (see HERO_BAND_SETTLE_TIMEOUT_MS).
+    function settleHeroBand() {
+      const firstSettle = !heroBandSettled;
+      heroBandSettled = true;
+      if (heroBandTimer !== null) {
+        clearTimeout(heroBandTimer);
+        heroBandTimer = null;
+      }
+      if (!firstSettle && !trendingHeroPick) return; // nothing new to show
+      paintHeroBandOnly();
+    }
+
+    // Start the hung-request backstop. Called from the first true-home render
+    // so the clock starts when the band actually appears as a reserved box.
+    function startHeroBandTimer() {
+      if (heroBandSettled || heroBandTimer !== null) return;
+      heroBandTimer = setTimeout(() => {
+        heroBandTimer = null;
+        settleHeroBand();
+      }, HERO_BAND_SETTLE_TIMEOUT_MS);
+    }
+
+    // HERO-PAINT-ORDER: the band's markup for every branch, extracted so the
+    // deferred band-only paint and the ordinary renderHotTopics paint emit the
+    // SAME bytes. Every string, number and class here is lifted verbatim from
+    // the previous inline branches — this milestone changes paint TIMING only.
+    function heroBandHtml(hot, dailyPick) {
+      if (dailyPick) {
+        const heroOutlets = Number(trendingHeroPickRow?.current_outlet_count);
+        const heroGrowth = Number(trendingHeroPickRow?.growth);
+        const heroBadge = trendingHeroPickRow?.is_new ? " · NEW"
+          : (Number.isFinite(heroGrowth) && heroGrowth > 0 ? ` · ↑${heroGrowth}` : "");
+        const heroStat = Number.isFinite(heroOutlets) && heroOutlets > 0
+          ? `${heroOutlets}개 매체${heroBadge}`
+          : heroBadge.replace(" · ", "");
+        return `<div class="public-eyebrow">확산 성장${heroStat ? ` · ${heroStat}` : ""} · 주간 스냅샷 기준 · 검증이 아닙니다</div>`
+          + renderTopicCardHtml(dailyPick, { detailed: true, hero: true });
+      }
+      if (!hot.length) return "";
+      if (hot.length >= 2) {
+        const band = `<div class="feed-hero-band">`
+          + renderTopicCardHtml(hot[0], { detailed: true, hero: true })
+          + renderTopicCardHtml(hot[1], { detailed: true, secondary: true })
+          + `</div>`;
+        return '<div class="public-eyebrow">주목순 · 검증이 아닙니다</div>' + band;
+      }
+      return '<div class="public-eyebrow">주목순 · 검증이 아닙니다</div>'
+        + renderTopicCardHtml(hot[0], { detailed: true, hero: true });
+    }
+
+    // HERO-PAINT-ORDER: paint the settled band WITHOUT touching the grid —
+    // the whole point of the milestone. Falls back to the ordinary full render
+    // in the two cases where the grid genuinely has to change, so the settled
+    // DOM stays byte-identical to the pre-change behaviour:
+    //   * no pick (fallback band) — hot[0]/hot[1] move INTO the band and must
+    //     leave the grid, or the reader sees the same card twice;
+    //   * the pick IS in the feed pool — the grid must drop that one card.
+    //     (Measured: trending representatives are usually older than the
+    //     recent-50 window, so this branch is the exception, not the rule.)
+    function paintHeroBandOnly() {
+      if (!hotTopicsTopEl) return;
+      // Domain tabs / narrowed renders own their band through renderHotTopics;
+      // a late pick must never repaint a view the reader has navigated to.
+      if (activeDomain !== "전체") return;
+      const hot = sortTopicCards(currentTopicCards(), "뜨는순");
+      const dailyPick = trendingDailyPickCard();
+      const pickInGrid = !!(dailyPick && hotTopicsEl && (
+        (dailyPick.recordId && hotTopicsEl.querySelector(
+          `.topic-card[data-topic-record-id="${cssAttrEscape(String(dailyPick.recordId))}"]`))
+        || hotTopicsEl.querySelector(
+          `.topic-card[data-topic-key="${cssAttrEscape(String(dailyPick.key))}"]`)
+      ));
+      // feedGridExcludedCount > 0 means a fallback band already took cards out
+      // of the grid; swapping in the pick's band must give them back.
+      if (!dailyPick || pickInGrid || feedGridExcludedCount > 0) {
         renderHotTopics();
         return;
       }
+      hotTopicsTopEl.classList.remove("hero-band-reserved");
+      // The grid keeps its existing chips; this repaints the band's own.
+      if (writeHeroBandHtml(heroBandHtml(hot, dailyPick))) loadClusterSizeChips();
+    }
+
+    // Minimal escape for embedding a value inside a [attr="…"] selector.
+    // CSS.escape covers identifiers, not quoted attribute values.
+    function cssAttrEscape(value) {
+      return String(value).replace(/["\\]/g, "\\$&");
+    }
+
+    // HERO-PAINT-ORDER: write-once guards (see heroBandHtmlCache). Return true
+    // when the DOM was actually touched, so callers can skip follow-up work.
+    function writeHeroBandHtml(html) {
+      if (!hotTopicsTopEl || heroBandHtmlCache === html) return false;
+      heroBandHtmlCache = html;
+      hotTopicsTopEl.innerHTML = html;
+      return true;
+    }
+
+    function writeFeedGridHtml(html) {
+      if (!hotTopicsEl || feedGridHtmlCache === html) return false;
+      feedGridHtmlCache = html;
+      hotTopicsEl.innerHTML = html;
+      return true;
     }
 
     // HOME-TOP5 S5b → HERO-TRENDING: build the hero card from the RESOLVED
@@ -8868,9 +9044,13 @@
       const allCards = currentTopicCards(preferredResults);
       // HOME-TOP5 S5b: 오늘의 한 장 applies ONLY to the genuine 전체 home feed —
       // never to a domain tab's hero or a search/preferred-results render.
-      const dailyPick = (activeDomain === "전체"
-        && !(Array.isArray(preferredResults) && preferredResults.length))
-        ? trendingDailyPickCard() : null;
+      const isTrueHomeFeed = activeDomain === "전체"
+        && !(Array.isArray(preferredResults) && preferredResults.length);
+      const dailyPick = isTrueHomeFeed ? trendingDailyPickCard() : null;
+      // HERO-PAINT-ORDER: on the genuine home feed the band waits for the pick
+      // to settle. Only the BAND waits — the grid paints immediately below the
+      // reserved space and is never repainted when the band fills.
+      const heroPending = isTrueHomeFeed && !heroBandSettled;
       // STABLE-TABS S2: the tab SET is now stable (전체 + all DOMAIN_ORDER), so it
       // no longer depends on the loaded pool — no tabPool derivation needed.
       renderCategoryTabs();
@@ -8911,10 +9091,15 @@
       // 뜨는순 cards flow back into the grid; on fallback the pre-S5b 2-card
       // exclusion applies unchanged.
       const heroKeys = new Set(hot.slice(0, 2).map((c) => c.key));
-      const poolBase = filtered.filter((c) => dailyPick
+      // HERO-PAINT-ORDER: while the branch is unknown the grid must not depend
+      // on it — excluding hot[0]/hot[1] now would DROP two cards from the page
+      // the moment Branch A wins, which is the content-shuffle being removed.
+      // Once settled this is the pre-change expression, unchanged.
+      const poolBase = heroPending ? filtered.slice() : filtered.filter((c) => dailyPick
         ? !(c.key === dailyPick.key
             || (c.recordId && String(c.recordId) === String(dailyPick.recordId)))
         : !heroKeys.has(c.key));
+      if (isTrueHomeFeed) feedGridExcludedCount = filtered.length - poolBase.length;
       const poolSorted = sortTopicCards(poolBase, activeSort);
       // DESIGN-C3-2: ONE uniform 3-col grid, PAGE_SIZE (12) cards per page. gridPool =
       // poolSorted (filtered MINUS the 2 hero cards, already sorted by activeSort so the
@@ -8951,63 +9136,39 @@
       // existing site strings verbatim (trending panel h2, the 주간 스냅샷 기준
       // spread-section meta, and the trending panel caption) — no new
       // vocabulary. Styled by the existing .public-eyebrow class (no CSS edit).
-      if (dailyPick) {
-        // POLISH-LABELS 1: surface WHY this card is the hero — the trending
-        // row's outlets + growth, in the sidebar Top-5 format VERBATIM
-        // ("{N}개 매체 · ↑{g}" / " · NEW"; badge omitted when growth is
-        // absent/zero/non-finite — never "↑0"). BOTH numbers come from the
-        // SAME /api/trending row (snapshot axis); the card face's cluster-size
-        // chip is the live-graph axis and stays unpaired with the delta.
-        const heroOutlets = Number(trendingHeroPickRow?.current_outlet_count);
-        const heroGrowth = Number(trendingHeroPickRow?.growth);
-        const heroBadge = trendingHeroPickRow?.is_new ? " · NEW"
-          : (Number.isFinite(heroGrowth) && heroGrowth > 0 ? ` · ↑${heroGrowth}` : "");
-        const heroStat = Number.isFinite(heroOutlets) && heroOutlets > 0
-          ? `${heroOutlets}개 매체${heroBadge}`
-          : heroBadge.replace(" · ", "");
-        hotTopicsTopEl.innerHTML =
-          `<div class="public-eyebrow">확산 성장${heroStat ? ` · ${heroStat}` : ""} · 주간 스냅샷 기준 · 검증이 아닙니다</div>`
-          + renderTopicCardHtml(dailyPick, { detailed: true, hero: true });
-        hotTopicsEl.innerHTML = pageSlice
-          .map((card) => renderTopicCardHtml(card, { detailed: true }))
-          .join("");
-      } else if (!hot.length) {
-        hotTopicsTopEl.innerHTML = "";
+      // HERO-PAINT-ORDER: band and grid are now written INDEPENDENTLY. The band
+      // is either the settled branch markup (built by the shared heroBandHtml
+      // so the bytes match the old inline branches exactly) or, while the pick
+      // is still in flight on the true home feed, nothing at a RESERVED height.
+      // The grid write below runs on THIS pass either way, which is what makes
+      // it the only grid write of a normal load.
+      if (heroPending) {
+        hotTopicsTopEl.classList.add("hero-band-reserved");
+        writeHeroBandHtml("");
+        startHeroBandTimer();
+      } else {
+        hotTopicsTopEl.classList.remove("hero-band-reserved");
+        writeHeroBandHtml(heroBandHtml(hot, dailyPick));
+      }
+      if (!hot.length) {
         // STABLE-TABS S2: a domain tab whose data is still fetching / failed shows
         // a loading or friendly-error line instead of the generic empty-state.
         if (domainPending) {
-          hotTopicsEl.innerHTML = domainFetchErrorKey === activeDomain
+          writeFeedGridHtml(domainFetchErrorKey === activeDomain
             ? '<div class="empty-state">이 분야의 뉴스를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</div>'
-            : '<div class="empty-state">불러오는 중…</div>';
+            : '<div class="empty-state">불러오는 중…</div>');
         } else {
-          hotTopicsEl.innerHTML = '<div class="empty-state">검색을 실행하거나 최근 분석을 불러오면 검증 카드가 표시됩니다.</div>';
+          writeFeedGridHtml('<div class="empty-state">검색을 실행하거나 최근 분석을 불러오면 검증 카드가 표시됩니다.</div>');
         }
-      } else if (hot.length >= 2) {
-        // POLISH-LABELS 2: Branch B now states its basis. The two-card hero is
-        // ranked by sortTopicCards(filtered, "뜨는순") — severity + freshness +
-        // 근거 수준 — whose public label is the existing sort-dropdown option
-        // "주목순" (SORT-LABEL-HONESTY, template.html); the tail reuses the
-        // Branch A eyebrow's honesty fragment. The eyebrow is a SIBLING placed
-        // before .feed-hero-band (exactly the Branch A structure), so the
-        // band's grid columns / divider rule / <=960px stacking are untouched.
-        // Also correct on the 전체 tab's trending-failure fallback — the
-        // ordering there is the same 뜨는순.
-        const band = `<div class="feed-hero-band">`
-          + renderTopicCardHtml(hot[0], { detailed: true, hero: true })
-          + renderTopicCardHtml(hot[1], { detailed: true, secondary: true })
-          + `</div>`;
-        hotTopicsTopEl.innerHTML =
-          '<div class="public-eyebrow">주목순 · 검증이 아닙니다</div>' + band;
-        hotTopicsEl.innerHTML = pageSlice
+      } else if (dailyPick || heroPending || hot.length >= 2) {
+        writeFeedGridHtml(pageSlice
           .map((card) => renderTopicCardHtml(card, { detailed: true }))
-          .join("");
+          .join(""));
       } else {
-        // <2 fallback — a single card renders as the hero alone (no grid below).
-        // POLISH-LABELS 2: same basis, same label as the two-card branch.
-        hotTopicsTopEl.innerHTML =
-          '<div class="public-eyebrow">주목순 · 검증이 아닙니다</div>'
-          + renderTopicCardHtml(hot[0], { detailed: true, hero: true });
-        hotTopicsEl.innerHTML = "";
+        // <2 fallback — the single card renders as the hero alone (no grid
+        // below). `heroPending` is in the condition above so a one-card pool
+        // is never blank while the pick is in flight.
+        writeFeedGridHtml("");
       }
 
       // DESIGN-C3-2: render the page-number nav (prev / 1..N / next) below the grid.
@@ -9134,10 +9295,15 @@
     // data-topic-*/openTopicCard wiring — a trending representative may be
     // older than the loaded recent-50 feed pool.
     async function renderTrendingTop5() {
-      if (!trendingPanelEl || !trendingListEl) return;
+      // HERO-PAINT-ORDER: every path on which the hero pick can NEVER arrive
+      // settles the band immediately, so the reader gets the fallback band at
+      // once instead of waiting out the hung-request backstop. The panel's own
+      // fail-quiet behaviour is unchanged — settling paints the band, not the
+      // sidebar.
+      if (!trendingPanelEl || !trendingListEl) { settleHeroBand(); return; }
       try {
         const response = await fetch(`${API_BASE}/api/trending`);
-        if (!response.ok) return;
+        if (!response.ok) { settleHeroBand(); return; }
         const body = await response.json();
         const rows = Array.isArray(body?.trending) ? body.trending.slice(0, 5) : [];
         // HOME-TOP5 S5b → HERO-TRENDING: cache the rows, then kick off the
@@ -9146,6 +9312,7 @@
         // leaves the two-card severity hero in place).
         trendingHeroRows = rows;
         if (rows.length) resolveTrendingHeroPick();
+        else settleHeroBand();
         const items = rows.map((row, i) => {
           const rid = Number(row?.representative_analysis_id);
           // MOBILE-POLISH F: trending rows come straight off GET /api/trending,
@@ -9176,6 +9343,9 @@
         trendingPanelEl.hidden = false;
       } catch (error) {
         // fail-silent: the trending panel is optional; the sidebar must never break
+        // HERO-PAINT-ORDER: a rejected fetch is terminal for the pick — release
+        // the band to its fallback rather than leaving a reserved empty box.
+        settleHeroBand();
       }
     }
 

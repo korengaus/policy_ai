@@ -2538,6 +2538,22 @@
       padding-left: 24px;
     }
 
+    /* HERO-PAINT-ORDER: space reserved for the hero band while the pick is in
+       flight, so the grid below paints at its FINAL y-offset and does not move
+       when the band fills. Applied to #hotTopicsTop by renderHotTopics only
+       while pending, and removed on the single settled paint — the settled
+       layout is therefore byte-identical to before this class existed.
+       260px = the MEASURED height of the settled single-hero band (Branch A,
+       1440x900, production data). Branch A is reserved rather than the taller
+       333px two-card fallback (Branch B) because Branch A is the normal
+       outcome: reserving the common case gives it zero movement, and the
+       fallback grows into place once, only when the pick genuinely failed.
+       A longer hero headline can still exceed the reserve — this removes the
+       collapse-to-zero jump, it does not pin every possible band height. */
+    .hero-band-reserved {
+      min-height: 260px;
+    }
+
     /* DESIGN-C2: hero = the SAME card rendered larger (no inner element changed).
        Only type scale + spacing grow; every badge/tag/verdict/source block stays. */
     .topic-card--hero {
@@ -4875,6 +4891,12 @@
          lifted from the aside) and the sort/feed slots shift down one. */
       #hotTopicsTop {
         order: 1;
+      }
+      /* HERO-PAINT-ORDER: the band stacks below 960px, so the desktop 260px
+         reserve is far too short here. 407px = the MEASURED settled Branch A
+         height at 390x844. Same rule as desktop: reserve the common branch. */
+      .hero-band-reserved {
+        min-height: 407px;
       }
       /* VERIFY-STRIP-RELOCATE: #verifyHowSection was moved OUT of .home-shell to a
          full-width sibling below it (above the domain sections), so its old order:2
