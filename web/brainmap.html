@@ -115,6 +115,34 @@
   }
   .map-search:focus { outline: 2px solid var(--brand); outline-offset: 1px; }
   .search-count { font-size: 12px; color: var(--slate); white-space: nowrap; }
+  /* BRAINMAP-SEARCH-NAV: step through the matches. Reuses the 리셋 button's
+     chrome — no new control language, no new dependency. Lives in the same
+     wrapping .head-row as the other controls, so on a narrow screen it reflows
+     onto its own line exactly like the focus chip. The buttons are 34px in
+     BOTH axes (comfortably over the 24px CSS-px tap floor) because a phone has
+     neither an Enter key in view nor arrow keys — the visible control is the
+     ONLY route there. */
+  .search-nav { display: none; align-items: center; align-self: center; gap: 6px; }
+  .nav-step {
+    font-size: 16px; line-height: 1; font-weight: 700;
+    min-width: 34px; min-height: 34px; padding: 0 10px;
+    border: 1px solid var(--line); border-radius: var(--radius-sm);
+    background: var(--paper); color: var(--slate); cursor: pointer;
+    font-family: inherit;
+  }
+  .nav-step:hover:not([disabled]) { color: var(--ink); border-color: var(--muted); }
+  .nav-step:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+  /* Disabled reads as a dimmer INK, never a lower opacity — opacity encodes
+     nothing on this page and must keep encoding nothing. */
+  .nav-step[disabled] { opacity: 1; color: #46536b; cursor: default; }
+  .nav-pos {
+    font-size: 12.5px; font-weight: 700; color: var(--brand-ink);
+    min-width: 60px; text-align: center; white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  /* The order is a FACT about the list, not a ranking — said out loud, next to
+     the position, so "1 / 123" cannot be read as "the most relevant". */
+  .nav-note { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
   .map-spread {
     font-size: 12.5px; font-weight: 600; padding: 5px 9px;
     border: 1px solid var(--line); border-radius: var(--radius-sm);
@@ -195,6 +223,17 @@
          vocabulary only — 일치/연결/매체, never verdict words. -->
     <input type="search" id="mapSearch" class="map-search" placeholder="제목 검색" autocomplete="off" aria-label="노드 제목 검색">
     <span id="searchCount" class="search-count" aria-live="polite"></span>
+    <!-- BRAINMAP-SEARCH-NAV: position within the results + a visible stepper.
+         Shown only while a query is active. "3 / 123" is a POSITION IN A LIST,
+         never a rank: the order is the graph's own node order (analysis_results
+         id ascending), which carries no relevance meaning — the note beside it
+         says so. -->
+    <span id="searchNav" class="search-nav" style="display:none">
+      <button type="button" id="searchPrev" class="nav-step" aria-label="이전 일치 항목으로">‹</button>
+      <span id="searchPos" class="nav-pos" aria-live="polite" aria-atomic="true"></span>
+      <button type="button" id="searchNext" class="nav-step" aria-label="다음 일치 항목으로">›</button>
+      <span class="nav-note">수록 순 · 관련도순 아님</span>
+    </span>
     <select id="spreadFilter" class="map-spread" aria-label="확산 규모 필터">
       <option value="0" selected>확산 규모: 전체</option>
       <option value="3">3개 매체 이상 보도</option>
@@ -339,6 +378,14 @@
   // BRAINMAP-3D-DEPTH (Part A): the node the search last centred on, so the
   // search's CURRENT MATCH — not just its query text — survives a mode switch.
   var searchMatchIndex = null;
+  // BRAINMAP-SEARCH-NAV: the ordered match list the ◀ ▶ stepper walks, and the
+  // reader's place in it. searchMatches holds INDEXES INTO graph.nodes, in the
+  // graph's own node order (analysis_results.id ascending) — an ingestion
+  // order, arbitrary with respect to relevance, and never a ranking. It is
+  // rebuilt from the fully composed isActive() predicate on every change, so
+  // it can never contain a node the filters have dimmed.
+  var searchMatches = [];
+  var searchPos = -1;         // index into searchMatches; -1 = not on one yet
 
   // BRAINMAP-3D-CONTROLS: orientation is a 3x3 ROTATION MATRIX (row-major
   // flat 9), not Euler angles — an arcball produces arbitrary axes that
@@ -853,6 +900,29 @@
     }
     ctx.globalAlpha = 1;
 
+    // BRAINMAP-SEARCH-NAV: the CURRENT match, marked with a DASHED RING at a
+    // constant screen radius. Deliberately not opacity (opacity encodes nothing
+    // on this page and must keep encoding nothing) and not size (size encodes
+    // outlet count) — the ring is drawn OUTSIDE the node at a radius that is
+    // identical for every node it ever marks, so it adds a position cue without
+    // touching either encoding. Every other match stays lit exactly as before.
+    // Distinct from the solid 6px hover ring by dash, radius and colour, so the
+    // two can be told apart when they land on the same node. setLineDash is
+    // save/restore'd — a leaked dash would reach the cluster labels' strokeText.
+    if (searchMatchIndex !== null && !intro.active
+        && graph.nodes[searchMatchIndex] && isActive(graph.nodes[searchMatchIndex])) {
+      ctx.save();
+      var cx = toScreenX(wx(searchMatchIndex)), cy = toScreenY(wy(searchMatchIndex));
+      ctx.globalAlpha = 1;
+      ctx.setLineDash([3, 3]);
+      ctx.lineWidth = 1.6;
+      ctx.strokeStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(cx, cy, 11.5, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     // Hover glow + ring — marks the POINTER only, never a data value, and is
     // identical for every node it touches.
     if (hoverNode && !intro.active) {
@@ -1215,7 +1285,12 @@
     arcStart = null; rotAtPress = null; twoMode = null;
     // BRAINMAP-3D-DEPTH: 리셋 means the whole map again, so the remembered
     // search match stops steering the camera on a later mode switch.
+    // BRAINMAP-SEARCH-NAV: 리셋 leaves the QUERY in force (unchanged
+    // behaviour) — only the reader's place in the list is released, so the
+    // stepper honestly reads "– / 123" until they step again.
     searchMatchIndex = null;
+    searchPos = -1;
+    updateSearchNav();
     if (mode3d && has3d) layout();
     // BRAINMAP-FOCUS: 리셋 / dblclick release focus too — focus is a view
     // state, so "back to the whole map" must mean it.
@@ -1314,17 +1389,98 @@
   // BRAINMAP-FEATURES: live search count — over the FULLY COMPOSED active set
   // (domain AND spread AND search), i.e. exactly the nodes currently lit.
   // "연결됨" = the node has at least one edge (hasEdgeById).
+  // BRAINMAP-SEARCH-NAV: the SAME pass now also rebuilds the ordered match list
+  // the stepper walks. One predicate (isActive) feeds the number AND the list,
+  // so the two can never disagree and a dimmed node can never be stepped to.
+  // Every filter path already funnels through here (domain/market legend,
+  // spread dropdown, content-nature toggle, setFocus, clearFocus), which is why
+  // this is the right place for it and no filter handler needed changing.
   function updateSearchCount() {
     var el = document.getElementById("searchCount");
-    if (!el) return;
-    if (!searchQuery) { el.textContent = ""; return; }
+    var was = searchMatchIndex;
     var total = 0, connected = 0;
-    graph.nodes.forEach(function (n) {
-      if (!isActive(n)) return;
-      total += 1;
-      if (hasEdgeById[n.id]) connected += 1;
-    });
-    el.textContent = total + "건 일치 · 그중 " + connected + "건 연결됨";
+    searchMatches = [];
+    if (searchQuery) {
+      graph.nodes.forEach(function (n, i) {
+        if (!isActive(n)) return;
+        searchMatches.push(i);
+        total += 1;
+        if (hasEdgeById[n.id]) connected += 1;
+      });
+    }
+    // The reader's place follows the NODE, not the index: when a filter removes
+    // matches, "3 / 123" becomes that same node's new position in the smaller
+    // list rather than a different article.
+    searchPos = (was === null) ? -1 : searchMatches.indexOf(was);
+    if (searchPos === -1 && was !== null) {
+      // The node we were on (or gliding toward) just left the match set — a
+      // filter hid it, or the query changed. Landing on a dimmed, unclickable
+      // node would be the bug, so the in-flight glide is cancelled where it is
+      // (the same "interrupted — stay where we are" rule pan/zoom already uses)
+      // and the position degrades to "– / N" while the COUNT stays truthful.
+      cancelCamera();
+      searchMatchIndex = null;
+      hoverNode = null;
+      tooltip.style.display = "none";
+    }
+    if (el) {
+      el.textContent = searchQuery
+        ? (total + "건 일치 · 그중 " + connected + "건 연결됨") : "";
+    }
+    updateSearchNav();
+  }
+
+  // BRAINMAP-SEARCH-NAV: the visible stepper's own state. Present only while a
+  // query is active. The label is a POSITION ("3 / 123"), and the fixed note
+  // beside it states the ordering, so no end of the list can read as a rank.
+  function updateSearchNav() {
+    var nav = document.getElementById("searchNav");
+    var pos = document.getElementById("searchPos");
+    var prev = document.getElementById("searchPrev");
+    var next = document.getElementById("searchNext");
+    if (!nav || !pos || !prev || !next) return;
+    if (!searchQuery) { nav.style.display = "none"; return; }
+    nav.style.display = "inline-flex";
+    var len = searchMatches.length;
+    if (!len) pos.textContent = "일치 없음";
+    else if (searchPos < 0) pos.textContent = "– / " + len;
+    else pos.textContent = (searchPos + 1) + " / " + len;
+    prev.disabled = (len === 0);
+    next.disabled = (len === 0);
+  }
+
+  // BRAINMAP-SEARCH-NAV: step to the next/previous match and glide there with
+  // the EXISTING eased camera (centerOnNode -> animateViewTo, 450ms). No second
+  // animation path is introduced. The list WRAPS at both ends — past the last
+  // returns to the first, back from the first goes to the last — which is also
+  // why neither end reads as "best" or "worst": it is a ring, not a podium.
+  function stepMatch(delta) {
+    skipIntro();
+    updateSearchCount();          // rebuild against the CURRENT filters first
+    var len = searchMatches.length;
+    if (!len) { draw(); return; } // no match: dimming stays, camera stays put
+    var at;
+    if (searchPos < 0) at = (delta >= 0) ? 0 : len - 1;
+    else at = ((searchPos + delta) % len + len) % len;
+    searchPos = at;
+    searchMatchIndex = searchMatches[at];
+    updateSearchNav();
+    centerOnNode(graph.nodes[searchMatchIndex]);
+  }
+
+  // BRAINMAP-SEARCH-NAV: Escape's new clearing duty. Also drops any pending
+  // debounced value, which would otherwise re-apply the query 120ms later.
+  function clearSearch() {
+    var el = document.getElementById("mapSearch");
+    if (el) el.value = "";
+    if (searchDebounce) { clearTimeout(searchDebounce); searchDebounce = null; }
+    searchQuery = "";
+    searchMatchIndex = null;
+    searchPos = -1;
+    hoverNode = null;
+    tooltip.style.display = "none";
+    updateSearchCount();
+    draw();
   }
 
   // BRAINMAP-FEATURES: center+zoom on one node — the SAME math as the
@@ -1457,7 +1613,8 @@
     searchDebounce = setTimeout(function () {
       // BRAINMAP-3D-DEPTH (Part A1): a new query invalidates the remembered
       // match — only a match the reader actually jumped to is worth carrying.
-      if (q !== searchQuery) searchMatchIndex = null;
+      // BRAINMAP-SEARCH-NAV: a new query also resets the reader's position.
+      if (q !== searchQuery) { searchMatchIndex = null; searchPos = -1; }
       searchQuery = q;
       hoverNode = null;
       tooltip.style.display = "none";
@@ -1466,27 +1623,30 @@
     }, 120);
   }
 
+  // BRAINMAP-SEARCH-NAV: keys bound INSIDE the search box —
+  //   Enter / ArrowDown        -> next match (a NEW query lands on the first)
+  //   Shift+Enter / ArrowUp    -> previous match
+  //   Escape                   -> clear the query
+  // Enter ADVANCES rather than always returning to the first, because pressing
+  // it again is what a reader actually tries. Arrow keys are preventDefault'ed
+  // so they step instead of moving the caret to the ends of the input.
   function onSearchKeydown(ev) {
     skipIntro();
-    if (ev.key !== "Enter") return;
+    if (ev.key === "Escape") { ev.preventDefault(); clearSearch(); return; }
+    var isNext = (ev.key === "Enter" && !ev.shiftKey) || ev.key === "ArrowDown";
+    var isPrev = (ev.key === "Enter" && ev.shiftKey) || ev.key === "ArrowUp";
+    if (!isNext && !isPrev) return;
     ev.preventDefault();
-    // Apply any pending debounced value immediately, then jump.
+    // Apply any pending debounced value immediately, then step.
     var prevQuery = searchQuery;
+    if (searchDebounce) { clearTimeout(searchDebounce); searchDebounce = null; }
     searchQuery = String(ev.target.value || "").trim().toLowerCase();
-    if (searchQuery !== prevQuery) searchMatchIndex = null;
-    updateSearchCount();
-    if (!searchQuery) { searchMatchIndex = null; draw(); return; }
-    for (var i = 0; i < graph.nodes.length; i++) {
-      if (isActive(graph.nodes[i])) {
-        // BRAINMAP-3D-DEPTH (Part A1): remember WHICH node the search centred
-        // on, so a mode switch can re-centre it in the other layout.
-        searchMatchIndex = i;
-        centerOnNode(graph.nodes[i]);
-        return;
-      }
-    }
-    searchMatchIndex = null;
-    draw(); // no match — just repaint dimmed state
+    // BRAINMAP-3D-DEPTH (Part A1): searchMatchIndex remembers WHICH node the
+    // search centred on, so a mode switch can re-centre it in the other layout;
+    // a changed query invalidates it (and the reader's position with it).
+    if (searchQuery !== prevQuery) { searchMatchIndex = null; searchPos = -1; }
+    if (!searchQuery) { updateSearchCount(); draw(); return; }
+    stepMatch(isPrev ? -1 : 1);
   }
 
   // BRAINMAP-FEATURES: spread-size dropdown (cluster outlet_count threshold).
@@ -1668,6 +1828,12 @@
       searchEl.addEventListener("input", onSearchInput);
       searchEl.addEventListener("keydown", onSearchKeydown);
     }
+    // BRAINMAP-SEARCH-NAV: the visible stepper — the only route to match 2 on a
+    // phone, which has neither an Enter key in view nor arrow keys.
+    var prevMatchBtn = document.getElementById("searchPrev");
+    var nextMatchBtn = document.getElementById("searchNext");
+    if (prevMatchBtn) prevMatchBtn.addEventListener("click", function () { stepMatch(-1); });
+    if (nextMatchBtn) nextMatchBtn.addEventListener("click", function () { stepMatch(1); });
     var spreadEl = document.getElementById("spreadFilter");
     if (spreadEl) spreadEl.addEventListener("change", onSpreadChange);
     layout();
@@ -1703,13 +1869,18 @@
     if (focusBtn) focusBtn.addEventListener("click", function () { clearFocus(true); });
     // Escape releases focus, matching 리셋 / dblclick. Ignored while the search
     // box has the caret so Escape can still clear the query first.
+    // BRAINMAP-SEARCH-NAV: Escape now clears the SEARCH too, from anywhere on
+    // the page. Both duties run, independently — clearing a query never skips
+    // the focus release, and with only a focus active the behaviour is exactly
+    // what it was. Inside the box, onSearchKeydown owns Escape (it clears the
+    // input's value as well), so this handler still defers to it there.
     window.addEventListener("keydown", function (ev) {
       // BRAINMAP-ATMOSPHERE: any keypress is deliberate input — settle now.
       skipIntro();
       if (ev.key !== "Escape") return;
-      if (focusCluster === null && !focusArmed) return;
       if (document.activeElement && document.activeElement.id === "mapSearch") return;
-      clearFocus(true);
+      if (searchQuery) clearSearch();
+      if (focusCluster !== null || focusArmed) clearFocus(true);
     });
     // BRAINMAP-HOVER A8: ?focus=<result_id> (from the card's 브레인맵에서 유사
     // 보도 보기 link) lands centered + hovered on that card's node, reusing the
