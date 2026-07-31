@@ -603,6 +603,61 @@
   // domain-colour disc wrapped in a background-colour separation ring, the
   // same treatment for every node, so it encodes NOTHING; hue still = domain,
   // position untouched. One stamp per node beats two path-fills per node.
+  // BRAINMAP-3D-FREE-WINS (1/4): a node's sprite and alpha depend ONLY on
+  // (domain, clustered, market_commercial) — never on the frame, the camera or
+  // the filters. Measured: the per-node work AROUND drawImage cost 5.2ms of a
+  // 53.5ms stamping pass, all of it string-keyed sprite lookups repeated
+  // 14,225 times a frame for at most a few dozen distinct answers.
+  //
+  // So each node gets a small COMBO ID once at load, and a draw resolves the
+  // combos (<= domains x 2 x 2) instead of the nodes. IDENTICAL PIXELS BY
+  // CONSTRUCTION: the combo carries exactly the three inputs spriteFor and the
+  // globalAlpha expression already used, and the resolved sprite is the same
+  // object spriteCache would have returned. Radius depends on radiusScale()
+  // (zoom in 3D), so the combo sprites are re-resolved whenever THAT changes —
+  // once per frame, not once per node.
+  var nodeCombo = null;         // Uint16Array: node index -> combo id
+  var comboDomain = [], comboClustered = [], comboMarket = [];
+  var comboSprite = [], comboAlpha = [];
+  var comboRadiusScale = -1;    // radiusScale() the sprites were resolved at
+
+  function buildNodeCombos() {
+    var seen = {}, n = graph.nodes.length;
+    nodeCombo = new Uint16Array(n);
+    comboDomain = []; comboClustered = []; comboMarket = [];
+    for (var i = 0; i < n; i++) {
+      var nd = graph.nodes[i];
+      var cl = nd.cluster_id !== null && nd.cluster_id !== undefined;
+      var mk = nd.content_nature === "market_commercial";
+      var k = (nd.domain || "") + "|" + (cl ? 1 : 0) + "|" + (mk ? 1 : 0);
+      var id = seen[k];
+      if (id === undefined) {
+        id = comboDomain.length;
+        seen[k] = id;
+        comboDomain.push(nd.domain);
+        comboClustered.push(cl);
+        comboMarket.push(mk);
+      }
+      nodeCombo[i] = id;
+    }
+    comboRadiusScale = -1;   // force a resolve on the next draw
+  }
+
+  function refreshComboSprites() {
+    var rs = radiusScale();
+    if (rs === comboRadiusScale && comboSprite.length === comboDomain.length) return;
+    comboRadiusScale = rs;
+    comboSprite = []; comboAlpha = [];
+    for (var c = 0; c < comboDomain.length; c++) {
+      comboSprite.push(spriteFor(
+        colorFor(comboDomain[c]),
+        scaledRadius(comboClustered[c] ? R_CLUSTERED : R_UNCLUSTERED),
+        comboMarket[c]));
+      // The SAME expression stampNode used per node, evaluated per combo.
+      comboAlpha.push(comboMarket[c] ? 0.75 : (comboClustered[c] ? 0.95 : 0.6));
+    }
+  }
+
   function spriteFor(color, r, hollow) {
     var dpr = window.devicePixelRatio || 1;
     var key = color + "|" + r + "|" + (hollow ? 1 : 0) + "|" + dpr;
@@ -733,6 +788,102 @@
     document.getElementById("legend").innerHTML = html;
   }
 
+  // BRAINMAP-3D-FREE-WINS (4/4): per-frame scratch, allocated once. Every one
+  // of these is fully overwritten before it is read, so reuse cannot leak state
+  // between frames.
+  var posPool = null, depthPool = null, bucketStartPool = null, bucketEdgePool = null;
+  function positionSlots(n) {
+    if (!posPool || posPool.length !== n) {
+      posPool = new Array(n);
+      for (var i = 0; i < n; i++) posPool[i] = { px: 0, py: 0 };
+    }
+    return posPool;
+  }
+  function depthBuf(n) {
+    if (!depthPool || depthPool.length !== n) depthPool = new Float64Array(n);
+    return depthPool;
+  }
+  function bucketStartBuf() {
+    if (!bucketStartPool) bucketStartPool = new Int32Array(DEPTH_BUCKETS + 1);
+    return bucketStartPool;
+  }
+  var clusterMemberCache = null, labelTopCache = null;
+  function clusterMembers() {
+    if (clusterMemberCache) return clusterMemberCache;
+    clusterMemberCache = {};
+    graph.nodes.forEach(function (n, i) {
+      if (n.cluster_id === null || n.cluster_id === undefined) return;
+      (clusterMemberCache[n.cluster_id] = clusterMemberCache[n.cluster_id] || []).push(i);
+    });
+    return clusterMemberCache;
+  }
+  function labelTopClusters() {
+    if (labelTopCache) return labelTopCache;
+    labelTopCache = graph.clusters
+      .filter(function (c) { return c.size >= LABEL_MIN_SIZE; })
+      .slice(0, LABEL_TOP_N);
+    return labelTopCache;
+  }
+
+  function bucketEdgeBuf() {
+    if (!bucketEdgePool) {
+      bucketEdgePool = [];
+      for (var i = 0; i < DEPTH_BUCKETS; i++) bucketEdgePool.push([]);
+    }
+    for (var j = 0; j < DEPTH_BUCKETS; j++) bucketEdgePool[j].length = 0;
+    return bucketEdgePool;
+  }
+
+  // BRAINMAP-3D-FREE-WINS (2/4): far-to-near order WITHOUT a full re-sort.
+  // One frame of a drag moves every node's depth by a hair: measured at
+  // 0.7 deg/frame, 49% of adjacent RANK pairs invert, but of ~35,274
+  // overlapping on-screen node pairs only ~3 (0.01%) change which one occludes
+  // the other — and those are pairs at near-equal depth, where either order
+  // paints the same. An insertion pass over the PREVIOUS order costs 1.34ms
+  // against 4.07ms for the comparator sort, and — this is the point — it
+  // produces a FULLY SORTED array, not an approximation: the output is exactly
+  // what the full sort would have produced, so the paint order is identical.
+  //
+  // The guard is the whole risk. Insertion sort is O(n^2) on badly-ordered
+  // input, and 리셋 / a mode switch / a fast fling can hand it exactly that.
+  // So the shifts are BUDGETED: past 8n moves it abandons the pass and falls
+  // back to the full sort, bounding the wasted work at a fraction of a
+  // millisecond. Correctness never depends on the budget — only speed does.
+  var SORT_MOVE_BUDGET = 8;
+  // Slack added to every off-screen test, in CSS px. Stroked geometry paints
+  // wider than its coordinates (line width + antialias), so a bare boundary
+  // test drops a sliver that a reader could see. Measured: without this, the
+  // before/after pixel diff showed exactly 1 differing pixel at 4x and 8x.
+  var CULL_PAD = 2;
+  function orderByDepth(depth, prev) {
+    var n = depth.length, i, j, v, dv;
+    if (prev && prev.length === n) {
+      var order = prev.slice();
+      var moves = 0, budget = SORT_MOVE_BUDGET * n, blown = false;
+      for (i = 1; i < n; i++) {
+        v = order[i]; dv = depth[v]; j = i - 1;
+        // The index tiebreak is what makes this EXACTLY the full sort's output
+        // rather than merely a correct one. Array.prototype.sort is stable, so
+        // sorting [0..n-1] by depth leaves exactly-equal depths in ascending
+        // index order; matching that here means the two algorithms agree on
+        // every input, ties included, and the paint order can never diverge.
+        while (j >= 0 && (depth[order[j]] > dv
+                          || (depth[order[j]] === dv && order[j] > v))) {
+          order[j + 1] = order[j];
+          j--;
+          if (++moves > budget) { blown = true; break; }
+        }
+        order[j + 1] = v;
+        if (blown) break;
+      }
+      if (!blown) return order;
+    }
+    var fresh = new Array(n);
+    for (i = 0; i < n; i++) fresh[i] = i;
+    fresh.sort(function (a, b) { return depth[a] - depth[b]; });
+    return fresh;
+  }
+
   function layout() {
     var rect = canvas.parentElement.getBoundingClientRect();
     var w = Math.max(320, rect.width), h = Math.max(280, rect.height);
@@ -755,19 +906,28 @@
       // from centre; 1.28 ~= a snug constant frame at every angle.
       var s3 = Math.min(w, h - PAD) / 1.28;
       var cxs = w / 2, cys = h / 2;
-      var depth = new Array(graph.nodes.length);
-      positions = graph.nodes.map(function (n, i) {
-        var vx = n.x3 - 0.5, vy = n.y3 - 0.5, vz = n.z3 - 0.5;
+      // BRAINMAP-3D-FREE-WINS (4/4): the projection still runs every rotation
+      // frame — it must, the numbers change — but its ALLOCATION does not.
+      // `positions` used to mint 14,225 fresh {px,py} objects per frame; the
+      // slots are now reused and overwritten. Same arithmetic in the same
+      // order, so the coordinates are bit-identical; only the garbage is gone.
+      var nCount = graph.nodes.length;
+      var depth = depthBuf(nCount);
+      var pos = positionSlots(nCount);
+      for (var pi = 0; pi < nCount; pi++) {
+        var pn = graph.nodes[pi];
+        var vx = pn.x3 - 0.5, vy = pn.y3 - 0.5, vz = pn.z3 - 0.5;
         var rx = m[0] * vx + m[1] * vy + m[2] * vz;
         var ry = m[3] * vx + m[4] * vy + m[5] * vz;
-        depth[i] = m[6] * vx + m[7] * vy + m[8] * vz;
-        return { px: cxs + rx * s3, py: cys + ry * s3 };
-      });
+        depth[pi] = m[6] * vx + m[7] * vy + m[8] * vz;
+        pos[pi].px = cxs + rx * s3;
+        pos[pi].py = cys + ry * s3;
+      }
+      positions = pos;
       // Far-to-near paint order: nearer nodes occlude farther ones — the
       // one honest depth cue besides motion parallax. Recomputed only when
       // rotation/layout changes, not on pan/zoom frames.
-      drawOrder = depth.map(function (d, i) { return i; });
-      drawOrder.sort(function (a, b) { return depth[a] - depth[b]; });
+      drawOrder = orderByDepth(depth, drawOrder);
       // BRAINMAP-3D-DEPTH: project the cloud's bounding sphere. Because the
       // projection is linear, the projected centre is just the centre's
       // projection, and an orthographic projection of a sphere is a circle of
@@ -792,15 +952,19 @@
         var b = Math.floor((d - dmin) / span * DEPTH_BUCKETS);
         return b < 0 ? 0 : (b >= DEPTH_BUCKETS ? DEPTH_BUCKETS - 1 : b);
       }
-      bucketNodeStart = new Int32Array(DEPTH_BUCKETS + 1);
+      // BRAINMAP-3D-FREE-WINS (4/4): an edge's bucket depends on depth, so the
+      // GROUPING cannot be hoisted — but rebuilding 25 typed arrays and 24
+      // JS arrays every frame can. The buffers are allocated once and emptied
+      // in place; the contents and their order are exactly what the old code
+      // produced (same scan, same push order), so the paint is identical.
+      bucketNodeStart = bucketStartBuf();
       for (var bi = 0, oi = 0; bi < DEPTH_BUCKETS; bi++) {
         bucketNodeStart[bi] = oi;
         while (oi < drawOrder.length && bucketOf(depth[drawOrder[oi]]) === bi) oi++;
         bucketNodeStart[bi + 1] = oi;
       }
       bucketNodeStart[DEPTH_BUCKETS] = drawOrder.length;
-      bucketEdges = [];
-      for (var bj = 0; bj < DEPTH_BUCKETS; bj++) bucketEdges.push([]);
+      bucketEdges = bucketEdgeBuf();
       graph.edges.forEach(function (e, ei) {
         var a = nodeById[e.src], b2 = nodeById[e.dst];
         if (!a || !b2) return;
@@ -811,23 +975,24 @@
       cloudProj = null;
       bucketNodeStart = null;
       bucketEdges = null;
-      positions = graph.nodes.map(function (n) {
-        return {
-          px: PAD + n.x * (w - PAD * 2),
-          py: PAD + n.y * (h - PAD * 2)
-        };
-      });
+      // Same allocation hoist on the 2D side, same bit-identical arithmetic.
+      var pos2 = positionSlots(graph.nodes.length);
+      for (var qi = 0; qi < graph.nodes.length; qi++) {
+        var qn = graph.nodes[qi];
+        pos2[qi].px = PAD + qn.x * (w - PAD * 2);
+        pos2[qi].py = PAD + qn.y * (h - PAD * 2);
+      }
+      positions = pos2;
     }
 
     // Top-N cluster label placements at each cluster's centroid.
-    var byCluster = {};
-    graph.nodes.forEach(function (n, i) {
-      if (n.cluster_id === null || n.cluster_id === undefined) return;
-      (byCluster[n.cluster_id] = byCluster[n.cluster_id] || []).push(i);
-    });
-    var top = graph.clusters
-      .filter(function (c) { return c.size >= LABEL_MIN_SIZE; })
-      .slice(0, LABEL_TOP_N);
+    // BRAINMAP-3D-FREE-WINS (4/4): the MEMBERSHIP grouping and the top-N pick
+    // never change while a graph is loaded, so they are built once instead of
+    // per rotation frame. The centroid is still summed from the live
+    // `positions` in the same order over the same members, so every anchor is
+    // bit-identical to before — only the O(nodes) regrouping is gone.
+    var byCluster = clusterMembers();
+    var top = labelTopClusters();
     labelSpots = top.map(function (c) {
       var members = byCluster[c.cluster_id] || [];
       var cx = 0, cy = 0;
@@ -868,6 +1033,10 @@
     // zoom, identically for all). Edges are never removed — faint at the
     // overview where 6,353 of them cannot be read anyway, full where zoom
     // makes them readable. Nodes are NEVER faded or hidden this way.
+    // (1/4) resolve the per-combo sprites for THIS frame's radius scale. A
+    // no-op unless the zoom crossed a quantised radius step.
+    refreshComboSprites();
+
     var edgeAlpha = 0.10 + 0.06 * Math.min(1, Math.max(0, view.scale - 1));
     var edgeWidth = 0.5;
     // BRAINMAP-3D-DEPTH (Part B2): in 3D ONLY, and only ABOVE 2x, edges keep
@@ -896,8 +1065,23 @@
         var a = nodeById[e.src], b = nodeById[e.dst];
         if (!a || !b) continue;
         if (filtering && !(isActive(a) && isActive(b))) continue;
-        ctx.moveTo(toScreenX(wx(a._i)), toScreenY(wy(a._i)));
-        ctx.lineTo(toScreenX(wx(b._i)), toScreenY(wy(b._i)));
+        var ax = toScreenX(wx(a._i)), ay = toScreenY(wy(a._i));
+        var bx = toScreenX(wx(b._i)), by = toScreenY(wy(b._i));
+        // BRAINMAP-3D-FREE-WINS (3/4): TRIVIAL REJECT, not "both ends are off
+        // screen". A segment is skipped only when both endpoints sit outside
+        // the SAME edge of the viewport — the one case where the line provably
+        // cannot cross it. An edge with both ends off screen on OPPOSITE sides
+        // still crosses the view and is still drawn, and an edge with one end
+        // inside never matches any of these four tests.
+        // CULL_PAD is not cosmetic: a stroked line is WIDER than its geometry,
+        // so a segment lying just past the boundary still antialiases a sliver
+        // into the first pixel column. Without the pad the pixel diff caught
+        // exactly one such pixel at 4x and 8x zoom. One line width plus one
+        // pixel of antialias spread covers it with room to spare.
+        if ((ax < -CULL_PAD && bx < -CULL_PAD) || (ax > w + CULL_PAD && bx > w + CULL_PAD)
+            || (ay < -CULL_PAD && by < -CULL_PAD) || (ay > h + CULL_PAD && by > h + CULL_PAD)) continue;
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(bx, by);
       }
       ctx.stroke();
     }
@@ -905,14 +1089,18 @@
     function stampNode(ni) {
       var n = graph.nodes[ni];
       if (filtering && !isActive(n)) return;
-      var clustered = n.cluster_id !== null && n.cluster_id !== undefined;
-      var isMarket = n.content_nature === "market_commercial";
-      var s = spriteFor(colorFor(n.domain),
-                        scaledRadius(clustered ? R_CLUSTERED : R_UNCLUSTERED),
-                        isMarket);
-      ctx.globalAlpha = isMarket ? 0.75 : (clustered ? 0.95 : 0.6);
-      ctx.drawImage(s.c, toScreenX(wx(ni)) - s.half, toScreenY(wy(ni)) - s.half,
-                    s.size, s.size);
+      // (1/4) sprite + alpha come from the node's combo, resolved once per
+      // frame for the whole graph instead of once per node.
+      var ci = nodeCombo[ni], s = comboSprite[ci];
+      var sx = toScreenX(wx(ni)), sy = toScreenY(wy(ni));
+      // (3/4) cull only when the sprite's FOOTPRINT is entirely outside the
+      // canvas — the half-size margin is what keeps a node hanging off the
+      // edge drawn, so a partially visible node never disappears. CULL_PAD on
+      // top of that is pure slack.
+      if (sx + s.half < -CULL_PAD || sx - s.half > w + CULL_PAD
+          || sy + s.half < -CULL_PAD || sy - s.half > h + CULL_PAD) return;
+      ctx.globalAlpha = comboAlpha[ci];
+      ctx.drawImage(s.c, sx - s.half, sy - s.half, s.size, s.size);
     }
     // 2D: edges first, as one batch, exactly as before. In 3D the edges are
     // deferred into the interleaved pass below so they can be occluded.
@@ -926,9 +1114,14 @@
       ctx.fillStyle = "#7e8ea8";
       graph.nodes.forEach(function (n, i) {
         if (isActive(n)) return;
+        var dx = toScreenX(wx(i)), dy = toScreenY(wy(i));
+        // (3/4) same footprint-aware cull as the sprites, at the dot's 1.8px
+        // radius. A dimmed node clipped by the edge still draws.
+        if (dx + 1.8 < -CULL_PAD || dx - 1.8 > w + CULL_PAD
+            || dy + 1.8 < -CULL_PAD || dy - 1.8 > h + CULL_PAD) return;
         ctx.globalAlpha = 0.14;
         ctx.beginPath();
-        ctx.arc(toScreenX(wx(i)), toScreenY(wy(i)), 1.8, 0, Math.PI * 2);
+        ctx.arc(dx, dy, 1.8, 0, Math.PI * 2);
         ctx.fill();
       });
       ctx.globalAlpha = 1;
@@ -1917,6 +2110,10 @@
                  r: d3[Math.min(d3.length - 1, Math.floor(0.99 * (d3.length - 1)))] };
     }
     (graph.clusters || []).forEach(function (c) { clusterById[c.cluster_id] = c; });
+    // BRAINMAP-3D-FREE-WINS (1/4): one pass over the nodes, at load, to give
+    // each its sprite/alpha combo id. Everything the draw loop needs about a
+    // node's appearance is decided here, once.
+    buildNodeCombos();
     // BRAINMAP-FEATURES: has-an-edge index (drives the 연결됨 count + stats).
     graph.edges.forEach(function (e) {
       hasEdgeById[e.src] = true;
