@@ -1048,6 +1048,40 @@ if (!SNAKE_RE.test(stripUrls(SNAKE_CONTROL))) failures.push(
   if (cardFaceTruncationDefect(FULL, FULL)) failures.push(
     "OVER-EAGER DETECTOR: card-face truncation fires on an untruncated face");
 }
+// TRENDING-URL-TAIL (ZERO class, WIRING form). The sidebar 확산 성장 Top 5 is
+// the one title surface the per-row classes above CANNOT reach: it renders from
+// GET /api/trending — snapshot cluster labels joined to a representative row —
+// and this scan's dump holds analysis rows, not that payload. So there is no
+// rendered[id].text for a sidebar line to join, and a per-row z: class would be
+// vacuous here by construction rather than merely narrow. What IS checkable
+// from source, and is exactly what failed before, is the WIRING: the renderer
+// must route its title through the same pinned verifier every other surface
+// uses, with the row's OWN url as the proof. Pure over `js` so it can be
+// pointed at any revision — which is how the pre-change failure was shown.
+function trendingTailWiring(js) {
+  const out = [];
+  const s = js.indexOf("    async function renderTrendingTop5(");
+  if (s < 0) {
+    out.push("SOURCE PIN LOST: renderTrendingTop5 — the sidebar renderer is "
+      + "gone or renamed; the trending title surface is unchecked");
+    return out;
+  }
+  const e = js.indexOf("\n    }", s);
+  const body = js.slice(s, e < 0 ? undefined : e + 6);
+  if (!/stripVerifiedOutletTail\(/.test(body)) {
+    out.push("z:trending-title-outlet-tail: the sidebar renders a title "
+      + "without stripVerifiedOutletTail — an outlet tail reaches the reader "
+      + "on a surface every other title path already strips");
+    return out;
+  }
+  if (!/stripVerifiedOutletTail\([\s\S]{0,160}?original_url/.test(body)) {
+    out.push("z:trending-title-outlet-tail: the sidebar strips a tail without "
+      + "verifying it against the row's OWN original_url — verification "
+      + "against the row's url or nothing; no frequency or name-list rule");
+  }
+  return out;
+}
+
 // title-outlet-tail controls — synthetic rows, so no corpus state can make
 // these vacuously pass. Both verification proofs are exercised (literal host
 // match; >=2-row same-apex evidence majority) and both refusal duties too
@@ -1354,6 +1388,22 @@ if (!SNAKE_RE.test(stripUrls(SNAKE_CONTROL))) failures.push(
     if (((x) => x ?? null)(undefined) === skips.skipClass) {
       failures.push("VACUOUS DETECTOR: HERO-MARKET-SKIP cannot distinguish a "
         + "dropped field from a carried one");
+    }
+  }
+
+  // --- TRENDING-URL-TAIL --------------------------------------------------
+  for (const f of trendingTailWiring(mainJs)) failures.push(f);
+  // Non-vacuity: the same check must FIRE on a source where the sidebar does
+  // not verify. The specimen is this file's own renderer with the verifier
+  // call removed — no hand-written stand-in that could drift from the real one.
+  {
+    const s = mainJs.indexOf("    async function renderTrendingTop5(");
+    if (s >= 0) {
+      const neutered = mainJs.replace(/stripVerifiedOutletTail\(\s*\n?\s*marked,[\s\S]{0,120}?\);/, "marked;");
+      if (neutered !== mainJs && !trendingTailWiring(neutered).length) {
+        failures.push("VACUOUS DETECTOR: trending-title-outlet-tail passes a "
+          + "sidebar renderer whose verifier call was removed");
+      }
     }
   }
 

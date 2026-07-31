@@ -2021,7 +2021,7 @@ def claim_by_lineage(lineage_id: str) -> Response:
 _TRENDING_EMPTY_JSON = '{"trending": []}'
 _TRENDING_DEFAULT_LIMIT = 10  # UI takes the Top 5; return a little headroom.
 _TRENDING_MAX_LIMIT = 20
-_TRENDING_DISPLAY_CACHE: dict = {"row_id": None, "display": None}
+_TRENDING_DISPLAY_CACHE: dict = {"row_id": None, "display": None, "urls": {}}
 
 
 def _fetch_snapshot_batches():
@@ -2213,7 +2213,58 @@ def _load_trending_display_index():
     display = _build_trending_display_index(graph)
     _TRENDING_DISPLAY_CACHE["row_id"] = row_id
     _TRENDING_DISPLAY_CACHE["display"] = display
+    # TRENDING-URL-TAIL: a new graph row invalidates the memoised URLs with the
+    # index they belong to, so a representative that moved cannot keep an old
+    # row's URL and vouch for a tail that is not its publisher.
+    _TRENDING_DISPLAY_CACHE["urls"] = {}
     return display
+
+
+def _trending_representative_urls(ids):
+    """original_url for the representative rows of ONE trending response.
+
+    TRENDING-URL-TAIL: the sidebar could not strip an outlet tail because it
+    had nothing to verify against — the strip removes a tail only when the
+    row's OWN url proves the tail is that row's publisher, and /api/trending
+    carried no url. This adds exactly that one field.
+
+    Bounded and memoised: at most ``_TRENDING_MAX_LIMIT`` primary keys in ONE
+    SELECT, cached on the SAME entry the display index uses, so a repeat
+    request costs nothing and a new brainmap_graph row drops both together.
+    SELECT-only; no stored field is written and no other field changes.
+    Fail-soft: on any error the known URLs are returned and the affected rows
+    simply ship without one, which leaves their tail unstripped — the same
+    state as before this change, never a wrong strip.
+    """
+    import sqlalchemy as sa
+
+    import postgres_storage
+
+    cache = _TRENDING_DISPLAY_CACHE.setdefault("urls", {})
+    wanted = {i for i in ids if isinstance(i, int)}
+    missing = sorted(wanted - set(cache))
+    if not missing:
+        return cache
+    engine = postgres_storage.get_engine()
+    if engine is None:
+        return cache
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                sa.text("SELECT id, original_url FROM analysis_results "
+                        "WHERE id IN :ids").bindparams(
+                            sa.bindparam("ids", expanding=True)),
+                {"ids": missing},
+            ).fetchall()
+    except Exception:
+        logger.warning("trending representative url lookup failed", exc_info=True)
+        return cache
+    for rid, url in rows:
+        cache[rid] = url or ""
+    # Remember the misses too, so an id with no row is not re-queried per request.
+    for rid in missing:
+        cache.setdefault(rid, "")
+    return cache
 
 
 @app.get("/api/trending")
@@ -2258,6 +2309,15 @@ def trending_growth(limit: Optional[str] = None) -> Response:
             entry["title"] = info.get("title") or ""
             entry["representative_analysis_id"] = info.get(
                 "representative_analysis_id")
+        # TRENDING-URL-TAIL: one bounded lookup for the representatives of the
+        # rows actually being returned. Ranks, ordering and the growth numbers
+        # above are untouched — this only attaches a field the sidebar needs to
+        # VERIFY a tail before stripping it.
+        rep_urls = _trending_representative_urls(
+            [e.get("representative_analysis_id") for e in entries])
+        for entry in entries:
+            entry["original_url"] = rep_urls.get(
+                entry.get("representative_analysis_id")) or ""
         return _spread_response(json.dumps({
             "trending": entries,
             "window": {

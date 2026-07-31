@@ -3500,7 +3500,18 @@
           const rid = Number(row?.representative_analysis_id);
           // MOBILE-POLISH F: trending rows come straight off GET /api/trending,
           // bypassing topicCardFromResult — strip the leading marker here too.
-          const title = stripLeadingTitleMarker(row?.title) || (rid > 0 ? `기사 #${rid}` : "");
+          const marked = stripLeadingTitleMarker(row?.title) || (rid > 0 ? `기사 #${rid}` : "");
+          // TRENDING-URL-TAIL: the outlet tail, through the SAME pinned verifier
+          // the card and detail titles use — no second implementation and no
+          // outlet list. /api/trending now carries the representative row's
+          // original_url, which is the only thing that was missing: the strip
+          // removes a tail ONLY when that url proves the tail is this row's own
+          // publisher (literal host match, or a >=2-row same-apex evidence
+          // majority). An unverifiable tail is returned byte-identical, so a
+          // publisher named as data and a prose subtitle both stay. Shortens or
+          // does nothing — it can never lengthen or reword a title.
+          const title = stripVerifiedOutletTail(
+            marked, row?.original_url || "", feedOutletTailEvidence());
           if (!title) return "";
           const outlets = Number(row?.current_outlet_count);
           const growth = Number(row?.growth);
