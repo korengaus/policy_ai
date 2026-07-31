@@ -663,9 +663,26 @@ function heroEyebrowNamesRank(eyebrow, rank, note) {
 // output. A derived holder missing from this list fails the run.
 const ADAPTER_CONTRACTS = [
   { fn: "mapHistoryRowToResult", holders: ["result", "fullResult"] },
-  { fn: "buildSlimResultSummary", holders: [] },
-  { fn: "buildSlimHistoryRecord", holders: [] },
-  { fn: "buildSlimReviewItem", holders: [] },
+  // ADAPTER-CONTRACT-EXTEND: no identifier in this file is ever assigned from
+  // buildSlimResultSummary — but its output is not unreachable either, it is
+  // read back through getHistoryResults. That accessor returns whichever of
+  // FOUR arrays exists (hydrated cache, response.results, results,
+  // summary_results), so an element it yields may be a full server result just
+  // as easily as a slim summary. Attributing those reads to THIS builder would
+  // be a false pass, which is worse than the honest skip. Stays skipped, with
+  // the reason sharpened from "no provable holder" to the real obstruction.
+  { fn: "buildSlimResultSummary",
+    skip: "consumed only through getHistoryResults, which merges four array "
+      + "shapes, so a read cannot be attributed to this builder" },
+  // ADAPTER-CONTRACT-EXTEND: covered through the STORAGE ROUND TRIP. There is
+  // no direct holder assignment, but the consumer chain is real and every hop
+  // is proven from source at scan time (see adapterRoundTripSite).
+  { fn: "buildSlimHistoryRecord", holders: [], roundTrip: {
+    writer: "safeWriteLocalHistory", key: "LOCAL_HISTORY_KEY",
+    reader: "safeReadLocalHistory", consumer: "renderHistory", ident: "row" } },
+  { fn: "buildSlimReviewItem", holders: [], roundTrip: {
+    writer: "safeWriteReviewQueue", key: "REVIEW_QUEUE_KEY",
+    reader: "safeReadReviewQueue", consumer: "renderReviewQueue", ident: "item" } },
   { fn: "topicCardFromResult", holders: ["card"] },
   // Declared skip, reviewed: its output is assigned to `record`, a name this
   // file also uses for localStorage history records and for the (never-passed)
@@ -673,8 +690,49 @@ const ADAPTER_CONTRACTS = [
   // different function from the assignment, so no sound scope exists for it
   // here. Excluded deliberately rather than by an empty allow-entry.
   { fn: "buildLocalHistoryRecord", skip: "identifier `record` is reused across shapes" },
-  { fn: "buildReviewQueueItem", holders: [] },
+  // ADAPTER-CONTRACT-EXTEND, spread resolved? NO. Its return opens with
+  // `...(existingItem || {})`, and existingItem is a PREVIOUSLY STORED queue
+  // item read back at runtime — not a literal this file can parse. A spread of
+  // a parsable object literal could be unfolded and merged into the produced
+  // set; a spread of runtime state cannot, because its key set is whatever an
+  // older version happened to write. Stays skipped, reason now states which
+  // kind of spread it is.
+  { fn: "buildReviewQueueItem",
+    skip: "return spreads `existingItem`, a runtime value read back from "
+      + "storage, not a parsable literal" },
 ];
+
+// ADAPTER-CONTRACT-EXTEND: the round-trip declarations above name six main.js
+// functions. Those names are DEPENDENCIES of this scan exactly as PINNED_DEPS
+// are, so a rename must be loud here too — otherwise the chain would simply
+// stop verifying. The list is DERIVED from the declarations rather than typed,
+// so adding a chain pins its hops automatically and the two can never drift.
+// They are pinned by PRESENCE only, deliberately not added to PINNED_DEPS:
+// those get evaluated in the sandbox, and renderHistory / renderReviewQueue are
+// DOM writers whose bodies this check only ever reads as source.
+{
+  const roundTripPinFailures = [];
+  for (const c of ADAPTER_CONTRACTS) {
+    if (!c.roundTrip) continue;
+    for (const dep of [c.roundTrip.writer, c.roundTrip.reader, c.roundTrip.consumer]) {
+      if (!extractDep(dep)) {
+        roundTripPinFailures.push(`SOURCE PIN LOST: ${dep} — named by the `
+          + `${c.fn} storage round-trip contract but no longer in main.js; that `
+          + "chain would stop verifying silently");
+      }
+    }
+    if (!mainJs.includes(c.roundTrip.key)) {
+      roundTripPinFailures.push(`SOURCE PIN LOST: ${c.roundTrip.key} — the `
+        + `storage key the ${c.fn} round trip is proven through is gone`);
+    }
+  }
+  if (roundTripPinFailures.length) {
+    for (const f of roundTripPinFailures) console.error("RENDER-SCAN FAIL:", f);
+    console.error(`RENDER SCAN FAILED: ${roundTripPinFailures.length} round-trip `
+      + "source pin(s) lost — fix the pins before trusting the adapter contract");
+    process.exit(1);
+  }
+}
 
 // built-in member names, taken by reflection — not a typed list
 const BUILTIN_MEMBERS = new Set([
@@ -749,18 +807,103 @@ function adapterReadKeys(js, site) {
   return keys;
 }
 
-// returns { failures[], covered[], skipped[] } — pure, so it can be pointed at
-// any revision's main.js for the vacuity proof
+// ADAPTER-CONTRACT-EXTEND: a holder proven through a STORAGE ROUND TRIP.
+// Direct assignment is not the only way an adapter's output reaches a reader:
+// buildSlimHistoryRecord is mapped over, JSON-serialised under a storage key,
+// read back under that SAME key, and iterated by a renderer. Nothing is
+// assumed — every hop below is located in main.js at scan time, and a hop that
+// cannot be found is reported by name rather than quietly dropping coverage.
+// Returns { site } on success or { failedHop } on the first unprovable link.
+function adapterRoundTripSite(js, fn, rt) {
+  const w = adapterBody(js, rt.writer);
+  if (!w) return { failedHop: `writer ${rt.writer}() not found` };
+  const wBody = js.slice(w.start, w.end);
+  // hop 1: the writer maps the adapter over its input, serialises, and stores
+  // it under the declared key.
+  if (!new RegExp("\\.map\\(\\s*(?:" + fn + "\\b|\\([^)]*\\)\\s*=>\\s*" + fn + "\\()").test(wBody)) {
+    return { failedHop: `${rt.writer}() no longer maps ${fn} over its input` };
+  }
+  if (!/JSON\.stringify\s*\(/.test(wBody)) return { failedHop: `${rt.writer}() no longer serialises` };
+  if (!new RegExp("safeStorage\\.set\\(\\s*" + rt.key + "\\b").test(wBody)) {
+    return { failedHop: `${rt.writer}() no longer writes ${rt.key}` };
+  }
+  // hop 2: the reader reads back that SAME key and parses it.
+  const r = adapterBody(js, rt.reader);
+  if (!r) return { failedHop: `reader ${rt.reader}() not found` };
+  const rBody = js.slice(r.start, r.end);
+  if (!new RegExp("safeStorage\\.get\\(\\s*" + rt.key + "\\b").test(rBody)) {
+    return { failedHop: `${rt.reader}() no longer reads ${rt.key}` };
+  }
+  if (!/JSON\.parse\s*\(/.test(rBody)) return { failedHop: `${rt.reader}() no longer parses` };
+  // hop 3: the reader's output is handed to the declared consumer.
+  if (!new RegExp(rt.consumer + "\\(\\s*" + rt.reader + "\\(").test(js)) {
+    return { failedHop: `${rt.consumer}(${rt.reader}()) wiring is gone` };
+  }
+  // hop 4: the consumer exists, and its body is the scope the reads live in.
+  const c = adapterBody(js, rt.consumer);
+  if (!c) return { failedHop: `consumer ${rt.consumer}() not found` };
+  return { site: { ident: rt.ident, start: c.start, end: c.end } };
+}
+
+// SCHEMA DRIFT. Both readers reshape with `{ ...storedRecord, ... }`, so a
+// record written by an OLDER version legitimately carries keys today's builder
+// no longer produces, and a consumer may still read them on purpose. Treating
+// every such read as a defect would manufacture false positives out of
+// deliberate backward compatibility.
+// The split is by DEFENCE, not by a list of tolerated names: a read is a
+// COMPAT read when its own expression falls back — an alternation (`||`/`??`)
+// that also reads a key the builder DOES produce, or that ends in a literal.
+// Anything else is BARE: today's writer produces undefined there and whatever
+// depends on it silently does not run, which is exactly the original class.
+// Compat reads are printed, never silently dropped.
+function readIsDefended(line, ident, producedKeys) {
+  if (!/\|\||\?\?/.test(line)) return false;
+  if (/(?:\|\||\?\?)\s*(?:"|'|`|\d|\[|\{)/.test(line)) return true;
+  const re = new RegExp("\\b" + ident + "\\s*(?:\\?\\.|\\.)\\s*([A-Za-z_][A-Za-z0-9_]*)", "g");
+  let m;
+  while ((m = re.exec(line)) !== null) if (producedKeys.has(m[1])) return true;
+  return false;
+}
+
+// the source line a given read sits on, for the defence test above
+function readLine(js, site, key) {
+  const scope = js.slice(site.start, site.end);
+  const m = new RegExp("\\b" + site.ident + "\\s*(?:\\?\\.|\\.)\\s*" + key + "\\b").exec(scope);
+  if (!m) return "";
+  const s = scope.lastIndexOf("\n", m.index) + 1;
+  const e = scope.indexOf("\n", m.index);
+  return scope.slice(s, e < 0 ? undefined : e);
+}
+
+// returns { failures[], covered[], skipped[], compat[] } — pure, so it can be
+// pointed at any revision's main.js for the vacuity proof
 function adapterFieldContract(js) {
-  const out = { failures: [], covered: [], skipped: [] };
+  const out = { failures: [], covered: [], skipped: [], compat: [] };
   for (const c of ADAPTER_CONTRACTS) {
     if (c.skip) { out.skipped.push([c.fn, c.skip]); continue; }
     const produced = adapterProducedKeys(js, c.fn);
     if (!produced) { out.skipped.push([c.fn, "no return literal found"]); continue; }
     if (produced.spread) { out.skipped.push([c.fn, "return literal has a spread"]); continue; }
-    const sites = adapterHolderSites(js, c.fn);
+    let sites = adapterHolderSites(js, c.fn);
+    // ADAPTER-CONTRACT-EXTEND: fall back to the declared round trip only when
+    // no direct holder exists. A DECLARED chain that no longer verifies is a
+    // FAILURE, not a skip — silently losing a chain we once proved is the
+    // vacuity this file exists to prevent.
+    let viaRoundTrip = false;
+    if (!sites.length && c.roundTrip) {
+      const rt = adapterRoundTripSite(js, c.fn, c.roundTrip);
+      if (rt.failedHop) {
+        out.failures.push(`ADAPTER-FIELD-CONTRACT: ${c.fn} declares a storage `
+          + `round-trip consumer chain that no longer verifies — ${rt.failedHop}. `
+          + "Re-prove the chain or remove the declaration; leaving it would let "
+          + "the adapter read as covered while nothing is checked");
+        continue;
+      }
+      sites = [rt.site];
+      viaRoundTrip = true;
+    }
     if (!sites.length) { out.skipped.push([c.fn, "no provable holder assignment"]); continue; }
-    const allow = new Set(c.holders);
+    const allow = new Set(viaRoundTrip ? [c.roundTrip.ident] : c.holders);
     const unexpected = [...new Set(sites.map((s) => s.ident))].filter((i) => !allow.has(i));
     if (unexpected.length) {
       out.failures.push(`ADAPTER-FIELD-CONTRACT: ${c.fn} output is assigned to `
@@ -773,15 +916,22 @@ function adapterFieldContract(js) {
     for (const site of sites) {
       for (const key of adapterReadKeys(js, site)) {
         checked += 1;
-        if (!produced.keys.has(key)) {
-          out.failures.push(`ADAPTER-FIELD-CONTRACT: ${c.fn} never returns `
-            + `"${key}", but ${site.ident}.${key} is read on its output — the `
-            + "comparison sees undefined, so whatever rule depends on it "
-            + "silently does not run");
+        if (produced.keys.has(key)) continue;
+        // Only a round trip can legitimately carry an older version's key —
+        // a directly-assigned holder holds exactly what the adapter returned,
+        // so its rule is unchanged and no read is ever excused there.
+        if (viaRoundTrip
+            && readIsDefended(readLine(js, site, key), site.ident, produced.keys)) {
+          out.compat.push([c.fn, `${site.ident}.${key}`]);
+          continue;
         }
+        out.failures.push(`ADAPTER-FIELD-CONTRACT: ${c.fn} never returns `
+          + `"${key}", but ${site.ident}.${key} is read on its output — the `
+          + "comparison sees undefined, so whatever rule depends on it "
+          + "silently does not run");
       }
     }
-    out.covered.push([c.fn, sites.length, checked]);
+    out.covered.push([c.fn, sites.length, checked, viaRoundTrip]);
   }
   return out;
 }
@@ -1210,9 +1360,18 @@ if (!SNAKE_RE.test(stripUrls(SNAKE_CONTROL))) failures.push(
   // --- ADAPTER-FIELD-CONTRACT ---------------------------------------------
   const contract = adapterFieldContract(mainJs);
   for (const f of contract.failures) failures.push(f);
-  for (const [fn, sites, checked] of contract.covered) {
-    warns.push(`ADAPTER-FIELD-CONTRACT covered: ${fn} (${sites} holder site(s), `
+  for (const [fn, sites, checked, viaRoundTrip] of contract.covered) {
+    warns.push(`ADAPTER-FIELD-CONTRACT covered: ${fn} (${sites} `
+      + `${viaRoundTrip ? "storage round-trip" : "holder"} site(s), `
       + `${checked} field read(s) verified against its return literal)`);
+  }
+  // Compat reads are stated, never swallowed: each is a key today's builder
+  // does not produce, read behind a fallback, i.e. deliberate support for a
+  // record an older version wrote.
+  for (const [fn, read] of contract.compat) {
+    warns.push(`ADAPTER-FIELD-CONTRACT compat read: ${fn} does not produce `
+      + `${read}, but the read falls back to a produced key or a literal — `
+      + "treated as deliberate older-schema support, not a defect");
   }
   for (const [fn, why] of contract.skipped) {
     warns.push(`ADAPTER-FIELD-CONTRACT skipped: ${fn} — ${why}. Coverage of this `
@@ -1253,6 +1412,57 @@ if (!SNAKE_RE.test(stripUrls(SNAKE_CONTROL))) failures.push(
     if (!ambiguous.failures.length) {
       failures.push("VACUOUS DETECTOR: adapter-field-contract accepts a holder "
         + "absent from its allow-entry instead of failing on the ambiguity");
+    }
+  }
+  // ADAPTER-CONTRACT-EXTEND vacuity: the ROUND-TRIP path needs its own proof —
+  // the direct-holder probe above never exercises it. A synthetic chain whose
+  // builder drops a key its renderer reads BARE must fail; carrying the key
+  // must pass; defending the read must be excused as compat; and a broken hop
+  // must fail rather than silently stop covering. No field name is typed.
+  {
+    const chain = (produced, read) =>
+      "    function __probeBuild(rec) {\n      return {\n        kept: rec.kept,\n"
+      + (produced ? "        drifted: rec.drifted,\n" : "") + "      };\n    }\n"
+      + "    function __probeWrite(rows) {\n"
+      + "      const slim = (rows || []).map(__probeBuild);\n"
+      + "      const s = JSON.stringify(slim);\n"
+      + "      safeStorage.set(__PROBE_KEY, s);\n    }\n"
+      + "    function __probeRead() {\n"
+      + "      const raw = safeStorage.get(__PROBE_KEY);\n"
+      + "      return JSON.parse(raw);\n    }\n"
+      + "    function __probeRender(rows) {\n"
+      + "      return rows.map((row) => " + read + ");\n    }\n"
+      + "    function __probeBoot() {\n      __probeRender(__probeRead());\n    }\n";
+    const RT = { writer: "__probeWrite", key: "__PROBE_KEY", reader: "__probeRead",
+                 consumer: "__probeRender", ident: "row" };
+    const save = ADAPTER_CONTRACTS.slice();
+    const run = (js) => {
+      ADAPTER_CONTRACTS.length = 0;
+      ADAPTER_CONTRACTS.push({ fn: "__probeBuild", holders: [], roundTrip: RT });
+      const r = adapterFieldContract(js);
+      ADAPTER_CONTRACTS.length = 0;
+      for (const c of save) ADAPTER_CONTRACTS.push(c);
+      return r;
+    };
+    const dropped = run(chain(false, "row.drifted"));
+    const carried = run(chain(true, "row.drifted"));
+    const defended = run(chain(false, 'row.kept || row.drifted || "x"'));
+    const brokenHop = run(chain(true, "row.drifted").replace("safeStorage.set(__PROBE_KEY, s);", ""));
+    if (!dropped.failures.length) {
+      failures.push("VACUOUS DETECTOR: adapter-field-contract round trip misses "
+        + "a builder that drops a key its renderer reads through storage");
+    }
+    if (carried.failures.length || !carried.covered.length) {
+      failures.push("OVER-EAGER DETECTOR: adapter-field-contract round trip "
+        + "fires on a builder that carries the key its renderer reads");
+    }
+    if (defended.failures.length || !defended.compat.length) {
+      failures.push("VACUOUS DETECTOR: adapter-field-contract round trip does "
+        + "not classify a fallback-defended read as an older-schema compat read");
+    }
+    if (!brokenHop.failures.length) {
+      failures.push("VACUOUS DETECTOR: adapter-field-contract round trip goes "
+        + "quiet when a declared hop disappears instead of failing");
     }
   }
 
