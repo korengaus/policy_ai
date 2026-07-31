@@ -174,11 +174,35 @@
     padding: 3px 10px; cursor: pointer; line-height: 1.15;
     transition: background .12s, border-color .12s, color .12s;
   }
+  /* BRAINMAP-MULTI-DOMAIN: on TOUCH pointers only, the chips grow to a real tap
+     target. Measured at 320/360/390px the legend chip was 22.4px tall — under
+     any tap-target floor — which mattered little when a reader tapped ONE
+     domain and matters a lot now that building a combination means tapping
+     several in a row. Gated on (pointer: coarse), so the desktop legend is
+     byte-identical to what it was. Padding only: no size or opacity encoding
+     is involved, and the twelve chips still wrap in the same order. */
+  @media (pointer: coarse) {
+    .legend .key { padding: 8px 12px; }
+    .legend { gap: 10px 14px; }
+  }
   .legend .key:hover { background: #17233a; border-color: var(--line); color: var(--ink); }
   .legend .key:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
   .legend .key.active {
     background: #142642; border-color: var(--brand); color: var(--brand-ink); font-weight: 700;
   }
+  /* BRAINMAP-MULTI-DOMAIN: the selected mark. A CHECKMARK plus the existing
+     active chrome (filled ground, brand border, brand ink, bold) — never
+     opacity, which encodes nothing on this page, and never size, which encodes
+     outlet count. The span keeps its 9px whether or not it holds the glyph, so
+     toggling a domain cannot reflow the twelve chips or make a selected chip
+     read as bigger. */
+  .legend .key .tick {
+    display: inline-block; width: 9px; text-align: center;
+    font-size: 11px; font-weight: 700; line-height: 1; color: var(--brand-ink);
+  }
+  /* The chip order is corpus volume, stated so a multi-selection row cannot be
+     read as a priority list. Same disclosure the search stepper makes. */
+  .legend-note { font-size: 11.5px; color: var(--muted); }
   .legend .dot {
     width: 10px; height: 10px; border-radius: 50%; display: inline-block;
   }
@@ -310,9 +334,29 @@
   var hoverNode = null;
 
   // BRAINMAP-FILTER: client-side domain filter over the already-loaded nodes
-  // (no new fetch, no data change). null = show all; {type:'domain', value}
-  // isolates one domain; {type:'market'} isolates market_commercial nodes.
-  var activeFilter = null;
+  // (no new fetch, no data change).
+  // BRAINMAP-MULTI-DOMAIN: the single {type,value} slot became a SET of domain
+  // values, so 교육 and 복지 can be read together. Everything else about the
+  // filter is unchanged — same client-side dimming, same AND chain, no fetch.
+  //   domainSel  : selected domain values. EMPTY = no domain condition (every
+  //                domain lit), which is the state 전체 보기 shows as active.
+  //                Empty and all-twelve-selected produce the same lit set but
+  //                are DIFFERENT STATES and are shown differently (see
+  //                updateLegendActive): empty lights 전체 보기, all-twelve
+  //                lights twelve ticked chips. Order is meaningless here — it
+  //                is a set, never a ranking, and selected chips are never
+  //                promoted or reordered in the legend.
+  //   marketOnly : the 시장·시세 소식(빈 점) isolate. Kept MUTUALLY EXCLUSIVE
+  //                with domainSel exactly as the old single slot was, so no
+  //                existing combination changes meaning.
+  //   multiSelectMode : an INPUT MODE, not a filter. While on, a plain tap
+  //                toggles a domain instead of switching to it — the touch
+  //                route to multi-select, mirroring the existing focus-arm
+  //                chip (a phone has no Ctrl/⌘/Shift). Off by default, so a
+  //                plain click keeps its current meaning byte for byte.
+  var domainSel = [];
+  var marketOnly = false;
+  var multiSelectMode = false;
   // BRAINMAP-FEATURES: two ADDITIONAL client-side conditions that compose with
   // the domain filter via AND in isActive — a node stays lit only if it passes
   // ALL active conditions. Circulation-only (title match / cluster outlet
@@ -335,7 +379,7 @@
   var focusNoteTimer = null;
 
   function anyFilterActive() {
-    return activeFilter !== null || searchQuery !== "" || spreadMin > 0
+    return domainSel.length > 0 || marketOnly || searchQuery !== "" || spreadMin > 0
       || focusCluster !== null || hideMarket;
   }
 
@@ -614,13 +658,14 @@
       if (n.cluster_id !== focusCluster) return false;
     }
     if (hideMarket && n.content_nature === "market_commercial") return false;
-    if (activeFilter) {
-      if (activeFilter.type === "market") {
-        if (n.content_nature !== "market_commercial") return false;
-      } else if ((n.domain || "기타-미분류") !== activeFilter.value) {
-        return false;
-      }
-    }
+    // BRAINMAP-MULTI-DOMAIN: still ONE link in the same AND chain. A node passes
+    // when its domain is ANY of the selected ones (OR within the domain
+    // condition), and an EMPTY selection imposes no condition at all — which is
+    // why removing the last domain returns to the whole map rather than
+    // blanking it. Selection order is never consulted.
+    if (marketOnly && n.content_nature !== "market_commercial") return false;
+    if (domainSel.length
+        && domainSel.indexOf(n.domain || "기타-미분류") === -1) return false;
     if (spreadMin > 0) {
       // Metric: the node's CLUSTER outlet_count. Isolated nodes (no cluster)
       // never meet an "N개 매체 이상" threshold — they dim, correctly (single
@@ -645,14 +690,22 @@
     // BRAINMAP-FILTER: each key is a filter toggle. "전체 보기" (active by
     // default) restores all; a domain key isolates its constellation; the
     // hollow market key isolates 시장·시세 nodes. Palette hex unchanged.
-    var html = '<button type="button" class="key key-all active" data-filter="all">전체 보기</button>';
+    var html = '<button type="button" class="key key-all active" data-filter="all" aria-pressed="true">전체 보기</button>';
+    // BRAINMAP-MULTI-DOMAIN: the touch route to combining domains, sitting next
+    // to 전체 보기 because both set the SCOPE of the domain selection. On
+    // desktop Ctrl/⌘/Shift+click does the same thing without a mode.
+    html += '<button type="button" class="key" data-filter="multi-arm" aria-pressed="false">' +
+            '분야 여러 개 고르기</button>';
     html += order.map(function (d) {
       var name = DOMAIN_KO[d] || d;
-      return '<button type="button" class="key" data-filter="domain" data-domain="' + escapeHtml(d) + '">' +
+      // The tick span is ALWAYS present (empty when unselected) so toggling a
+      // domain never reflows the legend and a selected chip is never wider.
+      return '<button type="button" class="key" data-filter="domain" aria-pressed="false" data-domain="' + escapeHtml(d) + '">' +
+             '<span class="tick" aria-hidden="true"></span>' +
              '<span class="dot" style="background:' + colorFor(d) + '"></span>' +
              escapeHtml(name) + "</button>";
     }).join("");
-    html += '<button type="button" class="key" data-filter="market">' +
+    html += '<button type="button" class="key" data-filter="market" aria-pressed="false">' +
             '<span class="dot hollow"></span>시장·시세 소식(빈 점)</button>';
     // BRAINMAP-FOCUS: content-nature toggle. Same .key chip, same delegated
     // click handler, same dimming — it only adds one AND condition. The label
@@ -671,6 +724,12 @@
               '입체 보기</button>' +
               '<span id="modeHint" class="search-count" style="display:none"></span>';
     }
+    // BRAINMAP-MULTI-DOMAIN: the chips are ordered by how many articles each
+    // domain has, which is a FACT about the corpus and not a judgement about
+    // which domain matters more. Now that several can be on at once the row
+    // could start to read as a priority list, so it says what the order is —
+    // the same disclosure the search stepper makes about its own ordering.
+    html += '<span class="legend-note">분야 순서는 기사 수 순 · 중요도 아님</span>';
     document.getElementById("legend").innerHTML = html;
   }
 
@@ -1307,13 +1366,22 @@
     if (!btn) return;
     var kind = btn.getAttribute("data-filter");
     // BRAINMAP-FOCUS: the two new keys are INDEPENDENT toggles, not members of
-    // the mutually-exclusive activeFilter slot — they leave domain/market alone.
+    // the mutually-exclusive domain/market pair — they leave both alone.
     if (kind === "nature-hide") {
       hideMarket = !hideMarket;
       // "시장·시세만 보기" and "시장·시세 숨기기" are contradictory intents; if
       // the isolate key was on, drop it rather than light an empty map.
-      if (hideMarket && activeFilter && activeFilter.type === "market") activeFilter = null;
+      if (hideMarket && marketOnly) marketOnly = false;
       updateLegendActive(); updateSearchCount(); draw();
+      return;
+    }
+    // BRAINMAP-MULTI-DOMAIN: an INPUT MODE, not a filter — it changes what a
+    // plain tap MEANS and moves no node in or out of the lit set, so there is
+    // nothing to refresh beyond its own chip. Sticky (not one-shot like
+    // focus-arm) because picking several domains takes several taps.
+    if (kind === "multi-arm") {
+      multiSelectMode = !multiSelectMode;
+      updateLegendActive();
       return;
     }
     if (kind === "focus-arm") {
@@ -1347,22 +1415,47 @@
       draw();
       return;
     }
-    var next = null;
-    if (kind === "domain") next = { type: "domain", value: btn.getAttribute("data-domain") };
-    else if (kind === "market") {
-      next = { type: "market" };
-      // Mirror of the reconciliation above: isolating 시장·시세 while hiding it
-      // would light nothing, so the hide toggle yields to the newer intent.
-      hideMarket = false;
+    if (kind === "domain") {
+      // BRAINMAP-MULTI-DOMAIN: two ways in, and the DEFAULT one is unchanged.
+      //   * plain click, mode off  -> isolate this domain (today's behaviour,
+      //     including "re-click the sole selection to go back to 전체 보기"),
+      //     so a reader whose habit is click-to-switch sees exactly what they
+      //     saw before and is never surprised into an accumulating selection;
+      //   * Ctrl/⌘/Shift+click, OR any plain click while 분야 여러 개 고르기 is
+      //     on -> TOGGLE membership, which is how a combination is built and
+      //     unbuilt. Toggling is symmetric: the same gesture removes.
+      // A plain click on top of a multi-selection collapses back to that one
+      // domain — the switch habit still means "just this one".
+      var value = btn.getAttribute("data-domain");
+      var at = domainSel.indexOf(value);
+      if (multiSelectMode || ev.ctrlKey || ev.metaKey || ev.shiftKey) {
+        if (at === -1) domainSel.push(value);
+        else domainSel.splice(at, 1);
+      } else if (domainSel.length === 1 && at === 0) {
+        domainSel = [];
+      } else {
+        domainSel = [value];
+      }
+      // Domains and the 시장·시세 isolate stay mutually exclusive, exactly as
+      // the single filter slot made them — no existing pair changes meaning.
+      if (domainSel.length) marketOnly = false;
+    } else if (kind === "market") {
+      marketOnly = !marketOnly;
+      if (marketOnly) {
+        domainSel = [];
+        // Mirror of the reconciliation above: isolating 시장·시세 while hiding it
+        // would light nothing, so the hide toggle yields to the newer intent.
+        hideMarket = false;
+      }
+    } else if (kind === "all") {
+      // "전체 보기" is the existing restore-all key — it releases focus, and now
+      // clears the WHOLE domain selection however many chips were on. It does
+      // not touch 분야 여러 개 고르기: that is an input mode, not a filter, the
+      // same way 전체 보기 has never turned off 입체 보기.
+      clearFocus(false);
+      domainSel = [];
+      marketOnly = false;
     }
-    // "전체 보기" is the existing restore-all key — it now also releases focus.
-    else if (kind === "all") clearFocus(false);
-    // Toggle off when re-clicking the active filter -> back to "전체 보기".
-    if (next && activeFilter && next.type === activeFilter.type &&
-        (next.type !== "domain" || next.value === activeFilter.value)) {
-      next = null;
-    }
-    activeFilter = next;
     updateLegendActive();
     hoverNode = null;
     tooltip.style.display = "none";
@@ -1378,11 +1471,22 @@
       var k = keys[i], kind = k.getAttribute("data-filter"), on = false;
       if (kind === "nature-hide") on = hideMarket;
       else if (kind === "focus-arm") on = focusArmed;
+      else if (kind === "multi-arm") on = multiSelectMode;
       else if (kind === "mode3d") on = mode3d;
-      else if (!activeFilter) on = (kind === "all");
-      else if (activeFilter.type === "market") on = (kind === "market");
-      else on = (kind === "domain" && k.getAttribute("data-domain") === activeFilter.value);
+      else if (kind === "market") on = marketOnly;
+      else if (kind === "domain") on = domainSel.indexOf(k.getAttribute("data-domain")) !== -1;
+      // BRAINMAP-MULTI-DOMAIN: 전체 보기 is lit ONLY by an empty selection. That
+      // is what keeps "nothing selected" and "all twelve selected" from
+      // silently collapsing into one state: both light the whole map, but the
+      // first shows 전체 보기 active with no ticks, and the second shows twelve
+      // ticked chips with 전체 보기 off.
+      else if (kind === "all") on = (!domainSel.length && !marketOnly);
       if (on) k.classList.add("active"); else k.classList.remove("active");
+      k.setAttribute("aria-pressed", on ? "true" : "false");
+      // The checkmark is what says MULTI-selection: several chips can be on at
+      // once, which the single-selection chrome never had to express.
+      var tick = k.querySelector ? k.querySelector(".tick") : null;
+      if (tick) tick.textContent = on ? "✓" : "";
     }
   }
 
