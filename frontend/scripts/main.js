@@ -495,7 +495,12 @@
     // phrases (검증 완료 / 사람 검토 대기) and VERDICT_LABELS is mutated below.
     // Left in place to avoid byte-risk; revisit in a later pinned-cluster slice.
     const VERDICT_LABELS = {
-      draft_verified: "임시 검증 완료",
+      // VERDICT-LABEL-SURFACES: qualified to match web/claim.html exactly —
+      // the stored value is an automated provisional pass (rules/LLM judge,
+      // docs/VERDICT_LABEL_DIAGNOSTIC.md), never a human confirmation, and
+      // every surface must read the same. card_render_audit.js parses the
+      // claim page's copy and fails on any drift between the two.
+      draft_verified: "임시 검증 완료 (AI 초안, 사람 검토 대기)",
       draft_likely_true: "사실 가능성 높음",
       draft_unverified: "추가 검증 필요",
       draft_needs_context: "맥락 추가 확인 필요",
@@ -2898,7 +2903,7 @@
             ${sourcePill}
             <span class="verdict-pill ${verdictTierClass(card.verdictLabel)}">
               <span class="verdict-dot" style="background:${verdictDotColor(card.verdictLabel)}"></span>
-              <span class="verdict-text">판정 ${escapeHtml(verdictLabelKo(card.verdictLabel))}</span>
+              <span class="verdict-text">AI 검증 상태 ${escapeHtml(verdictLabelKo(card.verdictLabel))}</span>
             </span>
           </div>
           ${sourceBody}
@@ -3450,7 +3455,7 @@
             <span class="rank-title">${escapeHtml(card.title)}</span>
             <span class="rank-verdict">
               <span class="verdict-dot" style="background:${verdictDotColor(card.verdictLabel)}"></span>
-              <span class="rank-verdict-text">판정 ${escapeHtml(verdictLabelKo(card.verdictLabel))}</span>
+              <span class="rank-verdict-text">AI 검증 상태 ${escapeHtml(verdictLabelKo(card.verdictLabel))}</span>
             </span>
           </div>
         </div>`;
@@ -5610,7 +5615,7 @@
         <section class="reading-guide">
           <div class="reading-guide-grid">
             <div class="reading-guide-card">
-              <strong>판정 단계</strong>
+              <strong>경고 단계</strong>
               ${escapeHtml(formatAlert(context.level))}은 현재 확보된 근거를 기준으로 얼마나 조심해서 봐야 하는지를 뜻합니다.
             </div>
             <div class="reading-guide-card">
@@ -6891,11 +6896,11 @@
             <section class="verdict-block">
               <div class="verdict-indicators">
                 <div class="verdict-indicator">
-                  <span class="verdict-label">판정 단계</span>
+                  <span class="verdict-label">경고 단계</span>
                   <span class="verdict-value">${escapeHtml(formatAlert(level))}</span>
                 </div>
                 <div class="verdict-indicator">
-                  <span class="verdict-label">AI 초안 판정</span>
+                  <span class="verdict-label">AI 검증 상태</span>
                   <span class="verdict-value">${escapeHtml(safeAiDraftVerdictForExport(result))}</span>
                 </div>
                 <!-- CARD-SIMPLIFY: the 근거 수준 number indicator is OFF the verdict
@@ -6918,7 +6923,7 @@
                 ${result.human_reviewed_at ? `<span class="review-status review-approved">${escapeHtml(HUMAN_REVIEWED_LABEL)}</span>` : ""}
               </div>
             </div>
-            ${renderCollapsibleSection("이 리포트는 이렇게 읽으면 됩니다", renderReadingGuide(userContext), false, "처음 보는 분을 위한 안내입니다. 판정 단계·공식 출처·근거를 어떻게 읽으면 되는지 설명합니다.")}
+            ${renderCollapsibleSection("이 리포트는 이렇게 읽으면 됩니다", renderReadingGuide(userContext), false, "처음 보는 분을 위한 안내입니다. 경고 단계·공식 출처·근거를 어떻게 읽으면 되는지 설명합니다.")}
             <!-- STEP 2 items 6+7: the AI 종합 검증 판단 residual card. STEP 3c removed
                  the duplicate 초안 판정 tile (now led by the top verdict block); kept:
                  리뷰 상태 + 핵심 주장 + the advanced collapsible. STEP 5: the advanced

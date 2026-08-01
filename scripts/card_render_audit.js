@@ -1752,6 +1752,67 @@ for (const [win, ids] of Object.entries(windows)) {
 }
 
 // ---------------------------------------------------------------------------
+// VERDICT-LABEL-SURFACES gate — no reader-visible surface may render the bare
+// adjudication word (판정) as a LABEL. The canonical wording is OWNED by
+// web/claim.html (the cold-email landing where it was first replaced): the
+// renamed column header and the qualified draft_verified value are PARSED from
+// that file, never typed here, so this gate cannot drift from the page it
+// mirrors. Scanned sources: main.js render templates + template.html. Each
+// pattern is anchored to a reader-shipping label position; operator-only
+// surfaces (server review panel's 판정 기록/이력/유형, the operatorToolsFlagSet-
+// gated dashboard tiles) and prose that DENIES adjudication are deliberately
+// not matchable by these anchors. The test-pinned export lines
+// (tests/regression.test.js requiredSections) are likewise excluded until the
+// slice that co-updates those pins.
+// ---------------------------------------------------------------------------
+{
+  const claimHtml = fs.readFileSync(path.join(ROOT, "web", "claim.html"), "utf8");
+  const thm = claimHtml.match(/<th>([^<]*검증 상태[^<]*)<\/th>/);
+  const dvm = claimHtml.match(/draft_verified:\s*"([^"]+)"/);
+  if (!thm || !dvm) {
+    failures.push("SOURCE PIN LOST: web/claim.html no longer carries the "
+      + "renamed status column header and/or a draft_verified display value "
+      + "— the vocabulary owner moved; re-anchor the adjudication-label gate");
+  } else {
+    const CANON_HEADER = thm[1];
+    const CANON_DRAFT_VERIFIED = dvm[1];
+    const mainDv = mainJs.match(/draft_verified:\s*"([^"]+)"/);
+    if (!mainDv || mainDv[1] !== CANON_DRAFT_VERIFIED) {
+      failures.push("ADJUDICATION LABEL: main.js VERDICT_LABELS.draft_verified "
+        + `is ${mainDv ? JSON.stringify(mainDv[1]) : "MISSING"} but the claim `
+        + `page ships ${JSON.stringify(CANON_DRAFT_VERIFIED)} — one value must `
+        + "read the same everywhere");
+    }
+    const BARE_LABEL_PATTERNS = [
+      [/판정 \$\{/g, "bare adjudication prefix before an interpolated value"],
+      [/>AI 판정</g, "legend axis heading claims adjudication"],
+      [/>판정 단계</g, "tile labels the alert level as an adjudication stage"],
+      [/>AI 초안 판정</g, "tile labels the AI draft state as an adjudication"],
+      [/>검증 완료</g, "legend row labels an automated provisional pass as "
+        + "completed verification"],
+    ];
+    for (const [src, name] of [[mainJs, "main.js"],
+                               [templateHtml, "template.html"]]) {
+      for (const [re, why] of BARE_LABEL_PATTERNS) {
+        const n = (src.match(re) || []).length;
+        if (n) failures.push(`ADJUDICATION LABEL: ${name} matches ${re} `
+          + `x${n} — ${why}; reuse the claim page's shipped wording `
+          + `(${JSON.stringify(CANON_HEADER)} / `
+          + `${JSON.stringify(CANON_DRAFT_VERIFIED)})`);
+      }
+    }
+    // vacuity: every pattern must still fire on its pre-fix specimen.
+    const CONTROL = '판정 ${x} >AI 판정< >판정 단계< >AI 초안 판정< >검증 완료<';
+    for (const [re] of BARE_LABEL_PATTERNS) {
+      if (!(CONTROL.match(re) || []).length) {
+        failures.push(`VACUOUS DETECTOR: adjudication-label pattern ${re} `
+          + "no longer matches its control");
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // answer-sentence omission grid (deterministic; any bad case FAILs)
 // ---------------------------------------------------------------------------
 (async () => {

@@ -352,7 +352,7 @@
           </div>
           <!-- LABEL-1 STEP 5: legend rebuilt into TWO labeled axes. GROUP 1 (공식 근거)
                = evidence-presence layer, colors matched to the card's green evidence pill
-               (.card-source-head) + the blue 공식자료 참고 status. GROUP 2 (AI 판정) = the
+               (.card-source-head) + the blue 공식자료 참고 status. GROUP 2 (AI 검증 상태) = the
                verdict-dot color axis (green/orange/red/muted), now INCLUDING the previously
                missing green draft_verified row. Colors mirror the card labels exactly. -->
           <!-- LABEL-1b STEP 1: each row's leading mark (✓ swatch OR round dot) is
@@ -371,10 +371,10 @@
               <span class="legend-lead"><span class="verdict-dot" style="background:var(--brand)"></span></span>
               <div class="legend-body"><span class="legend-label">공식자료 참고</span></div>
             </li>
-            <li class="legend-group-head">AI 판정</li>
+            <li class="legend-group-head">AI 검증 상태</li>
             <li class="legend-row">
               <span class="legend-lead"><span class="verdict-dot" style="background:var(--verify)"></span></span>
-              <div class="legend-body"><span class="legend-label">검증 완료</span></div>
+              <div class="legend-body"><span class="legend-label">임시 검증 완료</span></div>
             </li>
             <li class="legend-row">
               <span class="legend-lead"><span class="verdict-dot" style="background:var(--orange)"></span></span>
@@ -946,13 +946,17 @@
       </div>
 
       <div class="methodology-card">
-        <h3><svg class="section-icon" aria-hidden="true"><use href="#ic-gauge"/></svg>AI 판정</h3>
+        <h3><svg class="section-icon" aria-hidden="true"><use href="#ic-gauge"/></svg>AI 검증 상태</h3>
         <ul class="legend-list">
           <li class="legend-row">
             <span class="legend-lead"><span class="verdict-dot" style="background:var(--verify)"></span></span>
             <div class="legend-body">
-              <span class="legend-label">검증 완료</span>
-              <span class="legend-desc">임시 검증 완료</span>
+              <span class="legend-label">임시 검증 완료</span>
+              <!-- VERDICT-LABEL-SURFACES: the desc EXPLAINS the level — the
+                   green dot is an automated provisional pass awaiting human
+                   review (shipped review-status wording), never a completed
+                   human verification. -->
+              <span class="legend-desc">AI 초안, 사람 검토 대기</span>
             </div>
           </li>
           <li class="legend-row">
