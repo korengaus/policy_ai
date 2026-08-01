@@ -97,6 +97,26 @@ jobs:
       - name: Run npm test (regression — explicit re-run for dashboard clarity)
         run: npm test
 
+      # MARKER-REPEAT-AND-CI-GATE: the render scanner had NO automatic caller —
+      # its only invoker was scripts/b2b_readiness_audit.py, which a person runs
+      # by hand with live DB credentials. Two ZERO-class defects therefore
+      # shipped while their samples passed. A gate that does not run is not a
+      # gate, so it runs here on a committed fixture.
+      #
+      # WHAT THIS CATCHES: everything the scan derives from SOURCE — the ~60
+      # source pins, UNPINNED DEPENDENCY, every vacuity control, the
+      # status-vocabulary/missing-key gate across main.js + claim.html, the
+      # answer-sentence grid — plus the ZERO classes on the fixture's own rows
+      # (row 5740 is the stacked-marker specimen).
+      # WHAT THIS CANNOT CATCH: any defect whose SHAPE is absent from the
+      # fixture. The fixture is 6 frozen rows; the corpus is ~14.5k. This is a
+      # REGRESSION guard, not a discovery tool — new live shapes still surface
+      # only in the live CHECK 8 run. CEILING rate classes are deliberately not
+      # policed here (see the CI baselines file); a 6-row sample cannot measure
+      # a rate, so those thresholds are pinned open rather than faked.
+      - name: Run card render scan (fixture — source pins + zero classes)
+        run: node scripts/card_render_audit.js tests/fixtures/card_render_ci_rows.json tests/fixtures/card_render_ci_baselines.json
+
       - name: Run quick operational profile
         run: python scripts/run_operational_checks.py --profile quick --no-default-reports
 

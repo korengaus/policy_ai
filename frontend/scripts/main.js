@@ -641,12 +641,26 @@
     // "|| text" fallback means a title that is NOTHING but a marker keeps its
     // stored text rather than rendering empty. 7.63% of stored titles carry one.
     const LEADING_TITLE_BRACKET_RE = /^\s*\[[^\]]{1,15}\]\s*/;
+    // MARKER-REPEAT: outlets STACK markers ("[단독] [2027대입잣대] …"), and a
+    // single pass left the second bracket attached on 6 stored titles. Each
+    // pass is anchored and strictly shortens, so the loop is a fixed point —
+    // it stops as soon as a pass changes nothing. Bounded at 4 purely as a
+    // runaway guard: the corpus maximum is 2 stacked markers, so 4 is headroom
+    // rather than a behaviour limit, and a bound means no title can ever cost
+    // unbounded work. SHORTEN-OR-NOTHING is preserved twice over: a pass that
+    // would empty the title breaks out, and the final "|| text" still returns
+    // the stored text, so a marker-only headline never renders blank.
     function stripLeadingTitleMarker(value) {
       const text = sanitizeDisplayText(value);
-      const stripped = text
-        .replace(LEADING_TITLE_BRACKET_RE, "")
-        .replace(LEADING_TITLE_MARKER_RE, "");
-      return stripped || text;
+      let out = text;
+      for (let pass = 0; pass < 4; pass += 1) {
+        const next = out
+          .replace(LEADING_TITLE_BRACKET_RE, "")
+          .replace(LEADING_TITLE_MARKER_RE, "");
+        if (!next || next === out) break;
+        out = next;
+      }
+      return out || text;
     }
 
     // TITLE-TAIL-STRIP \u2014 remove a trailing " - <outlet>" from a rendered title

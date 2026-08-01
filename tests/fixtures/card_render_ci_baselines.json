@@ -1,0 +1,85 @@
+{
+ "_comment": "CI-ONLY baselines for scripts/card_render_audit.js run against tests/fixtures/card_render_ci_rows.json. CEILING classes are RATE checks and a frozen 6-row fixture cannot measure a rate, so every ceiling is pinned to 1.0 with full tolerance: ceilings are NOT policed in CI and never will be by this file. Only the ZERO classes, the SOURCE PINS, the vacuity controls and the vocabulary gate carry signal here. Corpus ceilings stay in scripts/card_render_baselines.json, measured by the live b2b_readiness_audit.py CHECK 8 run.",
+ "recorded": "2026-07-28",
+ "windows": {
+  "mod14": {
+   "n": 6,
+   "ceilings": {
+    "bullet_char": {
+     "rate": 1.0,
+     "tol": 1.0
+    },
+    "question_mojibake": {
+     "rate": 1.0,
+     "tol": 1.0
+    },
+    "sentence_join": {
+     "rate": 1.0,
+     "tol": 1.0
+    },
+    "hero_digit_start": {
+     "rate": 1.0,
+     "tol": 1.0
+    },
+    "hero_restates_title": {
+     "rate": 1.0,
+     "tol": 1.0
+    },
+    "empty_section": {
+     "rate": 1.0,
+     "tol": 1.0
+    }
+   },
+   "cand_tail": {
+    "p90": 100000,
+    "p99": 100000,
+    "warn_factor": 1.0
+   }
+  },
+  "latest500": {
+   "n": 6,
+   "ceilings": {
+    "bullet_char": {
+     "rate": 1.0,
+     "tol": 1.0
+    },
+    "question_mojibake": {
+     "rate": 1.0,
+     "tol": 1.0
+    },
+    "sentence_join": {
+     "rate": 1.0,
+     "tol": 1.0
+    },
+    "hero_digit_start": {
+     "rate": 1.0,
+     "tol": 1.0
+    },
+    "hero_restates_title": {
+     "rate": 1.0,
+     "tol": 1.0
+    },
+    "empty_section": {
+     "rate": 1.0,
+     "tol": 1.0
+    }
+   },
+   "cand_tail": {
+    "p90": 100000,
+    "p99": 100000,
+    "warn_factor": 1.0
+   }
+  }
+ },
+ "hero_clamp": {
+  "_comment": "HERO-CLAMP (2026-07-31). The hero summary is clipped by CSS, not JS. Measured in a real browser over the newest 300 card-face summaries at the shipped budget: max 2 wrapped lines at 1440x900 (hero summary 912px wide) and max 4 at 390x844 (362px wide), so 0 of 300 were clipped at clamp=4 at either viewport. The check reads both constants from the files that own them (clamp from frontend/styles/main.css, budget from CARD_FACE_MAX_CHARS in frontend/scripts/main.js) and fails if the clamp SHRINKS below this baseline or the budget GROWS above it, either of which would let the clamp start cutting mid-phrase again.",
+  "clamp": 4,
+  "budget_chars": 115,
+  "measured": {
+   "desktop_1440_max_lines": 2,
+   "phone_390_max_lines": 4,
+   "pool": 300,
+   "clipped": 0
+  }
+ }
+}
