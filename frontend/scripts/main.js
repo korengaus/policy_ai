@@ -516,7 +516,13 @@
     };
     const HUMAN_REVIEWED_LABEL = "사람 검토됨";
     VERDICT_LABELS.draft_needs_review = "사람 검토 대기";
-    VERDICT_LABELS.draft_high_risk_review = "고위험 사람 검토 대기";
+    // HIGH-RISK-LABEL: 고위험 borrowed the ALERT axis's own vocabulary, which
+    // contradicted the DUAL-AXIS-CLARITY line stating the two axes are
+    // independent. The replacement names what was EXAMINED (framing language +
+    // a confirmed contradiction — verification_card.py:521) rather than what
+    // was concluded, so the signal survives without importing severity.
+    // Must match web/claim.html character for character (gate-parsed).
+    VERDICT_LABELS.draft_high_risk_review = "표현·반박 확인, 사람 검토 대기";
 
     // DESIGN-3B-1: DISPLAY-ONLY verdict_label → color map for the card-face
     // verdict dot. Pure presentation — does NOT change verdict_label, the verdict
@@ -1231,7 +1237,7 @@
       const labels = {
         draft_verified: "공식 근거 확인 필요",
         draft_needs_review: "사람 검토 대기",
-        draft_high_risk_review: "고위험 사람 검토 대기",
+        draft_high_risk_review: "표현·반박 확인, 사람 검토 대기",
         draft_needs_official_confirmation: "공식 확인 필요",
         official_detail_missing: "공식 상세 원문 부족",
         official_detail_url_missing: "공식 상세 URL 부족",

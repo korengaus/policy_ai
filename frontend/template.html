@@ -483,8 +483,12 @@
                 </svg>
               </div>
               <div class="verify-how-eyebrow">STEP 03</div>
-              <h3 class="verify-how-title">등급 판정·공개</h3>
-              <p class="verify-how-desc">근거 등급과 판정을 출처 링크와 함께 공개하고, 새 사실이 나오면 정정합니다.</p>
+              <!-- HIGH-RISK-LABEL: the last reader-reachable 판정. This step
+                   describes PUBLISHING, not labelling, so it is not given a
+                   status string — it keeps 근거 등급 (the thing published) and
+                   drops the adjudication word from both title and body. -->
+              <h3 class="verify-how-title">근거 등급·출처 공개</h3>
+              <p class="verify-how-desc">근거 등급과 확인된 공식 출처를 링크와 함께 공개하고, 새 사실이 나오면 정정합니다.</p>
             </div>
           </div>
           <div class="verify-how-arrow verify-how-arrow--a" aria-hidden="true">
@@ -1040,7 +1044,7 @@
         <ul class="methodology-list">
           <li><strong>AI 초안</strong>: 사람 검토를 거치기 전의 자동 생성 결과입니다.</li>
           <li><strong>사람 검토 대기</strong>: 사람이 원문·공식문서·맥락을 확인해야 하는 상태입니다.</li>
-          <li><strong>고위험 사람 검토 대기</strong>: 위험 신호가 있어 사람 확인이 우선적으로 필요한 상태입니다.</li>
+          <li><strong>표현·반박 확인, 사람 검토 대기</strong>: 기사의 표현 방식과 반박·모순 신호를 함께 확인해야 해서 사람 확인이 우선적으로 필요한 상태입니다.</li>
           <li><strong>사람 검토됨</strong>: 사람이 확인을 마친 결과입니다.</li>
         </ul>
       </div>

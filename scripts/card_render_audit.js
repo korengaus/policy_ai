@@ -1779,8 +1779,16 @@ for (const [win, ids] of Object.entries(windows)) {
     // DUAL-AXIS-CLARITY: draft_likely_true joined the pinned pair — its old
     // value was a truth claim outright, so its renamed value must stay
     // identical across surfaces exactly like draft_verified's.
-    for (const key of ["draft_verified", "draft_likely_true"]) {
-      const keyRe = new RegExp(key + ':\\s*"([^"]+)"');
+    // HIGH-RISK-LABEL: draft_high_risk_review joined the pinned set — it is
+    // set by mutation on the site, so it was absent from claim.html and the
+    // two surfaces had silently forked before this pin existed.
+    for (const key of ["draft_verified", "draft_likely_true",
+                       "draft_high_risk_review"]) {
+      // [:=] because draft_high_risk_review is assigned by MUTATION on the
+      // site (VERDICT_LABELS.key = "…") but sits in the object literal on the
+      // claim page; a colon-only pattern would read one side as MISSING and
+      // fire a false pin-lost instead of comparing the two values.
+      const keyRe = new RegExp(key + '\\s*[:=]\\s*"([^"]+)"');
       const claimVal = claimHtml.match(keyRe);
       const mainVal = mainJs.match(keyRe);
       if (!claimVal) {
