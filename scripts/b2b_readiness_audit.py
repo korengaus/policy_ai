@@ -466,6 +466,73 @@ def build_readonly_engine():
 # ---------------------------------------------------------------------------
 # The audit
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# REVIEWER-INTO-AUDIT — the semantic reviewer as an ADVISORY notice.
+#
+# WHY IT IS NOT A ROW IN `rep`: run_audit's exit code is computed from
+# rep.rows ONLY (rep.worst(), plus the `fails`/`warns` list comprehensions over
+# rep.rows). The reviewer is a non-deterministic LLM layer whose own docs say
+# it is flag-and-hold BY CONSTRUCTION — it never auto-passes and never
+# auto-fails, because run-to-run disagreement is expected and Korean quotation
+# cannot be mechanically separated from assertion. A layer like that must never
+# decide whether nine cold emails go out. So its result is collected in a
+# SEPARATE list that rep never sees: there is no status string it could emit,
+# and no future edit to the status-ranking dict, that can reach the exit code.
+# The send decision stays with the deterministic rows.
+#
+# INVOKED AS A SUBPROCESS, exactly like CHECK 8 invokes the render scanner, so
+# scripts/showcase_reviewer_card_probe.py needs no callable entry point and is
+# not modified — its prompt and its three permitted questions are untouched.
+#
+# Probe exit codes (read from its own main()): 0 = ran, nothing held; 3 = notes
+# held for a human read; 2 = vacuous drift detector (its self-check failed).
+# A missing key/DB makes it print a sentinel and return 0, so returncode alone
+# would read as "clean" — the stdout sentinel is what distinguishes that.
+REVIEWER_CMD = [sys.executable, "-X", "utf8",
+                str(ROOT / "scripts" / "showcase_reviewer_card_probe.py")]
+REVIEWER_UNAVAILABLE_MARKS = ("ANTHROPIC_API_KEY not set", "DATABASE_URL not set")
+
+
+def reviewer_advisory_row(returncode, output):
+    """Pure classifier: (probe exit code, probe stdout) -> advisory row.
+
+    Returns (label, status, observed, note). NEVER raises, and the caller puts
+    the result in advisory_rows, never in rep.rows.
+    """
+    text = output or ""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    unavailable = [m for m in REVIEWER_UNAVAILABLE_MARKS if m in text]
+    if unavailable:
+        return ("R1 semantic reviewer", "UNAVAILABLE",
+                "did not run: %s" % unavailable[0],
+                "no semantic read was taken this run — the deterministic rows "
+                "above are unaffected and still decide the send")
+    if returncode == 2:
+        return ("R1 semantic reviewer", "UNAVAILABLE",
+                "drift detector self-check failed (exit 2) — no verdicts taken",
+                "the reviewer refused to spend calls on a detector it cannot "
+                "trust; deterministic rows above are unaffected")
+    if returncode == 3:
+        held = [ln for ln in lines if ln.startswith("HOLD FOR HUMAN READ")]
+        drift = [ln for ln in lines if ln.startswith("TRUTH-DRIFT:")]
+        return ("R1 semantic reviewer", "HOLD",
+                ((held[0] if held else "notes held") + " | "
+                 + (drift[0] if drift else ""))[:260],
+                "a person must read the held notes before sending; this does "
+                "NOT block the audit and does not decide the send")
+    if returncode == 0:
+        drift = [ln for ln in lines if ln.startswith("TRUTH-DRIFT:")]
+        return ("R1 semantic reviewer", "NO HOLD",
+                (drift[0] if drift else "ran, no notes held"),
+                "nothing held for a human read this run; the reviewer never "
+                "auto-passes the send either")
+    return ("R1 semantic reviewer", "UNAVAILABLE",
+            "probe exited %s — %s" % (returncode,
+                                      (lines[-1][:120] if lines else "no output")),
+            "no semantic read was taken this run — deterministic rows above "
+            "are unaffected")
+
+
 class Report:
     def __init__(self):
         self.rows = []
@@ -481,10 +548,14 @@ class Report:
         return max((order.get(s, 0) for _, s, _, _ in self.rows), default=0)
 
 
-def run_audit(base: str) -> int:
+def run_audit(base: str, with_reviewer: bool = False) -> int:
     rep = Report()
     budget = Budget(MAX_LIVE_REQUESTS)
     p = print
+    # REVIEWER-INTO-AUDIT: advisory notices live here, NOT in rep.rows, so they
+    # cannot reach rep.worst() / fails / warns and therefore cannot change the
+    # exit code. Default empty — the reviewer is opt-in (--with-reviewer).
+    advisory_rows = []
 
     # ---------------- CHECK 1 — the email's numbers -----------------------
     status, claim = http_get(base, "/api/claim/" + FLAGSHIP_LINEAGE, budget)
@@ -1078,6 +1149,29 @@ def run_audit(base: str) -> int:
                     "the render scan silently skipped")
         engine.dispose()
 
+    # ---------------- R1 — semantic reviewer (ADVISORY, opt-in) ------------
+    # Every failure mode lands in advisory_rows; nothing here can raise into
+    # the audit, and nothing here touches rep. If this whole block vanished the
+    # verdict would be byte-identical.
+    if with_reviewer:
+        try:
+            import subprocess  # local, mirroring CHECK 7/8's own local import
+            procR = subprocess.run(REVIEWER_CMD, capture_output=True, text=True,
+                                   encoding="utf-8", errors="replace",
+                                   timeout=600)
+            advisory_rows.append(reviewer_advisory_row(
+                procR.returncode, (procR.stdout or "") + (procR.stderr or "")))
+        except subprocess.TimeoutExpired:
+            advisory_rows.append(("R1 semantic reviewer", "UNAVAILABLE",
+                                  "probe exceeded its 600s timeout",
+                                  "no semantic read was taken this run — "
+                                  "deterministic rows above are unaffected"))
+        except Exception as err:  # noqa: BLE001 — must never reach the audit
+            advisory_rows.append(("R1 semantic reviewer", "UNAVAILABLE",
+                                  "probe invocation crashed: %s" % str(err)[:140],
+                                  "no semantic read was taken this run — "
+                                  "deterministic rows above are unaffected"))
+
     # ---------------- output ----------------------------------------------
     if NETWORK_FAILURES:
         rep.add("NET reachability", "FAIL",
@@ -1094,6 +1188,20 @@ def run_audit(base: str) -> int:
         p("| %s | %s | %s | %s |" % (check, statx, observed.replace("|", "/"),
                                      impact))
     p("")
+    # REVIEWER-INTO-AUDIT: printed BELOW the table and outside it, so it reads
+    # as a notice a person acts on rather than a row in the verdict. Its status
+    # words are deliberately NOT PASS/FAIL/WARN.
+    if with_reviewer:
+        p("ADVISORY (not part of the verdict — the rows above decide the send):")
+        for label, statx, observed, note in advisory_rows:
+            p("  [%s] %s — %s" % (statx, label, observed))
+            p("      %s" % note)
+        p("")
+    else:
+        p("ADVISORY: semantic reviewer not run (opt-in). Add --with-reviewer "
+          "to include it; it spends ~$0.20 of Anthropic balance per run and "
+          "can only ever print a HOLD notice, never change this verdict.")
+        p("")
     p("live requests used: %d / %d" % (budget.used, budget.cap))
     worst = rep.worst()
     fails = [c for c, s, _, _ in rep.rows if s in ("FAIL", "ERROR")]
@@ -1221,10 +1329,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="B2B readiness audit (read-only)")
     parser.add_argument("--base", default=DEFAULT_BASE)
     parser.add_argument("--selftest", action="store_true")
+    # REVIEWER-INTO-AUDIT: OPT-IN, deliberately. The reviewer spends ~$0.20 of
+    # a low Anthropic balance per run, and an audit the operator hesitates to
+    # run is worse than one that skips this row by default. The deterministic
+    # pre-send check stays free, offline-of-Anthropic, and instant.
+    parser.add_argument("--with-reviewer", action="store_true",
+                        help="also run the semantic reviewer probe and print "
+                             "its result as an ADVISORY notice (~$0.20). It "
+                             "can never change this audit's exit code.")
     args = parser.parse_args()
     if args.selftest:
         return selftest()
-    return run_audit(args.base)
+    return run_audit(args.base, with_reviewer=args.with_reviewer)
 
 
 if __name__ == "__main__":
