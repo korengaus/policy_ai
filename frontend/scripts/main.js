@@ -6940,11 +6940,20 @@
                   <span class="verdict-value">${escapeHtml(officialStatusLabel(result))}</span>
                 </div>
               </div>
-              <!-- DUAL-AXIS-CLARITY: one connective line stating the axes are
-                   independent. The alert-axis description reuses the shipped
-                   경고 단계 legend vocabulary (정책 영향·위험 신호); the closing
-                   denial is the claim/weekly pages' shipped sentence. -->
-              <div class="reader-note">경고 단계와 AI 검증 상태는 서로 독립된 축입니다. 경고 단계는 정책 영향·위험 신호를, AI 검증 상태는 검증 처리가 어디까지 진행됐는지를 나타냅니다. 사실 여부에 대한 판단이 아닙니다.</div>
+              <!-- INDEPENDENCE-LINE-CORRECTION: this said the two axes are
+                   독립된 축. That overstated and, worse, denied a correlation a
+                   reader can see: the axes SHARE INPUTS (evidence strength,
+                   evidence quality, confidence feed both), so they are not
+                   independent in construction — only non-identical in output.
+                   Measured Cramér's V 0.291; draft_verified is 39.8% of HIGH
+                   against 4.1% of LOW. The replacement states the measured
+                   relationship and claims neither independence nor implication.
+                   ORDERING: the concrete "what each shows" sentence now leads,
+                   because the proposed opener (서로 다른 것을 나타냅니다) merely
+                   promised what that sentence already says and repeated
+                   나타냅니다. The alert-axis description and the closing denial
+                   are the shipped strings, unchanged. -->
+              <div class="reader-note">경고 단계는 정책 영향·위험 신호를, AI 검증 상태는 검증 처리가 어디까지 진행됐는지를 나타냅니다. 같은 근거 측정을 일부 공유하기 때문에 함께 높아지는 경우가 많지만, 한쪽이 다른 쪽을 결정하지는 않습니다. 사실 여부에 대한 판단이 아닙니다.</div>
               <div class="verdict-reasoning">
                 <h3>왜 이렇게 판단했나요?</h3>
                 ${renderBulletList(decisionReasonBullets(userContext, 3))}
