@@ -1779,26 +1779,57 @@ for (const [win, ids] of Object.entries(windows)) {
     // DUAL-AXIS-CLARITY: draft_likely_true joined the pinned pair — its old
     // value was a truth claim outright, so its renamed value must stay
     // identical across surfaces exactly like draft_verified's.
-    // HIGH-RISK-LABEL: draft_high_risk_review joined the pinned set — it is
-    // set by mutation on the site, so it was absent from claim.html and the
-    // two surfaces had silently forked before this pin existed.
-    for (const key of ["draft_verified", "draft_likely_true",
-                       "draft_high_risk_review"]) {
-      // [:=] because draft_high_risk_review is assigned by MUTATION on the
-      // site (VERDICT_LABELS.key = "…") but sits in the object literal on the
-      // claim page; a colon-only pattern would read one side as MISSING and
-      // fire a false pin-lost instead of comparing the two values.
-      const keyRe = new RegExp(key + '\\s*[:=]\\s*"([^"]+)"');
-      const claimVal = claimHtml.match(keyRe);
-      const mainVal = mainJs.match(keyRe);
-      if (!claimVal) {
-        failures.push(`SOURCE PIN LOST: web/claim.html no longer carries a `
-          + `${key} display value — the vocabulary owner moved`);
-      } else if (!mainVal || mainVal[1] !== claimVal[1]) {
-        failures.push(`ADJUDICATION LABEL: main.js VERDICT_LABELS.${key} `
-          + `is ${mainVal ? JSON.stringify(mainVal[1]) : "MISSING"} but the `
-          + `claim page ships ${JSON.stringify(claimVal[1])} — one value must `
-          + "read the same everywhere");
+    // CLAIM-PAGE-MISSING-LABELS: this was a hardcoded three-key list that
+    // compared VALUES. It could not see ABSENCE — a key present in main.js but
+    // missing from claim.html has no value to disagree with, so the claim page
+    // silently fell back to "추가 검증 필요" (draft_unverified's display) on
+    // 6,167 rows across two keys before anyone noticed. Both key sets are now
+    // ENUMERATED from their own files and compared as SETS, so any key added
+    // to main.js in future must appear on the claim page or this fails.
+    // [:=] catches both forms: main.js sets some keys by mutation
+    // (VERDICT_LABELS.key = "…"), the claim page uses an object literal.
+    const verdictKeyMap = (src, blockRe) => {
+      const block = src.match(blockRe);
+      const out = new Map();
+      if (block) {
+        for (const m of block[1].matchAll(/(draft_\w+)\s*:\s*"([^"]+)"/g)) {
+          out.set(m[1], m[2]);
+        }
+      }
+      // mutation-assigned keys live outside the literal
+      for (const m of src.matchAll(
+        /VERDICT_LABELS\.(draft_\w+)\s*=\s*"([^"]+)"/g)) out.set(m[1], m[2]);
+      return out;
+    };
+    const mainLabels = verdictKeyMap(
+      mainJs, /const VERDICT_LABELS = \{([\s\S]*?)\n {4}\};/);
+    const claimLabels = verdictKeyMap(
+      claimHtml, /var VERDICT_LABELS = \{([\s\S]*?)\n {2}\};/);
+    // vacuity: a parser that reads nothing would make every check below pass.
+    if (mainLabels.size < 8 || claimLabels.size < 8) {
+      failures.push("VACUOUS DETECTOR: verdict-label map parser read "
+        + `${mainLabels.size} main.js / ${claimLabels.size} claim.html keys `
+        + "(expected >=8 each) — the label maps moved or were reshaped, and "
+        + "the missing-key check cannot run blind");
+    } else {
+      for (const [key, want] of mainLabels) {
+        if (!claimLabels.has(key)) {
+          failures.push(`MISSING STATUS KEY: web/claim.html has no ${key} — `
+            + `main.js renders ${JSON.stringify(want)} but the claim page `
+            + "falls back silently, showing a DIFFERENT stored state's label "
+            + "to readers arriving from a cold email");
+        } else if (claimLabels.get(key) !== want) {
+          failures.push(`ADJUDICATION LABEL: main.js VERDICT_LABELS.${key} is `
+            + `${JSON.stringify(want)} but the claim page ships `
+            + `${JSON.stringify(claimLabels.get(key))} — one value must read `
+            + "the same everywhere");
+        }
+      }
+      for (const key of claimLabels.keys()) {
+        if (!mainLabels.has(key)) {
+          failures.push(`ORPHAN STATUS KEY: web/claim.html defines ${key} and `
+            + "main.js does not — the two surfaces have forked");
+        }
       }
     }
     const BARE_LABEL_PATTERNS = [
