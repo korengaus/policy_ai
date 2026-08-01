@@ -7773,7 +7773,17 @@
         .replace(/\.{3}$/, "")
         .replace(/…$/, "")
         .replace(/[.\s]+$/, "");
-      for (let guard = 0; guard < 8; guard += 1) {
+      // BINDING-TAIL-ITERATION-CAP: was `guard < 8`; that cap, not the floor,
+      // stopped id 9674 at 73 chars (floor 40) leaving "…바라보는 국민의" — a
+      // long quotative sentence carries more than 8 consecutive binding tails
+      // (that row needs 11). Raising it moves the same failure further out, so
+      // the cap is removed as a TERMINATOR. Termination still holds: each pass
+      // drops a whole word plus its separator and rejoins on single spaces, so
+      // shorter.length <= cut.length - 2 (strictly shortening), and the floor
+      // check breaks BEFORE assigning, so cut never empties. That bounds the
+      // loop at (cut.length - floor)/2 <= 37 passes; the value.length backstop
+      // below exceeds that by construction and can never be what ends the loop.
+      for (let guard = 0; guard < value.length; guard += 1) {
         const words = cut.split(/\s+/);
         if (words.length < 2) break;
         const tail = words[words.length - 1].replace(/[^0-9a-z가-힣]+$/gi, "");
