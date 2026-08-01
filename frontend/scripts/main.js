@@ -5638,7 +5638,12 @@
           <div class="reading-guide-grid">
             <div class="reading-guide-card">
               <strong>경고 단계</strong>
-              ${escapeHtml(formatAlert(context.level))}은 현재 확보된 근거를 기준으로 얼마나 조심해서 봐야 하는지를 뜻합니다.
+              <!-- ALERT-TOPIC-DISCLOSURE: this card DEFINES the level, and said
+                   it rests on 근거 alone — true of four of its five inputs but
+                   not of impact_gate (policy_impact.py:46). Same disclosure as
+                   the 등급·상태 안내 card, verbatim, so the two definition
+                   surfaces cannot drift. Copy only; no level or gate changes. -->
+              ${escapeHtml(formatAlert(context.level))}은 현재 확보된 근거를 기준으로 얼마나 조심해서 봐야 하는지를 뜻합니다. 이 단계는 근거의 양과 질, 출처 신뢰도 같은 측정값에 기사 본문의 주제 표현을 함께 반영합니다. 어떤 주제가 더 중요하다는 뜻은 아니며, 주제 표현만으로 바뀔 수 있는 것은 낮음에서 관찰까지입니다.
             </div>
             <div class="reading-guide-card">
               <strong>공식 출처 상태</strong>

@@ -996,6 +996,18 @@
           <li><strong>관찰(WATCH)</strong>: 정책 영향 가능성은 있으나 공식 근거, 맥락, 반박 가능성 등 추가 확인이 필요합니다.</li>
           <li><strong>주의(CAUTION)·높음(HIGH)·심각(CRITICAL)</strong>: 더 강한 정책 영향 또는 위험 신호가 있을 수 있으나 최종 판단은 근거와 사람 검토가 필요합니다.</li>
         </ul>
+        <!-- ALERT-TOPIC-DISCLOSURE: policy_alert_level combines four measured
+             inputs (evidence strength/quality, source trust, confidence) with
+             impact_gate, which is a hand-written keyword test over the article
+             text (policy_impact.py:46, _impact_level at :137). A reader cannot
+             see that from the tier list, and 2,643 of 3,290 flagged rows match
+             no keyword in their TITLE, so the factor is invisible. Stated as a
+             PROCESS fact — what goes into the level — never as a claim that
+             some topics matter more. The second sentence is measured, not
+             asserted: impact_level=="high" is a NECESSARY condition inside the
+             HIGH gate (policy_scoring.py:147-155), so a keyword alone can only
+             act in the WATCH fallback (:156), where it lifts 361 rows LOW→WATCH. -->
+        <p class="reader-note">이 단계는 근거의 양과 질, 출처 신뢰도 같은 측정값에 기사 본문의 주제 표현을 함께 반영합니다. 어떤 주제가 더 중요하다는 뜻은 아니며, 주제 표현만으로 바뀔 수 있는 것은 낮음에서 관찰까지입니다.</p>
       </div>
 
       <!-- STALE-EXPLANATIONS: the score-explanation card was DELETED here —
