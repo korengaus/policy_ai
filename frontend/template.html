@@ -374,7 +374,7 @@
             <li class="legend-group-head">AI 검증 상태</li>
             <li class="legend-row">
               <span class="legend-lead"><span class="verdict-dot" style="background:var(--verify)"></span></span>
-              <div class="legend-body"><span class="legend-label">임시 검증 완료</span></div>
+              <div class="legend-body"><span class="legend-label">공식 근거 확인, 사람 검토 대기</span></div>
             </li>
             <li class="legend-row">
               <span class="legend-lead"><span class="verdict-dot" style="background:var(--orange)"></span></span>
@@ -951,11 +951,12 @@
           <li class="legend-row">
             <span class="legend-lead"><span class="verdict-dot" style="background:var(--verify)"></span></span>
             <div class="legend-body">
-              <span class="legend-label">임시 검증 완료</span>
-              <!-- VERDICT-LABEL-SURFACES: the desc EXPLAINS the level — the
-                   green dot is an automated provisional pass awaiting human
-                   review (shipped review-status wording), never a completed
-                   human verification. -->
+              <span class="legend-label">공식 근거 확인, 사람 검토 대기</span>
+              <!-- VERDICT-LABEL-SURFACES / DUAL-AXIS-CLARITY: label tracks the
+                   renamed draft_verified value (vocabulary owner:
+                   web/claim.html); the desc EXPLAINS the level — an automated
+                   evidence-gate pass awaiting human review, never a completed
+                   human verification and never a truth finding. -->
               <span class="legend-desc">AI 초안, 사람 검토 대기</span>
             </div>
           </li>

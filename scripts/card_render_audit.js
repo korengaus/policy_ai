@@ -1776,12 +1776,22 @@ for (const [win, ids] of Object.entries(windows)) {
   } else {
     const CANON_HEADER = thm[1];
     const CANON_DRAFT_VERIFIED = dvm[1];
-    const mainDv = mainJs.match(/draft_verified:\s*"([^"]+)"/);
-    if (!mainDv || mainDv[1] !== CANON_DRAFT_VERIFIED) {
-      failures.push("ADJUDICATION LABEL: main.js VERDICT_LABELS.draft_verified "
-        + `is ${mainDv ? JSON.stringify(mainDv[1]) : "MISSING"} but the claim `
-        + `page ships ${JSON.stringify(CANON_DRAFT_VERIFIED)} — one value must `
-        + "read the same everywhere");
+    // DUAL-AXIS-CLARITY: draft_likely_true joined the pinned pair — its old
+    // value was a truth claim outright, so its renamed value must stay
+    // identical across surfaces exactly like draft_verified's.
+    for (const key of ["draft_verified", "draft_likely_true"]) {
+      const keyRe = new RegExp(key + ':\\s*"([^"]+)"');
+      const claimVal = claimHtml.match(keyRe);
+      const mainVal = mainJs.match(keyRe);
+      if (!claimVal) {
+        failures.push(`SOURCE PIN LOST: web/claim.html no longer carries a `
+          + `${key} display value — the vocabulary owner moved`);
+      } else if (!mainVal || mainVal[1] !== claimVal[1]) {
+        failures.push(`ADJUDICATION LABEL: main.js VERDICT_LABELS.${key} `
+          + `is ${mainVal ? JSON.stringify(mainVal[1]) : "MISSING"} but the `
+          + `claim page ships ${JSON.stringify(claimVal[1])} — one value must `
+          + "read the same everywhere");
+      }
     }
     const BARE_LABEL_PATTERNS = [
       [/판정 \$\{/g, "bare adjudication prefix before an interpolated value"],
