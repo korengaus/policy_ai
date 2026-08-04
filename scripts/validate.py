@@ -46,6 +46,7 @@ def _commands() -> List[List[str]]:
     _assert_dual_write_disabled_for_determinism()
     _normalize_log_format_for_determinism()
     _normalize_database_url_for_determinism()
+    _assert_js_tests_wired()
     return [
         [python, "-m", "compileall", "api_server.py", "database.py", "job_manager.py",
          "source_crawler.py", "scripts/fetch_registry_source.py",
@@ -472,8 +473,80 @@ def _commands() -> List[List[str]]:
         # copies for 17 days with a green dashboard. Offline: no DB, no
         # network (imports api_server for the pinned pure function only).
         [python, "tests/test_prediction_log_weekly.py"],
+        # ORPHAN-TEST-WIRING (2026-08-05): every tests/test_*.py NOT named
+        # above is appended here BY DERIVATION — see _derived_test_commands.
+        # The hand-named entries above are kept for their milestone grouping
+        # and comments, but they can no longer orphan a file: a test that is
+        # on disk, un-named, and un-excluded runs automatically, so no future
+        # test can be born unwired (41 of 122 were — including the honesty
+        # guard's own pins and the entire API endpoint suite — and one had
+        # silently rotted).
+        # Derived entries run under pytest, NOT as plain scripts: a
+        # pytest-style file without a __main__ guard (test_rate_limit.py is
+        # one, measured) direct-runs to exit 0 having executed NOTHING — a
+        # fake-green gate, the exact defect this wiring exists to close.
+        # pytest exits 5 on zero collected tests, so an empty run is LOUD.
+        *[[python, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+           "tests/%s" % name] for name in _derived_test_names()],
         [npm, "test"],
     ]
+
+
+# ORPHAN-TEST-WIRING — the enumerate-by-name defect, closed both ways.
+#
+# WHY the file enumerates by name at all: ordering and interleaving. The list
+# above runs compile smokes, script --help/--status smokes, and tests in
+# milestone order with rationale comments — that curation is worth keeping.
+# What was NOT deliberate was the consequence: a test absent from the list was
+# absent from CI, silently. 41 of 122 files were dark, one of them broken.
+#
+# The repair keeps the curated list and DERIVES the remainder:
+#   * every tests/test_*.py on disk that the static list does not name and
+#     EXCLUDED_TESTS does not exclude is appended automatically;
+#   * EXCLUDED_TESTS must carry a stated reason per file — silence is not a
+#     valid state (currently empty: all 122 run offline and pass);
+#   * an EXCLUDED entry naming a file that no longer exists FAILS the run
+#     (the list rots in both directions — 0 ghosts today, keep it that way).
+# JS: package.json's npm-test chain is likewise checked — a tests/*.test.js
+# absent from it fails validate rather than staying dark.
+EXCLUDED_TESTS: dict = {
+    # filename -> reason it cannot run in CI (none today)
+}
+
+
+def _static_test_names() -> set:
+    """The test files the curated list above names, read from THIS file so
+    the two can never drift."""
+    import re
+    src = Path(__file__).read_text(encoding="utf-8")
+    return set(re.findall(r'"tests/(test_[A-Za-z0-9_]+\.py)"', src))
+
+
+def _derived_test_names() -> List[str]:
+    on_disk = sorted(p.name for p in (ROOT / "tests").glob("test_*.py"))
+    ghosts = [name for name in EXCLUDED_TESTS if name not in on_disk]
+    if ghosts:
+        print("EXCLUDED_TESTS names files that do not exist: %s — prune the "
+              "exclusion; a list rots in both directions." % ghosts)
+        raise SystemExit(2)
+    static = _static_test_names()
+    return [name for name in on_disk
+            if name not in static and name not in EXCLUDED_TESTS]
+
+
+def _assert_js_tests_wired() -> None:
+    """Every tests/*.test.js must be named by package.json's npm-test chain.
+    The JS side had its own two orphans (review_checkpoints,
+    test_frontend_v2_client) — same defect, same rule: on disk and un-named
+    is a FAILURE, not a silence."""
+    pkg = (ROOT / "package.json").read_text(encoding="utf-8")
+    missing = [p.name for p in (ROOT / "tests").glob("*.test.js")
+               if p.name not in pkg]
+    if missing:
+        print("JS TESTS NOT WIRED into package.json npm-test chain: %s — add "
+              "them (or an exclusion with a stated reason) before validating."
+              % missing)
+        raise SystemExit(2)
 
 
 def _assert_dual_write_disabled_for_determinism() -> None:

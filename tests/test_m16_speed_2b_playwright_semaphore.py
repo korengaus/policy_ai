@@ -162,16 +162,23 @@ def _install_mock_playwright(*, delay_seconds: float, event_log: list):
 
 
 class MaxParallelPlaywrightHelperTests(unittest.TestCase):
+    # M26.2 (LESSON 1 footgun fix): the in-code default was hardened 3 -> 1 —
+    # on a 1-CPU worker, N concurrent Chromium is a ~60x slowdown, and the
+    # dashboard already pins MAX_PARALLEL_PLAYWRIGHT=1. These two cases kept
+    # asserting the pre-M26.2 default of 3 and rotted unseen because this file
+    # was never enumerated by validate.py (found by the 2026-08-05 belief
+    # audit). The CONCEPT they pin — default value, and invalid-env falling
+    # back to the default — still exists, so the assertions follow the code.
     def test_max_parallel_playwright_default(self):
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("MAX_PARALLEL_PLAYWRIGHT", None)
-            self.assertEqual(official_browser_crawler._max_parallel_playwright(), 3)
+            self.assertEqual(official_browser_crawler._max_parallel_playwright(), 1)
 
     def test_max_parallel_playwright_invalid_env(self):
         with mock.patch.dict(
             os.environ, {"MAX_PARALLEL_PLAYWRIGHT": "garbage"}, clear=False,
         ):
-            self.assertEqual(official_browser_crawler._max_parallel_playwright(), 3)
+            self.assertEqual(official_browser_crawler._max_parallel_playwright(), 1)
 
     def test_max_parallel_playwright_zero_clamped(self):
         with mock.patch.dict(
