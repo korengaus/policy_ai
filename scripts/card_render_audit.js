@@ -766,19 +766,176 @@ function adapterBody(js, name) {
   return null;
 }
 
-// the adapter's own return literal -> produced key set (or null on a spread)
+// ---------------------------------------------------------------------------
+// ADAPTER-LITERAL-PARSE — read an object literal's keys from its BRACES, not
+// from line anchors.
+//
+// The previous extraction matched `^\s{6,}key:` and `^\s{6,}key,$`, i.e. it
+// could only see a key that sat alone on its own indented line. Nine functions
+// in main.js return a SINGLE-LINE literal (`return { strength, quality };`),
+// and for every one of them the old pair matched nothing and the result was an
+// EMPTY key set — indistinguishable from a literal that genuinely has no keys.
+// That is the dangerous direction: declaring such a function would have compared
+// every read against zero produced keys and failed all of them, loudly and
+// wrongly. An empty answer must never be the same value as "could not read".
+//
+// This scanner walks the literal with a bracket stack, skipping strings,
+// template substitutions and comments, and recognises a key only in the three
+// forms whose name is unambiguous in the source: `name:`, shorthand `name` /
+// `name,`, and a quoted key whose content is itself a valid identifier.
+// ANYTHING it cannot resolve soundly — a computed `[expr]:` key, a method
+// shorthand, a numeric key, an arrow body it cannot tell from a literal — makes
+// the whole parse UNPARSEABLE with a stated reason, never an approximation: an
+// approximate key set produces false failures on real reads.
+//
+// DEPTH: keys are collected at every brace depth, exactly as the line-anchored
+// pair did (its 6-space floor caught nested keys too). Preserving that is
+// deliberate — the five covered adapters must not shift underneath this change.
+// It is also over-permissive, and that is recorded rather than fixed here: see
+// the note in adapterShapedFunctions' caller.
+//
+// Returns { keys } | { spread: true } | { unparseable: reason }.
+function parseObjectLiteralKeys(src, open) {
+  const keys = new Set();
+  const stack = ["{"];
+  let expectKey = true;                 // at an element position of a `{`
+  let i = open + 1;
+  const IDENT = /[A-Za-z_$]/;
+  const IDENT_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+  while (i < src.length && stack.length) {
+    const ch = src[i];
+    if (ch === "/" && src[i + 1] === "/") {
+      const nl = src.indexOf("\n", i);
+      if (nl < 0) return { unparseable: "unterminated line comment" };
+      i = nl + 1;
+      continue;
+    }
+    if (ch === "/" && src[i + 1] === "*") {
+      const close = src.indexOf("*/", i);
+      if (close < 0) return { unparseable: "unterminated block comment" };
+      i = close + 2;
+      continue;
+    }
+    if (ch === " " || ch === "\n" || ch === "\r" || ch === "\t") { i += 1; continue; }
+    const top = stack[stack.length - 1];
+    if (expectKey && top === "{") {
+      if (src.startsWith("...", i)) return { spread: true };
+      if (ch === "}") { stack.pop(); i += 1; expectKey = false; continue; }
+      if (ch === "[") return { unparseable: "computed key `[expr]:`" };
+      if (ch === '"' || ch === "'" || ch === "`") {
+        const q = readString(src, i);
+        if (q.error) return { unparseable: q.error };
+        let j = skipTrivia(src, q.end);
+        if (src[j] !== ":") return { unparseable: "quoted element that is not a key" };
+        if (!IDENT_RE.test(q.value)) {
+          return { unparseable: `quoted key ${JSON.stringify(q.value)} is not an identifier` };
+        }
+        keys.add(q.value);
+        i = j + 1;
+        expectKey = false;
+        continue;
+      }
+      if (!IDENT.test(ch)) return { unparseable: `element starting with ${JSON.stringify(ch)}` };
+      let j = i;
+      while (j < src.length && /[A-Za-z0-9_$]/.test(src[j])) j += 1;
+      const name = src.slice(i, j);
+      const k = skipTrivia(src, j);
+      if (src[k] === ":") { keys.add(name); i = k + 1; expectKey = false; continue; }
+      if (src[k] === ",") { keys.add(name); i = k + 1; expectKey = true; continue; }
+      if (src[k] === "}") { keys.add(name); i = k; expectKey = false; continue; }
+      if (src[k] === "(") return { unparseable: `method shorthand ${name}()` };
+      return { unparseable: `element ${name} followed by ${JSON.stringify(src[k] || "EOF")}` };
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const q = readString(src, i);
+      if (q.error) return { unparseable: q.error };
+      i = q.end;
+      continue;
+    }
+    if (ch === "{" || ch === "[" || ch === "(") {
+      stack.push(ch);
+      // A nested `{` is treated as an object literal — the same assumption the
+      // line-anchored pair made. An arrow/function body lands here too and is
+      // reported unparseable rather than guessed at.
+      expectKey = ch === "{";
+      i += 1;
+      continue;
+    }
+    if (ch === "}" || ch === "]" || ch === ")") {
+      const want = { "}": "{", "]": "[", ")": "(" }[ch];
+      if (stack[stack.length - 1] !== want) return { unparseable: "unbalanced brackets" };
+      stack.pop();
+      i += 1;
+      expectKey = false;
+      continue;
+    }
+    if (ch === "," && stack[stack.length - 1] === "{") { expectKey = true; i += 1; continue; }
+    i += 1;
+  }
+  if (stack.length) return { unparseable: "literal never closes inside the function body" };
+  return { keys };
+}
+
+function skipTrivia(src, i) {
+  while (i < src.length) {
+    const ch = src[i];
+    if (ch === " " || ch === "\n" || ch === "\r" || ch === "\t") { i += 1; continue; }
+    if (ch === "/" && src[i + 1] === "/") {
+      const nl = src.indexOf("\n", i);
+      if (nl < 0) return src.length;
+      i = nl + 1;
+      continue;
+    }
+    if (ch === "/" && src[i + 1] === "*") {
+      const close = src.indexOf("*/", i);
+      if (close < 0) return src.length;
+      i = close + 2;
+      continue;
+    }
+    return i;
+  }
+  return i;
+}
+
+// Reads one string/template literal starting at src[i]. Template substitutions
+// are skipped whole so a `${obj.key}` inside can never be read as a key.
+function readString(src, i) {
+  const quote = src[i];
+  let j = i + 1;
+  let value = "";
+  while (j < src.length) {
+    const ch = src[j];
+    if (ch === "\\") { value += src[j + 1] || ""; j += 2; continue; }
+    if (ch === quote) return { value, end: j + 1 };
+    if (quote === "`" && ch === "$" && src[j + 1] === "{") {
+      let depth = 1;
+      j += 2;
+      while (j < src.length && depth) {
+        if (src[j] === "{") depth += 1;
+        else if (src[j] === "}") depth -= 1;
+        j += 1;
+      }
+      continue;
+    }
+    value += ch;
+    j += 1;
+  }
+  return { error: "unterminated string literal" };
+}
+
+// the adapter's own return literal -> produced key set, a spread marker, or an
+// explicit unparseable reason. The anchor (the LAST `return {` in the body) is
+// unchanged, so which literal is read is exactly what it was.
 function adapterProducedKeys(js, name) {
   const b = adapterBody(js, name);
   if (!b) return null;
   const body = js.slice(b.start, b.end);
   const r = body.lastIndexOf("return {");
   if (r < 0) return null;
-  const tail = body.slice(r);
-  if (/^\s+\.\.\./m.test(tail)) return { spread: true };
-  const keys = new Set();
-  for (const m of tail.matchAll(/^\s{6,}([A-Za-z_][A-Za-z0-9_]*)\s*:/gm)) keys.add(m[1]);
-  for (const m of tail.matchAll(/^\s{6,}([A-Za-z_][A-Za-z0-9_]*),\s*$/gm)) keys.add(m[1]);
-  return { spread: false, keys };
+  const parsed = parseObjectLiteralKeys(body, r + "return ".length);
+  if (parsed.spread) return { spread: true };
+  if (parsed.unparseable) return { spread: false, unparseable: parsed.unparseable };
+  return { spread: false, keys: parsed.keys };
 }
 
 // identifiers assigned from the adapter, each with the function body it sits in
@@ -929,12 +1086,18 @@ function adapterShapedFunctions(js) {
       sites: sites.length,
       reads,
       // Stated per function so an undeclared line says how hard covering it
-      // would be, without this file deciding that for anyone.
+      // would be, without this file deciding that for anyone. ADAPTER-LITERAL-
+      // PARSE: "0 produced key(s)" and "unparseable" are now DIFFERENT answers —
+      // the first is a measurement of the literal, the second is a statement
+      // about this parser. Reading them as the same value is what made nine
+      // functions look empty when they are not.
       shape: produced.spread
         ? "return literal has a spread"
-        : (produced.keys.size
-          ? `${produced.keys.size} produced key(s)`
-          : "return literal is not key-extractable by this parse"),
+        : (produced.unparseable
+          ? `return literal UNPARSEABLE — ${produced.unparseable}`
+          : (produced.keys.size
+            ? `${produced.keys.size} produced key(s)`
+            : "0 produced key(s) — the literal is genuinely empty, not unread")),
     });
   }
   return found;
@@ -949,6 +1112,13 @@ function adapterFieldContract(js) {
     const produced = adapterProducedKeys(js, c.fn);
     if (!produced) { out.skipped.push([c.fn, "no return literal found"]); continue; }
     if (produced.spread) { out.skipped.push([c.fn, "return literal has a spread"]); continue; }
+    // ADAPTER-LITERAL-PARSE: an unreadable literal is a SKIP with its reason,
+    // never an empty produced set. Comparing reads against {} would fail every
+    // one of them — loud, and wrong about the adapter.
+    if (produced.unparseable) {
+      out.skipped.push([c.fn, `return literal cannot be parsed (${produced.unparseable})`]);
+      continue;
+    }
     let sites = adapterHolderSites(js, c.fn);
     // ADAPTER-CONTRACT-EXTEND: fall back to the declared round trip only when
     // no direct holder exists. A DECLARED chain that no longer verifies is a
