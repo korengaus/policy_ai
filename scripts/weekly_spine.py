@@ -192,31 +192,99 @@ def _header_title(title):
         return "=?UTF-8?B?%s?=" % blob
 
 
+# NOTIFY-RETRY (2026-08-04) — one attempt used to be the whole delivery
+# guarantee. On 08-02 the daily-graph run finished correctly (both children
+# rc=0, vectors missing 0, merged_away 0) and the operator got nothing: the log
+# ended at "[notify] send failed (URLError)". The same topic delivered the
+# collection alert that morning and delivery resumed by itself the next day, so
+# ntfy was fine — a single packet was lost and nothing tried again. A channel
+# whose silence carries no information is not a monitoring channel, and this is
+# the device built to catch silent failure failing silently.
+#
+# BOUNDED, deliberately: 3 attempts, 10s per request (the timeout was already
+# explicit — it is preserved, not introduced), waits of 1s and 2s between them.
+# WORST CASE 3x10 + 1 + 2 = 33s, i.e. +23s over the old single attempt, and only
+# when every attempt fails. A successful first attempt is byte-identical to
+# before: one request, one log line, no sleep.
+NOTIFY_ATTEMPTS = 3
+NOTIFY_TIMEOUT_S = 10
+NOTIFY_BACKOFF_S = (1.0, 2.0)   # between attempts; len == NOTIFY_ATTEMPTS - 1
+
+
+def _notify_error_label(exc):
+    """'HTTPError 503' when the failure carries a status, else 'URLError'.
+    A code-less failure prints exactly what it printed before this change, so
+    the 08-02 log line ("send failed (URLError)") still reads the same."""
+    code = getattr(exc, "code", None)
+    if isinstance(code, int):
+        return "%s %d" % (type(exc).__name__, code)
+    return type(exc).__name__
+
+
+def _notify_retryable(exc):
+    """True when a second attempt could plausibly succeed.
+
+    urllib DOES surface enough to tell these apart: a non-2xx response raises
+    HTTPError (a URLError subclass) carrying ``.code``, while a transport
+    problem — DNS, connect refused, reset, read timeout — raises a bare
+    URLError/OSError with no code at all. So a 4xx is a rejection that will be
+    rejected identically the next two times and is NOT retried; a 5xx and every
+    code-less transport failure are."""
+    code = getattr(exc, "code", None)
+    if isinstance(code, int) and 400 <= code < 500:
+        return False
+    return True
+
+
 def notify(title, message, priority="default"):
     """Send an ntfy notification if NTFY_URL / NTFY_TOPIC is set, else PRINT.
     Best-effort: any send failure degrades to a printed warning — a
-    notification problem must NEVER change the run's exit code."""
+    notification problem must NEVER change the run's exit code.
+
+    Retries per NOTIFY-RETRY above. The three log states the 08-02 diagnosis
+    depended on are unchanged in kind — unset config, send failed, sent — and
+    the failure line now states how many attempts were made."""
     endpoint = _ntfy_endpoint()
     banner = "[notify] %s\n%s" % (title, message)
     if not endpoint:
         print(banner)
         print("[notify] (NTFY_URL/NTFY_TOPIC unset — printed above instead of sent)")
         return False
-    try:
-        req = urllib.request.Request(
-            endpoint,
-            data=message.encode("utf-8"),
-            headers={"Title": _header_title(title), "Priority": priority},
-            method="POST",
-        )
-        urllib.request.urlopen(req, timeout=10).read()
-        print("[notify] sent to %s: %s" % (endpoint, title))
-        return True
-    except Exception as exc:  # noqa: BLE001 — notify must never crash the run
-        print(banner)
-        print("[notify] send failed (%s) — printed above instead."
-              % type(exc).__name__)
-        return False
+
+    last_exc = None
+    attempts = 0
+    for attempt in range(1, NOTIFY_ATTEMPTS + 1):
+        attempts = attempt
+        try:
+            req = urllib.request.Request(
+                endpoint,
+                data=message.encode("utf-8"),
+                headers={"Title": _header_title(title), "Priority": priority},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=NOTIFY_TIMEOUT_S).read()
+            if attempt == 1:
+                print("[notify] sent to %s: %s" % (endpoint, title))
+            else:
+                print("[notify] sent to %s: %s (attempt %d/%d)"
+                      % (endpoint, title, attempt, NOTIFY_ATTEMPTS))
+            return True
+        except Exception as exc:  # noqa: BLE001 — notify must never crash the run
+            last_exc = exc
+            if attempt >= NOTIFY_ATTEMPTS or not _notify_retryable(exc):
+                break
+            wait = NOTIFY_BACKOFF_S[attempt - 1]
+            print("[notify] attempt %d/%d failed (%s) — retrying in %.0fs"
+                  % (attempt, NOTIFY_ATTEMPTS, _notify_error_label(exc), wait))
+            time.sleep(wait)
+
+    detail = _notify_error_label(last_exc)
+    if not _notify_retryable(last_exc):
+        detail += ", not retried — a 4xx is a rejection, not a hiccup"
+    print(banner)
+    print("[notify] send failed after %d attempt(s) (%s) — printed above "
+          "instead." % (attempts, detail))
+    return False
 
 
 # ---------------------------------------------------------------------------
