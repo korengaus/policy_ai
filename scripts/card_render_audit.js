@@ -990,14 +990,214 @@ function readString(src, i) {
 // naive "every return must be a literal" rule would mark that COVERED adapter
 // unparseable for returns that are not its own). That attribution is a separate
 // decision with its own machinery; it is deliberately not invented here.
+// ---------------------------------------------------------------------------
+// ADAPTER-RETURN-OWNERSHIP — attribute each `return` to the function that
+// actually returns it.
+//
+// The collection above this change was `body.indexOf("return {")`: every
+// literal in the TEXT of the body counted, including returns inside reduce/
+// filter/map callbacks that belong to the callback, not the adapter
+// (computeMetrics owns ONE return; its body contains four). Worse, a function
+// whose own success path returns a NON-literal expression while a guard path
+// returns `{}` was described by the guard alone — safeReadReviewerActions
+// reported an agreed EMPTY set, confidently describing nothing.
+//
+// The scan walks the body once with the same string/comment discipline as
+// parseObjectLiteralKeys, plus regex-literal skipping (bodies are full of
+// /.../ containing quotes and braces; a literal-scan inside a return literal
+// rarely meets one, a whole-body scan always does). Every `{` is tagged as a
+// FUNCTION body or not when it opens:
+//   * previous token `=>`                                  -> function body
+//   * previous token `)` whose matching `(` is headed by the `function`
+//     keyword, a `function`-preceded name, or a plain non-control identifier
+//     (method / getter shorthand — `ident(){` is not legal anywhere else)    -> function body
+//   * `(` headed by a control keyword (if/for/while/switch/catch), or any
+//     other opener (object literal, bare block)             -> not
+// A `return` counts as the adapter's OWN only at nested-function depth zero.
+//
+// Own returns are then classified: `{` -> literal (parsed as before);
+// `;`/newline (ASI), `null`, `undefined`, or an array literal -> key-less,
+// harmless (they cannot carry an identifier key, so the literal description
+// stands); anything else -> the function owns a return whose shape this parse
+// cannot read, and the WHOLE description is UNPARSEABLE naming it — a partial
+// key set stated as the set is exactly the empty-set lie being repaired.
+const OWNERSHIP_CONTROL = new Set(["if", "for", "while", "switch", "catch"]);
+
+
+function skipRegexLiteral(src, i) {
+  // src[i] === "/" in a regex-allowed position. Returns the index after the
+  // closing "/" (flags excluded — they are plain idents and scan harmlessly),
+  // or i + 1 when a newline arrives first (not a regex after all).
+  let j = i + 1;
+  let inClass = false;
+  while (j < src.length) {
+    const ch = src[j];
+    if (ch === "\\") { j += 2; continue; }
+    if (ch === "\n") return i + 1;
+    if (ch === "[") inClass = true;
+    else if (ch === "]") inClass = false;
+    else if (ch === "/" && !inClass) return j + 1;
+    j += 1;
+  }
+  return j;
+}
+
+
+function ownReturns(body) {
+  // The scan must begin INSIDE the outer function's own body — its header
+  // brace would otherwise be tagged as a nested-function frame and every own
+  // return would sit at depth 1. The opener is the first `{` AFTER the
+  // parameter list's matching `)`, walked with paren counting so a default
+  // parameter like `context = {}` cannot be mistaken for the body opener.
+  let start = body.indexOf("(");
+  if (start < 0) return [];
+  let depth = 0;
+  while (start < body.length) {
+    const c = body[start];
+    if (c === '"' || c === "'" || c === "`") {
+      const q = readString(body, start);
+      start = q.error ? start + 1 : q.end;
+      continue;
+    }
+    if (c === "(") depth += 1;
+    else if (c === ")") { depth -= 1; if (depth === 0) { start += 1; break; } }
+    start += 1;
+  }
+  const opener = body.indexOf("{", start);
+  if (opener < 0) return [];
+  const returns = [];
+  const frames = [];              // "fn" | "other" per open `{`
+  let fnDepth = 0;
+  const parens = [];              // { head, head2 } token before each `(`
+  let lastParen = null;           // info for the most recently CLOSED `(...)`
+  let prev = null;                // last significant token
+  let prev2 = null;
+  const IDENT_START = /[A-Za-z_$]/;
+  const setPrev = (tok) => { prev2 = prev; prev = tok; };
+  const REGEX_ALLOWED_AFTER = new Set([
+    null, "(", ",", "=", ":", "[", "!", "&", "|", "?", "{", "}", ";", "=>",
+    "return", "typeof", "case", "in", "of", "+", "-", "*", "%", "<", ">",
+  ]);
+  let i = opener + 1;             // inside the outer body; frames start empty
+  while (i < body.length) {
+    const ch = body[i];
+    if (ch === "/" && body[i + 1] === "/") {
+      const nl = body.indexOf("\n", i);
+      i = nl < 0 ? body.length : nl + 1;
+      continue;
+    }
+    if (ch === "/" && body[i + 1] === "*") {
+      const close = body.indexOf("*/", i);
+      i = close < 0 ? body.length : close + 2;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const q = readString(body, i);
+      i = q.error ? i + 1 : q.end;
+      setPrev("string");
+      continue;
+    }
+    if (ch === "/") {
+      if (REGEX_ALLOWED_AFTER.has(prev)) {
+        i = skipRegexLiteral(body, i);
+      } else {
+        i += 1;                   // division
+      }
+      setPrev("/");
+      continue;
+    }
+    if (ch === " " || ch === "\t" || ch === "\r" || ch === "\n") { i += 1; continue; }
+    if (ch === "=" && body[i + 1] === ">") { setPrev("=>"); i += 2; continue; }
+    if (IDENT_START.test(ch)) {
+      let j = i;
+      while (j < body.length && /[A-Za-z0-9_$]/.test(body[j])) j += 1;
+      const word = body.slice(i, j);
+      if (word === "return" && fnDepth === 0 && prev !== ".") {
+        // classify what this OWN return yields; stop at a newline — ASI makes
+        // `return \n expr` a bare return, and the old exact-string match
+        // treated it the same way.
+        let k = j;
+        while (k < body.length && (body[k] === " " || body[k] === "\t")) k += 1;
+        const nxt = body[k];
+        if (nxt === "{") {
+          returns.push({ kind: "literal", open: k });
+        } else if (nxt === ";" || nxt === "\n" || nxt === undefined
+                   || nxt === "[") {
+          returns.push({ kind: "bare" });
+        } else {
+          let e = j;
+          while (e < body.length && /[A-Za-z0-9_$ .]/.test(body[e])) e += 1;
+          const head = body.slice(j, e).trim();
+          if (head === "null" || head === "undefined") {
+            returns.push({ kind: "bare" });
+          } else {
+            returns.push({
+              kind: "expr",
+              snippet: body.slice(k, k + 48).split("\n")[0],
+            });
+          }
+        }
+      }
+      setPrev(word);
+      i = j;
+      continue;
+    }
+    if (ch === "(") { parens.push({ head: prev, head2: prev2 }); setPrev("("); i += 1; continue; }
+    if (ch === ")") { lastParen = parens.pop() || null; setPrev(")"); i += 1; continue; }
+    if (ch === "{") {
+      let tag = "other";
+      if (prev === "=>") tag = "fn";
+      else if (prev === ")") {
+        const info = lastParen || {};
+        const head = info.head;
+        if (head === "function" || info.head2 === "function") tag = "fn";
+        else if (typeof head === "string" && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(head)
+                 && !OWNERSHIP_CONTROL.has(head)
+                 && head !== "return" && head !== "typeof" && head !== "string") {
+          tag = "fn";             // method / getter shorthand
+        }
+      }
+      frames.push(tag);
+      if (tag === "fn") fnDepth += 1;
+      setPrev("{");
+      i += 1;
+      continue;
+    }
+    if (ch === "}") {
+      const tag = frames.pop();
+      if (tag === "fn") fnDepth -= 1;
+      setPrev("}");
+      i += 1;
+      continue;
+    }
+    setPrev(ch);
+    i += 1;
+  }
+  return returns;
+}
+
+
 function adapterProducedKeys(js, name) {
   const b = adapterBody(js, name);
   if (!b) return null;
   const body = js.slice(b.start, b.end);
-  const parsed = [];
-  for (let at = body.indexOf("return {"); at >= 0; at = body.indexOf("return {", at + 1)) {
-    parsed.push(parseObjectLiteralKeys(body, at + "return ".length));
+  const own = ownReturns(body);
+  const exprs = own.filter((r) => r.kind === "expr");
+  const literalOpens = own.filter((r) => r.kind === "literal");
+  if (!literalOpens.length) {
+    if (exprs.length) return null;    // returns only expressions — not literal-shaped
+    return null;
   }
+  if (exprs.length) {
+    return {
+      spread: false,
+      unparseable: "owns a non-literal return (`return "
+        + exprs[0].snippet.trim()
+        + "`) — the literal(s) do not describe every path this function can "
+        + "return an object on",
+    };
+  }
+  const parsed = literalOpens.map((r) => parseObjectLiteralKeys(body, r.open));
   if (!parsed.length) return null;
   const unreadable = parsed.find((p) => p.unparseable);
   if (unreadable) return { spread: false, unparseable: unreadable.unparseable };
