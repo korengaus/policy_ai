@@ -126,7 +126,75 @@ MATCHER_MISMATCH_BASELINE = 3
 # constants below AND says so in the C5 row, so a divergence shows up in the
 # output instead of being silently assumed.
 SPINE_GRACE_HOURS = 6
-DAILY_ADD_BAND = (90, 160)
+# C5-COLLAPSE-NOT-BAND (2026-08-04) — DAILY_ADD_BAND = (90, 160) is GONE.
+# It was a hand-typed snapshot of the 07-18..07-26 collection regime, and the
+# regime moved (post-07-25 dedup shift: complete days now run 51-88), so C5
+# warned on every run for over a week while saying nothing. Measured over all
+# 96 complete days: 8-46 (manual era) / 229-2440 (backfill spikes) / 109-175
+# (early cron) / 51-88 (current). There IS no stable band — dedup rejects more
+# as the corpus grows, so the count is a function of corpus size, not a
+# constant, and any typed band is pre-stale.
+#
+# The question the operator needs answered is not "is today inside a band" but
+# "is collection still working". That is answered without a band:
+#   * a complete day at ZERO is a FAIL (unchanged — the collapse this check
+#     exists to catch);
+#   * a complete day that COLLAPSED below a fixed fraction of the trailing
+#     window's median WARNs. The median is computed from the live data at run
+#     time, so the expectation moves when the truth moves; only the RATIO is
+#     typed, and a ratio is a structural rule (like SPINE_GRACE_HOURS), not a
+#     measurement wearing a constant's clothes. 1/4 is far below every
+#     legitimate regime shift observed (largest real drop: 140 -> 51 ≈ 0.36 of
+#     the then-median) while far above a trickle (a broken pipeline limping at
+#     a handful of rows against a ~75 median reads ~0.05).
+#   * everything else PASSes, and the row REPORTS the judged counts plainly —
+#     the C1 lesson — so the operator sees the level without a verdict on it.
+DAILY_ADD_COLLAPSE_RATIO = 0.25   # judged day < ratio * trailing median -> WARN
+DAILY_ADD_TRAILING_DAYS = 14      # median window, ending before the judged days
+
+
+def daily_adds_status(adds, trailing_counts):
+    """(status, note) for C5 daily adds. PURE — takes the judged complete days
+    ({iso_day: count}, oldest first) and the trailing window's counts (absent
+    days already materialised as 0 by the caller), so every branch is
+    selftestable without a DB.
+
+    FAIL: any judged complete day at zero — collection stopped; never softened.
+    WARN: any judged day below DAILY_ADD_COLLAPSE_RATIO * trailing median —
+          the trend BROKE (a trickle from a half-dead pipeline), as opposed to
+          drifting, which is the corpus growing and is not a defect.
+    PASS: otherwise. The counts themselves are always in the row; the level
+          carries no verdict (C1-OBSERVE-NOT-COMPARE).
+    A young corpus with an empty trailing window cannot be trend-judged: the
+    zero-check still stands, and the note says the trend check did not run
+    rather than silently passing it."""
+    zero_days = [d for d, v in adds.items() if v == 0]
+    if zero_days:
+        return "FAIL", ("ZERO adds on complete day(s) %s — collection stopped"
+                        % ", ".join(zero_days))
+    if not trailing_counts:
+        return "PASS", ("trend not judged — no trailing window yet "
+                        "(zero-day check still active)")
+    ordered = sorted(trailing_counts)
+    mid = len(ordered) // 2
+    median = (ordered[mid] if len(ordered) % 2
+              else (ordered[mid - 1] + ordered[mid]) / 2.0)
+    floor = DAILY_ADD_COLLAPSE_RATIO * median
+    collapsed = [d for d, v in adds.items() if v < floor]
+    basis = ("trailing %d-day median=%s, collapse floor=%.1f (x%.2f)"
+             % (len(trailing_counts), median, floor, DAILY_ADD_COLLAPSE_RATIO))
+    if median == 0:
+        # A dead trailing window makes the floor vacuous (anything >= 0
+        # passes). Say so: the judged days being non-zero is then the ONLY
+        # thing standing between this row and a lie.
+        return "PASS", ("trend not judgeable — trailing median is 0 "
+                        "(window itself collected nothing); zero-day check "
+                        "still active")
+    if collapsed:
+        return "WARN", ("COLLAPSED below trend: %s — %s"
+                        % (", ".join("%s=%d" % (d, adds[d]) for d in collapsed),
+                           basis))
+    return "PASS", basis
 
 # Fallback ONLY — used when render.yaml cannot be parsed. Kept at the value
 # that shipped before this change so a fallback is visibly the old assumption.
@@ -987,43 +1055,41 @@ def run_audit(base: str, with_reviewer: bool = False) -> int:
                     "-")
 
             # C5 — freshness.
-            # AUDIT-BASELINES C5 — judge COMPLETE UTC days only. The current UTC
-            # day is partial BY DEFINITION: its count is reported and explicitly
-            # labelled "not judged" instead of being compared to a full-day band.
-            # (The band arithmetic already ran on today-3..today-1; naming the
-            # boundary in the output is what was missing — the operator could not
-            # see which days were judged and which was the partial one.) Signal
-            # is preserved exactly: a COMPLETE day outside the band still WARNs,
-            # and a COMPLETE day at ZERO still FAILs — collection stopping is the
-            # failure this check exists to catch, so zero is never softened.
+            # AUDIT-BASELINES C5 — judge COMPLETE UTC days only; the current UTC
+            # day is partial BY DEFINITION and is reported, never judged.
+            # C5-COLLAPSE-NOT-BAND: the judged days are checked for STOPPED
+            # (zero -> FAIL) and for a BROKEN trend (below a fraction of the
+            # trailing window's median -> WARN). The expectation is computed
+            # from the live data each run — nothing here goes stale when the
+            # collection regime moves, which the typed 90-160 band did within
+            # nine days of being written.
             today = datetime.now(timezone.utc).date()
+            window_days = 3 + DAILY_ADD_TRAILING_DAYS
             day_rows = dict(q(
                 "SELECT substr(created_at,1,10) AS d, COUNT(*) "
                 "FROM analysis_results WHERE created_at >= :cut "
-                "GROUP BY 1 ORDER BY 1", cut=str(today - timedelta(days=4))))
+                "GROUP BY 1 ORDER BY 1",
+                cut=str(today - timedelta(days=window_days + 1))))
             complete_days = [str(today - timedelta(days=i)) for i in (3, 2, 1)]
             adds = {d: int(day_rows.get(d, 0)) for d in complete_days}
-            lo, hi = DAILY_ADD_BAND
-            zero_days = [d for d, v in adds.items() if v == 0]
-            off_band = [d for d, v in adds.items() if v and not lo <= v <= hi]
-            fresh_status = ("FAIL" if zero_days
-                            else ("WARN" if off_band else "PASS"))
+            # Trailing window ends where the judged days begin. Absent days are
+            # 0 — a day the pipeline wrote nothing is a zero-yield day, not a
+            # missing datum.
+            trailing = [int(day_rows.get(str(today - timedelta(days=i)), 0))
+                        for i in range(4, 4 + DAILY_ADD_TRAILING_DAYS)]
+            fresh_status, fresh_note = daily_adds_status(adds, trailing)
             # A recorded outage day is ANNOTATED, never exempted — it keeps its
-            # WARN and ages out of the window on its own. The annotation is
-            # withheld from a ZERO day even at a recorded date: zero is a FAIL
-            # about TODAY's collection, and a "known" tag next to it would read
-            # as an excuse for a failure that has not been explained.
-            flagged = "; ".join(
-                "%s=%d%s" % (d, adds[d],
-                             " [known: %s]" % KNOWN_LOW_ADD_DAYS[d]
-                             if d in off_band and d in KNOWN_LOW_ADD_DAYS else "")
-                for d in zero_days + off_band)
+            # WARN and ages out of the window on its own. (Zero days get no
+            # annotation: zero is a FAIL about TODAY's collection, and a
+            # "known" tag next to it would read as an excuse.)
+            for d, reason in KNOWN_LOW_ADD_DAYS.items():
+                if d in fresh_note and adds.get(d, -1) > 0:
+                    fresh_note += " [known: %s]" % reason
             max_id = q("SELECT MAX(id) FROM analysis_results")[0][0]
             rep.add("C5 daily adds", fresh_status,
-                    "max_id=%s judged(complete UTC days)=%s band=%d-%d%s | "
+                    "max_id=%s judged(complete UTC days)=%s — %s | "
                     "%s=%s partial — reported, not judged"
-                    % (max_id, adds, lo, hi,
-                       (" | out-of-band: %s" % flagged) if flagged else "",
+                    % (max_id, adds, fresh_note,
                        today, day_rows.get(str(today), 0)),
                     "stale data — 'today's briefing' built from old rows")
 
@@ -1559,6 +1625,28 @@ def selftest() -> int:
           "candidate-count tail" in defect_signals[1], True)
     check("c8-defect-disclosures-unchanged", len(defect_disclosures), 4)
     check("c8-empty-input", classify_render_warns(""), ([], []))
+
+    # C5-COLLAPSE-NOT-BAND — every branch of daily_adds_status, on real-shaped
+    # numbers. The one that matters most: the ACTUAL regime shift (median-140
+    # window falling to 51-adds days) must stay QUIET, while a trickle fails.
+    tr_old_regime = [109, 120, 130, 145, 175, 141, 134, 73, 140, 82, 80, 88, 76, 80]
+    check("c5-real-shift-quiet",
+          daily_adds_status({"a": 51, "b": 74, "c": 75}, tr_old_regime)[0], "PASS")
+    check("c5-zero-fails",
+          daily_adds_status({"a": 51, "b": 0, "c": 75}, tr_old_regime)[0], "FAIL")
+    check("c5-zero-names-day",
+          "b" in daily_adds_status({"a": 51, "b": 0, "c": 75}, tr_old_regime)[1],
+          True)
+    collapse = daily_adds_status({"a": 80, "b": 76, "c": 5}, tr_old_regime)
+    check("c5-trickle-warns", collapse[0], "WARN")
+    check("c5-trickle-names-day-and-basis",
+          "c=5" in collapse[1] and "median=" in collapse[1], True)
+    check("c5-young-corpus-passes-with-note",
+          daily_adds_status({"a": 10}, [])[0], "PASS")
+    check("c5-dead-trailing-not-judgeable",
+          "not judgeable" in daily_adds_status({"a": 10}, [0] * 14)[1], True)
+    check("c5-zero-beats-dead-trailing",
+          daily_adds_status({"a": 0}, [0] * 14)[0], "FAIL")
 
     if failures:
         print("SELFTEST FAIL (%d):" % len(failures))
