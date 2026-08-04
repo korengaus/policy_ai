@@ -103,7 +103,7 @@ MATCHER_MISMATCH_BASELINE = 3
 # the same defect already fixed for the C4 null-verdict baseline.
 #
 # The rule follows the schedule and the two producing scripts, not a guess:
-#   * the spine's cron is Sunday 19:00 UTC (Monday 04:00 KST);
+#   * the spine's cron time is READ FROM render.yaml at runtime (below);
 #   * snapshot_brainmap_growth.py:298 sets snapshot_date = the run's UTC DATE,
 #     so a Sunday run stamps that Sunday;
 #   * generate_weekly_report.py:313 defaults week_start = today - 6 days (the
@@ -115,28 +115,99 @@ MATCHER_MISMATCH_BASELINE = 3
 # GRACE: the expectation only comes due SPINE_GRACE_HOURS after the scheduled
 # time, so an audit run while the chain is still executing (it takes ~20 min)
 # cannot manufacture a false WARN.
-SPINE_WEEKDAY_UTC = 6           # Python weekday(): Mon=0 .. Sun=6
-SPINE_HOUR_UTC = 19
+#
+# SPINE-AFTER-COLLECTION: the hour used to be typed here as 19. That is the
+# same defect C1 above was repaired for — a hand-copied mirror of a value that
+# lives somewhere else, which goes stale silently the moment the real one
+# moves. render.yaml IS in this repo and IS the thing that provisions the cron,
+# so the schedule is parsed from it. The parse is deliberately strict: only a
+# plain 5-field expression with numeric minute/hour/day-of-week is accepted,
+# and ANY other shape (ranges, lists, steps, a missing block) falls back to the
+# constants below AND says so in the C5 row, so a divergence shows up in the
+# output instead of being silently assumed.
 SPINE_GRACE_HOURS = 6
 DAILY_ADD_BAND = (90, 160)
 
+# Fallback ONLY — used when render.yaml cannot be parsed. Kept at the value
+# that shipped before this change so a fallback is visibly the old assumption.
+SPINE_FALLBACK = (6, 19, 0)     # (python weekday Mon=0..Sun=6, hour, minute)
 
-def last_expected_spine_run(now_utc):
-    """The most recent Sunday 19:00 UTC spine run that is already DUE (i.e.
-    at least SPINE_GRACE_HOURS in the past). Pure — takes the clock as an
-    argument so the four staleness cases are selftestable."""
+
+def parse_cron_schedule(expr):
+    """('30 22 * * 0') -> (python_weekday, hour, minute), or None when the
+    expression is anything this parser cannot resolve exactly. Cron numbers
+    day-of-week 0=Sunday; Python's weekday() is Mon=0..Sun=6."""
+    parts = (expr or "").strip().strip('"\'').split()
+    if len(parts) != 5:
+        return None
+    minute, hour, dom, month, dow = parts
+    if dom != "*" or month != "*":
+        return None
+    if not (minute.isdigit() and hour.isdigit() and dow.isdigit()):
+        return None
+    minute, hour, dow = int(minute), int(hour), int(dow)
+    if not (0 <= minute < 60 and 0 <= hour < 24 and 0 <= dow <= 7):
+        return None
+    return ((dow % 7) + 6) % 7, hour, minute
+
+
+def read_spine_schedule(path=None):
+    """(weekday, hour, minute, source) for the weekly-spine cron.
+
+    Reads the `schedule:` of the render.yaml block whose `name:` is
+    weekly-spine. No YAML dependency: the file is walked block by block, a
+    block being delimited by a `- type:` line. Returns the SPINE_FALLBACK with
+    a source string naming the reason whenever the block, the key, or the
+    expression cannot be resolved — never a guess, and never silent."""
+    path = path or (ROOT / "render.yaml")
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except Exception as exc:
+        return SPINE_FALLBACK + ("FALLBACK: render.yaml unreadable (%s)"
+                                 % type(exc).__name__,)
+    name, schedule = None, None
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("- type:"):
+            if name == "weekly-spine" and schedule:
+                break
+            name, schedule = None, None
+        if stripped.startswith("name:"):
+            name = stripped.split(":", 1)[1].strip()
+        elif stripped.startswith("schedule:"):
+            schedule = stripped.split(":", 1)[1].strip()
+    if name != "weekly-spine" or not schedule:
+        return SPINE_FALLBACK + ("FALLBACK: no weekly-spine schedule in render.yaml",)
+    parsed = parse_cron_schedule(schedule)
+    if parsed is None:
+        return SPINE_FALLBACK + ("FALLBACK: unparseable cron %r" % schedule,)
+    return parsed + ("render.yaml %s" % schedule,)
+
+
+SPINE_WEEKDAY_UTC, SPINE_HOUR_UTC, SPINE_MINUTE_UTC, SPINE_SCHEDULE_SOURCE = (
+    read_spine_schedule())
+
+
+def last_expected_spine_run(now_utc, weekday=None, hour=None, minute=None):
+    """The most recent scheduled spine run that is already DUE (i.e. at least
+    SPINE_GRACE_HOURS in the past). Pure — takes the clock as an argument so the
+    staleness cases are selftestable, and takes the schedule so a case can pin
+    one explicitly instead of moving whenever render.yaml does."""
+    weekday = SPINE_WEEKDAY_UTC if weekday is None else weekday
+    hour = SPINE_HOUR_UTC if hour is None else hour
+    minute = SPINE_MINUTE_UTC if minute is None else minute
     due = now_utc - timedelta(hours=SPINE_GRACE_HOURS)
-    anchor = due.replace(hour=SPINE_HOUR_UTC, minute=0, second=0, microsecond=0)
-    anchor -= timedelta(days=(anchor.weekday() - SPINE_WEEKDAY_UTC) % 7)
+    anchor = due.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    anchor -= timedelta(days=(anchor.weekday() - weekday) % 7)
     if anchor > due:
         anchor -= timedelta(days=7)
     return anchor
 
 
-def expected_spine_artifacts(now_utc):
+def expected_spine_artifacts(now_utc, weekday=None, hour=None, minute=None):
     """(expected_week_start, expected_snapshot_date) as ISO date strings for
     the last DUE spine run — the OLDEST artifacts a healthy spine may hold."""
-    run_date = last_expected_spine_run(now_utc).date()
+    run_date = last_expected_spine_run(now_utc, weekday, hour, minute).date()
     return (run_date - timedelta(days=6)).isoformat(), run_date.isoformat()
 
 
@@ -162,8 +233,15 @@ def spine_artifact_status(wk_latest, snap_latest, now_utc):
                     - date.fromisoformat(str(observed))).days
             behind.append("%s=%s is %d cycle(s) behind %s"
                           % (label, observed, -(-days // 7), expected))
-    detail = ("weekly=%s (expect >=%s) snapshot=%s (expect >=%s)"
-              % (wk_latest, exp_wk, snap_latest, exp_snap))
+    # SPINE-AFTER-COLLECTION: the assumed schedule is STATED, and names where it
+    # came from. If render.yaml ever stops being readable the row says
+    # "FALLBACK: …" instead of quietly checking against a time that no longer
+    # happens — the failure this check used to be capable of.
+    detail = ("weekly=%s (expect >=%s) snapshot=%s (expect >=%s) [schedule "
+              "%02d:%02d UTC weekday=%d, +%dh grace, from %s]"
+              % (wk_latest, exp_wk, snap_latest, exp_snap,
+                 SPINE_HOUR_UTC, SPINE_MINUTE_UTC, SPINE_WEEKDAY_UTC,
+                 SPINE_GRACE_HOURS, SPINE_SCHEDULE_SOURCE))
     if behind:
         # em-dash, not a pipe: the observed cell must not split the table.
         return "WARN", detail + " — STALE: " + "; ".join(behind)
@@ -1346,20 +1424,53 @@ def selftest() -> int:
     # AUDIT-SPINE-BASELINE — the derived spine expectation, pinned by CASE
     # rather than by date, so this can never go stale the way the two
     # hardcoded constants it replaced did.
+    # SPINE-AFTER-COLLECTION: these four cases pin the PRE-MOVE schedule
+    # explicitly (Sun 19:00) so their expected values keep meaning exactly what
+    # they meant when they were written — they assert the arithmetic, not
+    # whatever render.yaml happens to say today.
+    OLD_SPINE = (6, 19, 0)
     tue = datetime(2026, 7, 28, 19, 0, tzinfo=timezone.utc)      # Tue
-    check("spine-anchor-tue", last_expected_spine_run(tue).isoformat(),
+    check("spine-anchor-tue", last_expected_spine_run(tue, *OLD_SPINE).isoformat(),
           "2026-07-26T19:00:00+00:00")                            # prev Sunday
-    check("spine-expected-tue", expected_spine_artifacts(tue),
+    check("spine-expected-tue", expected_spine_artifacts(tue, *OLD_SPINE),
           ("2026-07-20", "2026-07-26"))                           # Mon, Sun
     # Grace: at Sunday 19:30 UTC the chain is still running, so the run that
     # started 30 min ago is NOT yet due — the previous Sunday still governs.
     sun_during = datetime(2026, 7, 26, 19, 30, tzinfo=timezone.utc)
-    check("spine-grace-during-run", expected_spine_artifacts(sun_during),
+    check("spine-grace-during-run", expected_spine_artifacts(sun_during, *OLD_SPINE),
           ("2026-07-13", "2026-07-19"))
     # ...and once the grace has elapsed, that Sunday becomes the expectation.
     sun_after = datetime(2026, 7, 27, 2, 0, tzinfo=timezone.utc)
-    check("spine-grace-elapsed", expected_spine_artifacts(sun_after),
+    check("spine-grace-elapsed", expected_spine_artifacts(sun_after, *OLD_SPINE),
           ("2026-07-20", "2026-07-26"))
+
+    # The cron parser: only exactly-resolvable expressions are accepted.
+    check("cron-parse-new", parse_cron_schedule("30 22 * * 0"), (6, 22, 30))
+    check("cron-parse-old", parse_cron_schedule("0 19 * * 0"), (6, 19, 0))
+    check("cron-parse-monday", parse_cron_schedule("0 4 * * 1"), (0, 4, 0))
+    for bad in ("*/30 22 * * 0", "30 22 * * 0-3", "30 22 * * SUN",
+                "30 22 1 * 0", "30 22 * * ", ""):
+        check("cron-reject %r" % bad, parse_cron_schedule(bad), None)
+    # The schedule actually shipped in render.yaml is readable and is the one
+    # this audit assumes. A fallback would be named in the source string.
+    wd, hh, mm, src = read_spine_schedule()
+    check("spine-schedule-from-render-yaml", (wd, hh, mm), (6, 22, 30))
+    check("spine-schedule-source-not-fallback", src.startswith("render.yaml"), True)
+    # Post-move arithmetic: 22:30 + 6h grace comes due 04:30 Monday UTC.
+    NEW_SPINE = (6, 22, 30)
+    sun_mid_run = datetime(2026, 8, 2, 22, 45, tzinfo=timezone.utc)
+    check("spine-new-during-run", expected_spine_artifacts(sun_mid_run, *NEW_SPINE),
+          ("2026-07-20", "2026-07-26"))
+    mon_after_grace = datetime(2026, 8, 3, 4, 45, tzinfo=timezone.utc)
+    check("spine-new-grace-elapsed",
+          expected_spine_artifacts(mon_after_grace, *NEW_SPINE),
+          ("2026-07-27", "2026-08-02"))
+    # The move must NOT change which DATES are expected — only when they fall
+    # due — so a Monday-afternoon audit sees the same expectation either way.
+    mon_pm = datetime(2026, 8, 3, 12, 0, tzinfo=timezone.utc)
+    check("spine-move-changes-no-expected-dates",
+          expected_spine_artifacts(mon_pm, *OLD_SPINE),
+          expected_spine_artifacts(mon_pm, *NEW_SPINE))
 
     check("spine-current-passes",
           spine_artifact_status("2026-07-20", "2026-07-26", tue)[0], "PASS")

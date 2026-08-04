@@ -7,7 +7,18 @@ services:
   - type: cron
     name: weekly-spine
     runtime: python
-    schedule: "0 19 * * 0"
+    # SPINE-AFTER-COLLECTION (2026-08-04): was "0 19 * * 0" (Sun 19:00 UTC /
+    # Mon 04:00 KST), which fired two hours BEFORE Sunday's 21:00 UTC
+    # collection — so the final UTC day of every weekly window was 100% absent
+    # at generation (70 of 70 rows for 2026-08-02). Now Sun 22:30 UTC =
+    # Mon 07:30 KST: 15 min after the worst observed collection finish
+    # (21:03 start, 22:15 worst end, 70.1 min worst duration), 30 min before
+    # the daily-graph cron at 23:00, and 90 min before midnight UTC.
+    # ★The midnight margin is load-bearing, not slack: generate_weekly_report
+    # reads week_end = datetime.now(timezone.utc).date() at PROCESS START, so a
+    # start after 00:00 UTC would silently reindex the window to Tue..Mon.
+    # Never move this past 23:30 UTC.
+    schedule: "30 22 * * 0"
     buildCommand: pip install -r requirements.txt
     startCommand: python scripts/weekly_spine.py --mode weekly
     envVars:
@@ -37,8 +48,13 @@ services:
   # DAILY-COLLECTION — automated daily seed collection (the 42 DEFAULT_QUERIES
   # x max_news=3, <=126 articles/run upper bound; URL dedup means only NEW
   # articles are analyzed, so re-runs never reprocess). 21:00 UTC = 06:00 KST
-  # daily — fresh overnight news, 2h clear of weekly-spine (Sun 19:00 UTC /
-  # Mon 04:00 KST). The pipeline it runs is UNCHANGED; this only schedules it.
+  # daily — fresh overnight news. SPINE-AFTER-COLLECTION: this run now precedes
+  # weekly-spine (Sun 22:30 UTC / Mon 07:30 KST) instead of following it. The
+  # old comment here recorded the reverse ordering as deliberate separation —
+  # it was, and that separation is exactly what put Sunday's collection AFTER
+  # the report that is supposed to contain it. Do not move this cron without
+  # re-checking the spine's start time. The pipeline it runs is UNCHANGED;
+  # this only schedules it.
   - type: cron
     name: daily-collection
     runtime: python
