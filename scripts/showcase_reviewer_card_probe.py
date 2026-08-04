@@ -268,10 +268,39 @@ DRIFT_PREDICATES = ("신뢰할 수 없", "신뢰하기 어렵", "신뢰할 만",
                     "믿기 어렵", "믿을 수 없", "믿을 만", "믿기 힘들",
                     "사실이 아니", "사실과 다르", "사실로 보", "사실일 가능성",
                     "사실 여부", "진위", "허위", "거짓")
-# Sentinel labels that MUST come out of the extraction — a rename in main.js
-# breaks the sentinel and the probe exits loudly instead of silently
-# under-masking (the pinned-dependency posture).
-LABEL_SENTINELS = ("최고 신뢰 출처", "출처 신뢰도", "사실 가능성 높음")
+# Sentinel labels that MUST come out of the extraction — a missing one breaks
+# the sentinel and the probe exits loudly instead of silently under-masking
+# (the pinned-dependency posture).
+#
+# LABEL-SENTINEL-DERIVATION: the list was hand-typed and went stale the way
+# every hand-typed constant in this repo eventually has — 사실 가능성 높음 was
+# deliberately REMOVED from the product (it asserted a truth probability) and
+# the sentinel kept demanding it. Sentinels are now DERIVED at runtime from
+# the vocabulary's owner: every value of the closed VERDICT_LABELS map (the
+# literal map plus its `VERDICT_LABELS.x = "…"` extensions, sliced from
+# main.js by structure, not by the extraction regex being verified) that
+# contains 신뢰/사실/믿 — so a renamed status label moves the sentinel with
+# it, and a removed one stops being demanded. MEASURED TODAY that derived set
+# is EMPTY, and that is by design: the truth/trust-word purge stripped the
+# whole closed map of the extraction's character class. The remaining canaries
+# are therefore the two UI FIELD labels below — bare literals with no owning
+# map, so they cannot be derived, only held; the probe STATES the snapshot it
+# holds in its output so a divergence is visible before it fires.
+FIELD_LABEL_SENTINELS = ("최고 신뢰 출처", "출처 신뢰도")
+
+
+def derive_label_sentinels(src):
+    """Sentinels the extraction must capture: closed-map values carrying the
+    extraction's character class (derived from the VERDICT_LABELS literal and
+    its property-assignment extensions), plus the held field-label snapshot."""
+    derived = set()
+    start = src.find("const VERDICT_LABELS = {")
+    if start >= 0:
+        block = src[start:src.index("};", start)]
+        derived.update(re.findall(r':\s*"([^"]+)"', block))
+    derived.update(re.findall(r'VERDICT_LABELS\.[A-Za-z_]+\s*=\s*"([^"]+)"', src))
+    from_map = sorted(v for v in derived if re.search(r"신뢰|사실|믿", v))
+    return tuple(from_map) + FIELD_LABEL_SENTINELS
 # The real flagged note from the first Worker run — the label-quote control:
 # OLD must flag it (that was the artifact), NEW must not.
 LABEL_QUOTE_CONTROL = ("카드 핵심 주장은 2021년 11월 고용동향인데, 근거 문서와 "
@@ -291,11 +320,20 @@ def load_ui_labels():
     labels = {m.strip() for m in
               re.findall(r"[가-힣0-9 /·]*(?:신뢰|사실|믿)[가-힣0-9 /·]*", src)
               if m.strip()}
-    missing = [s for s in LABEL_SENTINELS if s not in labels]
+    sentinels = derive_label_sentinels(src)
+    # STATE the vocabulary held: how many sentinels are owner-derived (moves
+    # with a rename by itself) vs the typed field-label snapshot (cannot be
+    # derived — no owning map — so a divergence must be visible here, in the
+    # output, before the moment it fires).
+    print("LABEL SENTINELS: %d (closed-map-derived %d + field snapshot %s)"
+          % (len(sentinels), len(sentinels) - len(FIELD_LABEL_SENTINELS),
+             list(FIELD_LABEL_SENTINELS)))
+    missing = [s for s in sentinels if s not in labels]
     if missing:
         print("LABEL PIN LOST: %s — renamed or removed in main.js; drift "
               "masking would silently under-cover. Review the rename, then "
-              "update LABEL_SENTINELS." % missing)
+              "update FIELD_LABEL_SENTINELS (map-derived sentinels update "
+              "themselves)." % missing)
         raise SystemExit(2)
     return sorted(labels, key=len, reverse=True)
 
