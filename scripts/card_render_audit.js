@@ -788,16 +788,27 @@ function adapterBody(js, name) {
 // the whole parse UNPARSEABLE with a stated reason, never an approximation: an
 // approximate key set produces false failures on real reads.
 //
-// DEPTH: keys are collected at every brace depth, exactly as the line-anchored
-// pair did (its 6-space floor caught nested keys too). Preserving that is
-// deliberate — the five covered adapters must not shift underneath this change.
-// It is also over-permissive, and that is recorded rather than fixed here: see
-// the note in adapterShapedFunctions' caller.
+// DEPTH: keys are collected at the TOP LEVEL of the returned literal only (see
+// ADAPTER-NESTED-KEYS below). The line-anchored pair this replaced had a
+// 6-space floor that swept up nested keys as well, so a read of a name that
+// exists ONLY inside one of the values passed the contract — coverage the gate
+// did not have. Reads are matched on their FIRST path segment
+// (adapterReadKeys), so a legitimate `holder.response.status` still checks
+// against `response`, which is top level; nothing correct depends on the
+// nested names being in this set.
 //
 // Returns { keys } | { spread: true } | { unparseable: reason }.
 function parseObjectLiteralKeys(src, open) {
   const keys = new Set();
   const stack = ["{"];
+  // ADAPTER-NESTED-KEYS: collect at the TOP LEVEL of the returned literal only.
+  // A nested literal's keys are fields of one of the adapter's VALUES, not of
+  // its output: for `{ a: 1, response: { status: "ok" } }` a consumer reading
+  // holder.status is reading undefined, yet the all-depth set contained
+  // "status" and the read passed. Nested elements are still walked (so the
+  // cursor advances correctly and an unreadable nested form is still reported
+  // unparseable) — they are simply not added.
+  const atTopLevel = () => stack.length === 1;
   let expectKey = true;                 // at an element position of a `{`
   let i = open + 1;
   const IDENT = /[A-Za-z_$]/;
@@ -830,7 +841,7 @@ function parseObjectLiteralKeys(src, open) {
         if (!IDENT_RE.test(q.value)) {
           return { unparseable: `quoted key ${JSON.stringify(q.value)} is not an identifier` };
         }
-        keys.add(q.value);
+        if (atTopLevel()) keys.add(q.value);
         i = j + 1;
         expectKey = false;
         continue;
@@ -840,9 +851,9 @@ function parseObjectLiteralKeys(src, open) {
       while (j < src.length && /[A-Za-z0-9_$]/.test(src[j])) j += 1;
       const name = src.slice(i, j);
       const k = skipTrivia(src, j);
-      if (src[k] === ":") { keys.add(name); i = k + 1; expectKey = false; continue; }
-      if (src[k] === ",") { keys.add(name); i = k + 1; expectKey = true; continue; }
-      if (src[k] === "}") { keys.add(name); i = k; expectKey = false; continue; }
+      if (src[k] === ":") { if (atTopLevel()) keys.add(name); i = k + 1; expectKey = false; continue; }
+      if (src[k] === ",") { if (atTopLevel()) keys.add(name); i = k + 1; expectKey = true; continue; }
+      if (src[k] === "}") { if (atTopLevel()) keys.add(name); i = k; expectKey = false; continue; }
       if (src[k] === "(") return { unparseable: `method shorthand ${name}()` };
       return { unparseable: `element ${name} followed by ${JSON.stringify(src[k] || "EOF")}` };
     }
