@@ -934,19 +934,60 @@ function readString(src, i) {
   return { error: "unterminated string literal" };
 }
 
-// the adapter's own return literal -> produced key set, a spread marker, or an
-// explicit unparseable reason. The anchor (the LAST `return {` in the body) is
-// unchanged, so which literal is read is exactly what it was.
+// ADAPTER-RETURN-ANCHOR — read EVERY object-literal return, and require them to
+// agree, instead of positionally trusting the last one.
+//
+// The old anchor was `lastIndexOf("return {")`: whichever literal happened to be
+// written last won. That is a choice made by source order, not by meaning, and
+// it fails in the direction that is hardest to notice — the parse SUCCEEDS and
+// describes the wrong literal. serverReviewFetch is the live case: its error
+// path returns four keys (…, reason) and its success path three, and the
+// positional anchor silently published the three-key set as the adapter's
+// contract. A consumer reading `.reason` would have been failed for reading a
+// key the adapter really does produce, on the path where it matters.
+//
+// The rule chosen is UNANIMITY, and it is sound because it never picks: if every
+// object-literal return produces the same key set, that set is the answer no
+// matter which return a consumer reaches, so no selection is required. If they
+// differ, the shape a consumer receives genuinely cannot be determined from
+// source, and the honest output is UNPARSEABLE naming the disagreement — not a
+// tiebreaker. "Most keys wins" was rejected for exactly that reason: a function
+// whose error path is richer than its success path would be described by its
+// error path.
+//
+// KNOWN RESIDUAL, not fixed here: this looks only at returns that ARE object
+// literals. A function whose success path returns a non-literal (a parsed
+// value, a variable) while its guard paths return `{}` — safeReadReviewerActions
+// — still reports an agreed, empty set. Catching that needs each return
+// attributed to its OWNING function, since inner callbacks return values too
+// (computeMetrics has three such returns inside reduce/filter callbacks, and a
+// naive "every return must be a literal" rule would mark that COVERED adapter
+// unparseable for returns that are not its own). That attribution is a separate
+// decision with its own machinery; it is deliberately not invented here.
 function adapterProducedKeys(js, name) {
   const b = adapterBody(js, name);
   if (!b) return null;
   const body = js.slice(b.start, b.end);
-  const r = body.lastIndexOf("return {");
-  if (r < 0) return null;
-  const parsed = parseObjectLiteralKeys(body, r + "return ".length);
-  if (parsed.spread) return { spread: true };
-  if (parsed.unparseable) return { spread: false, unparseable: parsed.unparseable };
-  return { spread: false, keys: parsed.keys };
+  const parsed = [];
+  for (let at = body.indexOf("return {"); at >= 0; at = body.indexOf("return {", at + 1)) {
+    parsed.push(parseObjectLiteralKeys(body, at + "return ".length));
+  }
+  if (!parsed.length) return null;
+  const unreadable = parsed.find((p) => p.unparseable);
+  if (unreadable) return { spread: false, unparseable: unreadable.unparseable };
+  if (parsed.some((p) => p.spread)) return { spread: true };
+  const signature = (p) => [...p.keys].sort().join(",");
+  const first = signature(parsed[0]);
+  const dissenter = parsed.find((p) => signature(p) !== first);
+  if (dissenter) {
+    return {
+      spread: false,
+      unparseable: `${parsed.length} object-literal returns disagree `
+        + `([${first}] vs [${signature(dissenter)}]) — which one a consumer `
+        + "receives cannot be determined from source",
+    };
+  }
+  return { spread: false, keys: parsed[0].keys };
 }
 
 // identifiers assigned from the adapter, each with the function body it sits in
