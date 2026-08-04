@@ -39,3 +39,16 @@ redis==7.4.0
 # scripts/validate.py runs the test suite as part of CI and would
 # otherwise fail to import the test module.
 fakeredis==2.35.1
+# ORPHAN-TEST-WIRING: pytest runs the 41 derived test entries in
+# scripts/validate.py (invoked as `python -m pytest` because a file
+# without a __main__ guard direct-runs to exit 0 having tested
+# NOTHING). Same placement rationale as fakeredis above — validate.py
+# is the canonical local flow and CI must mirror local, so the one
+# requirements file every environment installs must provide the
+# runner; a CI-only install would recreate this exact failure on
+# every fresh clone. PINNED: the runner's collection rules and exit
+# codes (exit 5 on zero collected tests is load-bearing for the
+# fake-green guard) are part of the gate's contract, and an unpinned
+# runner drifting is the staleness class this repo keeps repairing.
+# Inert in the Render image: nothing imports it at runtime.
+pytest==9.0.3
