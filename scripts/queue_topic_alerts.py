@@ -8,8 +8,9 @@
 #   * The two-newest-batch SELECTs — imported from prediction_log_weekly.
 #   * The graph keyword lookup — build_cluster_lookup imported from
 #     b2b_briefing (same casefolded-substring matcher as the B2B filter).
-#   * notify() — duplicated VERBATIM from weekly_spine.py:153-187 (it is
-#     spine-local, not importable; weekly_spine.py must not be modified).
+#   * notify() — IMPORTED from weekly_spine (NOTIFY-DEDUP: the old verbatim
+#     copy diverged — no retry, no RFC-2047 Korean-title header — see the
+#     import-site comment below).
 #
 # VERDICT-ISOLATED (hard):
 #   * Reads verdict-free snapshot counts + graph node titles ONLY. The alert
@@ -37,7 +38,6 @@ import argparse
 import json
 import os
 import sys
-import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -104,44 +104,19 @@ INSERT_ALERT_SQL = (
 
 
 # ---------------------------------------------------------------------------
-# ntfy — DUPLICATED VERBATIM from weekly_spine.py:153-187 (spine-local helper;
-# weekly_spine.py is not modified). Env-driven, PRINT fallback, never crashes.
-# ---------------------------------------------------------------------------
-def _ntfy_endpoint():
-    url = (os.environ.get("NTFY_URL") or "").strip()
-    if url:
-        return url
-    topic = (os.environ.get("NTFY_TOPIC") or "").strip()
-    if topic:
-        return "https://ntfy.sh/%s" % topic
-    return None
-
-
-def notify(title, message, priority="default"):
-    """Send an ntfy notification if NTFY_URL / NTFY_TOPIC is set, else PRINT.
-    Best-effort: any send failure degrades to a printed warning — a
-    notification problem must NEVER change the run's exit code."""
-    endpoint = _ntfy_endpoint()
-    banner = "[notify] %s\n%s" % (title, message)
-    if not endpoint:
-        print(banner)
-        print("[notify] (NTFY_URL/NTFY_TOPIC unset — printed above instead of sent)")
-        return False
-    try:
-        req = urllib.request.Request(
-            endpoint,
-            data=message.encode("utf-8"),
-            headers={"Title": title, "Priority": priority},
-            method="POST",
-        )
-        urllib.request.urlopen(req, timeout=10).read()
-        print("[notify] sent to %s: %s" % (endpoint, title))
-        return True
-    except Exception as exc:  # noqa: BLE001 — notify must never crash the run
-        print(banner)
-        print("[notify] send failed (%s) — printed above instead."
-              % type(exc).__name__)
-        return False
+# ntfy — IMPORTED from weekly_spine (NOTIFY-DEDUP 2026-08-05). This used to be
+# a verbatim copy, made under "weekly_spine.py must not be modified" — a
+# constraint that expired, after which the copies diverged exactly as copies
+# do: NOTIFY-RETRY (3 attempts, 1s/2s backoff, 4xx not retried) landed in the
+# spine only, and the copy ALSO predated ALERT-FIX, so it still sent the raw
+# Korean Title header that urllib rejects with UnicodeEncodeError — meaning
+# this script's alerts (title "[tickedin] '<keyword>' 확산 알림") have never
+# been deliverable through the copy at all; every send took the print
+# fallback. One implementation, imported, ends the class. Import is clean:
+# weekly_spine executes nothing at import (stdlib imports, constants, defs, a
+# stdout-reconfigure guard), has no import of this module back, and this file
+# already imported it inside two functions for normalize_db_url.
+from weekly_spine import notify  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
