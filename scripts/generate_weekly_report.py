@@ -15,7 +15,8 @@
 #   python scripts/generate_weekly_report.py --dry-run          # rank, no write
 #   python scripts/generate_weekly_report.py                    # last 7 days
 #   python scripts/generate_weekly_report.py --week-start 2026-07-06 --week-end 2026-07-12
-#   python scripts/generate_weekly_report.py --force            # regenerate a week
+#   python scripts/generate_weekly_report.py --force \
+#       --supersede 2026-07-20 --supersede-reason "why"         # replace a PUBLISHED week
 #   python scripts/generate_weekly_report.py --selftest         # offline check
 #
 # SAFETY:
@@ -36,8 +37,12 @@
 #     (FORBIDDEN_LABEL_VOCAB imported from build_brainmap_graph — titles are
 #     journalist-written passthrough, exactly as in the brain map).
 #   * Idempotent per week_start: an existing row for that week_start SKIPS
-#     the write unless --force (which appends a fresh row; the API serves
-#     the newest row per week, older rows are free audit history).
+#     the write. ARCHIVE-IMMUTABILITY: --force alone no longer overrides that —
+#     because the API serves the NEWEST row per week, appending is a silent
+#     rewrite of a published page. Superseding additionally requires
+#     --supersede <that exact week> and --supersede-reason, and records both on
+#     the new row (payload_json -> supersedes). Older rows are never touched:
+#     they remain intact audit history.
 #   * Fail-closed: refuses without DATABASE_URL; refuses to write without
 #     USE_POSTGRES_WRITE=true (--dry-run needs only DATABASE_URL).
 #     Never prints DATABASE_URL or any API key.
@@ -103,11 +108,83 @@ INSERT_SQL = (
     "(week_start, week_end, generated_at, graph_build_ref, payload_json) "
     "VALUES (%s, %s, %s, %s, %s)"
 )
+# ARCHIVE-IMMUTABILITY: ORDER BY id DESC so this returns the row the archive
+# actually SERVES (api_server.py:1147-1150 selects the newest id for a week).
+# The skip decision is unchanged — it still turns on whether ANY row exists —
+# but a refusal can now name the exact snapshot that would be replaced.
 SELECT_EXISTING_WEEK_SQL = (
-    "SELECT id FROM weekly_reports WHERE week_start = %s LIMIT 1"
+    "SELECT id, generated_at FROM weekly_reports WHERE week_start = %s "
+    "ORDER BY id DESC LIMIT 1"
 )
 
 FRAMING_TEXT = "확산 규모 기준 · 사실 검증 아님"
+
+
+# ---------------------------------------------------------------------------
+# ARCHIVE-IMMUTABILITY — a published week may only be replaced on purpose.
+#
+# A stored week is a PUBLISHED record: 14 outreach emails link to archive pages,
+# and api_server serves the NEWEST row per week_start, so appending a second row
+# silently rewrites a page someone has already read. That has happened twice
+# (2026-07-14 and 2026-07-20), and for 07-20 the top ten changed membership and
+# order. The unflagged path was never the hole — it skips. `--force` was.
+#
+# The guard does not remove --force; it makes its effect impossible to reach by
+# accident. To supersede, the operator must ALSO name the exact week
+# (--supersede YYYY-MM-DD) and say why (--supersede-reason). Naming the week is
+# the load-bearing part: a --force left in a saved command supersedes whatever
+# week the default window resolves to, and that week changes every Monday, so a
+# stale command refuses the moment the calendar moves rather than quietly
+# replacing a different archive page than the operator was thinking of.
+#
+# FAILS CLOSED in every direction: unknown existence -> refuse (the caller
+# passes existing=None only when it positively read "no row"); force without
+# intent -> refuse; intent naming a different week -> refuse; blank reason ->
+# refuse. The only path that writes over a published week is one where the
+# operator typed that week's date and a reason.
+def supersede_decision(existing, force, supersede_week, supersede_reason,
+                       week_start):
+    """Pure: (action, message) for a write attempt. Never touches the DB.
+
+    ``existing`` is (id, generated_at) for the row the archive currently serves,
+    or None when the week has no stored row. Actions: "write" (no published row
+    to protect, or a deliberate supersession), "skip" (a row exists and no
+    supersession was requested — today's behaviour, unchanged), "refuse".
+    """
+    if existing is None:
+        return "write", ""
+    existing_id, existing_generated_at = existing
+    served = ("week_start=%s already has a stored row (id=%s, generated %s) and "
+              "that row is what the archive serves"
+              % (week_start, existing_id, existing_generated_at))
+    if not force:
+        return "skip", (
+            "[weekly] %s — skipping. To replace it you must supersede it "
+            "deliberately: --force --supersede %s --supersede-reason '<why>'."
+            % (served, week_start))
+    if not supersede_week:
+        return "refuse", (
+            "[weekly] REFUSING: %s. --force alone would append a row that "
+            "silently becomes the served version of a page outreach emails "
+            "link to. Re-run with --supersede %s --supersede-reason '<why>' "
+            "if that is genuinely what you intend."
+            % (served, week_start))
+    if supersede_week != week_start:
+        return "refuse", (
+            "[weekly] REFUSING: --supersede %s does not match the week being "
+            "written (%s). %s. This is the stale-command case: the flag names "
+            "a week you are not writing, so nothing is superseded."
+            % (supersede_week, week_start, served))
+    if not (supersede_reason or "").strip():
+        return "refuse", (
+            "[weekly] REFUSING: --supersede %s requires --supersede-reason "
+            "'<why>' — the reason is stored on the new row so a superseded "
+            "week is discoverable from the data, not just from a shell history."
+            % week_start)
+    return "supersede", (
+        "[weekly] SUPERSEDING %s. The previous snapshot stays in the table as "
+        "audit history; the new row becomes the served version."
+        % served)
 
 
 def build_report(graph, published_by_id, week_start, week_end,
@@ -353,11 +430,46 @@ def run_selftest() -> int:
     print("  [%s] (j) surviving rows byte-identical to the unguarded ranking "
           "(rank positions close up only)" % ("ok" if j_ok else "xx"))
 
-    ok = all([a_ok, b_ok, c_ok, d_ok, e_ok, f_ok, g_ok, h_ok, i_ok, j_ok])
+    # (k) ARCHIVE-IMMUTABILITY — every path of the supersession guard, on the
+    # pure decision function, so the refusals are demonstrated rather than
+    # trusted. No DB is touched by any of these.
+    WEEK = "2026-07-20"
+    row = (6, "2026-07-28T20:30:14.519469+00:00")
+    cases = [
+        ("unpublished week writes",
+         (None, False, None, None, WEEK), "write"),
+        ("unpublished week + force still writes",
+         (None, True, None, None, WEEK), "write"),
+        ("published week, no force -> skip (unchanged)",
+         (row, False, None, None, WEEK), "skip"),
+        ("published week + force alone -> REFUSE",
+         (row, True, None, None, WEEK), "refuse"),
+        ("force + supersede naming a DIFFERENT week -> REFUSE",
+         (row, True, "2026-07-14", "fixing a bad graph", WEEK), "refuse"),
+        ("force + supersede + blank reason -> REFUSE",
+         (row, True, WEEK, "   ", WEEK), "refuse"),
+        ("force + supersede + reason -> supersede",
+         (row, True, WEEK, "regenerated after graph rebuild", WEEK), "supersede"),
+    ]
+    k_ok = True
+    for label, args_tuple, want in cases:
+        got, msg = supersede_decision(*args_tuple)
+        if got != want:
+            k_ok = False
+            print("    [xx] %s: got %r want %r" % (label, got, want))
+    # the refusal must name the week and the row it protects, or an operator
+    # cannot act on it
+    _, refusal = supersede_decision(row, True, None, None, WEEK)
+    k_ok = k_ok and WEEK in refusal and "id=6" in refusal and "REFUSING" in refusal
+    print("  [%s] (k) supersession guard: %d paths, refusal names the week and "
+          "the served row" % ("ok" if k_ok else "xx", len(cases)))
+
+    ok = all([a_ok, b_ok, c_ok, d_ok, e_ok, f_ok, g_ok, h_ok, i_ok, j_ok, k_ok])
     print()
     print("SELFTEST: %s" % ("PASS (ranking + window filter + representative + "
                             "fallback + undated tolerance + honesty + "
-                            "content-guard)" if ok else "FAIL"))
+                            "content-guard + archive-immutability)"
+                            if ok else "FAIL"))
     return 0 if ok else 1
 
 
@@ -380,7 +492,20 @@ def main(argv=None) -> int:
                         help="Entries to keep (default %d)." % DEFAULT_TOP_N)
     parser.add_argument("--force", action="store_true",
                         help="Write even if a row for this week_start exists "
-                             "(appends; the API serves the newest per week).")
+                             "(appends; the API serves the newest per week). "
+                             "NOT sufficient on its own — see --supersede.")
+    # ARCHIVE-IMMUTABILITY: the two flags --force cannot be used without once a
+    # week is already published. Both are required, and --supersede must name
+    # the week being written, so neither can be satisfied by habit.
+    parser.add_argument("--supersede", default=None, metavar="YYYY-MM-DD",
+                        help="State that you intend to replace the PUBLISHED "
+                             "snapshot of this exact week. Must equal the week "
+                             "being written. Required with --force when a row "
+                             "already exists.")
+    parser.add_argument("--supersede-reason", default=None, metavar="TEXT",
+                        help="Why the published week is being replaced. Stored "
+                             "on the new row so the supersession is "
+                             "discoverable from the data.")
     args = parser.parse_args(argv)
 
     if args.selftest:
@@ -450,14 +575,38 @@ def main(argv=None) -> int:
             return 0
         with conn.cursor() as cur:
             cur.execute(CREATE_TABLE_SQL)
-            cur.execute(SELECT_EXISTING_WEEK_SQL, (week_start,))
-            existing = cur.fetchone()
-            if existing and not args.force:
-                print("[weekly] a row for week_start=%s already exists "
-                      "(id=%s) — skipping (use --force to append a fresh "
-                      "snapshot; the API serves the newest)."
-                      % (week_start, existing[0]))
+            # ARCHIVE-IMMUTABILITY: fail closed. If we cannot positively read
+            # whether this week is already published, we do not write — an
+            # unreadable archive is not evidence that there is nothing to
+            # protect.
+            try:
+                cur.execute(SELECT_EXISTING_WEEK_SQL, (week_start,))
+                existing = cur.fetchone()
+            except Exception as lookup_error:
+                print("[weekly] REFUSING: cannot determine whether week_start=%s "
+                      "is already published (%s). Refusing rather than risking a "
+                      "silent supersession."
+                      % (week_start, type(lookup_error).__name__))
+                return 1
+            action, message = supersede_decision(
+                existing, args.force, args.supersede,
+                args.supersede_reason, week_start)
+            if message:
+                print(message)
+            if action == "skip":
                 return 0
+            if action == "refuse":
+                return 1
+            if action == "supersede":
+                # Recorded ON THE ROW so the supersession is discoverable with a
+                # SELECT, not only from a shell history. Post-hoc metadata,
+                # exactly like generated_at / graph_build_ref above: nothing the
+                # ranking, the window filter or any entry depends on is touched.
+                payload["supersedes"] = {
+                    "report_id": existing[0],
+                    "generated_at": str(existing[1] or ""),
+                    "reason": args.supersede_reason.strip(),
+                }
             cur.execute(INSERT_SQL, (
                 week_start, week_end, generated_at, graph_build_ref,
                 json.dumps(payload, ensure_ascii=False),
