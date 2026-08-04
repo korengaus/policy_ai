@@ -2227,6 +2227,18 @@
         // DESIGN-DETAIL-5d FIX 2: this reliability_score is the 0-100 candidate score —
         // (the bogus "/5" was removed; the genuine 0-5 source.reliability_score lives
         // in renderEvidenceSources / the reader card, labelled "출처 신뢰도: N/5").
+        // EXCLUDED-ROW-SCORE-AND-ROLE: on a row this card has ALREADY marked
+        // excluded (same exclusionLabel the badge and label read — the ONE
+        // predicate, computed above, no second test), the summary line stops
+        // asserting a reliability score and a participatory role. A semantic
+        // review found the sandwich — 제외/불일치 badge, then "출처 신뢰도 70 ·
+        // 맥락 참고", then the exclusion label — reads as offered evidence:
+        // the number and the role assert participation and win against both
+        // markers. Display-only: the stored score is untouched (the detail
+        // rows below, sitting AFTER the exclusion label in the diagnostics
+        // def-list, still show every stored number); nothing is renumbered,
+        // and non-excluded rows are byte-identical. No replacement text —
+        // absence is honest and needs no new word.
         const summaryBits = [
           source.source_type ? formatSourceType(source.source_type) : "",
           publisher,
@@ -2235,8 +2247,10 @@
           // wore, i.e. two different scales under one name (the 7/21 two-path shape).
           // Relabelled to the 출처 신뢰도 family this same list already uses for the
           // field (평균 출처 신뢰도 / 출처 신뢰도 등급). No "/5": this is 0-100.
-          source.reliability_score == null ? "" : `출처 신뢰도 ${source.reliability_score}`,
-          source.verification_role ? roleLabel(source.verification_role) : "",
+          (exclusionLabel || source.reliability_score == null)
+            ? "" : `출처 신뢰도 ${source.reliability_score}`,
+          (exclusionLabel || !source.verification_role)
+            ? "" : roleLabel(source.verification_role),
         ].filter((b) => b && String(b).trim() && String(b).trim() !== "-");
         const summaryText = summaryBits.length
           ? summaryBits.join(" · ")
