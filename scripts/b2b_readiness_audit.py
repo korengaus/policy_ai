@@ -1439,14 +1439,24 @@ def run_audit(base: str, with_reviewer: bool = False) -> int:
     fails = [c for c, s, _, _ in rep.rows if s in ("FAIL", "ERROR")]
     warns = [c for c, s, _, _ in rep.rows if s == "WARN"]
     if worst == 2:
+        # VERDICT-DATE: the two healthy verdicts below used to end "on 8/3" — a
+        # planned SEND date typed into the instrument, i.e. a fact about the
+        # operator's calendar, not about the system this audit measured. It went
+        # stale the next day, exactly like the three constants repaired before
+        # it (C1 email numbers, C5 band, the spine hour). The audit answers
+        # "safe to send NOW" — the moment of the run IS the date, and the shell
+        # that ran it knows when that was, so the suffix is simply gone rather
+        # than replaced by a derived clock read it does not need. The
+        # "VERDICT: safe to send" prefix is unchanged — operator habit and any
+        # downstream grep on that prefix still match.
         p("VERDICT: fix %s first" % ", ".join(fails))
         # AUDIT-HARDENING: the gate's exit code now carries the verdict so a
         # scripted preflight cannot overlook a FAIL/ERROR table.
         return 1
     if warns:
-        p("VERDICT: safe to send on 8/3 AFTER addressing warns: %s" % ", ".join(warns))
+        p("VERDICT: safe to send AFTER addressing warns: %s" % ", ".join(warns))
     else:
-        p("VERDICT: safe to send on 8/3")
+        p("VERDICT: safe to send")
     return 0
 
 
