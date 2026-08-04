@@ -466,6 +466,12 @@ def _commands() -> List[List[str]]:
         [python, "scripts/check_logging.py", "--help"],
         [python, "scripts/check_logging.py", "--status"],
         [python, "tests/test_structured_logging.py"],
+        # TRENDING-SYNC-RECONCILE — the compute_trending sync pin. Born
+        # UNWIRED (7124f9d said "plus tests (unwired)" out loud) and therefore
+        # never ran in CI, so the 2047158 lineage re-key drifted the two
+        # copies for 17 days with a green dashboard. Offline: no DB, no
+        # network (imports api_server for the pinned pure function only).
+        [python, "tests/test_prediction_log_weekly.py"],
         [npm, "test"],
     ]
 

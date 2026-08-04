@@ -270,12 +270,16 @@ def process_hits(hits, snapshot_date, already_sent, record_sent, send):
 # ---------------------------------------------------------------------------
 def run_selftest() -> int:
     keywords = ["최저임금", "가계대출", "기초연금"]
-    # Two synthetic batches: (stable_id, outlet_count, member_count) rows.
-    previous_rows = [("s_surge", 2, 3), ("s_below", 2, 2)]
-    current_rows = [("s_surge", 4, 5),   # growth +2 -> qualifies, keyword hit
-                    ("s_below", 3, 3),   # growth +1 -> below threshold
-                    ("s_new", 3, 3),     # new, outlets 3 -> qualifies, keyword hit
-                    ("s_nokw", 5, 6)]    # new, outlets 5 -> qualifies, NO keyword
+    # Two synthetic batches: (stable_id, outlet_count, member_count,
+    # cluster_lineage_id) rows — the SELECT_SNAPSHOT_ROWS_SQL shape after
+    # TRENDING-SYNC-RECONCILE (compute_trending now unpacks 4-tuples and keys
+    # on lineage-or-sid; lineage None here keeps every key == stable_id, so
+    # the expectations below are unchanged).
+    previous_rows = [("s_surge", 2, 3, None), ("s_below", 2, 2, None)]
+    current_rows = [("s_surge", 4, 5, None),  # growth +2 -> qualifies, keyword hit
+                    ("s_below", 3, 3, None),  # growth +1 -> below threshold
+                    ("s_new", 3, 3, None),    # new, outlets 3 -> qualifies, keyword hit
+                    ("s_nokw", 5, 6, None)]   # new, outlets 5 -> qualifies, NO keyword
     graph = {
         "nodes": [
             {"id": 1, "cluster_id": "A", "title": "최저임금 인상안 발표"},

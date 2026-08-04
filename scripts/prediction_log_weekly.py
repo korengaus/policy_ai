@@ -85,8 +85,15 @@ SELECT_SNAPSHOT_KEYS_SQL = (
     "GROUP BY snapshot_date, graph_ref "
     "ORDER BY max_id DESC LIMIT 2"
 )
+# TRENDING-SYNC-RECONCILE (2026-08-04): cluster_lineage_id added — the durable
+# key. api_server._compute_trending re-keyed on lineage in 2047158 (stable_id
+# is a membership hash that churns exactly on the growing clusters this signal
+# ranks); this copy kept keying on stable_id for 17 days because its sync pin
+# was never wired into CI. Column exists on all rows (snapshot_brainmap_growth
+# CREATE TABLE + ADD COLUMN IF NOT EXISTS migration, verified live: 5931/5931
+# non-empty).
 SELECT_SNAPSHOT_ROWS_SQL = (
-    "SELECT cluster_stable_id, outlet_count, member_count "
+    "SELECT cluster_stable_id, outlet_count, member_count, cluster_lineage_id "
     "FROM brainmap_snapshots WHERE snapshot_date = %s AND graph_ref = %s"
 )
 SELECT_GRAPH_BY_ID_SQL = (
@@ -160,17 +167,32 @@ def compute_trending(current_rows, previous_rows, limit):
     """DUPLICATED from api_server._compute_trending (pure) so the cron child
     never imports the FastAPI app. Behaviorally sync-pinned by
     tests/test_prediction_log_weekly.py::TrendingSignalSyncTests — same
-    inputs MUST produce identical outputs, or the pin fails."""
-    current = {sid: (outlets, members)
-               for sid, outlets, members in current_rows if sid}
-    previous = {sid: outlets for sid, outlets, _ in previous_rows if sid}
+    inputs MUST produce identical outputs, or the pin fails.
+
+    TRENDING-SYNC-RECONCILE: keyed on ``lineage or sid`` exactly as the
+    api_server copy has been since 2047158. Rows are 4-tuples
+    (sid, outlets, members, lineage) — the SELECT_SNAPSHOT_ROWS_SQL shape.
+    A cluster whose stable_id churned between batches (it gained a member —
+    which is simultaneously what growth measures and what churns the hash) now
+    joins on its durable lineage instead of reporting as brand new with
+    inflated growth. ``cluster_lineage_id`` is emitted too: behavioural
+    agreement means identical dicts, and the extra key gives the track-record
+    and alert lanes the durable key (both read entries by name and ignore
+    keys they don't use)."""
+    current = {(lineage or sid): (sid, outlets, members)
+               for sid, outlets, members, lineage in current_rows
+               if lineage or sid}
+    previous = {(lineage or sid): outlets
+                for sid, outlets, _members, lineage in previous_rows
+                if lineage or sid}
     entries = []
-    for sid, (outlets, members) in current.items():
-        prev_outlets = previous.get(sid)
+    for key, (sid, outlets, members) in current.items():
+        prev_outlets = previous.get(key)
         is_new = prev_outlets is None
         growth = outlets if is_new else outlets - prev_outlets
         entries.append({
             "cluster_stable_id": sid,
+            "cluster_lineage_id": key,
             "representative_analysis_id": None,
             "title": "",
             "current_outlet_count": outlets,
@@ -423,7 +445,10 @@ def run_log(conn, today_iso, created_at, dry_run, top_n):
             batches.append({
                 "snapshot_date": snapshot_date,
                 "graph_ref": graph_ref,
-                "rows": [(r[0], r[1], r[2]) for r in cur.fetchall()],
+                # full SELECT arity — compute_trending unpacks 4-tuples
+                # (TRENDING-SYNC-RECONCILE); a hand-truncated slice here is
+                # how the old 3-wide shape survived the SQL widening.
+                "rows": [tuple(r) for r in cur.fetchall()],
             })
     current, previous = batches[0], batches[1]
 
@@ -534,16 +559,25 @@ def run_selftest() -> int:
 
     # (e) logging filter: growth>0 only, top-N cap, member ids resolved,
     #     direction/framing constants carried.
-    current = [("up", 8, 5), ("flat", 4, 3), ("new", 6, 4), ("down", 2, 2)]
-    previous = [("up", 5, 4), ("flat", 4, 3), ("down", 3, 2)]
+    # 4-tuple rows (TRENDING-SYNC-RECONCILE): lineage None -> key falls back
+    # to sid, so the pre-reconcile expectations hold unchanged. The "up"
+    # cluster's stable_id CHURNS between batches while its lineage holds —
+    # the exact case the lineage key exists for: it must still read as grown
+    # (+3), not as new.
+    current = [("up_hashB", 8, 5, "lin-up"), ("flat", 4, 3, None),
+               ("new", 6, 4, None), ("down", 2, 2, None)]
+    previous = [("up_hashA", 5, 4, "lin-up"), ("flat", 4, 3, None),
+                ("down", 3, 2, None)]
     entries = compute_trending(current, previous, 10)
     index = {sid: {"member_ids": {i, i + 1}, "outlet_count": o}
-             for i, (sid, o, _m) in enumerate(current)}
+             for i, (sid, o, _m, _l) in enumerate(current)}
     rows = build_prediction_rows(entries, index, "2026-07-13", 42,
                                  "2026-07-13", top_n=5)
     sids = [r["cluster_stable_id"] for r in rows]
-    check("(e) growth>0 only, ranked (new=6 > up=3), constants carried",
-          sids == ["new", "up"]
+    # the churned cluster logs its CURRENT stable_id (up_hashB), joined as
+    # grown (+3) via lineage — not re-logged as new with growth 8.
+    check("(e) growth>0 only, ranked (new=6 > up=3), churn joins via lineage",
+          sids == ["new", "up_hashB"]
           and all(r["predicted_direction"] == PREDICTED_DIRECTION
                   and r["framing"] == FRAMING_TEXT
                   and r["horizon_days"] == HORIZON_DAYS for r in rows)

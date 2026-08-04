@@ -13,6 +13,7 @@ selftest) plus the two B4-specific pins:
 """
 
 import json
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -109,8 +110,12 @@ class ContainmentMatcherTests(unittest.TestCase):
 
 class BuildPredictionRowsTests(unittest.TestCase):
     def _entries(self):
-        current = [("up", 8, 5), ("flat", 4, 3), ("new", 6, 4), ("down", 2, 2)]
-        previous = [("up", 5, 4), ("flat", 4, 3), ("down", 3, 2)]
+        # rows via the derived builder (defined below; resolved at call time)
+        # — lineage None keeps every key == stable_id, expectations unchanged.
+        current = [snapshot_row("up", 8, 5), snapshot_row("flat", 4, 3),
+                   snapshot_row("new", 6, 4), snapshot_row("down", 2, 2)]
+        previous = [snapshot_row("up", 5, 4), snapshot_row("flat", 4, 3),
+                    snapshot_row("down", 3, 2)]
         return plw.compute_trending(current, previous, 10), {
             "up": {"member_ids": {10, 11}, "outlet_count": 8},
             "flat": {"member_ids": {20, 21}, "outlet_count": 4},
@@ -208,18 +213,63 @@ class HonestySchemaTests(unittest.TestCase):
         self.assertNotIn(plw.FRAMING_TEXT, honesty_guard.FRAMING_WHITELIST)
 
 
+# TRENDING-SYNC-RECONCILE: the fixture row shape is DERIVED from the SELECT
+# both production callers feed compute_trending from, not typed. This pin was
+# dead for 17 days precisely because the fixture's hand-typed 3-tuples went
+# stale when api_server re-keyed to a 4th column (2047158) — deriving the
+# arity means a future column change moves the fixture with the query instead
+# of silently orphaning it. If the parse ever fails, the loud assert below
+# names the query it assumed rather than testing a guessed shape.
+_SELECT_LIST = re.match(r"SELECT (.+?) FROM", plw.SELECT_SNAPSHOT_ROWS_SQL)
+assert _SELECT_LIST, (
+    "cannot read the select-list of SELECT_SNAPSHOT_ROWS_SQL — the fixture "
+    "shape is derived from it; fixture assumed %r" % plw.SELECT_SNAPSHOT_ROWS_SQL)
+SNAPSHOT_COLUMNS = tuple(c.strip() for c in _SELECT_LIST.group(1).split(","))
+
+
+def snapshot_row(cluster_stable_id, outlet_count, member_count,
+                 cluster_lineage_id=None, **extra):
+    """One snapshot row tuple in SELECT_SNAPSHOT_ROWS_SQL's column order.
+    Unknown keyword = the SELECT gained a column this builder does not know —
+    fail loudly instead of silently mis-positioning values."""
+    values = {"cluster_stable_id": cluster_stable_id,
+              "outlet_count": outlet_count,
+              "member_count": member_count,
+              "cluster_lineage_id": cluster_lineage_id, **extra}
+    unknown = set(values) - set(SNAPSHOT_COLUMNS)
+    missing = set(SNAPSHOT_COLUMNS) - set(values)
+    assert not unknown and not missing, (
+        "fixture builder out of sync with SELECT_SNAPSHOT_ROWS_SQL: "
+        "unknown=%r missing=%r" % (sorted(unknown), sorted(missing)))
+    return tuple(values[col] for col in SNAPSHOT_COLUMNS)
+
+
+_row = snapshot_row
+
+
 class TrendingSignalSyncTests(unittest.TestCase):
     """Behavioral pin: the duplicated compute_trending must produce output
     identical to api_server._compute_trending on the same inputs."""
 
     FIXTURES = (
         # (current_rows, previous_rows, limit)
-        ([("a", 5, 3), ("b", 2, 1)], [("a", 1, 1)], 10),          # growth + new
-        ([("a", 5, 3), ("a", 9, 4)], [("a", 1, 1)], 10),           # dupes collapse
-        ([("a", 3, 1), ("b", 3, 1), ("c", 1, 1)], [], 2),          # ties + limit
-        ([("", 9, 9), ("a", 2, 1)], [("", 1, 1), ("a", 2, 1)], 10),  # blank sid dropped
-        ([], [("a", 5, 2)], 10),                                    # dropouts ignored
-        ([("x", 4, 2)], [("x", 7, 3)], 10),                        # negative growth kept by signal
+        ([_row("a", 5, 3), _row("b", 2, 1)], [_row("a", 1, 1)], 10),  # growth + new
+        ([_row("a", 5, 3), _row("a", 9, 4)], [_row("a", 1, 1)], 10),  # dupes collapse
+        ([_row("a", 3, 1), _row("b", 3, 1), _row("c", 1, 1)], [], 2),  # ties + limit
+        ([_row("", 9, 9), _row("a", 2, 1)],
+         [_row("", 1, 1), _row("a", 2, 1)], 10),                      # blank sid dropped
+        ([], [_row("a", 5, 2)], 10),                                  # dropouts ignored
+        ([_row("x", 4, 2)], [_row("x", 7, 3)], 10),                   # negative growth kept
+        # THE 2047158 CASE — the drift this pin failed to catch while dead:
+        # the cluster gained a member, so its stable_id churned while its
+        # lineage held. Both copies must join it as grown (+5), never re-count
+        # it as new.
+        ([_row("hash_after", 9, 5, cluster_lineage_id="lin-1")],
+         [_row("hash_before", 4, 3, cluster_lineage_id="lin-1")], 10),
+        # lineage present on one side only: `lineage or sid` must still join
+        # identically in both copies.
+        ([_row("a", 6, 3, cluster_lineage_id="lin-a")],
+         [_row("a", 2, 1)], 10),
     )
 
     def test_identical_output_on_all_fixtures(self):
@@ -230,6 +280,19 @@ class TrendingSignalSyncTests(unittest.TestCase):
                 api_server._compute_trending(current, previous, limit),
                 "compute_trending diverged from api_server._compute_trending "
                 "on fixture %r" % (current,))
+
+    def test_churned_stable_id_reads_as_growth_not_new(self):
+        # Not just agreement — the agreed answer must be the LINEAGE one.
+        # Two identical-but-wrong copies would pass the equality pin; this
+        # asserts the substance of 2047158 in both.
+        import api_server
+        current = [_row("hash_after", 9, 5, cluster_lineage_id="lin-1")]
+        previous = [_row("hash_before", 4, 3, cluster_lineage_id="lin-1")]
+        for fn in (plw.compute_trending, api_server._compute_trending):
+            [entry] = fn(current, previous, 10)
+            self.assertFalse(entry["is_new"], fn.__module__)
+            self.assertEqual(entry["growth"], 5, fn.__module__)
+            self.assertEqual(entry["cluster_lineage_id"], "lin-1", fn.__module__)
 
 
 class SelftestTests(unittest.TestCase):
