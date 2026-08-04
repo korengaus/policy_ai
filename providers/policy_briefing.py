@@ -4,7 +4,7 @@ Implements a primary-document-type provider against the data.go.kr Policy
 Briefing integrated press-release feed (org code 1371000, an aggregated feed of
 press releases from all central ministries):
 
-    GET http://apis.data.go.kr/1371000/pressReleaseService/pressReleaseList
+    GET https://apis.data.go.kr/1371000/pressReleaseService/pressReleaseList
     params: serviceKey, startDate, endDate (YYYYMMDD), pageNo, numOfRows
 
 Unlike the Naver provider (a *finder* that returns article URLs), this is a
@@ -31,6 +31,11 @@ CONFIRMED LIVE SPEC (verified via Worker Shell against the real API):
     * Error signaling: any resultCode != 0 / resultMsg != NORMAL_SERVICE
       (e.g. THREE_DAYS_OVER_ERROR, NO_MANDATORY_REQUEST_PARAMETERS_ERROR,
       SERVICE_KEY_IS_NOT_REGISTERED_ERROR) -> fail-closed empty result.
+    * GATEWAY errors use a DIFFERENT document than the service's own: root
+      <OpenAPI_ServiceResponse><cmmMsgHeader><errMsg>...</errMsg>
+      <returnAuthMsg>..</returnAuthMsg><returnReasonCode>30</returnReasonCode>
+      — and arrive with a non-200 status (403 observed for an unregistered
+      key). See ``_gateway_error``.
 
 Fail-closed contract (mirrors ``providers.naver_search``):
     * No network at import time.
@@ -61,8 +66,15 @@ from .base import DocumentProviderResult, PrimaryDocumentProvider
 log = get_logger(__name__)
 
 
+# HTTPS-ONLY (2026-08-04). The plain-HTTP (port 80) path stopped answering on
+# 2026-08-02: the TCP connect is accepted and NOTHING comes back, so every call
+# died as ReadTimeout — measured identical at timeout=5 and timeout=30, four
+# times each, locally and in production. Port 443 answers the byte-identical
+# query in ~0.3s. DELIBERATELY NO http:// FALLBACK: a silent retry on the other
+# scheme would hide the next occurrence of exactly this failure, which is what
+# made the 08-02 outage take three days to see. One scheme, and it fails loudly.
 POLICY_BRIEFING_ENDPOINT = (
-    "http://apis.data.go.kr/1371000/pressReleaseService/pressReleaseList"
+    "https://apis.data.go.kr/1371000/pressReleaseService/pressReleaseList"
 )
 
 # data.go.kr hard cap: a date window wider than 3 days returns
@@ -90,6 +102,12 @@ DEFAULT_NUM_OF_ROWS = 100
 # ignores pageNo (page 1 == page 2). Retained only as a documented upper-bound
 # reference; no longer read by the wiring.
 MAX_PAGES_PER_WINDOW = 5
+
+# ERROR-REASON-BREADCRUMB — hard cap on the stored reason string. A diagnostic
+# breadcrumb ("ReadTimeout", "http status 403: SERVICE_KEY_IS_NOT_REGISTERED_
+# ERROR"), never a payload: debug_summary is stored per row, so this must stay
+# bounded regardless of what an upstream error string contains.
+_MAX_ERROR_REASON_CHARS = 80
 
 _SOURCE_TAG = "policy_briefing"
 
@@ -254,15 +272,64 @@ def _newsitem_to_raw(elem) -> Dict[str, Any]:
     return raw
 
 
+def _gateway_error(root) -> tuple[str, str]:
+    """(errMsg, returnReasonCode) from a data.go.kr GATEWAY rejection document,
+    or ('', '') when ``root`` is not one.
+
+    The gateway answers a rejected request with a document the service's own
+    schema knows nothing about — root <OpenAPI_ServiceResponse> wrapping
+    <cmmMsgHeader><errMsg>SERVICE_KEY_IS_NOT_REGISTERED_ERROR</errMsg> — so a
+    parser looking only for header/resultMsg reported ('', '', []) and the one
+    string naming the cause never reached a log line.
+
+    ``returnAuthMsg`` is deliberately NOT read: the document declares UTF-8 but
+    sends the Korean text as EUC-KR bytes, so it decodes to mojibake under any
+    single decoding. The ASCII ``errMsg`` code is the actionable part.
+
+    Detection is by the presence of <cmmMsgHeader> ONLY, so a normal
+    <response> body cannot enter this branch."""
+    if root is None:
+        return "", ""
+    header = root.find("cmmMsgHeader")
+    if header is None:
+        return "", ""
+    return (
+        (header.findtext("errMsg") or "").strip(),
+        (header.findtext("returnReasonCode") or "").strip(),
+    )
+
+
+def gateway_error_from_text(text: str) -> tuple[str, str]:
+    """``_gateway_error`` over a raw body. ('', '') for an unparseable body or
+    any document that is not a gateway rejection. Never raises — used on the
+    non-200 path, where the gateway rejection actually arrives (403)."""
+    import xml.etree.ElementTree as ET
+
+    try:
+        return _gateway_error(ET.fromstring(text or ""))
+    except Exception:
+        return "", ""
+
+
 def parse_press_release_xml(text: str) -> tuple[str, str, List[Dict[str, Any]]]:
     """Parse the XML body. Returns (resultCode, resultMsg, [raw NewsItem dicts]).
-    Never raises — a malformed body yields ('', 'XML_PARSE_ERROR', [])."""
+    Never raises — a malformed body yields ('', 'XML_PARSE_ERROR', []).
+
+    A GATEWAY rejection yields (returnReasonCode, errMsg, []) so the cause
+    travels the SAME non-normal-service path every other error uses (errMsg is
+    never "NORMAL_SERVICE", so ``_is_normal_service`` still fails closed). The
+    successful path below is untouched: the gateway branch is entered only when
+    <cmmMsgHeader> is present, which a <response> document never has."""
     import xml.etree.ElementTree as ET
 
     try:
         root = ET.fromstring(text or "")
     except Exception:
         return "", "XML_PARSE_ERROR", []
+
+    gateway_msg, gateway_code = _gateway_error(root)
+    if gateway_msg:
+        return gateway_code, gateway_msg, []
 
     header = root.find("header")
     result_code = (header.findtext("resultCode") if header is not None else "") or ""
@@ -402,8 +469,27 @@ class PolicyBriefingProvider(PrimaryDocumentProvider):
         status_code = getattr(response, "status_code", None)
         debug = {"status_code": status_code, **debug_base}
         if status_code != 200:
-            log.warning("policy_briefing.non_200", extra={"status_code": status_code, **debug_base})
-            return self._empty_result(error=f"http status {status_code}", debug=debug)
+            # The gateway rejection arrives HERE, not on the 200 path (403 for
+            # an unregistered key), so the errMsg must be read before this
+            # branch returns or it is lost — the whole point of this change.
+            gateway_msg, gateway_code = gateway_error_from_text(
+                getattr(response, "text", "") or ""
+            )
+            debug["gateway_error"] = gateway_msg
+            debug["gateway_reason_code"] = gateway_code
+            log.warning(
+                "policy_briefing.non_200",
+                extra={
+                    "status_code": status_code,
+                    "gateway_error": gateway_msg,
+                    "gateway_reason_code": gateway_code,
+                    **debug_base,
+                },
+            )
+            error = f"http status {status_code}"
+            if gateway_msg:
+                error = f"{error}: {gateway_msg}"
+            return self._empty_result(error=error, debug=debug)
 
         result_code, result_msg, raw_items = parse_press_release_xml(
             getattr(response, "text", "") or ""
@@ -635,6 +721,10 @@ def _fetch_window_paginated(
     # "looked and found nothing" from "could not look". Behaviour otherwise
     # unchanged — errors still stop the page loop via the short-page rule.
     had_error = False
+    # ERROR-REASON-BREADCRUMB: the FIRST error string seen, returned alongside
+    # the flag so the caller can store WHY, not just THAT. Read-only extra —
+    # it changes no control flow.
+    error_reason = ""
     for page_no in range(1, max_pages + 1):
         result = provider.fetch_press_releases(
             start_date=start_date,
@@ -644,11 +734,13 @@ def _fetch_window_paginated(
         )
         if result.get("error"):
             had_error = True
+            if not error_reason:
+                error_reason = str(result.get("error") or "")
         page_docs = result.get("documents") or []
         documents.extend(page_docs)
         if len(page_docs) < num_of_rows:  # short-page-stop (incl. empty/error)
             break
-    return documents, had_error
+    return documents, had_error, error_reason
 
 
 def fetch_and_build_policy_briefing_candidates(
@@ -664,10 +756,15 @@ def fetch_and_build_policy_briefing_candidates(
     any failure / empty.
 
     SILENT-FAILURE-FLAG: with ``return_status=True`` returns
-    ``(candidates, count, status)`` where status is ``"ok"`` (every window
-    fetch answered — a 0-count is a genuine absence) or ``"error"`` (at least
-    one window fetch failed — we could NOT fully look; the 07-14/15 outage
-    stored 16 hours of such zeros indistinguishable from absences). The
+    ``(candidates, count, status, reason)`` where status is ``"ok"`` (every
+    window fetch answered — a 0-count is a genuine absence) or ``"error"`` (at
+    least one window fetch failed — we could NOT fully look; the 07-14/15
+    outage stored 16 hours of such zeros indistinguishable from absences).
+    ERROR-REASON-BREADCRUMB: ``reason`` is the FIRST failing window's error
+    string, capped at ``_MAX_ERROR_REASON_CHARS`` ("" whenever status is
+    "ok"). status keeps its exact "ok"/"error" vocabulary — the daily alert
+    counts failures by LIKE-matching that literal value, so the reason travels
+    as a SEPARATE value and never as a widened status. The
     default 2-tuple stays byte-compatible for existing callers; the fail-open
     contract is unchanged — errors still yield an empty list, never a raise
     (the whole body is additionally belt-wrapped so even an unexpected
@@ -700,10 +797,11 @@ def fetch_and_build_policy_briefing_candidates(
         seen_ids: set = set()
         documents: List[Dict[str, Any]] = []
         any_error = False
+        error_reason = ""
         for window_index in range(windows):
             window_ref = reference - timedelta(days=DATE_WINDOW_DAYS * window_index)
             start_date, end_date = date_window(reference=window_ref)
-            window_docs, window_error = _fetch_window_paginated(
+            window_docs, window_error, window_reason = _fetch_window_paginated(
                 provider,
                 start_date,
                 end_date,
@@ -712,6 +810,8 @@ def fetch_and_build_policy_briefing_candidates(
             )
             if window_error:
                 any_error = True
+                if not error_reason:
+                    error_reason = window_reason
             for doc in window_docs:
                 dedup_key = doc.get("id") or doc.get("original_url") or ""
                 if dedup_key and dedup_key in seen_ids:
@@ -724,11 +824,13 @@ def fetch_and_build_policy_briefing_candidates(
             documents, normalized_claims, max_releases=max_releases
         )
         status = "error" if any_error else "ok"
-    except Exception:
+        reason = error_reason[:_MAX_ERROR_REASON_CHARS] if status == "error" else ""
+    except Exception as entry_error:
         log.warning("policy_briefing.entry_failed", exc_info=True)
         candidates, count, status = [], 0, "error"
+        reason = type(entry_error).__name__[:_MAX_ERROR_REASON_CHARS]
     if return_status:
-        return candidates, count, status
+        return candidates, count, status, reason
     return candidates, count
 
 

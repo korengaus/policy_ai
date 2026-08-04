@@ -780,10 +780,16 @@ def _process_news_item_phase_a(
     # debug_summary below, never read by any scorer/verdict path. None when
     # the lane is disabled (key then absent, mirroring policy_briefing_count).
     policy_briefing_status = None
+    # ERROR-REASON-BREADCRUMB: the short WHY beside the status ("ReadTimeout",
+    # "http status 403: SERVICE_KEY_IS_NOT_REGISTERED_ERROR"). Provider-capped
+    # at 80 chars. Diagnosing the 08-02 outage meant reading three-day-old
+    # Render stderr because the row stored only the word "error".
+    policy_briefing_error_reason = ""
     if config.policy_briefing_enabled():
         from providers.policy_briefing import fetch_and_build_policy_briefing_candidates
 
-        policy_briefing_candidates, policy_briefing_count, policy_briefing_status = (
+        (policy_briefing_candidates, policy_briefing_count,
+         policy_briefing_status, policy_briefing_error_reason) = (
             fetch_and_build_policy_briefing_candidates(normalized_claims,
                                                        return_status=True)
         )
@@ -970,6 +976,15 @@ def _process_news_item_phase_a(
     # any scorer/verdict path.
     if policy_briefing_status is not None:
         debug_summary["policy_briefing_status"] = policy_briefing_status
+    # ERROR-REASON-BREADCRUMB: SEPARATE sibling key — policy_briefing_status
+    # keeps its exact "ok"/"error" value so
+    # scripts/daily_collection_alert.py's LIKE '%"policy_briefing_status":
+    # "error"%' counter is untouched, and this key's NAME does not contain that
+    # substring so it cannot inflate the denominator either. Written only when
+    # there is a reason (absent on ok/disabled rows). Pure data key, never read
+    # by any scorer/verdict path.
+    if policy_briefing_error_reason:
+        debug_summary["policy_briefing_error_reason"] = policy_briefing_error_reason
     # M23: in-branch-only debug key. national_law_count is None on the disabled
     # path, so this key is NOT added there — disabled debug_summary stays
     # byte-identical (mirrors policy_briefing_count).
