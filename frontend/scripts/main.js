@@ -8253,7 +8253,15 @@
         lines.push("");
         exportLine(lines, "[검토자 판단 대시보드]");
         exportLine(lines, `- 최종 판정: ${reviewerModel.finalJudgment}`);
-        exportLine(lines, `- AI 초안 판정: ${reviewerModel.draftVerdict}`);
+        // EXPORT-GUARD-LEAK: this line used reviewerModel.draftVerdict, which
+        // applies only the insufficiency downgrade — NOT the no-direct-support
+        // regex downgrade — so one document carried two different answers for
+        // the same field: the tail line (safeAiDraftVerdictForExport) said
+        // 사람 검토 대기 while this one still claimed 공식 근거 확인. Every
+        // verdict value leaving the product in a document goes through the ONE
+        // guard; the model's own draftVerdict remains for the operator-gated
+        // on-screen dashboard only.
+        exportLine(lines, `- AI 초안 판정: ${safeAiDraftVerdictForExport(result)}`);
         exportLine(lines, `- 사람 검토 필요 여부: ${reviewerModel.needsReview}`);
         exportLine(lines, `- 공식 근거 상태: ${reviewerModel.officialStatus}`);
         exportLine(lines, `- 공식 상세문서 상태: ${reviewerModel.detailStatus}`);

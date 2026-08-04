@@ -398,6 +398,27 @@ function runFixture(fixture) {
   };
 }
 
+// EXPORT-GUARD-LEAK: the old pin asserted `output.includes("AI 초안 판정: 사람
+// 검토 대기")` — satisfied by ONE correct emission while another emission of the
+// SAME field leaked an official-confirmation claim two sections earlier. The
+// exported document emits the draft verdict from more than one site, so the
+// assertion must hold for EVERY line carrying the field, not for at least one.
+function assertEveryDraftVerdictLine(output, expected, label) {
+  const lines = output.split("\n").filter((line) => line.includes("AI 초안 판정"));
+  assert.ok(lines.length >= 2,
+    `${label}: expected the draft verdict on at least 2 export lines `
+    + `(summary-card/dashboard + tail), found ${lines.length} — an emission `
+    + "site disappeared and this pin no longer covers it");
+  for (const line of lines) {
+    const value = line.slice(line.indexOf("AI 초안 판정") + "AI 초안 판정".length)
+      .replace(/^\s*:\s*/, "").trim();
+    assert.strictEqual(value, expected,
+      `${label}: draft-verdict line ${JSON.stringify(line.trim())} must read `
+      + `"${expected}" on every emission site — one guarded site cannot excuse `
+      + "an unguarded one");
+  }
+}
+
 for (const fixtureCase of fixtures) {
   const fixture = fixtureCase.data;
   const { text, markdown } = runFixture(fixture);
@@ -414,7 +435,7 @@ for (const fixtureCase of fixtures) {
         cautiousPhrases.some((phrase) => output.includes(phrase)),
         `${fixture.query}: expected cautious official-evidence wording`
       );
-      assert.ok(output.includes("AI 초안 판정: 사람 검토 대기"), `${fixture.query}: AI draft should wait for human review`);
+      assertEveryDraftVerdictLine(output, "사람 검토 대기", fixture.query);
       assert.ok(!output.includes("공식 직접 확인됨"), `${fixture.query}: weak evidence should not claim direct official confirmation`);
       if (fixtureCase.state === "candidate_only") {
         assert.ok(
@@ -435,6 +456,62 @@ for (const fixtureCase of fixtures) {
       assert.ok(!output.includes("공식기관 후보는 있으나 상세 본문 미확인"), `${fixture.query}: strong evidence should not show missing-body status`);
     }
     assert.ok(!/\bundefined\b|\bnull\b|\[object Object\]/.test(output), `${fixture.query}: broken placeholder leaked`);
+  }
+}
+
+// EXPORT-GUARD-LEAK regression case — the exact shape that leaked: evidence
+// SUFFICIENT (so the insufficiency downgrade does not fire), official state
+// contextual_support (so hasDirectOfficialSupport is false), stored
+// verdict_label draft_verified (so formatVerdict yields "공식 근거 확인, 사람
+// 검토 대기"). Only the no-direct-support regex downgrade stands between that
+// value and the document; a site that bypasses safeAiDraftVerdictForExport
+// ships the official-confirmation claim. The old includes() pin passed on this
+// fixture while the [검토자 판단 대시보드] line leaked.
+{
+  const guardLeakFixture = {
+    query: "가드누수",
+    maxNews: 1,
+    analyzedAt: "2026-08-04T00:00:00.000Z",
+    results: [
+      {
+        title: "가드 누수 회귀 케이스",
+        original_url: "https://example.com/guard-leak",
+        topic: "가드누수",
+        policy_confidence: { policy_confidence_score: 60 },
+        policy_impact: { impact_level: "medium", impact_direction: "uncertain" },
+        final_decision: { policy_alert_level: "WATCH" },
+        verification_card: {
+          verdict_label: "draft_verified",
+          review_status: "draft",
+          claim_text: "맥락 근거만 있는 초안 검증 사례",
+          last_checked_at: "2026-08-04T00:00:00.000Z",
+          source_reliability_summary: {
+            official_detail_available: true,
+            official_candidate_count: 3,
+            official_direct_match_score: 80,
+            official_evidence_status: "contextual_support",
+            top_official_detail_url: "https://www.korea.kr/x",
+          },
+          debug_summary: {
+            official_resolution_direct_matches: 0,
+            official_resolution_contextual_matches: 3,
+            official_body_candidates: 3,
+            official_bodies_fetched: 3,
+            official_direct_match_score: 80,
+            official_direct_match_classification: "medium_official_contextual_support",
+          },
+          source_candidates: [
+            { semantic_match_score: 90, official_body_match: true, official_body_text_match_score: 80 },
+          ],
+        },
+      },
+    ],
+  };
+  const { text, markdown } = runFixture(guardLeakFixture);
+  for (const output of [text, markdown]) {
+    assertEveryDraftVerdictLine(output, "사람 검토 대기", "guard-leak");
+    assert.ok(!output.includes("AI 초안 판정: 공식 근거 확인"),
+      "guard-leak: an official-confirmation claim reached an exported draft-verdict line");
   }
 }
 
