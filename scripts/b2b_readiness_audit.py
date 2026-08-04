@@ -3,7 +3,9 @@
 Verifies, before every outreach wave, that everything a B2B prospect could
 click or scrutinise matches live truth TODAY:
 
-  C1  the outreach email's exact numbers on GET /api/claim/<flagship>
+  C1  the flagship's live numbers on GET /api/claim/<flagship>, reported for
+      the operator to confirm the outreach copy against (OBSERVED, not
+      compared — see C1-OBSERVE-NOT-COMPARE below)
   C2  cross-surface agreement of the flagship cluster's outlet number
   C3  link integrity (weekly archive links, member /history rows, the four
       public pages + honesty strings, found:false posture)
@@ -73,10 +75,25 @@ FLAGSHIP_REPRESENTATIVE = 8523
 # Baseline measured 2026-07-27: exactly these three cards (MATCHER-GUARD).
 MATCHER_MISMATCH_KNOWN_IDS = frozenset({7871, 9534, 13977})
 MATCHER_MISMATCH_BASELINE = 3
-EMAIL_OUTLETS = 78
-EMAIL_MEMBERS = 156
-EMAIL_EARLIEST = "2026-06-30"
-EMAIL_LATEST = "2026-07-19"
+# C1-OBSERVE-NOT-COMPARE (2026-08-04) — the four EMAIL_* constants that used to
+# live here (78 / 156 / 2026-06-30 / 2026-07-19) were typed by hand from an
+# outreach draft and went stale the moment the cluster grew. On 08-04 the live
+# claim page and the outreach copy BOTH said 157 / 07-20 and only this file
+# still said 156 / 07-19 — so the audit printed "UPDATE EMAIL COPY" about a
+# correct email. An instrument that tells you to break a working artefact is
+# worse than no instrument.
+#
+# Retyping them would only reschedule the same failure, so the comparison is
+# GONE rather than corrected. Nothing in this repo carries the outreach copy:
+# the emails live on the operator's desktop, and b2b_briefings/ holds per-
+# customer weekly briefings from a different window (the flagship appears there
+# with outlet_count=20 for 2026-06-15..07-14), so it is not the same number and
+# cannot serve as the source. A file added here purely to hold these four values
+# would be one more hand-maintained constant wearing a different hat.
+#
+# C1 therefore OBSERVES: it prints the live four values and asks the operator —
+# the only party who can read the email — to confirm the copy matches. It never
+# asserts what the email says, so it can no longer be wrong about it.
 
 # AUDIT-SPINE-BASELINE C5 — the spine-artifact expectation is DERIVED from the
 # clock, never hardcoded. Two pinned dates went stale the moment the spine ran
@@ -533,6 +550,68 @@ def reviewer_advisory_row(returncode, output):
             "are unaffected")
 
 
+# ---------------------------------------------------------------------------
+# C8-WARN-VOCABULARY — split the render scan's warn lines into findings and
+# self-disclosures, using a vocabulary the SCAN ITSELF prints.
+# ---------------------------------------------------------------------------
+RENDER_WARN_PREFIX = "RENDER-SCAN WARN:"
+# The scanner prints one measurement line per class per window, e.g.
+#   RATE [mod14] bullet_char: 650/1053 = 61.7% (baseline 60.7% +5.0pp)
+# ahead of its warns. That is its complete measured vocabulary at runtime.
+_RENDER_RATE_RX = re.compile(r"^RATE \[([^\]]+)\]\s*([^:]+):")
+
+
+def classify_render_warns(scan_output):
+    """(defect_signals, disclosures) from a render-scan stdout+stderr blob.
+
+    DERIVED, NOT TYPED. The scan's WARN-level *finding* channel is the
+    baseline-comparison channel — "CEILING RISE [<window>] <class>: X% >
+    baseline Y% + Zpp". Every class and window it can name is announced first in
+    its own ``RATE [<window>] <class>:`` lines, so this reads that vocabulary out
+    of the run itself: a warn line that carries a measured window tag or names a
+    measured class is a finding. Adding a ceiling class to
+    card_render_baselines.json extends this classifier automatically — there is
+    no list in this file to forget to update, which is the whole point.
+
+    Everything else the scan warns about is a statement ABOUT ITSELF, not about
+    a reader's card: which adapters it covered, which it skipped and why, which
+    reads are deliberate older-schema support, a recorded coupling note. Those
+    are disclosures. They are returned (never dropped) so the caller can show
+    the count, but they are not defect signals and must not hold a send.
+
+    Pure and total: no I/O, never raises, empty input -> ([], [])."""
+    text = scan_output or ""
+    windows, classes = set(), set()
+    for line in text.splitlines():
+        match = _RENDER_RATE_RX.match(line)
+        if match:
+            windows.add(match.group(1).strip())
+            classes.add(match.group(2).strip())
+    signals, disclosures = [], []
+    for line in text.splitlines():
+        if not line.startswith(RENDER_WARN_PREFIX):
+            continue
+        body = line[len(RENDER_WARN_PREFIX):].strip()
+        measured = any("[%s]" % w in body for w in windows) or any(
+            re.search(r"(?<![0-9A-Za-z_])%s(?![0-9A-Za-z_])" % re.escape(c), body)
+            for c in classes)
+        (signals if measured else disclosures).append(body)
+    return signals, disclosures
+
+
+def render_disclosure_labels(disclosures):
+    """Distinct gate labels of the disclosure lines, in first-seen order, taken
+    from the lines themselves (text before the first ':') so a NEW kind of
+    disclosure shows up in the C8 row on the first run that emits it instead of
+    hiding inside a bare count."""
+    labels = []
+    for body in disclosures or []:
+        label = body.split(":", 1)[0].strip()[:48] or "(unlabelled)"
+        if label not in labels:
+            labels.append(label)
+    return labels
+
+
 class Report:
     def __init__(self):
         self.rows = []
@@ -582,18 +661,16 @@ def run_audit(base: str, with_reviewer: bool = False) -> int:
                    if not re.search(r"\$\.members\[\d+\]\.policy_confidence_score$", h)]
 
     if claim_ok:
-        numbers_match = (outlets == EMAIL_OUTLETS and members == EMAIL_MEMBERS
-                         and earliest == EMAIL_EARLIEST and latest == EMAIL_LATEST)
-        obs = ("outlets=%s members=%s earliest=%s latest=%s"
-               % (outlets, members, earliest, latest))
-        if numbers_match:
-            rep.add("C1 email numbers", "PASS", obs, "-")
-        else:
-            # Growth is not a bug — it is a copy-update signal (★).
-            rep.add("C1 email numbers", "WARN",
-                    obs + " (email says %s/%s %s→%s) — UPDATE EMAIL COPY"
-                    % (EMAIL_OUTLETS, EMAIL_MEMBERS, EMAIL_EARLIEST, EMAIL_LATEST),
-                    "prospect sees a different number than the email cited")
+        # C1-OBSERVE-NOT-COMPARE: report live truth, claim nothing about the
+        # email. INFO is weight 0 in Report.worst() and is not collected into
+        # `warns`, so this row cannot move the verdict or the exit code — it is
+        # an instruction to the operator, not a finding about the product.
+        rep.add("C1 email numbers", "INFO",
+                "LIVE NOW: outlets=%s members=%s earliest=%s latest=%s "
+                "— CONFIRM the outreach copy cites these four values before "
+                "sending (this audit cannot read the email; it is not in the "
+                "repo)" % (outlets, members, earliest, latest),
+                "an email citing older numbers than the page it links to")
         tl_ok = daily_sum == members
         tl_labelled = (daily_sum == dated and (dated + (undated or 0)) == members)
         rep.add("C1 timeline sum",
@@ -1119,21 +1196,32 @@ def run_audit(base: str, with_reviewer: bool = False) -> int:
             out8 = (proc8.stdout or "") + (proc8.stderr or "")
             tail8 = [ln for ln in out8.splitlines()
                      if ln.startswith("RENDER SCAN")][-1:] or ["(no summary)"]
-            warn_lines8 = [ln for ln in out8.splitlines()
-                           if ln.startswith("RENDER-SCAN WARN:")]
+            # C8-WARN-VOCABULARY: a healthy scan emits ~10 warn lines that are
+            # coverage/success disclosures (adapters covered, adapters skipped,
+            # deliberate compat reads, a recorded note). Treating any warn line
+            # as a defect made C8 structurally unable to PASS, so the row said
+            # WARN on every clean run — a gate that always warns is one the
+            # operator learns to skim. Only the measured (baseline-comparison)
+            # channel is a defect signal; see classify_render_warns.
+            signals8, disclosures8 = classify_render_warns(out8)
+            disclosed8 = ("; %d coverage disclosure(s): %s"
+                          % (len(disclosures8),
+                             ", ".join(render_disclosure_labels(disclosures8)))
+                          ) if disclosures8 else ""
             if proc8.returncode != 0:
                 rep.add("C8 render-scan", "FAIL",
                         out8.strip().replace("\n", " / ")[-260:],
                         "machine text or a broken sentence reaches a "
                         "reader's card — the classes we only ever caught "
                         "by eye")
-            elif warn_lines8:
+            elif signals8:
                 rep.add("C8 render-scan", "WARN",
-                        (tail8[0] + " / " + " / ".join(warn_lines8))[:260],
+                        (tail8[0] + " / " + " / ".join(signals8))[:260],
                         "a display artefact is GROWING past its recorded "
                         "baseline")
             else:
-                rep.add("C8 render-scan", "PASS", tail8[0],
+                rep.add("C8 render-scan", "PASS",
+                        (tail8[0] + disclosed8)[:260],
                         "machine text or a broken sentence reaches a "
                         "reader's card — the classes we only ever caught "
                         "by eye")
@@ -1315,6 +1403,51 @@ def selftest() -> int:
                "bad": {"avg_score": 1}}
     hits = scan_forbidden_score_keys(payload)
     check("score-scan", hits, ["$.bad.avg_score"])
+
+    # C8-WARN-VOCABULARY — both directions, on the scan's REAL line shapes.
+    # The RATE lines are the only place the class/window vocabulary is typed,
+    # and they come from the scan, exactly as at runtime.
+    scan_healthy = "\n".join([
+        "RATE [mod14] bullet_char: 650/1053 = 61.7% (baseline 60.7% +5.0pp)",
+        "RATE [mod14] cand_tail: p90=6 p99=13 max=21 (baseline p90=6 p99=12)",
+        "RATE [latest500] sentence_join: 3/500 = 0.6% (baseline 0.7% +1.0pp)",
+        "RENDER-SCAN WARN: TRENDING NOTE: renderTrendingTop5 still numbers rows"
+        " before filtering, so any null representative reaching it leaves a hole",
+        "RENDER-SCAN WARN: ADAPTER-FIELD-CONTRACT covered: topicCardFromResult"
+        " (1 holder site(s), 6 field read(s) verified against its return literal)",
+        "RENDER-SCAN WARN: ADAPTER-FIELD-CONTRACT compat read: "
+        "buildSlimHistoryRecord does not produce row.title, but the read falls"
+        " back to a produced key or a literal",
+        "RENDER-SCAN WARN: ADAPTER-FIELD-CONTRACT skipped: buildReviewQueueItem"
+        " — return spreads `existingItem`, a runtime value read back from storage",
+        "RENDER SCAN PASSED WITH WARNS: mod14=1053 latest500=500 rows, warns=4",
+    ])
+    healthy_signals, healthy_disclosures = classify_render_warns(scan_healthy)
+    check("c8-healthy-no-signals", healthy_signals, [])
+    check("c8-healthy-discloses-all-four", len(healthy_disclosures), 4)
+    check("c8-disclosure-labels",
+          render_disclosure_labels(healthy_disclosures),
+          ["TRENDING NOTE", "ADAPTER-FIELD-CONTRACT covered",
+           "ADAPTER-FIELD-CONTRACT compat read",
+           "ADAPTER-FIELD-CONTRACT skipped"])
+    # A genuine defect signal on the same output must still be a signal — both
+    # the named-class shape and the cand_tail shape, which names no class and is
+    # caught by its window tag alone.
+    scan_defect = scan_healthy + "\n" + "\n".join([
+        "RENDER-SCAN WARN: CEILING RISE [mod14] bullet_char: 71.2% > baseline"
+        " 60.7% + 5.0pp (e.g. ids 14,28,42) — the artefact is GROWING",
+        "RENDER-SCAN WARN: CEILING RISE [latest500] candidate-count tail: p90=19"
+        " p99=44 vs baseline p90=6 p99=12 — cards are accumulating even more"
+        " unrelated documents",
+    ])
+    defect_signals, defect_disclosures = classify_render_warns(scan_defect)
+    check("c8-defect-both-signals", len(defect_signals), 2)
+    check("c8-defect-names-class",
+          defect_signals[0].startswith("CEILING RISE [mod14] bullet_char"), True)
+    check("c8-defect-cand-tail-by-window",
+          "candidate-count tail" in defect_signals[1], True)
+    check("c8-defect-disclosures-unchanged", len(defect_disclosures), 4)
+    check("c8-empty-input", classify_render_warns(""), ([], []))
 
     if failures:
         print("SELFTEST FAIL (%d):" % len(failures))
