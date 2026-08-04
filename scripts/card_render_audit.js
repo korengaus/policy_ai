@@ -693,6 +693,24 @@ const ADAPTER_CONTRACTS = [
   // reader surface in the product. No field name is typed here: both sides are
   // parsed, exactly as for the other holders.
   { fn: "computeMetrics", holders: ["metrics"] },
+  // ADAPTER-COVER-LARGE: 21 produced keys, 8 holder sites. Attribution
+  // verified by probe: every site's enclosing function assigns `state`/
+  // `officialState` exactly ONCE, always from this adapter; the other user of
+  // the name `state` (debugState) assigns in a different enclosing function,
+  // so scoped reads cannot conflate. No merge sits upstream of any read.
+  { fn: "buildOfficialEvidenceState", holders: ["state", "officialState"] },
+  // ADAPTER-COVER-LARGE: 11 produced keys, 19 reads across its two consumers —
+  // the operator dashboard (model.*) and the public export (reviewerModel.*).
+  // Attribution verified: one assignment per scope, both from this adapter,
+  // neither name assigned from anything else in those scopes.
+  { fn: "buildReviewerDashboardModel", holders: ["model", "reviewerModel"] },
+  // ADAPTER-COVER-LARGE: the most-consumed undeclared adapter (6 holder sites,
+  // 17 reads). Its two returns DIVERGE — the error literal adds `reason` — so
+  // the produced set is the UNION, disclosed as such on the covered line (see
+  // UNANIMITY-OR-UNION above). Attribution verified: each of the six scopes
+  // assigns `result` exactly once, always from this adapter, and every read in
+  // those scopes is ok/status/body — no other `result` source is present.
+  { fn: "serverReviewFetch", holders: ["result"] },
   // Declared skip, reviewed: its output is assigned to `record`, a name this
   // file also uses for localStorage history records and for the (never-passed)
   // fourth parameter of topicCardFromResult. The reads that matter sit in a
@@ -946,14 +964,22 @@ function readString(src, i) {
 // contract. A consumer reading `.reason` would have been failed for reading a
 // key the adapter really does produce, on the path where it matters.
 //
-// The rule chosen is UNANIMITY, and it is sound because it never picks: if every
-// object-literal return produces the same key set, that set is the answer no
-// matter which return a consumer reaches, so no selection is required. If they
-// differ, the shape a consumer receives genuinely cannot be determined from
-// source, and the honest output is UNPARSEABLE naming the disagreement — not a
-// tiebreaker. "Most keys wins" was rejected for exactly that reason: a function
-// whose error path is richer than its success path would be described by its
-// error path.
+// The rule is UNANIMITY-OR-UNION, and neither half ever picks a literal:
+//   * if every object-literal return produces the same key set, that set is
+//     the answer no matter which return a consumer reaches;
+//   * if they DIFFER, the produced set is the UNION of the literals, marked
+//     ``divergent`` so every surface that prints it says so. The union is not
+//     a tiebreaker — it is exact for the defect class this gate exists to
+//     catch: a failing read is one that sees undefined on EVERY path ("the
+//     comparison sees undefined, so whatever rule depends on it silently does
+//     not run"), and a key produced on any path is not that. serverReviewFetch
+//     is the live case: its error literal carries ``reason`` and its success
+//     literal does not; a consumer reading .reason reads a real value on the
+//     path where it matters and must not be failed, while a consumer reading
+//     a key in NEITHER literal still fails. "Most keys wins" stays rejected —
+//     that WOULD pick, and would describe a function by its richer error path.
+//     Path-sensitive checking (is .reason only read on the error path?) is
+//     beyond a source parse and is not claimed.
 //
 // KNOWN RESIDUAL, not fixed here: this looks only at returns that ARE object
 // literals. A function whose success path returns a non-literal (a parsed
@@ -977,15 +1003,11 @@ function adapterProducedKeys(js, name) {
   if (unreadable) return { spread: false, unparseable: unreadable.unparseable };
   if (parsed.some((p) => p.spread)) return { spread: true };
   const signature = (p) => [...p.keys].sort().join(",");
-  const first = signature(parsed[0]);
-  const dissenter = parsed.find((p) => signature(p) !== first);
-  if (dissenter) {
-    return {
-      spread: false,
-      unparseable: `${parsed.length} object-literal returns disagree `
-        + `([${first}] vs [${signature(dissenter)}]) — which one a consumer `
-        + "receives cannot be determined from source",
-    };
+  const signatures = [...new Set(parsed.map(signature))];
+  if (signatures.length > 1) {
+    const union = new Set();
+    for (const p of parsed) for (const k of p.keys) union.add(k);
+    return { spread: false, keys: union, divergent: signatures };
   }
   return { spread: false, keys: parsed[0].keys };
 }
@@ -1147,9 +1169,12 @@ function adapterShapedFunctions(js) {
         ? "return literal has a spread"
         : (produced.unparseable
           ? `return literal UNPARSEABLE — ${produced.unparseable}`
-          : (produced.keys.size
-            ? `${produced.keys.size} produced key(s)`
-            : "0 produced key(s) — the literal is genuinely empty, not unread")),
+          : (produced.divergent
+            ? `${produced.keys.size} produced key(s), UNION of `
+              + `${produced.divergent.length} divergent return literals`
+            : (produced.keys.size
+              ? `${produced.keys.size} produced key(s)`
+              : "0 produced key(s) — the literal is genuinely empty, not unread"))),
     });
   }
   return found;
@@ -1218,7 +1243,10 @@ function adapterFieldContract(js) {
           + "silently does not run");
       }
     }
-    out.covered.push([c.fn, sites.length, checked, viaRoundTrip]);
+    // divergent (union) produced-sets are carried to the covered line so the
+    // disclosure names it — union coverage must never read as unanimity.
+    out.covered.push([c.fn, sites.length, checked, viaRoundTrip,
+                      produced.divergent || null]);
   }
   return out;
 }
@@ -1697,10 +1725,15 @@ function trendingTailWiring(js) {
   // --- ADAPTER-FIELD-CONTRACT ---------------------------------------------
   const contract = adapterFieldContract(mainJs);
   for (const f of contract.failures) failures.push(f);
-  for (const [fn, sites, checked, viaRoundTrip] of contract.covered) {
+  for (const [fn, sites, checked, viaRoundTrip, divergent] of contract.covered) {
     warns.push(`ADAPTER-FIELD-CONTRACT covered: ${fn} (${sites} `
       + `${viaRoundTrip ? "storage round-trip" : "holder"} site(s), `
-      + `${checked} field read(s) verified against its return literal)`);
+      + `${checked} field read(s) verified against `
+      + (divergent
+        ? `the UNION of ${divergent.length} divergent return literals — a `
+          + "read passing here may be path-dependent; only never-produced "
+          + "keys fail)"
+        : "its return literal)"));
   }
   // Compat reads are stated, never swallowed: each is a key today's builder
   // does not produce, read behind a fallback, i.e. deliberate support for a
