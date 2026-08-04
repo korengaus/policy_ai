@@ -684,6 +684,15 @@ const ADAPTER_CONTRACTS = [
     writer: "safeWriteReviewQueue", key: "REVIEW_QUEUE_KEY",
     reader: "safeReadReviewQueue", consumer: "renderReviewQueue", ident: "item" } },
   { fn: "topicCardFromResult", holders: ["card"] },
+  // ADAPTER-DENOMINATOR: found by the parse, absent from this list until now —
+  // the defect the measured denominator exists to catch. Its return is a bare
+  // four-key literal (no spread), it is held by `metrics` at four assignment
+  // sites, and `metrics` is assigned from NOTHING else in main.js, so every
+  // read attributes unambiguously. It feeds renderMetrics and the homepage
+  // metric tiles, where a dropped key prints an empty tile — the most prominent
+  // reader surface in the product. No field name is typed here: both sides are
+  // parsed, exactly as for the other holders.
+  { fn: "computeMetrics", holders: ["metrics"] },
   // Declared skip, reviewed: its output is assigned to `record`, a name this
   // file also uses for localStorage history records and for the (never-passed)
   // fourth parameter of topicCardFromResult. The reads that matter sit in a
@@ -873,6 +882,62 @@ function readLine(js, site, key) {
   const s = scope.lastIndexOf("\n", m.index) + 1;
   const e = scope.indexOf("\n", m.index);
   return scope.slice(s, e < 0 ? undefined : e);
+}
+
+// ---------------------------------------------------------------------------
+// ADAPTER-DENOMINATOR — how many adapters EXIST, measured, not declared.
+//
+// ADAPTER_CONTRACTS is hand-written, so "4 of 7" was never a count of this
+// file: 7 was whatever had been remembered. computeMetrics — four keys, a
+// unique holder, feeding the homepage metric tiles — sat outside it entirely
+// and nothing said so. A hand-written enumeration is exactly how this project's
+// enforcement loop once dropped newly added classes in silence, so the
+// denominator is now parsed the same way both sides of the contract already are.
+//
+// ADAPTER-SHAPED, defined by the SAME three predicates the contract check needs
+// before it can check anything at all:
+//   1. adapterProducedKeys finds an object literal as the function's return,
+//   2. adapterHolderSites finds its output assigned to at least one identifier,
+//   3. adapterReadKeys finds at least one non-builtin field read on that
+//      identifier inside the assignment scope.
+// That is what makes the definition sound rather than a heuristic: it is not a
+// second opinion about what an adapter is, it is the existing checker's own
+// precondition. Anything this finds is something the gate COULD check; anything
+// it misses (an output only ever mapped/passed, never held — the round-trip
+// forms) could not be checked from a holder even if declared, which is why
+// those carry an explicit roundTrip declaration instead.
+//
+// Reported, never covered: a function found here is NOT thereby audited. The
+// caller discloses each undeclared one by name so a new adapter announces
+// itself on its first run instead of sitting unaudited for a milestone.
+function adapterShapedFunctions(js) {
+  const found = [];
+  const seen = new Set();
+  for (const m of js.matchAll(/\n    (?:async )?function ([A-Za-z_][A-Za-z0-9_]*)\(/g)) {
+    const name = m[1];
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const produced = adapterProducedKeys(js, name);
+    if (!produced) continue;                       // (1) no return object literal
+    const sites = adapterHolderSites(js, name);
+    if (!sites.length) continue;                   // (2) never held by an identifier
+    const reads = sites.reduce((n, s) => n + adapterReadKeys(js, s).size, 0);
+    if (!reads) continue;                          // (3) held, but no field read
+    found.push({
+      name,
+      idents: [...new Set(sites.map((s) => s.ident))],
+      sites: sites.length,
+      reads,
+      // Stated per function so an undeclared line says how hard covering it
+      // would be, without this file deciding that for anyone.
+      shape: produced.spread
+        ? "return literal has a spread"
+        : (produced.keys.size
+          ? `${produced.keys.size} produced key(s)`
+          : "return literal is not key-extractable by this parse"),
+    });
+  }
+  return found;
 }
 
 // returns { failures[], covered[], skipped[], compat[] } — pure, so it can be
@@ -1427,6 +1492,32 @@ function trendingTailWiring(js) {
     warns.push(`ADAPTER-FIELD-CONTRACT skipped: ${fn} — ${why}. Coverage of this `
       + "class is INCOMPLETE by construction; absence of a finding here is not "
       + "evidence the adapter is clean");
+  }
+  // ADAPTER-DENOMINATOR: three numbers, not one. `found` is measured from the
+  // scanned file; `declared` is the length of the hand-written list; `covered`
+  // is what was actually checked. Only the first is evidence about main.js.
+  {
+    const shaped = adapterShapedFunctions(mainJs);
+    const declaredNames = new Set(ADAPTER_CONTRACTS.map((c) => c.fn));
+    const undeclared = shaped.filter((f) => !declaredNames.has(f.name));
+    warns.push("ADAPTER-FIELD-CONTRACT denominator: "
+      + `${shaped.length} adapter-shaped function(s) found by parse, `
+      + `${ADAPTER_CONTRACTS.length} declared, ${contract.covered.length} covered`
+      + (undeclared.length
+        ? ` — ${undeclared.length} present in main.js but ABSENT from `
+          + "ADAPTER_CONTRACTS, each named below"
+        : " — every adapter-shaped function is declared"));
+    // One line per undeclared adapter, the same shape as the skipped: lines, so
+    // an adapter added next month announces itself on its first run. These are
+    // DISCLOSURES, not defect signals: nothing here claims the adapter is
+    // broken, only that nothing is checking it.
+    for (const f of undeclared) {
+      warns.push(`ADAPTER-FIELD-CONTRACT undeclared: ${f.name} (${f.shape}; held `
+        + `by ${f.idents.join("/")} at ${f.sites} site(s), ${f.reads} field `
+        + "read(s)) — present in main.js but absent from ADAPTER_CONTRACTS, so "
+        + "NOTHING verifies those reads against its return. Not covered by this "
+        + "pass; declare it deliberately or record why it cannot be");
+    }
   }
   // vacuity: a synthetic adapter that drops a field its consumer reads must be
   // caught, and one that carries it must not. No field name is typed — the
