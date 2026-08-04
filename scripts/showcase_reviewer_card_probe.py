@@ -20,10 +20,13 @@
 # Node is required — the same requirement the C8 render-scan gate already
 # imposes on this environment.
 #
-# AS-JUDGED CONDITION: today's chain stamps the post-13977 caveat chip
-# ("공식 본문 불일치 가능성") onto candidate rows. For row 13977 ONLY, lines
-# equal to that stamp are dropped from the fed text so the reviewer sees the
-# card as it stood when a human caught it. Disclosed in the output.
+# AS-JUDGED CONDITION: BOTH ground-truth rows are reconstructed to the
+# 2026-07-29 human read (see AS-JUDGED-RECONSTRUCTION below): 13977 drops the
+# #13 caveat-chip lines; 13700 undoes the #14 exclusion labels and the #15
+# heading suffix (#18 is a verified no-op for it). Every string a strip
+# depends on is pinned against main.js — a renamed product string exits
+# loudly instead of silently feeding a modern card. Disclosed in the output
+# with per-row line counts.
 #
 # SAMPLE: this week's weekly top-10 representative rows (13700 is one of them)
 # + the first 6 distinct representatives from older archived weeks + row 13977
@@ -64,7 +67,133 @@ BATCH_SIZE = 3             # detail cards are ~3K tokens each
 MAX_TOKENS_PER_BATCH = 2000
 THINKING = {"type": "disabled"}  # extraction task; budget_tokens 400s on Sonnet 5
 MUST_INCLUDE = (13977, 13700)
-STAMP = "공식 본문 불일치 가능성"  # post-13977 caveat chip, stripped from 13977 only
+STAMP = "공식 본문 불일치 가능성"  # post-13977 caveat chip (#13/#19 MATCHER-GUARD)
+
+# ---------------------------------------------------------------------------
+# AS-JUDGED-RECONSTRUCTION — both ground-truth rows, not just 13977.
+#
+# The expectations at HEADLINE_EXPECTATIONS encode what a HUMAN caught by eye
+# on 2026-07-29. Product repairs since then changed what the cards SAY, so the
+# probe reconstructs each card as it stood when the human judged it — otherwise
+# a framing fix silently flips an answer and the recall check indicts the
+# reviewer for a card that got honest (which is exactly what happened to 13700:
+# ledger #14/#15 landed the same evening and its CAUGHT expectation became a
+# phantom MISSED).
+#
+# 13977 — strip the #13/#19 caveat chip (STAMP) lines. Unchanged behaviour.
+# 13700 — undo the two framing fixes that postdate the read; ledger #20 (the
+#   88-document roster itself) is WONTFIX, so the DOCUMENTS are already
+#   as-judged — only the framing moved:
+#   * #15 CANDIDATE-SECTION-FRAMING (b6dd708): the heading gained a suffix.
+#     Pre-fix heading was byte-identical minus the suffix (stated in the
+#     commit), so the rewrite keeps group 1 verbatim.
+#   * #14 CANDIDATE-EXCLUSION-WIRING (1f2b2f6): fetched-and-unmatched
+#     candidates gained (i) the 제외/불일치 trace badge, (ii) the 공개 표시
+#     판단 explanation 주제 불일치로 제외, (iii) the standalone exclusion
+#     label line. Pre-fix, those SAME candidates fell through to the weak
+#     trace tier — 공식 약한 후보 with its shipped explanation — which is
+#     DETERMINISTIC here: the tier (OFFICIAL-EVIDENCE-DISPLAY-HONESTY STEP 2)
+#     shipped 07-22, a week before the read, and 13700 measures 86/88
+#     candidates labelled ONLY via the #14 branch, 0 via any pre-#14 branch.
+#     So: badge lines rewrite to the weak badge, explanation lines rewrite to
+#     the weak explanation, standalone label lines drop. Every substitution
+#     string is shipped vocabulary quoted from main.js, never invented.
+#   * #18 GENUINE-GATE-REMOVAL (19de54c): verified NO-OP for 13700 — the row
+#     stores has_genuine_official_support=False, and the pre-#18 gate
+#     (=== false) fired identically. Nothing to strip.
+#
+# STALENESS MADE VISIBLE: every string a strip depends on is pinned below and
+# verified against main.js at render time. If a fix's string is renamed or
+# removed, the probe EXITS LOUDLY instead of quietly feeding a modern card —
+# a strip that silently no-ops is the same silent-flip defect one layer up.
+WEAK_BADGE = "공식 약한 후보"
+WEAK_EXPLANATION = "공식 후보이지만 상세 본문 또는 직접 일치가 제한적입니다."
+EXCL_BADGE = "제외/불일치"
+EXCL_LABEL = "주제 불일치로 제외"
+DISPLAY_ROW = "공개 표시 판단"
+HEADING_SUFFIX_RE = re.compile(
+    r"^(공식 출처 후보 \d+개)(?: 중 \d+개| — 모두) 직접 근거에서 제외됨$")
+
+# {row: {ledger ref: [strings that must still exist in main.js]}} — both the
+# fix's own strings AND the pre-fix vocabulary a rewrite reinstates.
+AS_JUDGED_PINS = {
+    13977: {"#13/#19 MATCHER-GUARD chip": [STAMP]},
+    13700: {
+        "#15 CANDIDATE-SECTION-FRAMING heading": [
+            " — 모두 직접 근거에서 제외됨", "개 직접 근거에서 제외됨"],
+        "#14 CANDIDATE-EXCLUSION-WIRING badge": [EXCL_BADGE, WEAK_BADGE],
+        "#14 CANDIDATE-EXCLUSION-WIRING label": [EXCL_LABEL, WEAK_EXPLANATION,
+                                                 DISPLAY_ROW],
+    },
+}
+
+# What each headline expectation HOLDS CONSTANT — printed beside CAUGHT/MISSED
+# so the output itself names the repair each answer depends on.
+HEADLINE_EXPECTATIONS = (
+    (13977, "consistency", "as-judged holds #13 stamp stripped"),
+    (13700, "consistency",
+     "as-judged holds #14 labels + #15 heading stripped; #18 verified no-op"),
+)
+
+
+def verify_as_judged_pins(src=None):
+    """Every string the reconstructions depend on must still exist in
+    main.js. A missing one means a framing fix moved again — exit loudly
+    BEFORE any render or API spend, mirroring LABEL PIN LOST. ``src`` is for
+    the loud-failure demonstration only; production always reads main.js."""
+    if src is None:
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, "frontend", "scripts", "main.js"),
+                  encoding="utf-8") as fh:
+            src = fh.read()
+    lost = [(rid, ref, pin)
+            for rid, refs in AS_JUDGED_PINS.items()
+            for ref, pins in refs.items()
+            for pin in pins if pin not in src]
+    if lost:
+        for rid, ref, pin in lost:
+            print("AS-JUDGED PIN LOST: row %s holds %s constant via %r — "
+                  "string gone from main.js. The reconstruction would silently "
+                  "feed a modern card; review the product change, then update "
+                  "the strip." % (rid, ref, pin))
+        raise SystemExit(2)
+
+
+def apply_as_judged(rid, text):
+    """Reconstruct a MUST_INCLUDE row's fed text as it stood at the human
+    read. Returns (text, {ledger ref: lines affected}); zero-hit ops are the
+    caller's to report — row data can legitimately change."""
+    if rid == 13977:
+        lines = text.splitlines()
+        kept = [ln for ln in lines if ln.strip() != STAMP]
+        return "\n".join(kept), {
+            "#13/#19 MATCHER-GUARD chip": len(lines) - len(kept)}
+    if rid == 13700:
+        hits = {"#15 CANDIDATE-SECTION-FRAMING heading": 0,
+                "#14 CANDIDATE-EXCLUSION-WIRING badge": 0,
+                "#14 CANDIDATE-EXCLUSION-WIRING label": 0}
+        out = []
+        prev_stripped = ""
+        for ln in text.splitlines():
+            stripped = ln.strip()
+            heading = HEADING_SUFFIX_RE.match(stripped)
+            if heading:
+                out.append(ln.replace(stripped, heading.group(1)))
+                hits["#15 CANDIDATE-SECTION-FRAMING heading"] += 1
+            elif stripped == EXCL_BADGE:
+                out.append(ln.replace(EXCL_BADGE, WEAK_BADGE))
+                hits["#14 CANDIDATE-EXCLUSION-WIRING badge"] += 1
+            elif stripped == EXCL_LABEL and prev_stripped == DISPLAY_ROW:
+                out.append(ln.replace(EXCL_LABEL, WEAK_EXPLANATION))
+                hits["#14 CANDIDATE-EXCLUSION-WIRING label"] += 1
+            elif stripped == EXCL_LABEL:
+                hits["#14 CANDIDATE-EXCLUSION-WIRING label"] += 1
+                # pre-fix: no exclusion div — line dropped, nothing appended
+            else:
+                out.append(ln)
+            prev_stripped = stripped
+        return "\n".join(out), hits
+    return text, {}
 
 # ---------------------------------------------------------------- prompt ----
 # THE PROMPT IS THE DESIGN — printed verbatim. The consistency-vs-truth
@@ -317,6 +446,10 @@ def render_cards(conn, ids):
         raise SystemExit(2)
     with open(out_path, encoding="utf-8") as fh:
         rendered = json.load(fh)
+    # AS-JUDGED-RECONSTRUCTION: pins verified BEFORE any strip is applied, so
+    # a renamed product string exits loudly here rather than feeding a modern
+    # card to the recall check (this runs before any API spend in main()).
+    verify_as_judged_pins()
     cards = {}
     for rid in ids:
         entry = rendered.get(str(rid)) or {}
@@ -324,9 +457,14 @@ def render_cards(conn, ids):
             print("RENDER ERROR on %s: %s" % (rid, entry["error"][:120]))
             continue
         text = entry.get("text") or ""
-        if rid == 13977:  # AS-JUDGED: drop the post-fix caveat chip lines
-            text = "\n".join(ln for ln in text.splitlines()
-                             if ln.strip() != STAMP)
+        text, hits = apply_as_judged(rid, text)
+        for ref, count in hits.items():
+            note = "" if count else (" — ZERO lines matched: the fed text no "
+                                     "longer carries this fix's strings; the "
+                                     "reconstruction may be moot or the "
+                                     "rendering moved. Read before trusting "
+                                     "the expectation.")
+            print("AS-JUDGED %s: %s -> %d line(s)%s" % (rid, ref, count, note))
         cards[rid] = text
     return cards
 
@@ -456,7 +594,9 @@ def main() -> int:
           "2 passes × %d batches of ≤%d, thinking off"
           % (len(ordered_ids), total_chars, MODEL,
              (len(ordered_ids) + BATCH_SIZE - 1) // BATCH_SIZE, BATCH_SIZE))
-    print("AS-JUDGED: '%s' chip lines stripped from 13977's text only" % STAMP)
+    print("AS-JUDGED: 13977 (#13 stamp) + 13700 (#14 labels, #15 heading; "
+          "#18 verified no-op) reconstructed to the 2026-07-29 human read — "
+          "per-row line counts above; pins verified against main.js")
     print("REVIEWER PROMPT (verbatim):")
     print(SYSTEM_PROMPT)
 
@@ -472,14 +612,14 @@ def main() -> int:
           % (os.path.basename(paths[0]), os.path.basename(paths[1])))
 
     print("HEADLINE VERDICTS (run 1, verbatim):")
-    for rid, expect in ((13977, "consistency"), (13700, "consistency")):
+    for rid, expect, held in HEADLINE_EXPECTATIONS:
         v = run1.get(str(rid))
         if not v:
             print("  %s: NO VERDICT RETURNED" % rid)
             continue
         ok = bool(v.get(expect))
-        print("  %s [%s expected]: %s | g=%s s=%s c=%s | note: %s"
-              % (rid, expect, "CAUGHT" if ok else "MISSED",
+        print("  %s [%s expected — %s]: %s | g=%s s=%s c=%s | note: %s"
+              % (rid, expect, held, "CAUGHT" if ok else "MISSED",
                  v["genre"], v["surface"], v["consistency"], v["note"][:150]))
     known = {str(i) for i in MUST_INCLUDE}
     false_pos = [v for iid, v in run1.items()
