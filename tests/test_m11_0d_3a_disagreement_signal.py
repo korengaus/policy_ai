@@ -123,6 +123,12 @@ class P3ImpliedTierMappingTests(unittest.TestCase):
     and the _p3_implied_alert_tier helper in
     tests/test_verdict_producer_disagreement_diagnostic.py."""
 
+    # BEHAVIOURAL table, not a membership authority: the VALUES are the
+    # claim — which draft state escalates to which alert tier — and they
+    # are the whole point of keeping P3's disposition vocabulary and
+    # P1/P2's alert vocabulary on separate axes. Typed on purpose. The
+    # KEY SET is no longer asserted from here; see the membership test
+    # below, which derives it from the owner.
     EXPECTED_MAPPING = {
         "draft_verified": "HIGH",
         "draft_likely_true": "MEDIUM",
@@ -140,13 +146,37 @@ class P3ImpliedTierMappingTests(unittest.TestCase):
                 self.assertEqual(_P3_TO_ALERT_TIER[p3_label], expected_tier)
 
     def test_p3_mapping_covers_all_documented_labels_no_extras(self):
+        # OWNER-PINNED (was: `set(self.EXPECTED_MAPPING.keys())`). Comparing
+        # the key set against the eight names typed into EXPECTED_MAPPING
+        # made this a mirror pinned to a mirror: ship a new draft_* label
+        # and it failed pointing at a literal in this file, with nothing
+        # naming verification_card. The expected set is now DERIVED from the
+        # owner's return literals through the same helper the honesty_guard,
+        # b2b-audit, producer-comparison and llm_judge pins use, so all five
+        # move together. The "" default is excluded — it is api_server's
+        # unset placeholder, never a producer output, so implying an alert
+        # tier for it would be meaningless.
+        #
+        # Imported lazily and by function, not re-implemented: one mechanism.
+        # The assertion stays HERE and reads the LIVE dict rather than
+        # source-parsing main.py, because this file already imports main
+        # (line 39) for _build_disagreement_signal — the import cost and any
+        # side effect are already paid, so the live object costs nothing new,
+        # and a source-parse would pin the literal rather than the value the
+        # pipeline actually maps with.
+        _TESTS_DIR = str(Path(__file__).resolve().parent)
+        if _TESTS_DIR not in sys.path:
+            sys.path.insert(0, _TESTS_DIR)
+        from test_honesty_guard import _authoritative_verdict_labels
         self.assertEqual(
             set(_P3_TO_ALERT_TIER.keys()),
-            set(self.EXPECTED_MAPPING.keys()),
-            "_P3_TO_ALERT_TIER must cover exactly the 8 documented P3 "
-            "labels — no extras (would mean a new vocabulary entry "
-            "snuck in) and no omissions (would silently classify as "
-            "UNKNOWN at runtime).",
+            _authoritative_verdict_labels() - {""},
+            "_P3_TO_ALERT_TIER must cover exactly the closed set of draft_* "
+            "labels verification_card._verdict_label can return — no extras "
+            "(would mean a vocabulary entry that no producer emits) and no "
+            "omissions (a shipped label would silently classify as UNKNOWN "
+            "at runtime, so every disagreement_signal carrying it would "
+            "read as a disagreement).",
         )
 
     def test_unknown_p3_label_falls_back_to_uppercase_unknown(self):
