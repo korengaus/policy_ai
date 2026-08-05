@@ -926,16 +926,26 @@ class ModuleLevelStaticChecks(unittest.TestCase):
             )
 
     def test_label_severity_rank_matches_documented_set(self):
-        expected_labels = {
-            "draft_unverified",
-            "draft_needs_context",
-            "draft_needs_review",
-            "draft_needs_official_confirmation",
-            "draft_disputed",
-            "draft_high_risk_review",
-            "draft_likely_true",
-            "draft_verified",
-        }
+        # OWNER-PINNED (was: a hand-typed `expected_labels` set right here).
+        # Typing the eight names into the test made this a mirror pinned to
+        # another mirror: ship a new draft_* label and it failed pointing at a
+        # literal in this file, with nothing naming verification_card. The
+        # expected set is now DERIVED from the owner's return literals through
+        # the same helper the honesty_guard/audit/producer-comparison pins
+        # use, so all four move together. The "" default is excluded — it is
+        # api_server's unset placeholder, never a judged label, so ranking it
+        # would be meaningless.
+        #
+        # Imported lazily and by function, not re-implemented: one mechanism.
+        # The assertion stays HERE rather than moving to test_honesty_guard.py
+        # because the rank-ordering pins below are behavioural claims about
+        # llm_judge and need llm_judge's live values; splitting membership
+        # from ordering would scatter one constant's rules across two files.
+        _TESTS_DIR = str(Path(__file__).resolve().parent)
+        if _TESTS_DIR not in sys.path:
+            sys.path.insert(0, _TESTS_DIR)
+        from test_honesty_guard import _authoritative_verdict_labels
+        expected_labels = _authoritative_verdict_labels() - {""}
         self.assertSetEqual(
             set(llm_judge.LABEL_SEVERITY_RANK.keys()),
             expected_labels,
