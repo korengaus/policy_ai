@@ -1236,9 +1236,41 @@ def run_audit(base: str, with_reviewer: bool = False) -> int:
                             "an official-evidence assertion leaks on a "
                             "suppressed card (4th recurrence)")
                 else:
+                    # OBSERVED-CELL-OVERFLOW (C7): the cell used to hold
+                    # stdout+stderr joined and HEAD-CUT to the last 220 chars.
+                    # stderr is appended last, so the slice kept the FINAL
+                    # failure lines and discarded the EARLIEST — on the one
+                    # path where the operator needs all of them. Worse than
+                    # C8's, which bit on a passing row; this bites only once
+                    # the honesty check has already failed.
+                    #
+                    # C8's SHAPE TRANSFERS EXACTLY, and that is a property of
+                    # the scan, not a convenience: official_leak_scan.js emits
+                    # ONE line per violated surface per row, prefixed
+                    # "LEAK-SCAN FAIL:" (:245), the same one-line-per-finding
+                    # shape as the render scan's. So the same treatment fits —
+                    # count in the row, every line in full below the table, no
+                    # slice operator left on the observed string.
+                    fails7 = [ln for ln in (proc.stderr or "").splitlines()
+                              if ln.startswith("LEAK-SCAN FAIL:")]
+                    # A scan that dies before its report (LEAK-SCAN CRASH, a
+                    # lost SOURCE PIN, a usage exit) prints no FAIL lines —
+                    # fall back to the raw output so a failure is never
+                    # rendered as an empty detail block.
+                    detail_blocks.append((
+                        "C7 leak-scan",
+                        ("%d leak-scan failure line(s)" % len(fails7))
+                        if fails7 else
+                        "no LEAK-SCAN FAIL line — raw scan output",
+                        fails7 or [ln for ln in
+                                   ((proc.stdout or "") + "\n"
+                                    + (proc.stderr or "")).splitlines()
+                                   if ln.strip()]))
                     rep.add("C7 leak-scan", "FAIL",
-                            ((proc.stdout or "") + (proc.stderr or ""))
-                            .strip().replace("\n", " / ")[-220:],
+                            "leak scan exited %s; %s; listed below"
+                            % (proc.returncode,
+                               "%d failure line(s)" % len(fails7) if fails7
+                               else "no FAIL line — died before its report"),
                             "an official-evidence assertion leaks on a "
                             "suppressed card (4th recurrence)")
                 # SUPPRESSION-UNIFY: parity cross-check. The scan emits the id
