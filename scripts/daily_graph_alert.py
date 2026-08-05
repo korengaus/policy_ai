@@ -66,6 +66,20 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
+# STREAM-GUARD — the SAME guard weekly_spine.py:55-58 already runs at import,
+# applied here and extended to stderr. See the fuller note in
+# scripts/daily_collection_alert.py. Short version: a cp949 console cannot
+# encode U+2014, so a print() carrying an em-dash raised UnicodeEncodeError,
+# and an exception out of print() in a cron wrapper can take the run with it.
+# Korean itself encodes fine on cp949, so no message content changes. utf-8
+# matches the encoding this script already DECODES its children with (line
+# ~110); errors="replace" degrades instead of raising; best-effort throughout.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
 # weekly_spine (same directory, pin-OUT) owns the ntfy plumbing.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 

@@ -54,6 +54,33 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
+# ---------------------------------------------------------------------------
+# STREAM-GUARD — the SAME guard weekly_spine.py:55-58 already runs at import,
+# applied here and extended to stderr. Not a new mechanism; the existing one,
+# in the two wrappers that lacked it.
+#
+# WHY: a cp949 console (the Windows operator default) cannot encode U+2014 EM
+# DASH — KS X 1001 carries U+2015 HORIZONTAL BAR instead — so every print()
+# carrying an em-dash raised UnicodeEncodeError. In a cron wrapper that is not
+# a lost line: an exception out of print() escapes run()/main() and can take
+# the run with it, turning a healthy collection into a failed one. The one
+# message the operator must see was the one that died encoding itself.
+#
+# WHY THE STREAM AND NOT THE STRINGS: Korean encodes FINE on cp949 (it is a
+# Korean codepage) — the notifications are Korean by design and nothing here
+# touches their content. Only a handful of Western typographic characters are
+# unmappable. utf-8 matches what daily_graph_alert.py:110 and
+# weekly_spine.py:357 already use to DECODE captured child output, so a
+# child's Korean survives the pipe into the notification intact.
+# errors="replace" is the degrade: an unmappable character becomes a
+# replacement char, never an exception. Whole thing is best-effort — a stream
+# that cannot be reconfigured leaves today's behaviour exactly as it is.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
 # weekly_spine (same directory, pin-OUT) owns the ntfy plumbing.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 

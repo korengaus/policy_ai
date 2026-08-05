@@ -52,10 +52,16 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 _SCRIPTS_DIR = Path(__file__).resolve().parent
 
-try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
-except Exception:
-    pass
+# STREAM-GUARD: stdout has been guarded here since the spine was written;
+# stderr is now guarded the same way. Both matter — a cp949 console cannot
+# encode U+2014 and this file carries em-dashes in 9 print sites, and an
+# exception out of print() inside a cron chain can take the run with it.
+# Unchanged in behaviour for stdout; nothing about any message changes.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
