@@ -82,9 +82,43 @@ State key: **FIXED** · **OPEN** · **WONTFIX** (deliberately not fixed) · **NO
 | 43 | `question_mojibake` | 1.9% / 4.0% | ceiling |
 | 44 | `sentence_join` | 0.7% / 0.2% | ceiling |
 | 45 | `hero_digit_start` | 0.2% / 0.8% | ceiling |
-| 46 | `hero_restates_title` | 6.3% / 8.2% | ceiling |
+| 46 | `hero_restates_title` | 6.3% / **12.8%** (was 8.2%) | ceiling — see growth-watch entry below |
 | 47 | `empty_section` | 0.0% / 0.0% | ceiling |
 | 48 | `cand_tail` (roster length) | p90 70 / 96 | ceiling |
+
+### Growth-watch events — a ceiling exceeded its baseline, was looked at, and was re-recorded
+
+**`hero_restates_title`, latest500: 8.2% → 12.8%. Measured 2026-08-05 (corpus max_id=14856). NOT a defect.**
+
+The first ceiling rise since the classifier that separates signal from disclosure was repaired on 08-04.
+
+- **Old level** 8.2% (recorded 07-28 at max_id=14245). **New level** 12.8% (64/500). The old number was
+  already stale before the alert fired: the previous 1000 rows (ids 13357–14356) were at 11.0%.
+- **Cause: composition, not regression.** Rows whose *stored* title ends in an appended outlet name
+  (`… - 뉴스1`, `… - go.seoul.co.kr`) went 3.3% of history → 15.7% (prev 1000) → 22.0% (latest500).
+  Those rows fire at ~35% — they are aggregator/announcement stubs whose body yields no claim, so the
+  hero falls back to the headline. Both sub-rates held flat throughout (tail ~35%, non-tail ~6.5%), and
+  the pair reproduces every window: 7.4 / 11.0 / 12.8% against actual 7.1 / 11.0 / 12.8%. Concentrated in
+  agency announcements whose headline already is the whole claim — statistics 41.9%, health 30.4%,
+  finance 3.0%, SMB 0.0%.
+- **Not a code change.** Nothing in the hero path moved. The 07-31 title-tail work (`7feb77e`, `12efcc1`,
+  `94cc011`) is display-only — of 64 hits, **0** fire only against the raw title, so the strip
+  manufactured none of them. The 08-05 export-label commit (`c1145ba`) is unrelated: `exportClaimText`
+  appears in its diff only as unchanged context. Structurally, the scan renders *current* main.js over
+  rows of *all* ingest dates, so a display change moves the whole curve and cannot produce a
+  date-localised pattern; the pattern here is by ingest date, i.e. data.
+- **Shape: drift, not a step.** By ingest day the rate runs 8.3, 24.6, 8.5, 9.0, 8.2, 7.9, 11.0, 6.2, 4.5,
+  7.9, 11.2, 17.6, 13.5, 9.3, 21.8% — overdispersed (χ²=54.1, 14 df), 500-id blocks oscillating
+  8.3 → 14.4 → 7.2 → 15.2%. The largest single day (07-22, 24.6%) predates every commit considered.
+- **KNOWN LIMIT of the detector — recorded, deliberately not fixed (its own decision, own trade-offs):**
+  it compares the hero against the **raw stored title** while the reader sees the **outlet-tail-stripped**
+  one, so it **under-counts**. Ten further latest500 cards restate the title a reader actually sees
+  without firing. The reader-facing rate is about **14.8%**, not the 12.8% recorded.
+- **What would make it a defect again:** stratify first. Tail share still rising with both sub-rates flat
+  = the same composition story, number merely stale. Either **sub-rate** rising (non-tail past ~6.5%,
+  tail past ~35%) = hero selection has degraded, and that is a defect regardless of the headline number.
+- Tolerance left at 4.5pp and the mod14 baseline left at 6.3% (it measured 7.1%, inside tolerance).
+  Reason recorded in `scripts/card_render_baselines.json` under this class's `_reason`.
 
 ## I. NOT A DEFECT — instrument error or misreading
 | # | Reported as | Truth | First |
