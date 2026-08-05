@@ -252,6 +252,56 @@ def _authoritative_verdict_labels():
     return set(re.findall(r'return "(draft_[a-z_]+)"', source)) | {""}
 
 
+def _module_level_string_keys(path, const_name):
+    """The string members of a module-level collection literal, read from
+    SOURCE — no import, no binding, nothing executed. Sets/lists/tuples yield
+    their elements; dicts yield their KEYS. frozenset({...}) and any other
+    single-argument wrapping call are unwrapped. Raises if the constant is
+    gone, because a pin that silently finds nothing is not a pin."""
+    tree = ast.parse(Path(path).read_text(encoding="utf-8"))
+    for node in tree.body:
+        targets = []
+        if isinstance(node, ast.Assign):
+            targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            targets = [node.target.id]
+        if const_name not in targets:
+            continue
+        value = node.value
+        if isinstance(value, ast.Call) and value.args:   # frozenset({...})
+            value = value.args[0]
+        if isinstance(value, ast.Dict):
+            members = [k.value for k in value.keys
+                       if isinstance(k, ast.Constant)]
+        else:
+            members = list(ast.literal_eval(value))
+        return {m for m in members if isinstance(m, str)}
+    raise AssertionError(
+        "%s not found in %s — the mirror was renamed or removed; this pin "
+        "can no longer see it" % (const_name, Path(path).name))
+
+
+def _vpc_mirror_verdict_labels():
+    """verdict_producer_comparison.LABEL_SEVERITY_RANK's draft_* keys.
+
+    WHY SOURCE-PARSED, NOT IMPORTED: the module calls
+    ``get_logger(__name__)`` at import time (verdict_producer_comparison.py:107),
+    and structured_logging.get_logger runs configure_logging(), which INSTALLS
+    HANDLERS ON THE ROOT LOGGER. Importing it here would reconfigure logging
+    for the whole pytest process and every test that runs after this one —
+    the same class of import-time side effect that ruled out importing the
+    b2b audit, differing only in which global it mutates.
+
+    Only the draft_* keys are compared: the map is deliberately mixed, also
+    ranking P1/P2 alert levels (LOW/WATCH/MEDIUM/HIGH), which are a different
+    vocabulary with their own owner. The authoritative "" default is excluded
+    too — it is api_server's unset placeholder, never a producer output, so a
+    rank for it would be meaningless."""
+    return {k for k in _module_level_string_keys(
+        PROJECT_ROOT / "verdict_producer_comparison.py", "LABEL_SEVERITY_RANK")
+        if k.startswith("draft_")}
+
+
 def _audit_mirror_verdict_labels():
     """scripts/b2b_readiness_audit.py's LEGAL_VERDICT_LABELS, read from SOURCE.
 
@@ -268,22 +318,8 @@ def _audit_mirror_verdict_labels():
     parse the OWNER'S SOURCE, bind nothing, execute nothing. ast.literal_eval
     on the frozenset literal means no label is typed here either.
     """
-    path = SCRIPTS_DIR / "b2b_readiness_audit.py"
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    for node in tree.body:
-        if not isinstance(node, ast.Assign):
-            continue
-        names = [t.id for t in node.targets if isinstance(t, ast.Name)]
-        if "LEGAL_VERDICT_LABELS" not in names:
-            continue
-        call = node.value
-        # frozenset({...}) — take the set literal it wraps.
-        if isinstance(call, ast.Call) and call.args:
-            return set(ast.literal_eval(call.args[0]))
-        return set(ast.literal_eval(call))
-    raise AssertionError(
-        "LEGAL_VERDICT_LABELS not found in %s — the audit's mirror was "
-        "renamed or removed; this pin can no longer see it" % path.name)
+    return _module_level_string_keys(
+        SCRIPTS_DIR / "b2b_readiness_audit.py", "LEGAL_VERDICT_LABELS")
 
 
 class SyncWithAuthoritativeSourcesTests(unittest.TestCase):
@@ -303,6 +339,18 @@ class SyncWithAuthoritativeSourcesTests(unittest.TestCase):
         # or CI stops.
         self.assertEqual(_authoritative_verdict_labels(),
                          _audit_mirror_verdict_labels())
+
+    def test_verdict_labels_match_verdict_producer_comparison(self):
+        # FOURTH copy (verdict_producer_comparison.py:141 LABEL_SEVERITY_RANK),
+        # unpinned and unreferenced by any test until now. It is a read-only
+        # measurement module, not request-path code, so a drift here does not
+        # ship a bad label — it degrades the instrument: an unranked label
+        # returns None from _rank() (:554) and silently drops out of the
+        # most_conservative_label comparison, so the tool that exists to
+        # measure producer disagreement would quietly measure less of it,
+        # exactly when a new label made the comparison most interesting.
+        self.assertEqual(_authoritative_verdict_labels() - {""},
+                         _vpc_mirror_verdict_labels())
 
     def test_alert_levels_match_policy_decision(self):
         import policy_decision
