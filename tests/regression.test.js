@@ -351,7 +351,7 @@ const requiredSections = [
   "핵심 요약",
   "왜 이렇게 판단했나요?",
   "근거와 출처 요약",
-  "AI 초안 판정",
+  "AI 초안 상태",
   "공식 근거 상태",
   "공식 상세문서 상태",
   "의미 매칭 상태",
@@ -398,19 +398,23 @@ function runFixture(fixture) {
   };
 }
 
-// EXPORT-GUARD-LEAK: the old pin asserted `output.includes("AI 초안 판정: 사람
+// EXPORT-GUARD-LEAK: the old pin asserted `output.includes("AI 초안 상태: 사람
 // 검토 대기")` — satisfied by ONE correct emission while another emission of the
 // SAME field leaked an official-confirmation claim two sections earlier. The
-// exported document emits the draft verdict from more than one site, so the
+// exported document emits the draft state from more than one site, so the
 // assertion must hold for EVERY line carrying the field, not for at least one.
+// EXPORT-VERDICT-LABELS: the label this pin binds to was renamed 판정 → 상태.
+// Only the label string moved — the per-line form and the guard it proves are
+// unchanged.
+const DRAFT_STATE_LABEL = "AI 초안 상태";
 function assertEveryDraftVerdictLine(output, expected, label) {
-  const lines = output.split("\n").filter((line) => line.includes("AI 초안 판정"));
+  const lines = output.split("\n").filter((line) => line.includes(DRAFT_STATE_LABEL));
   assert.ok(lines.length >= 2,
-    `${label}: expected the draft verdict on at least 2 export lines `
+    `${label}: expected the draft state on at least 2 export lines `
     + `(summary-card/dashboard + tail), found ${lines.length} — an emission `
     + "site disappeared and this pin no longer covers it");
   for (const line of lines) {
-    const value = line.slice(line.indexOf("AI 초안 판정") + "AI 초안 판정".length)
+    const value = line.slice(line.indexOf(DRAFT_STATE_LABEL) + DRAFT_STATE_LABEL.length)
       .replace(/^\s*:\s*/, "").trim();
     assert.strictEqual(value, expected,
       `${label}: draft-verdict line ${JSON.stringify(line.trim())} must read `
@@ -510,8 +514,8 @@ for (const fixtureCase of fixtures) {
   const { text, markdown } = runFixture(guardLeakFixture);
   for (const output of [text, markdown]) {
     assertEveryDraftVerdictLine(output, "사람 검토 대기", "guard-leak");
-    assert.ok(!output.includes("AI 초안 판정: 공식 근거 확인"),
-      "guard-leak: an official-confirmation claim reached an exported draft-verdict line");
+    assert.ok(!output.includes("AI 초안 상태: 공식 근거 확인"),
+      "guard-leak: an official-confirmation claim reached an exported draft-state line");
   }
 }
 

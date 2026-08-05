@@ -14417,7 +14417,12 @@
         lines.push(`최고 신뢰 출처: ${publicExportTopSource(result)}`);
         lines.push("");
         exportLine(lines, "[검증 결과 요약 카드]");
-        exportLine(lines, `- 최종 판정: ${reviewerModel.finalJudgment}`);
+        // EXPORT-VERDICT-LABELS: the "최종 판정" line here (and in the dashboard
+        // block below) was REMOVED, not renamed. Its value was
+        // formatAlert(policy_alert_level) — the alert axis, already printed in
+        // this same document as 최고 경고 단계 and 경고 단계 from the identical
+        // expression. Renaming it to 경고 단계 would have produced three verbatim
+        // duplicate lines; the name claimed an adjudication we never make.
         exportLine(lines, `- 신뢰도 점수: ${plain(confidence.policy_confidence_score ?? decision.final_score, "확인되지 않음")}`);
         exportLine(lines, `- 공식 근거 상태: ${reviewerModel.officialStatus}`);
         exportLine(lines, `- 공식 상세문서 상태: ${reviewerModel.detailStatus}`);
@@ -14427,7 +14432,6 @@
         exportLine(lines, `- 추천 다음 조치: ${reviewerModel.nextAction}`);
         lines.push("");
         exportLine(lines, "[검토자 판단 대시보드]");
-        exportLine(lines, `- 최종 판정: ${reviewerModel.finalJudgment}`);
         // EXPORT-GUARD-LEAK: this line used reviewerModel.draftVerdict, which
         // applies only the insufficiency downgrade — NOT the no-direct-support
         // regex downgrade — so one document carried two different answers for
@@ -14436,7 +14440,11 @@
         // verdict value leaving the product in a document goes through the ONE
         // guard; the model's own draftVerdict remains for the operator-gated
         // on-screen dashboard only.
-        exportLine(lines, `- AI 초안 판정: ${safeAiDraftVerdictForExport(result)}`);
+        // EXPORT-VERDICT-LABELS: 판정 → 상태. The values this label carries
+        // (사람 검토 대기 / 확인 추가 필요 …) are draft-gate STATES, not verdicts,
+        // and 초안 상태 is the term the reviewer queue already uses for the same
+        // field. The guard below is unchanged — it matches on the VALUE.
+        exportLine(lines, `- AI 초안 상태: ${safeAiDraftVerdictForExport(result)}`);
         exportLine(lines, `- 사람 검토 필요 여부: ${reviewerModel.needsReview}`);
         exportLine(lines, `- 공식 근거 상태: ${reviewerModel.officialStatus}`);
         exportLine(lines, `- 공식 상세문서 상태: ${reviewerModel.detailStatus}`);
@@ -14480,7 +14488,7 @@
         exportLine(lines, "근거와 출처 요약");
         publicSourceNotesForReport(result).forEach((item) => lines.push(`- ${sanitizePublicExportText(item)}`));
         lines.push("");
-        lines.push(`AI 초안 판정: ${sanitizePublicExportText(safeAiDraftVerdictForExport(result))}`);
+        lines.push(`AI 초안 상태: ${sanitizePublicExportText(safeAiDraftVerdictForExport(result))}`);
         lines.push(`핵심 주장: ${sanitizePublicExportText(plain(exportClaimText(result)))}`);
         lines.push(`근거 요약: ${getSafeAiDraftEvidenceSummary(result)}`);
         lines.push(`부족한 맥락: ${getSafeAiDraftMissingContext(result)}`);
