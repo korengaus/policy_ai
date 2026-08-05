@@ -173,6 +173,21 @@ AS_JUDGED_KNOWN_GAPS = {
                   "that landed 07-29 and the human may never have seen.",
          "a strip here would be a second reconstruction written from "
          "inference, not from a commit that states the pre-fix text"),
+        ("EXTRA", "the 대조 검토 section's whole shape — the count-reconcile "
+                  "lines (후보/매칭, 판정 근거) and the rewired rebuttal path. "
+                  "REBUTTAL-PATH-WIRING (c9cdbb8) and REBUTTAL-COUNT-RECONCILE "
+                  "(7f556d7) both landed 2026-07-30, the day AFTER the human "
+                  "read, so neither row was judged against this text; both rows "
+                  "are fed it. Worst on 13977, whose expectation is the "
+                  "CONSISTENCY axis and 대조 검토 is the section that speaks to "
+                  "it — the expectation still passes and its signal (a "
+                  "five-year date gap) is untouched, but the section carrying "
+                  "the reviewer's strongest cue for that axis is not as-judged. "
+                  "card_render_audit.js already carries mirror comments for "
+                  "both commits, so the drift was documented in the scanner and "
+                  "not here.",
+         "the pre-fix section text is not stated by either commit, so a strip "
+         "would be reconstruction by inference — re-authoring, not restoring"),
     ),
     13700: (
         ("MISSING", "출처 신뢰도 N and the 맥락 참고 role line on EXCLUDED "
@@ -183,6 +198,41 @@ AS_JUDGED_KNOWN_GAPS = {
          "them means re-authoring numbers from a ledger entry"),
     ),
 }
+
+# ---------------------------------------------------------------------------
+# ★EXIT CONDITION — when to ABANDON the reconstruction instead of annotating it.
+#
+# Recording a gap is a STAY, not a cure. Every product change moves the fed card
+# one step further from the 2026-07-29 read, and a gap list with no stopping
+# rule becomes an indefinite one by default — each new entry individually
+# reasonable, the whole quietly no longer describing the card a human judged.
+#
+#   When the recorded gap count reaches FOUR, or when either expectation flips
+#   to MISSED, the reconstruction has drifted far enough that annotating it is
+#   no longer honest. At that point the correct response is to establish a NEW
+#   GROUND TRUTH — a fresh human read of current cards — NOT to add a fifth gap.
+#
+# A MISSED trips it on its own because the expectations are the only evidence
+# that the reconstruction still carries its signal; once one stops holding,
+# nothing distinguishes "the reviewer regressed" from "the card we feed is no
+# longer the card that was judged", and no further annotation can separate them.
+# The count is printed against this ceiling wherever the gaps are shown, so the
+# distance is read rather than counted.
+AS_JUDGED_GAP_CEILING = 4
+AS_JUDGED_EXIT_CONDITION = (
+    "EXIT CONDITION: at %d recorded gaps, or the first MISSED, STOP annotating "
+    "— the reconstruction has drifted too far to describe the judged card. "
+    "Establish a new ground truth (a fresh human read of current cards) instead "
+    "of recording another gap." % AS_JUDGED_GAP_CEILING)
+
+
+def as_judged_gap_count(gaps=None):
+    """Distinct recorded gaps, not per-row mentions — one product change that
+    hits both rows is ONE gap, and must not inflate the count toward the exit
+    ceiling twice."""
+    src = AS_JUDGED_KNOWN_GAPS if gaps is None else gaps
+    return sum(len(entries) for entries in src.values())
+
 
 # ★THE FIDELITY CLAIM — printed wherever a CAUGHT/MISSED is reported, because a
 # CAUGHT read without it means more than it should.
@@ -253,16 +303,47 @@ def report_as_judged(rid, hits):
     return zero
 
 
-def print_known_gaps():
+def print_known_gaps(gaps=None):
     """The gaps are printed BEFORE any verdict, so nobody reads a CAUGHT
-    without having read what its reconstruction does not restore."""
-    print("AS-JUDGED KNOWN GAPS (recorded, deliberately NOT repaired — "
-          "restoring deleted product text would re-author a card that never "
-          "existed):")
-    for rid, gaps in AS_JUDGED_KNOWN_GAPS.items():
-        for direction, what, why in gaps:
+    without having read what its reconstruction does not restore — and the
+    count is printed AGAINST the exit ceiling, so the distance to abandoning
+    the reconstruction is read rather than counted. ``gaps`` is for the
+    at-ceiling demonstration only; production always reads the module table."""
+    src = AS_JUDGED_KNOWN_GAPS if gaps is None else gaps
+    n = as_judged_gap_count(src)
+    print("AS-JUDGED KNOWN GAPS: %d of %d before the exit condition — recorded, "
+          "deliberately NOT repaired (restoring deleted product text would "
+          "re-author a card that never existed):"
+          % (n, AS_JUDGED_GAP_CEILING))
+    for rid, entries in src.items():
+        for direction, what, why in entries:
             print("  %s [%s] %s" % (rid, direction, what))
             print("      not repaired because: %s" % why)
+    print(AS_JUDGED_EXIT_CONDITION)
+    if n >= AS_JUDGED_GAP_CEILING:
+        print("★EXIT CONDITION REACHED: %d recorded gaps >= %d. Do NOT record a "
+              "%dth. The reconstruction no longer describes the card the human "
+              "judged closely enough for a CAUGHT to mean what it says — "
+              "establish a new ground truth (a fresh human read of current "
+              "cards) and re-baseline the expectations against it."
+              % (n, AS_JUDGED_GAP_CEILING, n + 1))
+    else:
+        print("  (%d more recorded gap(s) would reach it)"
+              % (AS_JUDGED_GAP_CEILING - n))
+
+
+def print_missed_exit_condition(missed):
+    """A MISSED is an exit-condition trigger on its own — print it as one."""
+    if not missed:
+        return
+    print("★EXIT CONDITION REACHED — MISSED on %s. Neither an added gap nor "
+          "another annotation can settle this: the expectations were the only "
+          "evidence that the reconstruction still carries its signal, so once "
+          "one stops holding, 'the reviewer regressed' and 'the card we feed is "
+          "no longer the card that was judged' become indistinguishable. "
+          "Establish a new ground truth — a fresh human read of current cards — "
+          "and re-baseline the expectations against it. Do not add a gap for "
+          "this." % ", ".join(str(r) for r in missed))
 
 
 def apply_as_judged(rid, text):
@@ -755,12 +836,15 @@ def main() -> int:
           % (os.path.basename(paths[0]), os.path.basename(paths[1])))
 
     print("HEADLINE VERDICTS (run 1, verbatim):")
+    missed = []
     for rid, expect, held in HEADLINE_EXPECTATIONS:
         v = run1.get(str(rid))
         if not v:
             print("  %s: NO VERDICT RETURNED" % rid)
             continue
         ok = bool(v.get(expect))
+        if not ok:
+            missed.append(rid)
         print("  %s [%s expected — %s]: %s | g=%s s=%s c=%s | note: %s"
               % (rid, expect, held, "CAUGHT" if ok else "MISSED",
                  v["genre"], v["surface"], v["consistency"], v["note"][:150]))
@@ -772,6 +856,12 @@ def main() -> int:
                   "— this answer is about a card further from the human read "
                   "than the line above claims." % "; ".join(degraded[rid]))
     print("  " + AS_JUDGED_FIDELITY)
+    # ★MISSED was NOT loud on its own — it was one word inside a verdict line,
+    # indistinguishable at a glance from the CAUGHT beside it, and it does not
+    # move the exit code (3 is reserved for held drift notes, and the audit's R1
+    # row reads that contract). A MISSED is one of the two exit-condition
+    # triggers, so it says so here, at the moment it happens.
+    print_missed_exit_condition(missed)
     known = {str(i) for i in MUST_INCLUDE}
     false_pos = [v for iid, v in run1.items()
                  if iid not in known and flagged(v)]
@@ -854,6 +944,30 @@ def selftest() -> int:
         if not AS_JUDGED_KNOWN_GAPS.get(rid):
             failures.append("row %s: no known gap recorded" % rid)
 
+    if as_judged_gap_count() != 3:
+        failures.append("expected 3 recorded gaps, found %d — update the "
+                        "selftest deliberately, not incidentally"
+                        % as_judged_gap_count())
+    if as_judged_gap_count() >= AS_JUDGED_GAP_CEILING:
+        failures.append("gap count already at the exit ceiling — the "
+                        "reconstruction should be abandoned, not annotated")
+
+    print("\n=== SELFTEST 2b — what happens AT the ceiling (simulated 4th gap) ===")
+    simulated = {rid: tuple(entries)
+                 for rid, entries in AS_JUDGED_KNOWN_GAPS.items()}
+    simulated[13700] = simulated[13700] + (
+        ("MISSING", "SIMULATED FOURTH GAP — selftest only, not a real finding.",
+         "simulation"),)
+    print_known_gaps(simulated)
+    if as_judged_gap_count(simulated) != AS_JUDGED_GAP_CEILING:
+        failures.append("simulated ceiling did not reach %d"
+                        % AS_JUDGED_GAP_CEILING)
+
+    print("\n=== SELFTEST 2c — what a MISSED prints ===")
+    print_missed_exit_condition([13977])
+    print("(no MISSED case:)")
+    print_missed_exit_condition([])
+
     print("\n=== SELFTEST 3 — rename detection still fires ===")
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     with open(os.path.join(root, "frontend", "scripts", "main.js"),
@@ -880,7 +994,9 @@ def selftest() -> int:
             print("FAIL: %s" % f)
         return 1
     print("PASS: zero-hit strips are loud and carried onto the verdict line, "
-          "known gaps are recorded for both rows, rename pins still exit 2.")
+          "%d known gaps recorded for both rows and printed against the exit "
+          "ceiling of %d, a MISSED prints the exit condition, rename pins still "
+          "exit 2." % (as_judged_gap_count(), AS_JUDGED_GAP_CEILING))
     return 0
 
 
