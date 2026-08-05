@@ -2408,6 +2408,99 @@ for (const [win, ids] of Object.entries(windows)) {
 }
 
 // ---------------------------------------------------------------------------
+// VERDICT-STYLE-COVERAGE gate — every verdict label the BACKEND CAN ACTUALLY
+// PRODUCE must have a dot colour and a tier class on the front end. The owner
+// is verification_card._verdict_label's return literals, parsed here from
+// verification_card.py — the SAME source the five Python pins read
+// (honesty_guard, the b2b audit's LEGAL_VERDICT_LABELS, verdict_producer_
+// comparison's LABEL_SEVERITY_RANK, llm_judge's LABEL_SEVERITY_RANK, main's
+// _P3_TO_ALERT_TIER). No label name is typed in this scanner; both sides come
+// from source, so shipping a new draft_* label fails here naming the label.
+//
+// DIRECTION — READ THIS BEFORE TRUSTING A PASS: this is COVERAGE, NOT
+// EQUALITY. owner ⊆ map keys. A key the maps style that NO producer emits does
+// NOT fail; it is DISCLOSED as a warn instead. A passing run therefore proves
+// only that nothing ships unstyled — it is NOT evidence the maps are clean.
+// Equality is unavailable today precisely because such keys exist (below).
+//
+// WHY main.js ONLY, not web/index.html: index.html is GENERATED from main.css
+// + main.js by frontend/build_index.py, which records sha256 in
+// frontend/dist_checksum.txt. Its copies of both maps are byte-duplicates by
+// construction, so pinning them would re-measure one fact twice, and a
+// main.js/index.html divergence is a STALE BUILD — a different failure with a
+// different owner, already caught by the checksum path. The census undercounted
+// only because this scanner never read index.html; that is a reporting gap,
+// not a second thing to pin.
+// ---------------------------------------------------------------------------
+{
+  const vcPy = fs.readFileSync(path.join(ROOT, "verification_card.py"), "utf8");
+  const fnStart = vcPy.indexOf("def _verdict_label");
+  // Scope to the owning function, exactly as inspect.getsource does on the
+  // Python side: from its `def` to the next top-level def/class.
+  const after = fnStart < 0 ? "" : vcPy.slice(fnStart);
+  const nextTop = after.slice(1).search(/\n(?:def |class )/);
+  const fnSrc = nextTop < 0 ? after : after.slice(0, nextTop + 1);
+  const ownerLabels = new Set(
+    [...fnSrc.matchAll(/return "(draft_[a-z_]+)"/g)].map((m) => m[1]));
+  const styleMapKeys = (name) => {
+    const block = mainJs.match(
+      new RegExp("const " + name + " = \\{([\\s\\S]*?)\\n {4}\\};"));
+    return new Set(block
+      ? [...block[1].matchAll(/(draft_\w+)\s*:/g)].map((m) => m[1]) : []);
+  };
+  const STYLE_MAPS = [["VERDICT_DOT_COLORS", styleMapKeys("VERDICT_DOT_COLORS")],
+                      ["VERDICT_TIER_CLASSES", styleMapKeys("VERDICT_TIER_CLASSES")]];
+  // vacuity: a parser that reads nothing would make every check below pass.
+  if (ownerLabels.size < 8 || STYLE_MAPS.some(([, keys]) => keys.size < 8)) {
+    failures.push("VACUOUS DETECTOR: verdict-style parser read "
+      + `${ownerLabels.size} owner label(s) from verification_card.py and `
+      + STYLE_MAPS.map(([n, k]) => `${k.size} ${n}`).join(" / ")
+      + " key(s) from main.js (expected >=8 each) — the owner function or the "
+      + "style maps moved or were reshaped, and the coverage check cannot run "
+      + "blind");
+  } else {
+    for (const [name, keys] of STYLE_MAPS) {
+      for (const label of [...ownerLabels].sort()) {
+        if (!keys.has(label)) {
+          failures.push(`UNSTYLED VERDICT LABEL: main.js ${name} has no `
+            + `${label}, but verification_card._verdict_label returns it — the `
+            + "label ships to readers taking the map's silent fallback "
+            + "(grey dot / vt-muted pill), so a real verdict state renders as "
+            + "the styling of an unknown one");
+        }
+      }
+    }
+    const extras = [].concat(...STYLE_MAPS.map(([, keys]) =>
+      [...keys].filter((k) => !ownerLabels.has(k))));
+    const deadKeys = [...new Set(extras)].sort();
+    rateLines.push("VERDICT-STYLE-COVERAGE: "
+      + `${ownerLabels.size}/${ownerLabels.size} owner label(s) styled in `
+      + STYLE_MAPS.map(([n, k]) => `${n} (${k.size} keys)`).join(" and ")
+      + ` — COVERAGE, NOT EQUALITY: ${deadKeys.length} map key(s) that no `
+      + "producer emits do NOT fail this check, so a PASS is not evidence the "
+      + "maps are clean");
+    if (deadKeys.length) {
+      // DISCLOSURE, not a finding: styling for verdicts that cannot occur is
+      // real, but removing it is a front-end edit and a separate decision.
+      // Named here so it stops being forgotten — it was, until today. Carries
+      // no measured window tag and no ceiling-class name, so
+      // b2b_readiness_audit.classify_render_warns files it as a disclosure and
+      // it cannot hold a B2B send.
+      warns.push("VERDICT-STYLE-COVERAGE dead keys: main.js styles "
+        + `${deadKeys.join(", ")} in `
+        + STYLE_MAPS.filter(([, k]) => deadKeys.some((d) => k.has(d)))
+          .map(([n]) => n).join(" and ")
+        + ", but verification_card._verdict_label cannot return "
+        + (deadKeys.length > 1 ? "them" : "it")
+        + " — presentation for a verdict state that cannot occur. NOT a "
+        + "failure: this gate is coverage-only (owner must be styled), so "
+        + "extra keys are disclosed rather than gated. Deleting them is a "
+        + "front-end change and a separate decision");
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // answer-sentence omission grid (deterministic; any bad case FAILs)
 // ---------------------------------------------------------------------------
 (async () => {
