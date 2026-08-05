@@ -37,8 +37,16 @@
 # parse failure prints response structure and exits 2 (never a clean-looking
 # empty run).
 #
+# REMOVAL DRIFT: the pins catch a RENAME. They cannot catch a REMOVAL — see
+# AS_JUDGED_KNOWN_GAPS. What a removal leaves behind (a strip matching zero
+# lines) is now announced on the CAUGHT/MISSED line itself, and the two known
+# gaps are printed before any verdict. The reconstructions are SUFFICIENT, not
+# FAITHFUL, and the output says so.
+#
 # Joe runs once in the Render Worker Shell:
 #     PYTHONPATH=. python scripts/showcase_reviewer_card_probe.py
+# Offline, no DB/API/cost — proves the drift machinery is not vacuous:
+#     PYTHONPATH=. python scripts/showcase_reviewer_card_probe.py --selftest
 #
 # SAFETY: SELECT-only (weekly_reports.payload_json, analysis_results render
 # columns). Temp-file dump for the Node driver only (the C8 precedent) — no DB
@@ -135,6 +143,73 @@ HEADLINE_EXPECTATIONS = (
      "as-judged holds #14 labels + #15 heading stripped; #18 verified no-op"),
 )
 
+# ---------------------------------------------------------------------------
+# REMOVAL-DRIFT — the gap the pins CANNOT see, written down instead of closed.
+#
+# AS_JUDGED_PINS verify that every string a strip DEPENDS ON still exists in
+# main.js, so a RENAME exits loudly. They are blind to a REMOVAL of something no
+# strip ever named: a product change that DELETES reader text leaves nothing to
+# pin and nothing to no-op, and the reconstruction silently drifts one element
+# closer to the modern card. That has now happened twice (below).
+#
+# ★NOT FIXED BY DESIGN. Restoring deleted product text would mean re-authoring
+# card output from a ledger entry; a card that is APPROXIMATELY the old one
+# tests the reviewer against a card that never existed, which is worse than a
+# known gap. The goal here is that the gap is VISIBLE and BOUNDED, not zero. So
+# these are recorded, printed beside every CAUGHT/MISSED, and deliberately left
+# open. Adding a strip for any of them is the re-authoring this forbids.
+#
+# Each entry: (direction, what the fed card gets wrong, why it is not repaired).
+#   MISSING = the human saw it, the modern card no longer emits it, the
+#             reconstruction cannot put it back.
+#   EXTRA   = the modern card emits it, the human never saw it, no strip removes
+#             it (the reconstruction is incomplete in the other direction).
+AS_JUDGED_KNOWN_GAPS = {
+    13977: (
+        ("EXTRA", "#14 CANDIDATE-EXCLUSION-WIRING framing on the candidate "
+                  "roster — 제외/불일치 badges, 공개 표시 판단 rows and 주제 "
+                  "불일치로 제외 labels. The 13700 reconstruction rewrites these; "
+                  "13977 has no such strip, so its fed roster carries framing "
+                  "that landed 07-29 and the human may never have seen.",
+         "a strip here would be a second reconstruction written from "
+         "inference, not from a commit that states the pre-fix text"),
+    ),
+    13700: (
+        ("MISSING", "출처 신뢰도 N and the 맥락 참고 role line on EXCLUDED "
+                    "candidates. EXCLUDED-CANDIDATE-DROP-SCORE-AND-ROLE stopped "
+                    "emitting both for rows the card had already set aside; the "
+                    "human read them on 88 candidates and nothing restores them.",
+         "the deleted values are per-candidate product output; reconstructing "
+         "them means re-authoring numbers from a ledger entry"),
+    ),
+}
+
+# ★THE FIDELITY CLAIM — printed wherever a CAUGHT/MISSED is reported, because a
+# CAUGHT read without it means more than it should.
+AS_JUDGED_FIDELITY = (
+    "FIDELITY: the reconstruction is SUFFICIENT, not FAITHFUL — it preserves "
+    "the SIGNAL each expectation tests (13977: a five-year date gap between "
+    "claim and official documents; 13700: documents unrelated to the claim), "
+    "NOT the whole card the human read. See KNOWN GAPS above; a CAUGHT means "
+    "the reviewer saw that signal, not that it read the 2026-07-29 card.")
+
+# ★ZERO-HIT POLICY: WARNING, not a hard failure — and bound to the verdict line
+# so it cannot be skimmed.
+#   Against a hard failure: a strip legitimately matches zero lines when the
+#   ROW's stored data changed (a candidate leaving the roster, a re-analysis
+#   dropping a chip). Exiting there blocks a $0.81 run — against roughly $11
+#   remaining — for a benign reason, and the probe's whole value is that it can
+#   be run.
+#   Against a bare warning: the per-op count line already existed and is exactly
+#   the "number a reader might skim past" — it prints ~30 lines above the
+#   verdict that actually gets read.
+#   So: keep the run, and make the warning ride ON the CAUGHT/MISSED line via
+#   RECONSTRUCTION DEGRADED, plus a consolidated banner. The operator cannot
+#   read the answer without reading that its reconstruction was incomplete.
+ZERO_HIT_NOTE = (" — ZERO lines matched: the fed text no longer carries this "
+                 "fix's strings; the reconstruction may be moot or the "
+                 "rendering moved. Read before trusting the expectation.")
+
 
 def verify_as_judged_pins(src=None):
     """Every string the reconstructions depend on must still exist in
@@ -157,6 +232,37 @@ def verify_as_judged_pins(src=None):
                   "feed a modern card; review the product change, then update "
                   "the strip." % (rid, ref, pin))
         raise SystemExit(2)
+
+
+def report_as_judged(rid, hits):
+    """Print one line per as-judged op and return the refs that matched NOTHING.
+    Shared by render_cards and --selftest so the demonstration exercises the
+    production path rather than a copy of it."""
+    zero = [ref for ref, count in hits.items() if not count]
+    for ref, count in hits.items():
+        print("AS-JUDGED %s: %s -> %d line(s)%s"
+              % (rid, ref, count, "" if count else ZERO_HIT_NOTE))
+    if zero:
+        print("AS-JUDGED RECONSTRUCTION DEGRADED [%s]: %d of %d operation(s) "
+              "matched nothing (%s). A removal the pins cannot see: the strip's "
+              "target text is gone from the RENDER, not just from main.js, so "
+              "this row is fed one element closer to the modern card than the "
+              "human read. The expectation below is reported WITH this caveat, "
+              "not silently."
+              % (rid, len(zero), len(hits), "; ".join(zero)))
+    return zero
+
+
+def print_known_gaps():
+    """The gaps are printed BEFORE any verdict, so nobody reads a CAUGHT
+    without having read what its reconstruction does not restore."""
+    print("AS-JUDGED KNOWN GAPS (recorded, deliberately NOT repaired — "
+          "restoring deleted product text would re-author a card that never "
+          "existed):")
+    for rid, gaps in AS_JUDGED_KNOWN_GAPS.items():
+        for direction, what, why in gaps:
+            print("  %s [%s] %s" % (rid, direction, what))
+            print("      not repaired because: %s" % why)
 
 
 def apply_as_judged(rid, text):
@@ -489,6 +595,7 @@ def render_cards(conn, ids):
     # card to the recall check (this runs before any API spend in main()).
     verify_as_judged_pins()
     cards = {}
+    degraded = {}
     for rid in ids:
         entry = rendered.get(str(rid)) or {}
         if "error" in entry:
@@ -496,15 +603,11 @@ def render_cards(conn, ids):
             continue
         text = entry.get("text") or ""
         text, hits = apply_as_judged(rid, text)
-        for ref, count in hits.items():
-            note = "" if count else (" — ZERO lines matched: the fed text no "
-                                     "longer carries this fix's strings; the "
-                                     "reconstruction may be moot or the "
-                                     "rendering moved. Read before trusting "
-                                     "the expectation.")
-            print("AS-JUDGED %s: %s -> %d line(s)%s" % (rid, ref, count, note))
+        zero = report_as_judged(rid, hits)
+        if zero:
+            degraded[rid] = zero
         cards[rid] = text
-    return cards
+    return cards, degraded
 
 
 def _extract_json(text):
@@ -623,7 +726,7 @@ def main() -> int:
            .replace("postgresql+psycopg2://", "postgresql://"))
     with psycopg.connect(url) as conn:
         ids = pick_sample_ids(conn)
-        cards = render_cards(conn, ids)
+        cards, degraded = render_cards(conn, ids)
     ordered_ids = [i for i in ids if i in cards]
 
     total_chars = sum(len(t) for t in cards.values())
@@ -635,6 +738,8 @@ def main() -> int:
     print("AS-JUDGED: 13977 (#13 stamp) + 13700 (#14 labels, #15 heading; "
           "#18 verified no-op) reconstructed to the 2026-07-29 human read — "
           "per-row line counts above; pins verified against main.js")
+    print_known_gaps()
+    print(AS_JUDGED_FIDELITY)
     print("REVIEWER PROMPT (verbatim):")
     print(SYSTEM_PROMPT)
 
@@ -659,6 +764,14 @@ def main() -> int:
         print("  %s [%s expected — %s]: %s | g=%s s=%s c=%s | note: %s"
               % (rid, expect, held, "CAUGHT" if ok else "MISSED",
                  v["genre"], v["surface"], v["consistency"], v["note"][:150]))
+        # The gap rides ON the answer, never only above it.
+        for direction, what, _why in AS_JUDGED_KNOWN_GAPS.get(rid, ()):
+            print("      KNOWN GAP [%s]: %s" % (direction, what.split(".")[0]))
+        if rid in degraded:
+            print("      ★RECONSTRUCTION DEGRADED this run: %s matched nothing "
+                  "— this answer is about a card further from the human read "
+                  "than the line above claims." % "; ".join(degraded[rid]))
+    print("  " + AS_JUDGED_FIDELITY)
     known = {str(i) for i in MUST_INCLUDE}
     false_pos = [v for iid, v in run1.items()
                  if iid not in known and flagged(v)]
@@ -711,5 +824,67 @@ def main() -> int:
     return 3 if held else 0
 
 
+def selftest() -> int:
+    """Offline proof that the drift machinery is not vacuous. NO DB, NO API,
+    NO cost. Exercises the SAME functions the run uses:
+      1. a strip whose target text is gone from the RENDER -> loud, and the
+         degradation is carried, not just counted;
+      2. the recorded known gaps print for both rows;
+      3. the rename pins still exit 2 when a pinned string leaves main.js.
+    Run: PYTHONPATH=. python scripts/showcase_reviewer_card_probe.py --selftest
+    """
+    print("=== SELFTEST 1 — a strip that matches nothing (REMOVAL) ===")
+    # A modern-shaped card with every strip target ALREADY absent, i.e. what a
+    # future product removal leaves behind.
+    stripped_render = ("[공식 문서 후보]\n공식 출처 후보 88개\n"
+                       "어떤 배지도 라벨도 남지 않은 렌더\n[대조 검토]\n검사한 주장\n2")
+    failures = []
+    for rid in (13977, 13700):
+        text, hits = apply_as_judged(rid, stripped_render)
+        zero = report_as_judged(rid, hits)
+        if len(zero) != len(hits):
+            failures.append("row %s: zero-hit detection missed an op" % rid)
+        if text != stripped_render:
+            failures.append("row %s: a no-op strip still altered the text" % rid)
+
+    print("\n=== SELFTEST 2 — the recorded known gaps ===")
+    print_known_gaps()
+    print(AS_JUDGED_FIDELITY)
+    for rid in (13977, 13700):
+        if not AS_JUDGED_KNOWN_GAPS.get(rid):
+            failures.append("row %s: no known gap recorded" % rid)
+
+    print("\n=== SELFTEST 3 — rename detection still fires ===")
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(root, "frontend", "scripts", "main.js"),
+              encoding="utf-8") as fh:
+        real_src = fh.read()
+    try:
+        verify_as_judged_pins(real_src)
+        print("pins over the REAL main.js: all present (no exit) — correct")
+    except SystemExit as exc:
+        failures.append("pins fired against unmodified main.js (code %s)" % exc.code)
+    renamed = real_src.replace(EXCL_LABEL, "주제가 달라 제외")
+    if renamed == real_src:
+        failures.append("could not simulate a rename: %r absent" % EXCL_LABEL)
+    try:
+        verify_as_judged_pins(renamed)
+        failures.append("RENAME NOT DETECTED — the pin is vacuous")
+    except SystemExit as exc:
+        print("simulated rename of %r -> exit %s (loud, as designed)"
+              % (EXCL_LABEL, exc.code))
+
+    print("\n=== SELFTEST RESULT ===")
+    if failures:
+        for f in failures:
+            print("FAIL: %s" % f)
+        return 1
+    print("PASS: zero-hit strips are loud and carried onto the verdict line, "
+          "known gaps are recorded for both rows, rename pins still exit 2.")
+    return 0
+
+
 if __name__ == "__main__":
+    if "--selftest" in sys.argv:
+        sys.exit(selftest())
     sys.exit(main())
