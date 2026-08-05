@@ -8,6 +8,7 @@ SyncWithAuthoritativeSourcesTests below pin them against their sources so
 divergence fails CI instead of drifting silently.
 """
 
+import ast
 import copy
 import inspect
 import re
@@ -242,15 +243,66 @@ class PurityTests(unittest.TestCase):
         self.assertTrue(ok)
 
 
+def _authoritative_verdict_labels():
+    """THE closed set, derived from its owner: every draft_* return literal in
+    verification_card._verdict_label, plus the AnalyzeResult "" default. No
+    label name is typed anywhere in this file — both sides come from source."""
+    import verification_card
+    source = inspect.getsource(verification_card._verdict_label)
+    return set(re.findall(r'return "(draft_[a-z_]+)"', source)) | {""}
+
+
+def _audit_mirror_verdict_labels():
+    """scripts/b2b_readiness_audit.py's LEGAL_VERDICT_LABELS, read from SOURCE.
+
+    WHY NOT IMPORT IT, when this file already imports build_brainmap_graph
+    from the same directory: the audit DOES WORK AT IMPORT TIME. Two side
+    effects, both unacceptable to inherit into a test process —
+      * b2b_readiness_audit.py:51-54 calls sys.stdout.reconfigure(), which
+        would mutate the TEST RUNNER'S stdout for the rest of the session;
+      * b2b_readiness_audit.py:255 evaluates read_spine_schedule() at module
+        level, which reads render.yaml off disk.
+    Neither is the audit's fault — it is a script with a main path, not a
+    library — but a pin must not drag them in. So the mirror is read the way
+    the briefing-status key is pinned in scripts/daily_collection_alert.py:
+    parse the OWNER'S SOURCE, bind nothing, execute nothing. ast.literal_eval
+    on the frozenset literal means no label is typed here either.
+    """
+    path = SCRIPTS_DIR / "b2b_readiness_audit.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        names = [t.id for t in node.targets if isinstance(t, ast.Name)]
+        if "LEGAL_VERDICT_LABELS" not in names:
+            continue
+        call = node.value
+        # frozenset({...}) — take the set literal it wraps.
+        if isinstance(call, ast.Call) and call.args:
+            return set(ast.literal_eval(call.args[0]))
+        return set(ast.literal_eval(call))
+    raise AssertionError(
+        "LEGAL_VERDICT_LABELS not found in %s — the audit's mirror was "
+        "renamed or removed; this pin can no longer see it" % path.name)
+
+
 class SyncWithAuthoritativeSourcesTests(unittest.TestCase):
     """The duplicated constants must match their authoritative sources."""
 
     def test_verdict_labels_match_verification_card(self):
-        import verification_card
-        source = inspect.getsource(verification_card._verdict_label)
-        from_source = set(re.findall(r'return "(draft_[a-z_]+)"', source))
-        self.assertEqual(from_source | {""},
+        self.assertEqual(_authoritative_verdict_labels(),
                          set(honesty_guard.LEGAL_VERDICT_LABELS))
+
+    def test_verdict_labels_match_b2b_audit_mirror(self):
+        # THIRD copy of the same closed set (scripts/b2b_readiness_audit.py:348),
+        # unpinned until now. It gates the C4 check the audit runs before every
+        # B2B send: if a new draft_* label ships and this copy lags, C4 either
+        # flags legal rows as illegal — a false alarm on the instrument we
+        # trust before sending — or misses a genuine above-draft leak. Pinned
+        # to the SAME authority as honesty_guard, so all three move together
+        # or CI stops.
+        self.assertEqual(_authoritative_verdict_labels(),
+                         _audit_mirror_verdict_labels())
 
     def test_alert_levels_match_policy_decision(self):
         import policy_decision
