@@ -575,7 +575,7 @@ def http_get(base, path, budget, as_json=True, timeout=30):
                 last_err = "http %s" % status
                 continue
         except Exception as err:  # DNS/timeout/reset — retry
-            last_err = str(err)[:120]
+            last_err = cell_text(err, NET_ITEM_MAX)
             continue
         if as_json:
             try:
@@ -623,7 +623,7 @@ def build_readonly_engine():
             conn.execute(sa.text("SELECT 1"))
         return engine, None
     except Exception as err:
-        return None, "DB connect failed: %s" % str(err)[:160]
+        return None, "DB connect failed: %s" % cell_text(err)
 
 
 # ---------------------------------------------------------------------------
@@ -679,19 +679,20 @@ def reviewer_advisory_row(returncode, output):
         held = [ln for ln in lines if ln.startswith("HOLD FOR HUMAN READ")]
         drift = [ln for ln in lines if ln.startswith("TRUTH-DRIFT:")]
         return ("R1 semantic reviewer", "HOLD",
-                ((held[0] if held else "notes held") + " | "
-                 + (drift[0] if drift else ""))[:260],
+                cell_text((held[0] if held else "notes held") + " | "
+                          + (drift[0] if drift else "")),
                 "a person must read the held notes before sending; this does "
                 "NOT block the audit and does not decide the send")
     if returncode == 0:
         drift = [ln for ln in lines if ln.startswith("TRUTH-DRIFT:")]
         return ("R1 semantic reviewer", "NO HOLD",
-                (drift[0] if drift else "ran, no notes held"),
+                cell_text(drift[0] if drift else "ran, no notes held"),
                 "nothing held for a human read this run; the reviewer never "
                 "auto-passes the send either")
     return ("R1 semantic reviewer", "UNAVAILABLE",
             "probe exited %s — %s" % (returncode,
-                                      (lines[-1][:120] if lines else "no output")),
+                                      (cell_text(lines[-1]) if lines
+                                       else "no output")),
             "no semantic read was taken this run — deterministic rows above "
             "are unaffected")
 
@@ -756,6 +757,58 @@ def render_disclosure_labels(disclosures):
         if label not in labels:
             labels.append(label)
     return labels
+
+
+# ---------------------------------------------------------------------------
+# CELL-TEXT-CUT — the ONE truncation for single-string observed cells.
+#
+# Ten sites used to slice free text into the table with a bare [:N] and no
+# marker, so a cut exception read exactly like a complete one. The common case
+# is not exotic: subprocess.TimeoutExpired measures 176 characters on these
+# paths because it carries absolute paths for both the node script and the temp
+# dump, so 120 and 140 alike cut it mid-path — and the operator could not tell.
+#
+# WIDTH, DERIVED RATHER THAN GUESSED. The renderer enforces no column width and
+# has no alignment to break, and C4 verdict_label already ships 350 untruncated
+# characters, so 350 is the widest cell this table demonstrably tolerates. Any
+# error row is therefore no wider than a healthy row that already exists, and
+# the measured worst realistic exception (176) clears it by roughly 2x, so the
+# common failure is never cut at all. Note what the marker buys: once a cut
+# announces itself, the width stops being a correctness question and becomes a
+# readability one — a wrong width is disclosed, not hidden.
+OBSERVED_CELL_MAX = 350
+# The one site that genuinely needs a different bound: NETWORK_FAILURES entries
+# are joined SIX to a cell (the [:6] cap in the NET row), so the item budget is
+# the cell budget divided by that cap. At the full 350 one row could reach ~2100
+# characters — a bound derived from the cell it shares, not a smaller guess.
+NET_ITEM_MAX = OBSERVED_CELL_MAX // 6
+
+
+def cell_text(text, limit=OBSERVED_CELL_MAX):
+    """Free text made safe for one markdown table cell, cut VISIBLY.
+
+    Two jobs, both display-only:
+
+      * COLLAPSE WHITESPACE. A newline inside `observed` used to break the row
+        in half — the renderer emits one "| … |" line per row, so a multi-line
+        exception silently split the table. This is not hypothetical: a
+        SQLAlchemy connect failure is routinely three lines ("(psycopg2…)",
+        "[SQL: …]", "[parameters: …]"), and that string reaches a cell.
+      * MARK THE CUT. Over `limit`, the kept text is followed by
+        "… [truncated, +N chars]". Unambiguous in a cell because it is always
+        last, it is bracketed, and it states a character count — an exception
+        message does not end by counting its own remaining characters, and the
+        ellipsis alone would have been mistakable for the author's own elision.
+
+    The count is of characters DROPPED, so the reader knows the scale of what
+    is missing. Output length is `limit` plus the marker: the promise is "you
+    are seeing the first `limit` characters", which stays true as the marker
+    changes width. Pure and total: never raises, None -> "".
+    """
+    flat = " ".join(str(text if text is not None else "").split())
+    if len(flat) <= limit:
+        return flat
+    return "%s… [truncated, +%d chars]" % (flat[:limit], len(flat) - limit)
 
 
 class Report:
@@ -979,7 +1032,8 @@ def run_audit(base: str, with_reviewer: bool = False) -> int:
     st, ghost = http_get(base, "/api/claim/deadbeef0000", budget)
     ghost_ok = st == 200 and isinstance(ghost, dict) and ghost.get("found") is False
     rep.add("C3 not-found posture", "PASS" if ghost_ok else "FAIL",
-            "http=%s payload=%s" % (st, json.dumps(ghost, ensure_ascii=False)[:60]),
+            "http=%s payload=%s"
+            % (st, cell_text(json.dumps(ghost, ensure_ascii=False))),
             "a fabricated page for a nonexistent claim id")
 
     # ---------------- CHECKS 4-6 — database -------------------------------
@@ -1166,7 +1220,7 @@ def run_audit(base: str, with_reviewer: bool = False) -> int:
                     "LIKE '%\"has_genuine_official_support\": true%'")).fetchall()
         except Exception as err:
             rep.add("C7 matcher-consistency", "ERROR",
-                    "genuine-row fetch crashed: %s" % str(err)[:120],
+                    "genuine-row fetch crashed: %s" % cell_text(err),
                     "wrong-period matches could grow unseen")
             # The leak scan shares this input — it must FAIL VISIBLY too,
             # never silently disappear from the table.
@@ -1205,7 +1259,7 @@ def run_audit(base: str, with_reviewer: bool = False) -> int:
                         "defect fixed three times, recurring")
             except Exception as err:
                 rep.add("C7 matcher-consistency", "ERROR",
-                        "predicate run crashed: %s" % str(err)[:120],
+                        "predicate run crashed: %s" % cell_text(err),
                         "wrong-period matches could grow unseen")
 
             # Leak scan: the five official-assertion surfaces are frontend
@@ -1324,7 +1378,7 @@ def run_audit(base: str, with_reviewer: bool = False) -> int:
                         "screen and counts could disagree about official support")
             except Exception as err:
                 rep.add("C7 leak-scan", "ERROR",
-                        "scan invocation crashed: %s" % str(err)[:120],
+                        "scan invocation crashed: %s" % cell_text(err),
                         "the leak scan silently skipped")
                 rep.add("C7 predicate-parity", "ERROR",
                         "scan invocation crashed — parity not compared",
@@ -1462,7 +1516,7 @@ def run_audit(base: str, with_reviewer: bool = False) -> int:
                     "the render scan silently skipped")
         except Exception as err:
             rep.add("C8 render-scan", "ERROR",
-                    "render-scan invocation crashed: %s" % str(err)[:140],
+                    "render-scan invocation crashed: %s" % cell_text(err),
                     "the render scan silently skipped")
         engine.dispose()
 
@@ -1485,7 +1539,8 @@ def run_audit(base: str, with_reviewer: bool = False) -> int:
                                   "deterministic rows above are unaffected"))
         except Exception as err:  # noqa: BLE001 — must never reach the audit
             advisory_rows.append(("R1 semantic reviewer", "UNAVAILABLE",
-                                  "probe invocation crashed: %s" % str(err)[:140],
+                                  "probe invocation crashed: %s"
+                                  % cell_text(err),
                                   "no semantic read was taken this run — "
                                   "deterministic rows above are unaffected"))
 
@@ -1733,6 +1788,36 @@ def selftest() -> int:
           "candidate-count tail" in defect_signals[1], True)
     check("c8-defect-disclosures-unchanged", len(defect_disclosures), 4)
     check("c8-empty-input", classify_render_warns(""), ([], []))
+
+    # CELL-TEXT-CUT — the marker must appear exactly when text is cut, and the
+    # count must be of what was DROPPED. Proven on the real exception shape
+    # these sites actually see, not on a synthetic string of the right length.
+    import subprocess  # local, mirroring CHECK 7/8's own local import
+    timeout_err = subprocess.TimeoutExpired(
+        ["node", str(ROOT / "scripts" / "official_leak_scan.js"),
+         str(ROOT / "tmp" / "dump.json")], 180)
+    check("cell-under-limit-unmarked", cell_text("short"), "short")
+    check("cell-at-limit-unmarked", cell_text("x" * 350), "x" * 350)
+    check("cell-over-limit-marked",
+          cell_text("x" * 360).endswith("… [truncated, +10 chars]"), True)
+    check("cell-keeps-limit-chars", len(cell_text("x" * 360)) - len(
+        "… [truncated, +10 chars]"), 350)
+    check("cell-none-is-empty", cell_text(None), "")
+    # A newline used to split the markdown row in half.
+    check("cell-collapses-newlines",
+          cell_text("(psycopg2.OperationalError)\n[SQL: SELECT 1]"),
+          "(psycopg2.OperationalError) [SQL: SELECT 1]")
+    # The measured real case: 176 chars fits 350 whole, and was cut at 120/140.
+    check("cell-timeout-fits-whole", cell_text(timeout_err),
+          " ".join(str(timeout_err).split()))
+    check("cell-timeout-was-cut-before", len(str(timeout_err)) > 140, True)
+    # The NET item bound is derived from the cell it shares, not guessed.
+    check("cell-net-item-bound", NET_ITEM_MAX, OBSERVED_CELL_MAX // 6)
+    check("cell-net-six-items-fit-one-cell",
+          NET_ITEM_MAX * 6 <= OBSERVED_CELL_MAX, True)
+    check("cell-net-item-marks",
+          cell_text(timeout_err, NET_ITEM_MAX).endswith(
+              "chars]"), True)
 
     # C5-COLLAPSE-NOT-BAND — every branch of daily_adds_status, on real-shaped
     # numbers. The one that matters most: the ACTUAL regime shift (median-140
