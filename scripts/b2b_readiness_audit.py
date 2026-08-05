@@ -781,6 +781,11 @@ def run_audit(base: str, with_reviewer: bool = False) -> int:
     # cannot reach rep.worst() / fails / warns and therefore cannot change the
     # exit code. Default empty — the reviewer is opt-in (--with-reviewer).
     advisory_rows = []
+    # OBSERVED-CELL-OVERFLOW: per-row detail that is COUNTED in the table and
+    # PRINTED IN FULL below it. Display only — nothing here reaches rep.rows,
+    # rep.worst(), fails/warns or the exit code. Entries are
+    # (row label, heading, lines).
+    detail_blocks = []
 
     # ---------------- CHECK 1 — the email's numbers -----------------------
     status, claim = http_get(base, "/api/claim/" + FLAGSHIP_LINEAGE, budget)
@@ -1356,24 +1361,64 @@ def run_audit(base: str, with_reviewer: bool = False) -> int:
             # operator learns to skim. Only the measured (baseline-comparison)
             # channel is a defect signal; see classify_render_warns.
             signals8, disclosures8 = classify_render_warns(out8)
-            disclosed8 = ("; %d coverage disclosure(s): %s"
-                          % (len(disclosures8),
-                             ", ".join(render_disclosure_labels(disclosures8)))
-                          ) if disclosures8 else ""
+            # OBSERVED-CELL-OVERFLOW: these lists used to be joined INTO the
+            # observed cell behind a hand-typed 260-char slice, and the cell
+            # lost the race twice. On 08-04 ten disclosure lines filled it, so
+            # a ceiling rise arriving after the first line would have been
+            # invisible; the classifier was repaired, the DISPLAY was not.
+            # Today a seventh disclosure label pushed the list to 349 chars and
+            # `VERDICT-STYLE-COVERAGE dead keys` fell off the tail — the string
+            # VERDICT-STYLE appeared nowhere in the audit output at all. A
+            # wider constant only moves the next overflow: the row carries a
+            # LIST whose length grows with the scan, so no fixed width can
+            # bound it. So the lists leave the cell. The row keeps the scan's
+            # own fixed-shape summary plus COUNTS (bounded by digits, not by
+            # how much the scan found), and every line is printed in full
+            # below the table. Nothing is shortened and nothing is dropped.
+            #
+            # THE SIGNAL GUARANTEE, structurally: there is no slice operator on
+            # any C8 observed string any more, and no branch joins signals into
+            # a cell. A defect signal therefore cannot be the thing that gets
+            # cut — not because it is ordered ahead of disclosures, but because
+            # nothing truncates it. classify_render_warns already keeps the two
+            # channels apart and the branches below already separate them, so
+            # the ordering half of the fix was never the missing piece.
+            def _detail(heading, lines):
+                if lines:
+                    detail_blocks.append(("C8 render-scan", heading, lines))
+
+            counts8 = "".join([
+                ("; %d growth signal(s)" % len(signals8)) if signals8 else "",
+                ("; %d coverage disclosure(s)" % len(disclosures8))
+                if disclosures8 else "",
+                "; listed below" if (signals8 or disclosures8) else "",
+            ])
+            _detail("%d growth signal(s) — a display artefact past its "
+                    "recorded baseline" % len(signals8), signals8)
+            _detail("%d coverage disclosure(s) — statements the scan makes "
+                    "ABOUT ITSELF, not findings" % len(disclosures8),
+                    disclosures8)
             if proc8.returncode != 0:
+                fails8 = [ln for ln in out8.splitlines()
+                          if ln.startswith("RENDER-SCAN FAIL:")]
+                # A scan that dies before its own report (PIN LOST, crash)
+                # prints neither summary nor FAIL lines — fall back to the raw
+                # output so the failure is never rendered as an empty cell.
+                _detail("%d scan failure(s)" % len(fails8), fails8
+                        or [ln for ln in out8.splitlines() if ln.strip()])
                 rep.add("C8 render-scan", "FAIL",
-                        out8.strip().replace("\n", " / ")[-260:],
+                        tail8[0] + ("; %d scan failure(s); listed below"
+                                    % len(fails8) if fails8 else
+                                    "; scan output listed below"),
                         "machine text or a broken sentence reaches a "
                         "reader's card — the classes we only ever caught "
                         "by eye")
             elif signals8:
-                rep.add("C8 render-scan", "WARN",
-                        (tail8[0] + " / " + " / ".join(signals8))[:260],
+                rep.add("C8 render-scan", "WARN", tail8[0] + counts8,
                         "a display artefact is GROWING past its recorded "
                         "baseline")
             else:
-                rep.add("C8 render-scan", "PASS",
-                        (tail8[0] + disclosed8)[:260],
+                rep.add("C8 render-scan", "PASS", tail8[0] + counts8,
                         "machine text or a broken sentence reaches a "
                         "reader's card — the classes we only ever caught "
                         "by eye")
@@ -1428,6 +1473,19 @@ def run_audit(base: str, with_reviewer: bool = False) -> int:
         p("| %s | %s | %s | %s |" % (check, statx, observed.replace("|", "/"),
                                      impact))
     p("")
+    # OBSERVED-CELL-OVERFLOW: the table stays one scannable line per check;
+    # anything that is a LIST lives here, in full. Printed BEFORE the advisory
+    # notice so it reads as part of the rows above rather than as a separate
+    # opinion, and it can no more change the verdict than the advisory can —
+    # detail_blocks never touches rep.rows or the exit code.
+    if detail_blocks:
+        p("DETAIL (full text of the lines counted in the table above — "
+          "nothing here is truncated or omitted):")
+        for label, heading, lines in detail_blocks:
+            p("  %s — %s:" % (label, heading))
+            for line in lines:
+                p("    - %s" % line)
+        p("")
     # REVIEWER-INTO-AUDIT: printed BELOW the table and outside it, so it reads
     # as a notice a person acts on rather than a row in the verdict. Its status
     # words are deliberately NOT PASS/FAIL/WARN.
