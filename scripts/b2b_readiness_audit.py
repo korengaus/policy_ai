@@ -1304,6 +1304,14 @@ def run_audit(base: str, with_reviewer: bool = False) -> int:
         # only on growth past their recorded baselines. An inability to run
         # is an ERROR — the gate is not passable while skipping it. Adds
         # ~35s (a ~13s dump of ~1,480 rows + a ~22s Node render pass).
+        # COLUMN-OWNER: this tuple MIRRORS scripts/card_render_audit.js's
+        # ROW_COLUMNS (card_render_audit.js:91) — the consumer owns the list.
+        # original_url was added there by TITLE-TAIL-STRIP and never here, so
+        # the title-outlet-tail ZERO class verified a tail against an empty
+        # host and no-op'd on every real row: the class was dormant on the
+        # live corpus and only the vacuity controls still exercised it. A
+        # check that stopped checking, silently. Now equal to the owner,
+        # column-for-column and in the owner's order.
         RENDER_COLS = ("title", "claim_text", "content_nature", "claims",
                        "normalized_claims", "evidence_snippets",
                        "evidence_sources", "source_candidates",
@@ -1312,7 +1320,7 @@ def run_audit(base: str, with_reviewer: bool = False) -> int:
                        "debug_summary", "evidence_extraction_summary",
                        "contradiction_summary", "contradiction_checks",
                        "missing_context", "verdict_label",
-                       "policy_alert_level")
+                       "policy_alert_level", "original_url")
         try:
             with engine.connect() as conn:
                 max_id8 = conn.execute(sa.text(

@@ -85,6 +85,79 @@ def read_max_id():
         return None
 
 
+# ---------------------------------------------------------------------------
+# KEY-PIN — the debug_summary key this monitor counts is OWNED by main.py's
+# writer (main.py:1025). The LIKE patterns below embed that key as a literal,
+# and a rename there is the one failure this monitor cannot survive.
+#
+# WHY A SOURCE PIN AND NOT AN IMPORT (backlog_systemic_scan.py:44's pattern):
+# there is no symbol to import. The key is a string literal used as a dict
+# subscript inside analyze_pipeline's body, not a module-level constant, so
+# `from main import ...` has nothing to bind to. And importing main.py at all
+# would pull config, engines and every provider into a wrapper whose standing
+# rule is that nothing in the alerting layer may block collection. So this is
+# pinned the way web/claim.html's vocabulary is pinned: assert the literal in
+# the OWNER'S SOURCE, and fail loudly and by name when it is gone.
+#
+# WHY RENAME IS THE FAILURE MODE, NOT DELETION: rows without the key are
+# UNKNOWN and are excluded from BOTH the numerator and the denominator on
+# purpose (old rows, disabled lane). That is correct — and it is precisely
+# what makes a rename invisible: read_briefing_status returns (0, 0), run()'s
+# `keyed_rows > 0` gate never opens, and a dead outage counter is
+# indistinguishable from a healthy quiet day. The pin changes NOTHING about
+# what is counted or how it gates; absence stays unknown. It exists so that a
+# rename can no longer masquerade as absence.
+BRIEFING_STATUS_KEY = "policy_briefing_status"
+BRIEFING_KEY_OWNER = REPO_ROOT / "main.py"
+# The owner's write site, verbatim (main.py:1025). Matching the SUBSCRIPT and
+# not just the bare word is what makes this a rename detector: the word alone
+# also occurs in prose comments that a rename would leave behind.
+BRIEFING_KEY_WRITE_SITE = 'debug_summary["%s"]' % BRIEFING_STATUS_KEY
+
+
+def read_owner_source():
+    """The owner file's text. Raises only if main.py is unreadable."""
+    return BRIEFING_KEY_OWNER.read_text(encoding="utf-8")
+
+
+def check_briefing_key_pin(source_reader=read_owner_source):
+    """(ok, detail) — is the counted key still written by main.py?
+
+    Never raises: an unreadable owner is reported as a broken pin, because a
+    monitor that cannot verify its own key has no business reporting zeros
+    as if they meant something."""
+    try:
+        src = source_reader()
+    except Exception as exc:
+        return False, "main.py unreadable (%s)" % type(exc).__name__
+    if BRIEFING_KEY_WRITE_SITE in src:
+        return True, "%s written at %s" % (BRIEFING_KEY_WRITE_SITE,
+                                           BRIEFING_KEY_OWNER.name)
+    return False, ("%s is NOT written anywhere in %s: the key was renamed or "
+                   "removed" % (BRIEFING_KEY_WRITE_SITE, BRIEFING_KEY_OWNER.name))
+
+
+def print_pin_banner(ok, detail):
+    """Loud, by name, on stderr AND stdout. Says what breaks, not just that
+    something broke. Deliberately ASCII-only: this is the one message that
+    must survive an operator console that cannot encode the rest of this
+    script's Korean text."""
+    if ok:
+        print("[collection-alert] key-pin OK - %s" % detail)
+        return
+    for line in (
+            "=" * 72,
+            "[collection-alert] KEY-PIN BROKEN - %s" % detail,
+            "  The outage counter counts rows whose debug_summary contains",
+            "  the literal key %r. That key is gone from its owner," % BRIEFING_STATUS_KEY,
+            "  so read_briefing_status now returns (0, 0) for EVERY run and",
+            "  the briefing-outage alert can never fire again.",
+            "  A silent zero is not a quiet day. Fix the pattern or the pin.",
+            "=" * 72):
+        print(line)
+        print(line, file=sys.stderr)
+
+
 def read_briefing_status(min_id):
     """SILENT-FAILURE-FLAG: (error_rows, keyed_rows) among rows with
     id > min_id, read from debug_summary.policy_briefing_status. Rows WITHOUT
@@ -109,8 +182,11 @@ def read_briefing_status(min_id):
         # Passing the patterns AS PARAMETERS fixes it and is immune to the
         # whole class of bug (nothing to double-escape, patterns are data).
         # Still a pure SELECT — no write, no schema change.
-        error_pat = '%"policy_briefing_status": "error"%'
-        keyed_pat = '%"policy_briefing_status"%'
+        # KEY-PIN: derived from BRIEFING_STATUS_KEY, never re-typed, so the
+        # patterns and the pin cannot drift apart. Same bytes as before:
+        #   %"policy_briefing_status": "error"%  /  %"policy_briefing_status"%
+        error_pat = '%%"%s": "error"%%' % BRIEFING_STATUS_KEY
+        keyed_pat = '%%"%s"%%' % BRIEFING_STATUS_KEY
         with psycopg.connect(url, connect_timeout=15) as conn:
             row = conn.execute(
                 "SELECT "
@@ -433,9 +509,21 @@ def main(argv=None) -> int:
         value = read_max_id()
         print("[collection-alert] MAX(id) = %r" % value)
         return 0 if value is not None else 1
+    if "--pin-check" in argv:
+        # KEY-PIN, CI/dev-facing: this is the LOUD EXIT. Nonzero and named,
+        # with no DB, no network and no collection run.
+        ok, detail = check_briefing_key_pin()
+        print_pin_banner(ok, detail)
+        return 0 if ok else 4
 
     import weekly_spine
 
+    # KEY-PIN at cron runtime: report loudly, never block. The banner goes to
+    # the Render log; the exit code stays the CHILD'S, because blocking a
+    # day's collection to protect its monitor inverts the priority this
+    # wrapper exists to defend. `--pin-check` (and --selftest) are where the
+    # pin fails by exit code.
+    print_pin_banner(*check_briefing_key_pin())
     return run(run_child, read_max_id, weekly_spine.notify,
                briefing_reader=read_briefing_status)
 
@@ -708,10 +796,42 @@ def selftest() -> int:
     check("13 mib", format_bytes(5 * 1024 * 1024) == "5MiB")
     check("13 gib", format_bytes(2 * 1024 ** 3) == "2.00GiB")
 
+    # 14. KEY-PIN. The real source must pass; a RENAME — the actual failure
+    # mode — must fail, by name. Both directions are exercised against an
+    # injected reader, so main.py is never touched to prove it.
+    ok, detail = check_briefing_key_pin()
+    check("14 real source pins", ok)
+    print("[selftest] key-pin against real main.py: %s" % detail)
+    # The REALISTIC rename: the write site moves, the prose around it (which
+    # names the old key four times in main.py, and in this file too) does not.
+    # A bare-word pin passes straight through that and reports a healthy quiet
+    # day forever. Matching the write site is what makes the difference.
+    src = read_owner_source()
+    renamed = src.replace(BRIEFING_KEY_WRITE_SITE,
+                          'debug_summary["policy_briefing_state"]')
+    check("14 rename actually changed the source", renamed != src)
+    ok_r, detail_r = check_briefing_key_pin(lambda: renamed)
+    check("14 rename detected", not ok_r)
+    check("14 rename names the key", BRIEFING_STATUS_KEY in detail_r)
+    check("14 bare word alone would NOT have caught it",
+          BRIEFING_STATUS_KEY in renamed)
+    ok_m, detail_m = check_briefing_key_pin(lambda: "")
+    check("14 removal detected", not ok_m)
+
+    def unreadable():
+        raise OSError("owner gone")
+
+    ok_u, _ = check_briefing_key_pin(unreadable)
+    check("14 unreadable owner is a broken pin", not ok_u)
+    # The LIKE patterns must still be the exact bytes the owner writes.
+    check("14 patterns derived from the pinned key",
+          '%%"%s": "error"%%' % BRIEFING_STATUS_KEY
+          == '%"policy_briefing_status": "error"%')
+
     if failures:
         print("SELFTEST FAILED: " + ", ".join(failures))
         return 1
-    print("SELFTEST PASSED (22 cases, 54 assertions)")
+    print("SELFTEST PASSED (23 cases, 61 assertions)")
     return 0
 
 

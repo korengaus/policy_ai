@@ -534,13 +534,18 @@ def drift_flags(note, labels):
     return (bool(OLD_DRIFT_RE.search(note)),
             any(p in masked for p in DRIFT_PREDICATES))
 
+# COLUMN-OWNER: MIRRORS scripts/card_render_audit.js ROW_COLUMNS
+# (card_render_audit.js:91) — this probe renders through that committed audit
+# chain, so the audit owns the column list. Kept equal to it column-for-column
+# and in its order; original_url (TITLE-TAIL-STRIP) was missing here too.
 RENDER_COLS = ("title", "claim_text", "content_nature", "claims",
                "normalized_claims", "evidence_snippets", "evidence_sources",
                "source_candidates", "source_reliability_summary",
                "source_reliability_reason", "evidence_summary",
                "debug_summary", "evidence_extraction_summary",
                "contradiction_summary", "contradiction_checks",
-               "missing_context", "verdict_label", "policy_alert_level")
+               "missing_context", "verdict_label", "policy_alert_level",
+               "original_url")
 
 # ------------------------------------------------------------ Node driver ---
 # Reuses the COMMITTED scripts/card_render_audit.js: vm-executes it with a
