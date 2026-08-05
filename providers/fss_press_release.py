@@ -559,6 +559,7 @@ def fetch_and_build_fss_candidates(
     normalized_claims: List[Dict[str, Any]],
     *,
     max_releases: Optional[int] = None,
+    return_status: bool = False,
 ) -> tuple[List[Dict[str, Any]], int]:
     """Top-level entry called by the pipeline (Option A / Lane-A). Fetches the
     recent FSS window (one GET), dedups by contentId, then shapes the releases
@@ -566,16 +567,32 @@ def fetch_and_build_fss_candidates(
     failure / empty.
 
     The CALLER gates this behind ``config.fss_enabled()`` so the disabled path
-    constructs nothing and hits no network."""
+    constructs nothing and hits no network.
+
+    LANE-SKIP-BREADCRUMB: with ``return_status=True`` returns
+    ``(candidates, count, status)`` where status is ``"ok"`` (the window fetch
+    answered — a 0-count is then a genuine absence) or ``"error"`` (the
+    provider was unavailable, e.g. FSS_API_KEY missing, or the fetch reported
+    an error — we could NOT look). This is the SAME vocabulary and the SAME
+    contract as providers/policy_briefing.py's SILENT-FAILURE-FLAG,
+    deliberately mirrored rather than re-invented. The default 2-tuple stays
+    byte-compatible for every existing caller, and the fail-open contract is
+    unchanged: errors still yield an empty list, never a raise. Adding this
+    return value changes nothing about WHAT is fetched, WHEN, or with WHICH
+    parameters."""
     provider = get_fss_provider("fss_press_release")
     if not getattr(provider, "available", False):
-        return [], 0
+        # Gate on but provider unusable (missing FSS_API_KEY / unsupported
+        # name): we could not look. Mirrors the PolicyBriefing disabled-provider
+        # path, which surfaces its reason as an error too.
+        return ([], 0, "error") if return_status else ([], 0)
 
     if max_releases is None:
         max_releases = config.fss_max_releases()
 
     start_date, end_date = date_window()
     result = provider.fetch_press_releases(start_date=start_date, end_date=end_date)
+    any_error = bool(result.get("error"))
     documents = result.get("documents") or []
 
     # Global dedup by stable contentId (one window -> typically already unique).
@@ -589,9 +606,12 @@ def fetch_and_build_fss_candidates(
             seen_ids.add(dedup_key)
         deduped.append(doc)
 
-    return to_official_source_candidates(
+    candidates, count = to_official_source_candidates(
         deduped, normalized_claims, max_releases=max_releases
     )
+    if return_status:
+        return candidates, count, ("error" if any_error else "ok")
+    return candidates, count
 
 
 _DEFAULT_MOCK_ITEMS: List[Dict[str, Any]] = [

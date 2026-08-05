@@ -101,6 +101,38 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# LANE-SKIP-BREADCRUMB — the four values an official-document lane can report.
+# EXTENDS the existing SILENT-FAILURE-FLAG vocabulary rather than replacing it:
+# "ok" and "error" keep their exact meanings from
+# providers/policy_briefing.py, and two states that were previously collapsed
+# into "no key at all" get their own names.
+#   "disabled" — the gate is off; the branch was never entered, no network,
+#                nothing was looked up. (Previously: silence.)
+#   "error"    — the lane was attempted and could NOT fully look (provider
+#                unavailable / missing key / transport / HTTP / API error).
+#   "empty"    — the lane RAN and ANSWERED, and genuinely returned zero
+#                documents. (Previously: indistinguishable from "disabled".)
+#   "ok"       — the lane ran, answered, and returned at least one document.
+LANE_STATUS_VALUES = ("disabled", "error", "empty", "ok")
+
+
+def _lane_status(gate_enabled: bool, status: str | None, count: int | None) -> str:
+    """Collapse one lane's (gate, fetch status, document count) into a single
+    breadcrumb value from ``LANE_STATUS_VALUES``.
+
+    The gate is checked FIRST and independently of status/count, so a disabled
+    lane can never be reported as an empty one — separating those two is the
+    entire purpose of this key. Pure function: no I/O, no environment read,
+    never raises. Not read by any scorer/verdict path."""
+    if not gate_enabled:
+        return "disabled"
+    if status == "error":
+        return "error"
+    if not count:
+        return "empty"
+    return "ok"
+
+
 def _normalize_cache_text(value: str) -> str:
     return re.sub(r"\s+", " ", sanitize_text(value or "").strip().lower())
 
@@ -785,7 +817,12 @@ def _process_news_item_phase_a(
     # at 80 chars. Diagnosing the 08-02 outage meant reading three-day-old
     # Render stderr because the row stored only the word "error".
     policy_briefing_error_reason = ""
-    if config.policy_briefing_enabled():
+    # LANE-SKIP-BREADCRUMB: hoist each lane's gate into a local so the value
+    # WRITTEN to debug_summary is the SAME read that decided whether the branch
+    # ran (config.*_enabled() reads the environment on every call). No change to
+    # what any lane fetches, when, or with what parameters.
+    policy_briefing_gate = config.policy_briefing_enabled()
+    if policy_briefing_gate:
         from providers.policy_briefing import fetch_and_build_policy_briefing_candidates
 
         (policy_briefing_candidates, policy_briefing_count,
@@ -805,11 +842,16 @@ def _process_news_item_phase_a(
     # observability here is the in-memory counter below (no log.* in this pinned
     # file).
     national_law_count = None
-    if config.national_law_enabled():
+    # LANE-SKIP-BREADCRUMB: same "ok"/"error" channel Policy Briefing already
+    # had; None while the lane is disabled (the gate below carries that state).
+    national_law_status = None
+    national_law_gate = config.national_law_enabled()
+    if national_law_gate:
         from providers.national_law import fetch_and_build_national_law_candidates
 
-        national_law_candidates, national_law_count = (
-            fetch_and_build_national_law_candidates(normalized_claims)
+        national_law_candidates, national_law_count, national_law_status = (
+            fetch_and_build_national_law_candidates(normalized_claims,
+                                                    return_status=True)
         )
         if national_law_candidates:
             source_candidates = source_candidates + national_law_candidates
@@ -824,10 +866,15 @@ def _process_news_item_phase_a(
     # (pin-OUT); the only observability here is the in-memory counter below (no
     # log.* in this pinned file).
     fss_count = None
-    if config.fss_enabled():
+    # LANE-SKIP-BREADCRUMB: same "ok"/"error" channel Policy Briefing already
+    # had; None while the lane is disabled (the gate below carries that state).
+    fss_status = None
+    fss_gate = config.fss_enabled()
+    if fss_gate:
         from providers.fss_press_release import fetch_and_build_fss_candidates
 
-        fss_candidates, fss_count = fetch_and_build_fss_candidates(normalized_claims)
+        fss_candidates, fss_count, fss_status = fetch_and_build_fss_candidates(
+            normalized_claims, return_status=True)
         if fss_candidates:
             source_candidates = source_candidates + fss_candidates
     source_candidates, official_resolution_debug = resolve_official_evidence(
@@ -995,6 +1042,36 @@ def _process_news_item_phase_a(
     # byte-identical (mirrors policy_briefing_count / national_law_count).
     if fss_count is not None:
         debug_summary["fss_count"] = fss_count
+    # LANE-SKIP-BREADCRUMB: ONE shared key recording WHY each official-document
+    # lane did or did not run. A disabled lane used to write no key at all and
+    # raise nothing, so "the flag was off" and "it looked and found nothing"
+    # were the same stored bytes — the ambiguity that left 2,974 rows
+    # unreadable. This key is ALWAYS written, for all three lanes; that is the
+    # whole point, since the ABSENCE of a key was the defect. ONE key with
+    # distinct values (never two keys that can disagree).
+    #
+    # ALERT-COUNTER SAFETY: scripts/daily_collection_alert.py:112-113 counts
+    # failures with LIKE '%"policy_briefing_status": "error"%' and its
+    # DENOMINATOR with LIKE '%"policy_briefing_status"%'. Neither substring can
+    # occur in this key or its values: the nested lane key is the literal
+    # "policy_briefing", never "policy_briefing_status", and no value contains
+    # a key name. So the alert matches exactly the same rows AND its denominator
+    # is unmoved. The pre-existing policy_briefing_status key is written above,
+    # untouched and with its exact "ok"/"error" vocabulary preserved.
+    #
+    # Pure data key — NO log call site, because main.py is pin-IN for the
+    # 331/16 log-call pins and adding one would move the count. Never read by
+    # any scorer/verdict path. FORWARD-ONLY: no stored row is backfilled,
+    # recomputed, or corrected.
+    debug_summary["official_lane_status"] = {
+        "policy_briefing": _lane_status(
+            policy_briefing_gate, policy_briefing_status, policy_briefing_count
+        ),
+        "national_law": _lane_status(
+            national_law_gate, national_law_status, national_law_count
+        ),
+        "fss": _lane_status(fss_gate, fss_status, fss_count),
+    }
     # FRESHNESS Phase 2: surface the article publish date + collection source so
     # the frontend can derive a CONSERVATIVE "freshly-broken" label (distinct
     # from "old-unmatched"). Additive, byte-identical convention (mirrors

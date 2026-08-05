@@ -547,17 +547,34 @@ def fetch_and_build_national_law_candidates(
     *,
     provider=None,
     max_kept: int = MAX_KEPT_LAWS,
+    return_status: bool = False,
 ) -> tuple[List[Dict[str, Any]], int]:
     """Top-level entry called by the pipeline (Option A). 2-step: search (<=3)
     -> rank-to-fill top-K -> body fetch (<=5) -> inject only laws whose body
     text was retrieved. Never raises; returns ([], 0) on failure / empty.
 
     The CALLER gates this behind ``config.national_law_enabled()`` so the
-    disabled path constructs nothing and hits no network."""
+    disabled path constructs nothing and hits no network.
+
+    LANE-SKIP-BREADCRUMB: with ``return_status=True`` returns
+    ``(candidates, count, status)`` where status is ``"ok"`` (every search and
+    body fetch answered — a 0-count is then a genuine absence) or ``"error"``
+    (the provider was unavailable, e.g. LAW_OC missing, or at least one
+    search/body call reported an error — we could NOT fully look). This is the
+    SAME vocabulary and the SAME contract as
+    providers/policy_briefing.py's SILENT-FAILURE-FLAG, deliberately mirrored
+    rather than re-invented. The default 2-tuple stays byte-compatible for
+    every existing caller, and the fail-open contract is unchanged: errors
+    still yield an empty list, never a raise. Adding this return value changes
+    nothing about WHAT is fetched, WHEN, or with WHICH parameters."""
     provider = provider or get_law_provider("national_law")
     if not getattr(provider, "available", False):
-        return [], 0
+        # Gate on but provider unusable (missing LAW_OC / unsupported name):
+        # we could not look. Mirrors PolicyBriefing's disabled-provider path,
+        # which surfaces its reason as an error too.
+        return ([], 0, "error") if return_status else ([], 0)
 
+    any_error = False
     laws_by_mst: Dict[str, Dict[str, Any]] = {}
     searches = 0
     for query in _derive_queries(normalized_claims):
@@ -565,6 +582,8 @@ def fetch_and_build_national_law_candidates(
             break
         result = provider.search_laws(query)
         searches += 1
+        if result.get("error"):
+            any_error = True
         for law in result.get("laws") or []:
             mst = law.get("mst")
             if mst and mst not in laws_by_mst:
@@ -576,6 +595,8 @@ def fetch_and_build_national_law_candidates(
     laws_with_body: List[Dict[str, Any]] = []
     for law in kept:
         body = provider.fetch_law_body(law.get("mst") or "")
+        if body.get("error"):
+            any_error = True
         raw_text = _assemble_body_text(body.get("articles") or [])
         if raw_text.strip():
             laws_with_body.append({**law, "raw_text": raw_text})
@@ -594,7 +615,10 @@ def fetch_and_build_national_law_candidates(
         if len(_law_body_material_tokens(law) & claim_tokens) >= MIN_LAW_CLAIM_OVERLAP
     ]
 
-    return to_official_source_candidates(laws_with_body, normalized_claims)
+    candidates, count = to_official_source_candidates(laws_with_body, normalized_claims)
+    if return_status:
+        return candidates, count, ("error" if any_error else "ok")
+    return candidates, count
 
 
 __all__ = [
