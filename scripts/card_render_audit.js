@@ -2450,14 +2450,61 @@ for (const [win, ids] of Object.entries(windows)) {
   };
   const STYLE_MAPS = [["VERDICT_DOT_COLORS", styleMapKeys("VERDICT_DOT_COLORS")],
                       ["VERDICT_TIER_CLASSES", styleMapKeys("VERDICT_TIER_CLASSES")]];
-  // vacuity: a parser that reads nothing would make every check below pass.
-  if (ownerLabels.size < 8 || STYLE_MAPS.some(([, keys]) => keys.size < 8)) {
+  // VACUITY FLOOR — DERIVED, and scoped to what it is actually for.
+  //
+  // It exists for ONE failure: a parse silently yielding an empty set, which
+  // makes `owner ⊆ mapKeys` vacuously true, so every check below passes while
+  // measuring nothing. It is NOT a rule about how large the vocabulary should
+  // be. The floor used to be a hand-typed 8 on both sides; removing the two
+  // dead style keys brought both maps to exactly 8, so the floor came to rest
+  // ON the current count and could no longer tell "a label was legitimately
+  // retired" from "the parser broke" — the next intentional vocabulary change
+  // would have reported a parser failure that did not happen. Lowering the
+  // literal would only re-arm the same trap further out.
+  //
+  // OWNER SIDE — absolute, and irreducibly so. If the owner parses to nothing,
+  // the coverage loop has nothing to iterate and passes blind; and no rule
+  // derived from the owner can police the owner, because a floor computed from
+  // a broken parse is not a floor. So this stays absolute, at the smallest
+  // honest value: at least one return literal. That fires on exactly the modes
+  // it exists for — verification_card.py moved, _verdict_label renamed, or the
+  // return-literal shape changed, all of which yield zero matches — and stays
+  // quiet if the vocabulary legitimately shrinks to seven.
+  //   The residual mode a >=1 floor CANNOT see is a PARTIAL under-read (the
+  // def-to-next-def slice truncating, so 3 of 8 labels are found). That is
+  // already caught, by a different mechanism in a different language:
+  // tests/test_honesty_guard.py derives the same set through
+  // inspect.getsource(verification_card._verdict_label) — Python's own source
+  // introspection, not this scanner's text slice — and asserts set EQUALITY
+  // against the five Python mirrors, so an under-read fails there naming the
+  // labels. Two independent extractions of one owner; this one need not also
+  // be the one that catches its own partial failure.
+  //
+  // MAP SIDE — derived from the owner, not typed. A style map parsing to ZERO
+  // keys while the owner parsed at least one is a broken parse: a map literal
+  // that exists but styles nothing is not a state the front end can be in. A
+  // map parsing to FEWER keys than the owner but not zero is a REAL coverage
+  // gap, and the loop below already reports it as UNSTYLED naming the label —
+  // strictly more useful than a vacuity failure, so this must not pre-empt it.
+  // Nothing that used to fire has gone quiet: a map at 1..7 keys now falls
+  // through to that loop and still exits non-zero.
+  const blindMaps = STYLE_MAPS.filter(([, keys]) => keys.size === 0);
+  if (ownerLabels.size === 0 || blindMaps.length) {
     failures.push("VACUOUS DETECTOR: verdict-style parser read "
       + `${ownerLabels.size} owner label(s) from verification_card.py and `
       + STYLE_MAPS.map(([n, k]) => `${k.size} ${n}`).join(" / ")
-      + " key(s) from main.js (expected >=8 each) — the owner function or the "
-      + "style maps moved or were reshaped, and the coverage check cannot run "
-      + "blind");
+      + " key(s) from main.js — "
+      + (ownerLabels.size === 0
+        ? "verification_card._verdict_label yielded NO return literals, so the "
+          + "coverage check would compare against an empty owner and pass "
+          + "blind; the function moved, was renamed, or stopped returning "
+          + "string literals"
+        : `${blindMaps.map(([n]) => n).join(" and ")} parsed to zero keys `
+          + `while the owner yielded ${ownerLabels.size}, so the map literal `
+          + "moved or was reshaped — this is a parser failure, not an "
+          + "unstyled label")
+      + ". The floor is the owner's own count, never a typed size: a "
+      + "vocabulary that legitimately shrinks does NOT trip this");
   } else {
     for (const [name, keys] of STYLE_MAPS) {
       for (const label of [...ownerLabels].sort()) {
