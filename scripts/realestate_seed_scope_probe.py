@@ -106,8 +106,15 @@ def promo_hit(text: str) -> str:
 from scripts._console import p  # noqa: E402
 
 
+# DISPLAY-RENDER: ensure_ascii=False. This escaped EVERY non-ASCII character on
+# every run, so 정책 검증 완료 reached the operator as 정책... . The premise
+# was 'no mojibake in the shell'; scripts/_console.p now owns that — it prints
+# normally and only on a real UnicodeEncodeError escapes the characters that
+# actually failed. Every call site here is display and goes through p(). The
+# json.dumps wrapper is KEPT: it still collapses control characters and quotes,
+# so the one-line-per-value property this relied on is unchanged.
 def _ascii(value) -> str:
-    return json.dumps(value if value is not None else "", ensure_ascii=True)
+    return json.dumps(value if value is not None else "", ensure_ascii=False)
 
 
 def _json_obj(value) -> dict:
