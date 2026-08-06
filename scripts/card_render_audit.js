@@ -60,6 +60,19 @@ const apiServerPy = fs.readFileSync(path.join(ROOT, "api_server.py"), "utf8");
 let BINDING_TAIL_RE = null;
 // SIDEBAR-TITLE-CLEANUP: marker families, read from main.js at load.
 let MARKER_FAMILIES = [];
+// Each family is a NAMED constant in main.js, so the read can be VERIFIED
+// against the file rather than counted against a literal — see the
+// SIDEBAR-TITLE-CLEANUP guard. Declared here, beside MARKER_FAMILIES, because
+// leadingMarkerFamilies() is called at load (below) long before its own
+// definition — a const declared next to the function would still be in its
+// temporal dead zone at that call.
+const LEADING_MARKER_FAMILY_SOURCES = [
+  ["LEADING_TITLE_BRACKET_RE", /const LEADING_TITLE_BRACKET_RE = \/(.*?)\/;/],
+  ["LEADING_TITLE_MARKER_RE", /const LEADING_TITLE_MARKER_RE = \/(.*?)\/;/],
+];
+// What the LAST leadingMarkerFamilies() call actually resolved: which families
+// main.js still DECLARES, and which of those this scanner could not read.
+let MARKER_FAMILY_DIAG = { declared: [], unreadable: [] };
 
 const dataPath = process.argv[2];
 if (!dataPath) {
@@ -1472,11 +1485,24 @@ function adapterFieldContract(js) {
 // file while still giving the check an independent opinion.
 function leadingMarkerFamilies(js) {
   const out = [];
-  for (const re of [/const LEADING_TITLE_BRACKET_RE = \/(.*?)\/;/,
-                    /const LEADING_TITLE_MARKER_RE = \/(.*?)\/;/]) {
+  const declared = [];
+  const unreadable = [];
+  for (const [name, re] of LEADING_MARKER_FAMILY_SOURCES) {
+    // DECLARED is asked of THE FILE, not of this scanner's own list. A family
+    // main.js no longer declares has been RETIRED, and a retirement must not
+    // be reported as "cannot read the regexes from main.js" — a parser failure
+    // that did not happen. Only a family the file still declares, and that
+    // this scanner then fails to extract or compile, is a parse failure.
+    if (!new RegExp("const " + name + "\\s*=").test(js)) continue;
+    declared.push(name);
     const m = re.exec(js);
-    if (m) { try { out.push(new RegExp(m[1])); } catch (e) { /* unusable */ } }
+    let read = false;
+    if (m) {
+      try { out.push(new RegExp(m[1])); read = true; } catch (e) { /* unusable */ }
+    }
+    if (!read) unreadable.push(name);
   }
+  MARKER_FAMILY_DIAG = { declared, unreadable };
   return out;
 }
 function leadingMarkerSurvives(title, families) {
@@ -1730,9 +1756,26 @@ function trendingTailWiring(js) {
   // specimens are built from the helper's OWN regex sources, so a family added
   // to main.js is exercised here without being typed twice.
   {
-    if (MARKER_FAMILIES.length < 2) {
-      failures.push("SIDEBAR-TITLE-CLEANUP: cannot read the leading-marker "
-        + "regexes from main.js — the marker check is blind");
+    // VERIFIED, NOT COUNTED. This floor was `MARKER_FAMILIES.length < 2`, and
+    // leadingMarkerFamilies can return at most 2 — so the floor EQUALLED the
+    // maximum and no number could have worked: any legitimate retirement of a
+    // family would report "cannot read the regexes from main.js", a parser
+    // failure that did not happen. The fix is a different signal, not a better
+    // number. main.js NAMES each family, so the read is checked against the
+    // file: a family the file still declares but this scanner could not
+    // extract or compile is a parse failure and is named; a family the file no
+    // longer declares was retired and is silent here. The separate zero case
+    // stays absolute — resolving nothing at all leaves the marker check blind
+    // whatever the cause, and a count of the thing being read cannot police
+    // itself.
+    if (MARKER_FAMILY_DIAG.unreadable.length) {
+      failures.push("SIDEBAR-TITLE-CLEANUP: main.js declares "
+        + `${MARKER_FAMILY_DIAG.unreadable.join(", ")} but this scan could not `
+        + "read the regex literal — the marker check is blind to that family; "
+        + "the constant was reshaped, not retired");
+    } else if (MARKER_FAMILIES.length === 0) {
+      failures.push("SIDEBAR-TITLE-CLEANUP: no leading-marker family resolved "
+        + "from main.js at all — the marker check is blind");
     }
     for (const spec of ["[포토] 국산 농산물 공급 협력 업무협약 체결",
                         "■ 불릿 마커가 붙은 정책 보도 제목"]) {
@@ -2357,12 +2400,42 @@ for (const [win, ids] of Object.entries(windows)) {
       mainJs, /const VERDICT_LABELS = \{([\s\S]*?)\n {4}\};/);
     const claimLabels = verdictKeyMap(
       claimHtml, /var VERDICT_LABELS = \{([\s\S]*?)\n {2}\};/);
-    // vacuity: a parser that reads nothing would make every check below pass.
-    if (mainLabels.size < 8 || claimLabels.size < 8) {
+    // VACUITY: ZERO, not a size — the rule follows the CONSEQUENCE of a
+    // partial read, which here is already loud. The comparison below runs in
+    // BOTH directions and names every key it cannot pair (MISSING STATUS KEY,
+    // ORPHAN STATUS KEY) or whose value disagrees (ADJUDICATION LABEL), so a
+    // side that reads 7 of 10 does not sail past — it reports the three keys
+    // by name, which is strictly more useful than a vacuity failure. The old
+    // floor was a hand-typed 8 against maps holding 10 (8 literal + 2 assigned
+    // by mutation); retiring the two dead display-text keys would have landed
+    // it exactly on 8 and turned the next legitimate retirement into a
+    // reported parser failure that did not happen.
+    //
+    // Only ZERO is dangerous, and only ZERO fires. If BOTH sides parse empty,
+    // both loops iterate nothing and the check passes in silence — the one
+    // genuinely vacuous state. One side empty is not silent, but it is
+    // MISDIAGNOSED (ten "the claim page has forked" failures for what is a
+    // broken regex), so it is named here as the parse failure it is. A
+    // VERDICT_LABELS literal that exists but holds no keys is not a state
+    // either file can be in.
+    //
+    // STATED LIMIT: the old floor did incidentally catch one thing this does
+    // not — both regexes breaking to the SAME non-empty subset, which would
+    // agree and measure less than it claims. That is bounded rather than
+    // eliminated: the two patterns differ in keyword, delimiter and closing
+    // indentation across two files of different syntax (`const … \n    };` in
+    // JS, `var … \n  };` in HTML), so they cannot plausibly fail alike, and
+    // the values are compared too, not just the key sets. Tightening this
+    // further would mean corroborating against the owner set, which belongs to
+    // a different check — not this one's comparison to widen.
+    if (mainLabels.size === 0 || claimLabels.size === 0) {
       failures.push("VACUOUS DETECTOR: verdict-label map parser read "
-        + `${mainLabels.size} main.js / ${claimLabels.size} claim.html keys `
-        + "(expected >=8 each) — the label maps moved or were reshaped, and "
-        + "the missing-key check cannot run blind");
+        + `${mainLabels.size} main.js / ${claimLabels.size} claim.html keys — `
+        + [mainLabels.size ? null : "main.js",
+           claimLabels.size ? null : "web/claim.html"].filter(Boolean).join(" and ")
+        + " parsed to ZERO keys, so the VERDICT_LABELS literal moved or was "
+        + "reshaped; this is a parser failure, not a forked surface, and the "
+        + "missing-key check cannot run blind");
     } else {
       for (const [key, want] of mainLabels) {
         if (!claimLabels.has(key)) {
