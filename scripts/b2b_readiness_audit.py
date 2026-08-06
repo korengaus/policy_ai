@@ -746,19 +746,6 @@ def classify_render_warns(scan_output):
     return signals, disclosures
 
 
-def render_disclosure_labels(disclosures):
-    """Distinct gate labels of the disclosure lines, in first-seen order, taken
-    from the lines themselves (text before the first ':') so a NEW kind of
-    disclosure shows up in the C8 row on the first run that emits it instead of
-    hiding inside a bare count."""
-    labels = []
-    for body in disclosures or []:
-        label = body.split(":", 1)[0].strip()[:48] or "(unlabelled)"
-        if label not in labels:
-            labels.append(label)
-    return labels
-
-
 # ---------------------------------------------------------------------------
 # CELL-TEXT-CUT — the ONE truncation for single-string observed cells.
 #
@@ -1765,8 +1752,13 @@ def selftest() -> int:
     healthy_signals, healthy_disclosures = classify_render_warns(scan_healthy)
     check("c8-healthy-no-signals", healthy_signals, [])
     check("c8-healthy-discloses-all-four", len(healthy_disclosures), 4)
-    check("c8-disclosure-labels",
-          render_disclosure_labels(healthy_disclosures),
+    # The count above does not pin WHICH lines landed in the disclosure
+    # channel, nor in what order the detail block will print them. Three of
+    # these four are near-identical ADAPTER-FIELD-CONTRACT variants, so this
+    # asserts the classifier's own output — identity and first-seen order —
+    # on the live path the C8 detail block reads.
+    check("c8-disclosures-kept-in-order",
+          [body.split(":", 1)[0] for body in healthy_disclosures],
           ["TRENDING NOTE", "ADAPTER-FIELD-CONTRACT covered",
            "ADAPTER-FIELD-CONTRACT compat read",
            "ADAPTER-FIELD-CONTRACT skipped"])
