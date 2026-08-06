@@ -112,8 +112,10 @@ BUCKET_LABELS = (
 MIN_CLAIM_CHARS = 15
 
 
-def p(message: str = "") -> None:
-    print(message, flush=True)
+# CONSOLE-P: the shared print helper. This file used to carry its own copy that
+# printed with flush but NO UnicodeEncodeError guard, so one unencodable
+# character killed the run mid-report on the operator's cp949 console.
+from scripts._console import p  # noqa: E402
 
 
 def _loads(raw) -> object:

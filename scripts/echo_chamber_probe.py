@@ -132,8 +132,10 @@ WIRE_HOSTS = {
 HEAVY_FRACTIONS = (0.5, 0.8, 1.0)
 
 
-def p(message: str = "") -> None:
-    print(message, flush=True)
+# CONSOLE-P: the shared print helper. This file used to carry its own copy that
+# printed with flush but NO UnicodeEncodeError guard, so one unencodable
+# character killed the run mid-report on the operator's cp949 console.
+from scripts._console import p  # noqa: E402
 
 
 def _int(value, default: int = 0) -> int:
