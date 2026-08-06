@@ -764,13 +764,41 @@ def flagged(v):
 
 def persist_run(tag, verdicts, usage):
     """Title-probe pattern: every verdict object from the pass, re-readable,
-    so drift claims can always be re-checked after the fact."""
+    so drift claims can always be re-checked after the fact.
+
+    EMITTED TWICE, DELIBERATELY — to a file AND to stdout.
+
+    The file alone did not deliver the promise in the line above. This probe
+    runs in the Render Worker Shell, whose filesystem does not outlive the
+    session, so both earlier runs' JSONs were gone by the time anyone wanted
+    them: when nine flags needed classifying they had to be re-derived by
+    re-rendering the cards, and the token counts — recorded nowhere else —
+    were simply lost. Writing to a different directory would not have helped;
+    no path on an ephemeral worker is retrievable. stdout is, because the
+    operator is already reading it and the run costs too much to repeat for
+    want of a copy.
+
+    So the payload is also printed between explicit markers. Copy everything
+    between them into ``scripts/probe_card_run_<tag>.json`` in a checkout and
+    commit it — that path is deliberately NOT matched by .gitignore, so it
+    stages without argument. It is small enough to paste: one id, three
+    booleans and a short note per card, plus the two token counts.
+
+    The file content is byte-identical to what it was before this was added.
+    """
+    payload = {"verdicts": verdicts,
+               "usage": {"in": usage[0], "out": usage[1]}}
+    blob = json.dumps(payload, ensure_ascii=False, indent=1)
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         "probe_card_run_%d.json" % tag)
     with open(path, "w", encoding="utf-8") as fh:
-        json.dump({"verdicts": verdicts,
-                   "usage": {"in": usage[0], "out": usage[1]}},
-                  fh, ensure_ascii=False, indent=1)
+        fh.write(blob)
+    print("--- BEGIN probe_card_run_%d.json (%d bytes) — this shell's disk does"
+          " NOT survive the session; copy everything between these markers into"
+          " scripts/probe_card_run_%d.json in a checkout and commit it ---"
+          % (tag, len(blob.encode("utf-8")), tag))
+    print(blob)
+    print("--- END probe_card_run_%d.json ---" % tag)
     return path
 
 
