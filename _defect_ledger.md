@@ -143,6 +143,42 @@ The first ceiling rise since the classifier that separates signal from disclosur
 | 57 | Backlog scan: self-reference 0 hits | detector searched `[반박 검사]`, a label that does not exist (real one is `대조 검토`) | 07-31 |
 | 58 | Tail derivation via frequency (3 attempts) | "rarely ends a sentence" selects almost every Korean noun | 07-31 |
 
+### Misreadings worth the space — a premise was acted on, measured, and withdrawn
+
+**"Twelve probes print bare, so they are one Korean character from crashing." Measured 2026-08-06. FALSE — and nine files were changed and reverted before it was.**
+
+- **What was believed.** `scripts/` probes call `print()` directly rather than the shared
+  `_console.p`, so on the operator's cp949 console a single em-dash would raise
+  `UnicodeEncodeError`, kill the run mid-report, and exit non-zero — losing exactly the
+  diagnostic output someone ran the probe by hand to read.
+- **THE DISTINGUISHING TEST: the guard is at the STREAM, not at the call site.** Printing bare
+  says nothing about crash-safety. **104 of 129** bare-printing scripts call
+  `sys.stdout.reconfigure(..., errors=...)` at import — 102 `errors="replace"`, 2
+  `errors="backslashreplace"` — and a stream with an error handler **cannot raise**. All twelve
+  targets are in that set. Any future pass must test the stream, not count `print(`.
+- **The count was also wrong by an order of magnitude:** 129 scripts and 3,761 bare `print()`
+  calls, not 13. Of those calls 3,206 are single-positional and 246 zero-arg, but **151 pass
+  `file=sys.stderr` and must never become `p()`** (it writes stdout), plus 152 multi-arg and 4
+  `end=`/`sep=`. Only 47 of 128 files are wholly drop-in.
+- **Work done and discarded, so no diff survives to find.** Nine files and **263 call sites**
+  were migrated to the shared helper, then reverted in full once the stream measurement landed.
+  Stdout *and* stderr verified byte-identical against pre-migration baselines, 9/9. The revert
+  was on evidence, not on difficulty.
+- **Where this belongs if it is ever done: a different 25 files** — the ones with no stdout
+  reconfigure at all (`body1_*`, `body2_*`, `r2_*`, `rel1_diag`, `minwon_rising_probe`,
+  `create_admin`, `m37_snippet_a/b`, `briefing_outage_dryrun`, `badge_overlap_probe`,
+  `backfill_recon_probe`, `backfill_embedding_vectors`, `check_semantic_canary_env`, and 5 more).
+  **None of the twelve is among them.** ★Unguarded is NOT the same as exposed: a script whose
+  output is entirely ASCII cannot raise whatever its stream is. Which of the 25 actually print
+  non-ASCII is the next MEASUREMENT, not a to-do.
+- **Two smaller findings, recorded not acted on.** (1) `inst_source_audit.py:166`
+  (`p = (publisher or "").strip()`), `source_box_audit.py:241` (`for p, c in …`) and
+  `genuine_tighten_probe.py:201` (comprehension `p`) carry a local `p` that would shadow the
+  shared import — they were never cleanly migratable regardless of the premise. (2)
+  `match_instability_probe.py` and `sectionpage_500.py` reconfigure stdout to
+  `encoding="ascii"` **by construction**, so Korean is escaped there no matter what prints it,
+  and the shared helper's Korean-preserving degrade can never help them until that changes.
+
 ## J. Known but unverified — UNKNOWN state
 | # | Item | Source | What would settle it |
 |---|---|---|---|
