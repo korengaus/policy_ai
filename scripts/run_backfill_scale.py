@@ -66,11 +66,12 @@ ENV_SEED_QUERIES = (
 )
 
 
-def p(line: str = "") -> None:
-    try:
-        print(line, flush=True)
-    except UnicodeEncodeError:
-        print(str(line).encode("ascii", "backslashreplace").decode("ascii"), flush=True)
+# CONSOLE-P: the shared print helper — the LAST copy but one. This file already
+# flushed, so nothing about its happy path or its output ordering changes. What
+# changes is the degrade: its own guard escaped to ASCII, so one unencodable
+# character turned the whole Korean line into escapes. The shared helper escapes
+# only the characters that actually failed, and adds two further fallback tiers.
+from scripts._console import p  # noqa: E402
 
 
 def _ascii(value) -> str:
