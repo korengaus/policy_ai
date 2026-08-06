@@ -109,10 +109,15 @@ def _parse_json(value):
     return value
 
 
+# CUT-MARKER: the cut now ANNOUNCES itself. This helper sliced with a bare [:n],
+# so a truncated value reached the operator looking exactly like a whole one —
+# the defect repaired in the audit's cell_text, which never reached these probes.
+# Width unchanged; scripts/_console.cut adds the marker and the dropped-char count.
+from scripts._console import cut  # noqa: E402
+
 def _ascii(v, n=80) -> str:
-    """Single-line, ASCII-only repr of any value (Korean -> \\uXXXX)."""
-    s = re.sub(r"\s+", " ", str(v if v is not None else "")).strip()[:n]
-    return json.dumps(s, ensure_ascii=True)
+    r"""Single-line, ASCII-only repr of any value (Korean -> \uXXXX)."""
+    return json.dumps(cut(str(v if v is not None else ""), n), ensure_ascii=True)
 
 
 def _norm(v) -> str:

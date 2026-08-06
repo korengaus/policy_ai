@@ -60,3 +60,32 @@ def p(line: str = "") -> None:
     except (UnicodeEncodeError, LookupError):
         pass
     print(text.encode("ascii", "backslashreplace").decode("ascii"), flush=True)
+
+
+def cut(text: str, limit: int) -> str:
+    """One-line text for a report row, cut VISIBLY.
+
+    TWO JOBS, both display-only, and both learned from the audit's cell_text
+    (verification of that repair is why this exists; it is NOT imported from
+    b2b_readiness_audit.py, which reconfigures stdout and reads a file at
+    import time — a probe must not drag that in to format a string).
+
+      * COLLAPSE WHITESPACE. A newline inside a value breaks a report that
+        prints one line per row, splitting one record into two.
+      * MARK THE CUT. Over `limit`, the kept text is followed by
+        "… [truncated, +N chars]". Unambiguous inside a value because it is
+        always last, it is bracketed, and it states a COUNT — real text does
+        not end by counting its own missing characters.
+
+    N is the number of characters DROPPED, so the reader knows the scale of
+    the loss rather than merely that there was one. Twelve probes cut at 80 or
+    100 with no marker at all, so a cut value read exactly like a whole one;
+    a truncated URL in particular looked pasteable and was not.
+
+    The limit is the CALLER'S — this function never picks a width. Pure and
+    total: never raises, None -> "".
+    """
+    flat = " ".join(str(text if text is not None else "").split())
+    if len(flat) <= limit:
+        return flat
+    return "%s… [truncated, +%d chars]" % (flat[:limit], len(flat) - limit)

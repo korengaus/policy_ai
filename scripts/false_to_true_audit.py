@@ -89,8 +89,14 @@ def _parse_json(value):
     return value
 
 
-def _trunc(v, n=150):
-    return re.sub(r"\s+", " ", str(v or "")).strip()[:n]
+# CUT-MARKER: the cut now ANNOUNCES itself. This helper sliced with a bare [:n],
+# so a truncated value reached the operator looking exactly like a whole one —
+# the defect repaired in the audit's cell_text, which never reached these probes.
+# Width unchanged; scripts/_console.cut adds the marker and the dropped-char count.
+from scripts._console import cut  # noqa: E402
+
+def _trunc(v, n=100) -> str:
+    return cut(str(v or ""), n)
 
 
 def _cand_score(c):

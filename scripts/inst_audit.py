@@ -133,8 +133,14 @@ def _num(v) -> float:
         return 0.0
 
 
+# CUT-MARKER: the cut now ANNOUNCES itself. This helper sliced with a bare [:n],
+# so a truncated value reached the operator looking exactly like a whole one —
+# the defect repaired in the audit's cell_text, which never reached these probes.
+# Width unchanged; scripts/_console.cut adds the marker and the dropped-char count.
+from scripts._console import cut  # noqa: E402
+
 def _trunc(v, n=100) -> str:
-    return re.sub(r"\s+", " ", str(v or "")).strip()[:n]
+    return cut(str(v or ""), n)
 
 
 def _candidate_score(c: dict) -> float:

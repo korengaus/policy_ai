@@ -155,8 +155,14 @@ def _num(v):
         return 0.0
 
 
-def _trunc(v, n=80):
-    return re.sub(r"\s+", " ", str(v or "")).strip()[:n]
+# CUT-MARKER: the cut now ANNOUNCES itself. This helper sliced with a bare [:n],
+# so a truncated value reached the operator looking exactly like a whole one —
+# the defect repaired in the audit's cell_text, which never reached these probes.
+# Width unchanged; scripts/_console.cut adds the marker and the dropped-char count.
+from scripts._console import cut  # noqa: E402
+
+def _trunc(v, n=100) -> str:
+    return cut(str(v or ""), n)
 
 
 def _candidate_score(c):
