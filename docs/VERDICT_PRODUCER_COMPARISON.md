@@ -100,6 +100,15 @@ documented in the module-level docstring of
 | 2 | medium / likely-true | `MEDIUM`, `draft_likely_true` |
 | 3 | high / verified | `HIGH`, `draft_verified` |
 
+This table is KEPT rather than replaced by a pointer, because it is not a copy
+of `LABEL_SEVERITY_RANK`: it carries the cross-producer walk — which P1/P2 tier
+name sits at the same rank as which P3 label — which is the whole subject of
+this document and which the dict, holding P3 labels only, cannot express. The
+`meaning` column is likewise a gloss that exists nowhere in code.
+`verdict_producer_comparison.LABEL_SEVERITY_RANK` remains authoritative for the
+P3 half and wins any disagreement. Re-verified against it on 2026-08-06: all
+eight keys and all eight rank values match.
+
 The "most conservative" producer is the one whose label maps to the
 lowest rank. Ties are broken by producer order (P1 wins, then P2,
 then P3). Labels unknown to the map are treated as rank `None` and

@@ -60,12 +60,13 @@ despite weak inputs.
 Mirrors the M11.0b descriptive ordering in
 `docs/VERDICT_LABEL_DIAGNOSTIC.md`. Lower rank = more conservative.
 
-| Rank | Labels                                                                                                  |
-|------|---------------------------------------------------------------------------------------------------------|
-| 0    | `draft_unverified`                                                                                      |
-| 1    | `draft_needs_context`, `draft_needs_review`, `draft_needs_official_confirmation`, `draft_disputed`, `draft_high_risk_review` |
-| 2    | `draft_likely_true`                                                                                     |
-| 3    | `draft_verified`                                                                                        |
+**The ranks themselves are not restated here.** Read them from
+`llm_judge.LABEL_SEVERITY_RANK`, which is the thing `is_downgrade` and the
+schema validator actually consult. This section used to carry a four-row table
+of label-to-number — bookkeeping that added nothing the dict does not say, and
+that no test could ever have failed on, so a drift would have misinformed
+readers silently and indefinitely. What is worth writing down is the *rule*
+the numbers encode, which is below and which the dict cannot express.
 
 A downgrade is a **strict decrease** in rank. Lateral moves within
 the same rank (e.g. `draft_needs_review` → `draft_needs_context`,
@@ -237,6 +238,13 @@ emits `log.warning("llm_judge.failed", extra={"error_type": <name>})`
 `266`. Only the new `main.py` warning counts; the `llm_judge.py`
 INFO emission does not, because `llm_judge.py` is not in
 `MIGRATED_FILES`.
+
+> **Dated figure — do not read `266` as current.** That was this milestone's
+> delta, and it is left as written because renumbering it would falsify what
+> this change actually measured. The live pin has moved many times since; as of
+> 2026-08-06 `EXPECTED_TOTAL_LOG_CALLS` is `331`. Read the symbol, never the
+> number here. The reasoning above — that only `MIGRATED_FILES` modules count
+> toward the pin — is what stays true, and is the reason this section exists.
 
 ### Default behaviour without the flag
 
