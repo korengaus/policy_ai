@@ -534,10 +534,8 @@
       draft_needs_official_confirmation: "var(--orange)",
       draft_needs_review: "var(--orange)",
       draft_high_risk_review: "var(--orange)",
-      draft_misleading: "var(--red)",
       draft_disputed: "var(--red)",
       draft_unverified: "var(--muted)",
-      draft_outdated: "var(--muted)",
     };
     function verdictDotColor(label) {
       return VERDICT_DOT_COLORS[String(label || "")] || "var(--muted)";
@@ -552,10 +550,8 @@
       draft_needs_official_confirmation: "vt-orange",
       draft_needs_review: "vt-orange",
       draft_high_risk_review: "vt-orange",
-      draft_misleading: "vt-red",
       draft_disputed: "vt-red",
       draft_unverified: "vt-muted",
-      draft_outdated: "vt-muted",
     };
     function verdictTierClass(label) {
       return VERDICT_TIER_CLASSES[String(label || "")] || "vt-muted";
