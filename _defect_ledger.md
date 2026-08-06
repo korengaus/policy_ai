@@ -1,7 +1,16 @@
 # DEFECT LEDGER — every card-detail defect found, and its state
 Built 2026-07-31 from: `git log -60` (bodies, not subjects), `scripts/card_render_audit.js`
 zero/ceiling classes + `card_render_baselines.json`, `scripts/showcase_reviewer_card_probe.py`,
-and the untracked `_*.md` scratch files. UNTRACKED FILE — inventory only, fixes nothing.
+and the untracked `_*.md` scratch files. Inventory only — it records defects, it fixes none.
+
+TRACKED ON PURPOSE, and one of exactly two exceptions to the `_*` scratch convention (the
+other is `scripts/backlog_systemic_scan.py`, the probe that fed this file; both landed in
+`373c7a81c`, 2026-07-31). It said "UNTRACKED FILE" here until 2026-08-06, which was false
+from the day it was committed. The reason for the exception, so nobody helpfully undoes it:
+the `_*.md` files beside it are single-session working notes and are meant to be disposable,
+whereas this is the register they feed — the only place the cross-session state of every
+entry below lives, and the thing that has to outlive the machine that produced it. **Do not
+untrack it.**
 
 State key: **FIXED** · **OPEN** · **WONTFIX** (deliberately not fixed) · **NOT-A-DEFECT** · **UNKNOWN**
 `R` = recurred (found, fixed, found again on another surface).
