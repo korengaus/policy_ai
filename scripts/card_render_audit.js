@@ -509,7 +509,11 @@ function trendingHeadingCount(templateHtml) {
   return m ? Number(m[1]) : null;
 }
 function trendingSliceCount(js) {
-  const fn = js.indexOf("async function renderTrendingTop5");
+  // Trailing "(" — same exact-anchor rule as the verdict owner: without it a
+  // suffixed rename (renderTrendingTop5Legacy) still matches and this reads
+  // the wrong body. The parenthesised form is already used for this very
+  // function elsewhere in this file, so this only makes the two agree.
+  const fn = js.indexOf("async function renderTrendingTop5(");
   if (fn < 0) return null;
   const body = js.slice(fn, fn + 4000);
   const m = /trending\s*\)\s*\?\s*body\.trending\.slice\(0,\s*(\d+)\)/.exec(body)
@@ -606,7 +610,8 @@ MARKER_FAMILIES = leadingMarkerFamilies(mainJs);
 // names that row's 1-based position whenever it exceeds 1.
 // ---------------------------------------------------------------------------
 function heroSkipRulesFromJs(js) {
-  const fn = js.indexOf("async function resolveTrendingHeroPick");
+  // Trailing "(" — exact anchor; see trendingSliceCount above.
+  const fn = js.indexOf("async function resolveTrendingHeroPick(");
   if (fn < 0) return null;
   const body = js.slice(fn, fn + 2000);
   return {
@@ -1486,7 +1491,8 @@ function leadingMarkerSurvives(title, families) {
 }
 
 function trendingRankMapsBeforeFilter(js) {
-  const fn = js.indexOf("async function renderTrendingTop5");
+  // Trailing "(" — exact anchor; see trendingSliceCount above.
+  const fn = js.indexOf("async function renderTrendingTop5(");
   if (fn < 0) return null;
   const body = js.slice(fn, fn + 4000);
   return /rank-num[^]*?\$\{i \+ 1\}/.test(body) && /\.filter\(Boolean\)/.test(body);
@@ -2434,10 +2440,44 @@ for (const [win, ids] of Object.entries(windows)) {
 // ---------------------------------------------------------------------------
 {
   const vcPy = fs.readFileSync(path.join(ROOT, "verification_card.py"), "utf8");
-  const fnStart = vcPy.indexOf("def _verdict_label");
+  // OWNER ANCHOR — MATCHED, THEN VERIFIED.
+  //
+  // This was indexOf("def _verdict_label"), a bare substring. A SUFFIXED
+  // rename (_verdict_label_v2, _verdict_label_old) still matched it, so the
+  // slice below would land on a DIFFERENT function and the coverage check
+  // would PASS while measuring labels nobody asked about. A floor that fires
+  // wrongly is noise; an anchor on the wrong body is a check that reports on
+  // the wrong thing in silence, which is worse.
+  //
+  // SHAPE: /^def _verdict_label\(/gm — `def` must start at COLUMN 0, so a
+  // method or a nested def cannot be mistaken for the module-level owner; the
+  // name must be exact; and `(` must follow IMMEDIATELY, so no suffixed or
+  // prefixed neighbour can match. A multi-line signature is fine — only the
+  // opening paren is required, not the parameter list.
+  //
+  // VERIFIED, NOT TRUSTED. Python's grammar is not regular and this file is
+  // read as TEXT, so no lexical rule can prove the anchor landed on the real
+  // function. Rather than claim more than it delivers, it asserts the one
+  // thing it can check cheaply: that EXACTLY ONE such definition exists. Zero
+  // means the owner was renamed or moved; more than one means the scan cannot
+  // know which definition is live. Both fail loudly instead of picking one.
+  //
+  // WHAT STILL DEFEATS IT, stated rather than papered over: the literal text
+  // `def _verdict_label(` at column 0 inside a docstring or triple-quoted
+  // string would anchor on prose, because a text scan cannot tell code from a
+  // string. And an owner that KEEPS its name while delegating its return
+  // literals to a helper would anchor correctly and read a subset — caught not
+  // here but by the vacuity floor (if it falls to zero) and by
+  // tests/test_honesty_guard.py, which binds verification_card._verdict_label
+  // as an OBJECT through inspect.getsource and therefore cannot mis-anchor at
+  // all. That test is corroboration, not a substitute: it runs in pytest,
+  // while the b2b audit's C8 row consumes THIS scanner's verdict.
+  const ownerDefs = [...vcPy.matchAll(/^def _verdict_label\(/gm)];
   // Scope to the owning function, exactly as inspect.getsource does on the
-  // Python side: from its `def` to the next top-level def/class.
-  const after = fnStart < 0 ? "" : vcPy.slice(fnStart);
+  // Python side: from its `def` to the next top-level def/class. An
+  // unresolved anchor yields "" here and is named explicitly below rather
+  // than being allowed to read some neighbouring function's body.
+  const after = ownerDefs.length === 1 ? vcPy.slice(ownerDefs[0].index) : "";
   const nextTop = after.slice(1).search(/\n(?:def |class )/);
   const fnSrc = nextTop < 0 ? after : after.slice(0, nextTop + 1);
   const ownerLabels = new Set(
@@ -2495,10 +2535,20 @@ for (const [win, ids] of Object.entries(windows)) {
       + STYLE_MAPS.map(([n, k]) => `${k.size} ${n}`).join(" / ")
       + " key(s) from main.js — "
       + (ownerLabels.size === 0
-        ? "verification_card._verdict_label yielded NO return literals, so the "
-          + "coverage check would compare against an empty owner and pass "
-          + "blind; the function moved, was renamed, or stopped returning "
-          + "string literals"
+        ? (ownerDefs.length !== 1
+          ? `OWNER ANCHOR ${ownerDefs.length ? "AMBIGUOUS" : "LOST"}: `
+            + `verification_card.py has ${ownerDefs.length} module-level `
+            + "`def _verdict_label(` definition(s), expected exactly 1 — "
+            + (ownerDefs.length
+              ? "the scan cannot know which one is live, so it refuses to "
+                + "pick"
+              : "the owner was renamed or moved. NOTE the anchor is exact by "
+                + "design: a suffixed rename (_verdict_label_v2) used to "
+                + "still match a substring anchor and slide the scan silently "
+                + "onto another function's body")
+          : "verification_card._verdict_label yielded NO return literals, so "
+            + "the coverage check would compare against an empty owner and "
+            + "pass blind; it stopped returning string literals")
         : `${blindMaps.map(([n]) => n).join(" and ")} parsed to zero keys `
           + `while the owner yielded ${ownerLabels.size}, so the map literal `
           + "moved or was reshaped — this is a parser failure, not an "
