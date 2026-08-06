@@ -29,11 +29,16 @@ Three producers under comparison
        ``official_sources``, ``evidence_snippets``,
        ``contradiction_summary``, ``bias_framing_summary``,
        ``claim_count``.
-       Output: a ``draft_*`` label string (``draft_verified``,
-       ``draft_likely_true``, ``draft_needs_context``,
-       ``draft_unverified``, ``draft_disputed``,
-       ``draft_needs_review``, ``draft_needs_official_confirmation``,
-       ``draft_high_risk_review``).
+       Output: a ``draft_*`` label string — a vocabulary DISJOINT
+       from P1/P2's alert levels, which is the reason this module
+       exists at all: the three producers cannot be compared by
+       string equality, only through the rank map below.
+       The eight names are deliberately NOT enumerated here. They are
+       the ``return`` literals of ``verification_card._verdict_label``,
+       which owns them; this line used to restate the set, which made
+       the first thing a reader of this module met a copy that no test
+       could fail on. The rank table below names each one anyway, at
+       the rank that gives it meaning.
 
 Conservative-ordering ranking
 -----------------------------
@@ -52,6 +57,16 @@ action signal). The mapping is deliberately exhaustive and stable:
         ``MEDIUM`` (P1), ``draft_likely_true`` (P3)
     rank 3 (high — verified / actionable)
         ``HIGH`` (P1, P2), ``draft_verified`` (P3)
+
+This block is KEPT as a table rather than replaced by a pointer to
+``LABEL_SEVERITY_RANK``, because it is not a restatement of that dict.
+The dict is flat — twelve keys to four numbers. Two things only here
+say which producer can reach a given rank (note ``MEDIUM`` is P1 only,
+because the P2 calibrator's score-based decider never emits it, so P2
+can never land at rank 2), and what each rank MEANS in operator terms.
+Neither survives being read out of the dict. ``LABEL_SEVERITY_RANK``
+is authoritative and wins any disagreement; re-verified against it on
+2026-08-06, all twelve keys and all twelve values match.
 
 The "most conservative" producer is the one whose label maps to the
 lowest rank. Ties are broken by producer order (P1 wins, then P2,
