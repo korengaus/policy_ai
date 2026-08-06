@@ -87,6 +87,24 @@ try:
 except Exception:
     pass
 
+# CLAIM-POOL: ONE owner, imported — not copied. This probe carried a
+# byte-equivalent second copy of claim_pool; two copies of one function diverge,
+# and the census that found this one also found a notify duplicated four ways
+# where a single copy silently missed an encoding fix. The pool ORDER
+# (normalized_claims[].claim_text before claims[]) is the frontend mirror this
+# probe's entire promoted-claim view rests on, so a drifted copy would not fail
+# loudly — it would quietly measure a different site than the one that ships.
+#
+# IMPORT SAFETY, CHECKED RATHER THAN ASSUMED (three imports this week had to
+# fall back to source-parsing because the target ACTED at import time). Measured
+# on this module: import costs 0.07s, emits nothing on stdout or stderr, opens
+# no socket, imports no sqlalchemy, and adds no root-logger handler. It does two
+# things at module level, both harmless here: it reconfigures stdout with the
+# EXACT call just made above (idempotent, same arguments), and it reads
+# render.yaml once for the spine cron behind a total try/except that falls back
+# rather than raising. Neither touches this probe's behaviour.
+from scripts.b2b_readiness_audit import claim_pool  # noqa: E402
+
 
 # Seed markers: label -> compiled regex. Counts are reported per marker AS
 # FOUND (0-hit markers print 0); the repeat-template table catches what this
@@ -119,24 +137,6 @@ def _loads(raw) -> object:
         return json.loads(raw)
     except Exception:
         return None
-
-
-def claim_pool(normalized_raw, claims_raw) -> list:
-    """The frontend promotion pool, SAME order (main.js:6619-6628):
-    normalized_claims[].claim_text first, then claims[] strings. Trimmed,
-    empties dropped. normalized_claims entries may be dicts or strings."""
-    pool = []
-    normalized = _loads(normalized_raw)
-    if isinstance(normalized, list):
-        for entry in normalized:
-            if isinstance(entry, dict):
-                pool.append(str(entry.get("claim_text") or ""))
-            elif isinstance(entry, str):
-                pool.append(entry)
-    claims = _loads(claims_raw)
-    if isinstance(claims, list):
-        pool.extend(str(c or "") for c in claims if isinstance(c, str))
-    return [text.strip() for text in pool if str(text or "").strip()]
 
 
 def marker_hits(text: str) -> list:
@@ -340,6 +340,9 @@ def _selftest() -> int:
           template_of("07월17일 09시01분 송고"))
     check("template-differs", template_of(real) == template_of(boiler_11966), False)
 
+    # These three now exercise the IMPORTED owner, so they are this probe's
+    # standing check that the shared pool still orders and trims the way the
+    # promoted-claim view assumes — kept, not deleted, when the copy went.
     check("pool-order",
           claim_pool(json.dumps([{"claim_text": "정규화 주장"}]),
                      json.dumps(["원시 주장"])),
