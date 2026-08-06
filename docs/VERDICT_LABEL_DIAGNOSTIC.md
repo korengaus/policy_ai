@@ -3,6 +3,20 @@
 Read-only audit of the `verification_card._verdict_label` function and the
 `verdict_label` values currently stored in `analysis_results`.
 
+> **This is a dated milestone record (M11.0a–M11.1), not living documentation.**
+> Every `verification_card.py` line number below — 465–466, 474–475, 476–477,
+> 478–479, 482 — was accurate when written and is accurate for no other purpose
+> now: the function has moved, and as of 2026-08-06 each of those numbers lands
+> in an unrelated helper. They are deliberately NOT renumbered, because
+> renumbering a record of what was measured at M11.0b would falsify it. Read
+> them as "the branch this paragraph describes", never as a place to look.
+> **The authority for both the branch set and the label set is
+> `verification_card._verdict_label` itself** — no list here is a source, and
+> the branch-count parity between that function and
+> `verdict_label_diagnostic.VERDICT_LABEL_BRANCHES` is the one claim in this
+> file a test can actually fail on
+> (`tests/test_verdict_label_diagnostic.py::BranchCatalogueParityTests`).
+
 ## Why this tool exists
 
 M11.0a (verdict producer comparison) measured three-producer

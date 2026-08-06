@@ -92,12 +92,19 @@ This document and the pinned diagnostic test (`tests/test_verdict_producer_disag
 
 ### Producer 3 — `verification_card._verdict_label`
 
-- **File:** `verification_card.py`, lines L391-469.
+- **File:** `verification_card.py` — the function `_verdict_label`. No line
+  range: this section used to say `L391-469`, and the function has moved far
+  enough since that those numbers now land inside an unrelated helper. Anchor
+  on the name, which does not drift.
 - **Signature:** `_verdict_label(policy_confidence, evidence_comparison, official_sources, evidence_snippets=None, contradiction_summary=None, bias_framing_summary=None, claim_count=0) -> str`.
-- **Output vocabulary (DISJOINT from P1/P2):**
-  - `draft_disputed`, `draft_high_risk_review`, `draft_needs_review`,
-  - `draft_needs_official_confirmation`, `draft_needs_context`,
-  - `draft_verified`, `draft_likely_true`, `draft_unverified`
+- **Output vocabulary (DISJOINT from P1/P2):** the closed set is exactly the
+  `return "draft_*"` literals of `verification_card._verdict_label`. It is
+  deliberately NOT restated here. This section previously carried the eight
+  names as a bare list — a copy that no test could fail on, so had it drifted
+  it would have misinformed every reader silently and indefinitely, which is
+  what separates a doc mirror from a code one. The decision tree below already
+  names each label at the branch that emits it: the same information, anchored
+  to the reason it is emitted rather than floating free as a list.
 - **Inputs:**
   - `policy_confidence["policy_confidence_score"]`, `policy_confidence["verification_strength"]`
   - `evidence_comparison["comparison_status"]`, `evidence_comparison["verification_level"]`, `evidence_comparison["conflict_signals"]`, `evidence_comparison["semantic_conflict_signals"]`
@@ -106,7 +113,13 @@ This document and the pinned diagnostic test (`tests/test_verdict_producer_disag
   - `contradiction_summary["possible_contradiction_count"]`, `["confirmed_contradiction_count"]` (or `["likely_contradiction_count"]`), `["needs_official_confirmation_count"]`, `["insufficient_evidence_count"]`
   - `bias_framing_summary["high_framing_count"]`
   - `claim_count` (int)
-- **Decision tree (top-to-bottom, first match wins):**
+- **Decision tree (top-to-bottom, first match wins).** A transcription of the
+  branch order, not a second source: `verification_card._verdict_label` is
+  authoritative and wins any disagreement. Kept rather than deleted because it
+  is not a copy of the label *set* — each name appears as the OUTCOME of a
+  stated trigger, which is reasoning the code expresses only as control flow.
+  Re-verified branch-for-branch against the owner on 2026-08-06: all 16
+  branches, their conditions and their order still match.
   1. `conflict_signals OR comparison_status == "official_conflict_possible"` → **draft_disputed**
   2. `high_framing_count > 0 AND confirmed_count > 0` → **draft_high_risk_review**
   3. `high_framing_count > 0` → **draft_needs_review**
@@ -200,6 +213,13 @@ P3 normalization (heuristic — used only for the disagreement count, not in pro
 | `draft_likely_true` | MEDIUM |
 | `draft_disputed`, `draft_high_risk_review`, `draft_needs_review`, `draft_needs_official_confirmation`, `draft_needs_context` | WATCH |
 | `draft_unverified` | LOW |
+
+This table is a FROZEN RECORD of the heuristic that produced the counts in this
+section, not a live mirror. It is kept, and deliberately not re-pointed at
+code: as of 2026-08-06 it happens to coincide exactly with
+`main._P3_TO_ALERT_TIER`, but that map is production and this one explicitly
+was not, so citing it here would misdescribe how these numbers were reached.
+If the two ever diverge, the divergence is not an error in this table.
 
 ### High-impact disagreement examples (selected from the 42-row matrix)
 
