@@ -75,11 +75,10 @@ DEFAULT_CONTEXT = 300  # how many chars of the overlapping substring to display
 _FACT_FIELDS = {"claim_text"}
 
 
-def p(line: str = "") -> None:
-    try:
-        print(line)
-    except UnicodeEncodeError:
-        print(str(line).encode("ascii", "backslashreplace").decode("ascii"))
+# CONSOLE-P: the shared print helper. This file carried its own guarded copy that
+# did not flush and escaped to ASCII, so an unencodable character turned the whole
+# Korean line into escapes. The shared helper flushes and escapes only what failed.
+from scripts._console import p  # noqa: E402
 
 
 def _maximal_overlap(body: str, text: str, window: str) -> str:

@@ -161,13 +161,10 @@ from news_collector import (  # noqa: E402  (after sys.path/​stdout setup)
 )
 
 
-def p(line: str = "") -> None:
-    """ASCII-guarded print. Prints the (UTF-8) line directly; on any encode error
-    falls back to a backslash-escaped ASCII rendering so the shell never chokes."""
-    try:
-        print(line)
-    except UnicodeEncodeError:
-        print(str(line).encode("ascii", "backslashreplace").decode("ascii"))
+# CONSOLE-P: the shared print helper. This file carried its own guarded copy that
+# did not flush and escaped to ASCII, so an unencodable character turned the whole
+# Korean line into escapes. The shared helper flushes and escapes only what failed.
+from scripts._console import p  # noqa: E402
 
 
 def _norm_q(text) -> str:

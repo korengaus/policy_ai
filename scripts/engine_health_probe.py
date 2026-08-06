@@ -153,13 +153,10 @@ PRIMARY_COLLECTION_SOURCES = frozenset({"naver_api", "google_rss"})
 ENRICH_SUPPORT_FLOOR = 62
 
 
-def p(line: str = "") -> None:
-    """ASCII-guarded print — prints the UTF-8 line directly; on any encode error falls
-    back to a backslash-escaped ASCII rendering so the shell never chokes."""
-    try:
-        print(line)
-    except UnicodeEncodeError:
-        print(str(line).encode("ascii", "backslashreplace").decode("ascii"))
+# CONSOLE-P: the shared print helper. This file carried its own guarded copy that
+# did not flush and escaped to ASCII, so an unencodable character turned the whole
+# Korean line into escapes. The shared helper flushes and escapes only what failed.
+from scripts._console import p  # noqa: E402
 
 
 def _ascii(text) -> str:

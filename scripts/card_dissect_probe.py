@@ -98,11 +98,10 @@ WEAK = "weak_official_candidate_only"
 OFFICIAL_TYPES = {"official_government", "public_institution"}
 
 
-def p(line: str = "") -> None:
-    try:
-        print(line)
-    except UnicodeEncodeError:
-        print(str(line).encode("ascii", "backslashreplace").decode("ascii"))
+# CONSOLE-P: the shared print helper. This file carried its own guarded copy that
+# did not flush and escaped to ASCII, so an unencodable character turned the whole
+# Korean line into escapes. The shared helper flushes and escapes only what failed.
+from scripts._console import p  # noqa: E402
 
 
 def _ascii(value) -> str:

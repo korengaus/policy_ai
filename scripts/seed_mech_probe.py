@@ -72,11 +72,10 @@ ENV_HEALTH_VOCAB = ("환경", "탄소", "에너지", "기후", "온실", "재생
                     "의료", "질병", "백신", "건강", "감염", "병원")
 
 
-def p(line: str = "") -> None:
-    try:
-        print(line)
-    except UnicodeEncodeError:
-        print(str(line).encode("ascii", "backslashreplace").decode("ascii"))
+# CONSOLE-P: the shared print helper. This file carried its own guarded copy that
+# did not flush and escaped to ASCII, so an unencodable character turned the whole
+# Korean line into escapes. The shared helper flushes and escapes only what failed.
+from scripts._console import p  # noqa: E402
 
 
 def _ascii(value) -> str:

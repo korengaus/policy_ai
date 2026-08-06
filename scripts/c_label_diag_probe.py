@@ -116,12 +116,10 @@ MAINJS_VERDICT_LABEL = "임시 검증 완료"          # main.js:300
 MAINJS_TECHNICAL_LABEL = "공식 근거 확인 필요"     # main.js:777
 
 
-def p(line: str = "") -> None:
-    """ASCII-guarded print — direct UTF-8, backslash-escaped fallback on encode error."""
-    try:
-        print(line)
-    except UnicodeEncodeError:
-        print(str(line).encode("ascii", "backslashreplace").decode("ascii"))
+# CONSOLE-P: the shared print helper. This file carried its own guarded copy that
+# did not flush and escaped to ASCII, so an unencodable character turned the whole
+# Korean line into escapes. The shared helper flushes and escapes only what failed.
+from scripts._console import p  # noqa: E402
 
 
 def _ascii(text) -> str:
