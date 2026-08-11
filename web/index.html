@@ -988,6 +988,50 @@
       margin: 16px 0 18px;
     }
 
+    /* 5b: circulation facts grid — the four spread numbers as data, not prose.
+       Geometry copied from .verdict-indicators below, but a SEPARATE class on
+       purpose: circulation facts must never ride verdict-* markup (the two
+       axes were deliberately decoupled). auto-fit re-flows 1-4 cells across
+       the row, so an omitted cell narrows the grid instead of leaving a hole.
+       tabular-nums on the VALUE only (Pretendard ships tnum; fallbacks ignore
+       it harmlessly) — labels and body text keep proportional figures.
+       Shared token names only (--line/--muted/--slate/--ink), so this block
+       can paste into web/claim.html unchanged. No colour, no status, no
+       emphasis — every cell renders identically. */
+    .spread-facts {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 16px;
+      padding: 14px 0;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      margin: 10px 0 0;
+    }
+    .spread-fact {
+      min-width: 0;
+    }
+    .spread-fact-label {
+      display: block;
+      color: var(--slate);
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 5px;
+    }
+    .spread-fact-value {
+      display: block;
+      color: var(--ink);
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 1.35;
+      font-variant-numeric: tabular-nums;
+      overflow-wrap: anywhere;
+    }
+    .spread-facts-note {
+      color: var(--muted);
+      font-size: 12px;
+      margin: 4px 0 10px;
+    }
+
     .verdict-indicators {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -12622,14 +12666,26 @@
           const timeline = data.timeline || {};
           const firstAt = typeof timeline.first_at === "string" ? timeline.first_at.slice(0, 10) : "";
           const lastAt = typeof timeline.last_at === "string" ? timeline.last_at.slice(0, 10) : "";
+          // 5b: the four circulation numbers render as ONE facts grid — data,
+          // not four prose sentences a reader assembles. Every label and value
+          // form already ships somewhere (전체 확산 매체 수 claim:466/weekly:174,
+          // 보도 건수 claim:236, 확산 기간 this block, 문구 거의 동일 claim:465);
+          // nothing invented. A cell whose value is absent is OMITTED entirely
+          // (auto-fit re-flows the row) — a labelled blank would shout "missing"
+          // and a 0 we did not measure would be a lie; only the 문구 거의 동일
+          // 0 is real (claim.html renders 0개 매체 for it today). The grid
+          // carries no status, no colour, no emphasis.
+          const spreadFactCell = (label, value) => `<div class="spread-fact"><span class="spread-fact-label">${label}</span><span class="spread-fact-value">${value}</span></div>`;
           // POLISH-LABELS 4: corpus-scoped wording (claim.html's solved form) —
           // first_at is the earliest COLLECTED member, not the claim's origin
           // and not this article's date, so 최초 보도 overclaimed (the 최저임금
-          // cluster's earliest member even predates the 07-14 decision). MUST
-          // stay in lockstep with the share-image canvas line above (two render
-          // sites, one string).
-          const timelineLine = Number(timeline.dated_members) > 0 && firstAt && lastAt
-            ? `<div class="spread-timeline-line">확산 기간 ${escapeHtml(firstAt)} → ${escapeHtml(lastAt)} (수집 기사 기준)</div>`
+          // cluster's earliest member even predates the 07-14 decision). The
+          // sentence decomposed into the grid: label 확산 기간 + the same date
+          // range; (수집 기사 기준) moved to the ONE grid-level note below since
+          // it qualifies all four cells. The share-image canvas keeps its own
+          // copy of the full sentence — wording unchanged there.
+          const timelineCell = Number(timeline.dated_members) > 0 && firstAt && lastAt
+            ? spreadFactCell("확산 기간", `${escapeHtml(firstAt)} → ${escapeHtml(lastAt)}`)
             : "";
           // SYNDICATION-STAT B5d 2b + NEAR-ANCHOR-LABEL-HONESTY: spread-structure
           // line (circulation only, never a verdict/color). The STORED
@@ -12653,16 +12709,23 @@
             : nearShown >= 1
               ? `<div class="spread-syndication-line">이 중 ${escapeHtml(nearShown)}개 매체는 첫 보도와 제목·주장 문구가 거의 동일합니다.${exactNote}</div>`
               : `<div class="spread-syndication-line">첫 보도와 제목·주장 문구가 거의 동일한 매체는 없습니다.</div>`;
+          // 5b: the number ALSO renders as a grid cell (label 문구 거의 동일,
+          // value {n}개 매체 — both shipped on claim:465). The sentence above
+          // STAYS: it carries the 첫 보도-exclusion semantics and the
+          // exact-match subnote no cell can hold. One accepted duplication,
+          // deliberate. The real 0 renders (0개 매체 ships on claim.html today);
+          // null (pre-2a graph rows) omits the cell.
+          const nearCell = nearShown === null
+            ? ""
+            : spreadFactCell("문구 거의 동일", `${escapeHtml(nearShown)}개 매체`);
           // 4b: the ARTICLE count beside the OUTLET count. The block stated only
           // "{N}개 매체", so 40 outlets / 158 articles and 40 / 40 read identically
           // to a reader. api_server.py:1566 records the two as deliberately
           // separate fields — "conflating them would overstate reach (78 vs 156)"
           // — and cluster.size is the article-row count that was never drawn.
-          // NO new sentence pattern: 기사 {N}건 is the shipped form
-          // web/claim.html:392 uses for the SAME quantity (cluster.member_count),
-          // and (수집 기사 기준) is this block's own qualifier, taken from the
-          // 확산 기간 line below. Circulation fact only — no chart, no ordering,
-          // no emphasis, nothing implying importance.
+          // 5b: now a grid cell — label 보도 건수 (claim:236), value {N}건 (the
+          // shipped counting form); (수집 기사 기준) is the grid-level note.
+          // Circulation fact only — no chart, no ordering, no emphasis.
           // Renders NOTHING when size is absent/null/non-finite (legacy graph
           // rows predate the field), and ALSO nothing when size < outletCount:
           // the two are precomputed separately, so that combination is
@@ -12670,18 +12733,29 @@
           // self-contradiction on the reader's screen. Suppressing is honest;
           // guessing which of the two is right would not be.
           const memberSize = Number(data?.cluster?.size);
-          const sizeLine = Number.isFinite(memberSize) && memberSize >= outletCount
-            ? `<div class="spread-size-line">기사 ${escapeHtml(memberSize)}건 (수집 기사 기준)</div>`
+          const sizeCell = Number.isFinite(memberSize) && memberSize >= outletCount
+            ? spreadFactCell("보도 건수", `${escapeHtml(memberSize)}건`)
             : "";
+          // 5b: cells in fixed order — 매체 / 건수 / 기간 / 문구. The outlet cell
+          // is unconditional inside this block (the >=2 gate above is its
+          // precondition); the other three omit themselves when their value is
+          // absent, and auto-fit re-flows the remaining cells across the row so
+          // a 2-cell or 1-cell grid reads as fewer facts, never as zeros.
+          const factsGrid = `<div class="spread-facts">${
+            spreadFactCell("전체 확산 매체 수", `${escapeHtml(outletCount)}개 매체`)
+          }${sizeCell}${timelineCell}${nearCell}</div>
+            <div class="spread-facts-note">(수집 기사 기준)</div>`;
           // DETAIL-IA MERGE: this div is a CHILD of the 얼마나 퍼졌나 wrapper —
           // the section h3 and the ONE consolidated caveat live on the wrapper
           // (the old per-part h3/caveat here were consolidated, not deleted).
+          // 5b: the grid REPLACED the three pure-restatement prose lines (the
+          // outlet sentence, the 4b sizeLine, the 확산 기간 line) — same numbers,
+          // rendered once, as data. The syndication sentence stays (see above);
+          // the header answer line stays (different layer, prose summary).
           section.innerHTML = `
-            <div>이 주장과 유사한 내용이 ${escapeHtml(outletCount)}개 매체에서 보도되었습니다.</div>
-            ${sizeLine}
+            ${factsGrid}
             ${corpusDistributionHtml(data?.corpus_outlet_distribution, outletCount)}
             ${syndicationLine}
-            ${timelineLine}
             ${spreadSparklineHtml(timeline.daily)}
             <div class="spread-map-link"><a href="/web/brainmap.html?focus=${encodeURIComponent(id)}" target="_blank" rel="noopener noreferrer">브레인맵에서 유사 보도 보기 →</a></div>
           `;

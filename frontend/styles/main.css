@@ -952,6 +952,50 @@
       margin: 16px 0 18px;
     }
 
+    /* 5b: circulation facts grid — the four spread numbers as data, not prose.
+       Geometry copied from .verdict-indicators below, but a SEPARATE class on
+       purpose: circulation facts must never ride verdict-* markup (the two
+       axes were deliberately decoupled). auto-fit re-flows 1-4 cells across
+       the row, so an omitted cell narrows the grid instead of leaving a hole.
+       tabular-nums on the VALUE only (Pretendard ships tnum; fallbacks ignore
+       it harmlessly) — labels and body text keep proportional figures.
+       Shared token names only (--line/--muted/--slate/--ink), so this block
+       can paste into web/claim.html unchanged. No colour, no status, no
+       emphasis — every cell renders identically. */
+    .spread-facts {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 16px;
+      padding: 14px 0;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      margin: 10px 0 0;
+    }
+    .spread-fact {
+      min-width: 0;
+    }
+    .spread-fact-label {
+      display: block;
+      color: var(--slate);
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 5px;
+    }
+    .spread-fact-value {
+      display: block;
+      color: var(--ink);
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 1.35;
+      font-variant-numeric: tabular-nums;
+      overflow-wrap: anywhere;
+    }
+    .spread-facts-note {
+      color: var(--muted);
+      font-size: 12px;
+      margin: 4px 0 10px;
+    }
+
     .verdict-indicators {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
