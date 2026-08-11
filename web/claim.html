@@ -172,6 +172,22 @@
   table.members td.m-host { white-space: nowrap; }
   table.members a { color: var(--ink); text-decoration: none; font-weight: 600; }
   table.members a:hover { color: var(--brand-ink); text-decoration: underline; }
+  /* 4a: date-group header rows. The control is a real <button>, so Enter/Space
+     and focus come from the platform rather than hand-rolled key handling, and
+     it carries aria-expanded/aria-controls. Deliberately NOT display:flex|grid|
+     contents — the site already lost a disclosure control that way (see
+     frontend/styles/main.css DESIGN-DETAIL-5f). No colour semantics: the same
+     --ink/--brand-ink/--muted tokens the rest of this table already uses. */
+  table.members td.m-group-cell { padding: 0; }
+  .m-group-toggle {
+    width: 100%; text-align: left; font: inherit; font-weight: 700;
+    color: var(--ink); background: none; border: 0; cursor: pointer;
+    padding: 9px 8px;
+  }
+  .m-group-toggle:hover { color: var(--brand-ink); }
+  .m-group-toggle::before { content: "+ "; color: var(--muted); }
+  .m-group-toggle[aria-expanded="true"]::before { content: "\2212 "; }
+  .m-group-count { color: var(--muted); font-weight: 600; }
   .table-scroll { overflow-x: auto; }
   footer.report-foot {
     max-width: 860px; margin: 0 auto; padding: 0 20px 46px;
@@ -471,21 +487,78 @@
       capLine.hidden = false;
     }
     var tbody = document.getElementById("memberRows");
+    // 4a: rows are GROUPED BY 보도일 and every group ships COLLAPSED. The table
+    // ran 158 rows / 19,948px on mobile for the reference claim, with no sort,
+    // filter, search or pagination — a reader could only scroll. The spread is
+    // strongly clustered in time (102 of 158 on one day), so the date lines ARE
+    // the shape the reader came for; 9 summary lines show it, 158 rows bury it.
+    // Nothing is removed: every row stays in the DOM, one click away, with the
+    // same four cells and the same link.
+    // Grouping is a SINGLE PASS over the API's existing chronological order —
+    // no sort, no new field, no server change. day() is the same helper that
+    // already produced the 보도일 cell. Rows with no published_at get their own
+    // group under the string that cell already used ("날짜 없음"), never folded
+    // into a real date.
+    // ONE table, one <tbody> per date: per-date <table>s would let column widths
+    // drift between groups.
+    var groupKeys = [];
+    var groupRows = {};
     members.forEach(function (m) {
-      var tr = el("tr");
-      tr.appendChild(el("td", "m-date", day(m.published_at) || "날짜 없음"));
-      tr.appendChild(el("td", "m-host", m.outlet_host || "-"));
-      var tdTitle = el("td");
-      var link = el("a", null, m.title || "(제목 없음)");
-      var rid = Number(m.analysis_id);
-      link.href = rid > 0 ? "/?result_id=" + encodeURIComponent(rid) : "/";
-      tdTitle.appendChild(link);
-      tr.appendChild(tdTitle);
-      tr.appendChild(el("td", null, verdictLabelKo(m.verdict_label)));
-      // CARD-SIMPLIFY: the per-article 근거 수준 cell is OFF this table (same
-      // decision as the card front face). m.policy_confidence_score stays in the
-      // /api/claim payload untouched — b2b_readiness_audit pins it there.
-      tbody.appendChild(tr);
+      var key = day(m.published_at) || "날짜 없음";
+      if (!Object.prototype.hasOwnProperty.call(groupRows, key)) {
+        groupRows[key] = [];
+        groupKeys.push(key);
+      }
+      groupRows[key].push(m);
+    });
+    var membersTable = tbody.parentNode;
+    groupKeys.forEach(function (key, groupIndex) {
+      var rows = groupRows[key];
+      var groupBody = el("tbody", "m-group");
+      var bodyId = "memberGroup" + groupIndex;
+      groupBody.id = bodyId;
+
+      var headRow = el("tr", "m-group-head");
+      var headCell = el("td", "m-group-cell");
+      headCell.colSpan = 4;
+      // A real <button>: implicit role, focusable, and Enter/Space activation
+      // come from the platform — not a div with a click listener.
+      var toggle = el("button", "m-group-toggle");
+      toggle.type = "button";
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.setAttribute("aria-controls", bodyId);
+      toggle.appendChild(document.createTextNode(key + " · "));
+      toggle.appendChild(el("span", "m-group-count", "기사 " + rows.length + "건"));
+      headCell.appendChild(toggle);
+      headRow.appendChild(headCell);
+      groupBody.appendChild(headRow);
+
+      var dataRows = [];
+      rows.forEach(function (m) {
+        var tr = el("tr");
+        tr.appendChild(el("td", "m-date", day(m.published_at) || "날짜 없음"));
+        tr.appendChild(el("td", "m-host", m.outlet_host || "-"));
+        var tdTitle = el("td");
+        var link = el("a", null, m.title || "(제목 없음)");
+        var rid = Number(m.analysis_id);
+        link.href = rid > 0 ? "/?result_id=" + encodeURIComponent(rid) : "/";
+        tdTitle.appendChild(link);
+        tr.appendChild(tdTitle);
+        tr.appendChild(el("td", null, verdictLabelKo(m.verdict_label)));
+        // CARD-SIMPLIFY: the per-article 근거 수준 cell is OFF this table (same
+        // decision as the card front face). m.policy_confidence_score stays in the
+        // /api/claim payload untouched — b2b_readiness_audit pins it there.
+        tr.hidden = true;
+        dataRows.push(tr);
+        groupBody.appendChild(tr);
+      });
+
+      toggle.addEventListener("click", function () {
+        var open = toggle.getAttribute("aria-expanded") === "true";
+        toggle.setAttribute("aria-expanded", open ? "false" : "true");
+        dataRows.forEach(function (tr) { tr.hidden = open; });
+      });
+      membersTable.appendChild(groupBody);
     });
     document.getElementById("membersPanel").hidden = false;
 
