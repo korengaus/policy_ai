@@ -528,17 +528,22 @@
     // verdict dot. Pure presentation — does NOT change verdict_label, the verdict
     // path, or any score. Unknown labels fall back to grey.
     const VERDICT_DOT_COLORS = {
-      draft_verified: "var(--verify)",
-      draft_likely_true: "var(--verify)",
-      draft_needs_context: "var(--orange)",
-      draft_needs_official_confirmation: "var(--orange)",
-      draft_needs_review: "var(--orange)",
-      draft_high_risk_review: "var(--orange)",
-      draft_disputed: "var(--red)",
-      draft_unverified: "var(--muted)",
+      // 2c: every tier resolves to ONE neutral. Colour carries no signal on this
+      // axis — the label says how far checking got, not whether a claim is true.
+      // --slate, not --muted: --muted is 2.56:1 on white, under the 3:1 WCAG
+      // 1.4.11 non-text minimum. VALUES only — keys, order and the map's shape
+      // are untouched, and VERDICT-STYLE-COVERAGE reads keys.
+      draft_verified: "var(--slate)",
+      draft_likely_true: "var(--slate)",
+      draft_needs_context: "var(--slate)",
+      draft_needs_official_confirmation: "var(--slate)",
+      draft_needs_review: "var(--slate)",
+      draft_high_risk_review: "var(--slate)",
+      draft_disputed: "var(--slate)",
+      draft_unverified: "var(--slate)",
     };
     function verdictDotColor(label) {
-      return VERDICT_DOT_COLORS[String(label || "")] || "var(--muted)";
+      return VERDICT_DOT_COLORS[String(label || "")] || "var(--slate)";
     }
     // LABEL-1 STEP 3: verdict-pill tier class, mirroring VERDICT_DOT_COLORS above
     // (same label keys). Returns vt-green / vt-orange / vt-red / vt-muted; default

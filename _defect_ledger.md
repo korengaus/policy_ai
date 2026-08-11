@@ -62,6 +62,7 @@ State key: **FIXED** · **OPEN** · **WONTFIX** (deliberately not fixed) · **NO
 | 26 | Same card twice on one page | 7 of 58 cards in both grid and domain section | home page | 07-30 | FIXED | **NO GATE** |
 | 27 | Hero summary clipped mid-phrase | "…수료증이…" | CSS `-webkit-line-clamp:4`, `main.css:2591` | 07-31 | **OPEN** | none |
 | 28 | Sidebar "Top 5" shows 4 | ranks 1,2,4,5 | `/api/trending` row with null representative | 07-31 | **OPEN** | none |
+| 67 | Two independent axes painted identically | `.card-watch.alert-*` and `.vt-*` carried byte-identical tint pairs (`#fff7ed`/`#c2410c`, `#fef2f2`/`#b91c1c`), so 경고 단계 and AI 검증 상태 read as one severity scale on the same card row — while the detail screen states 한쪽이 다른 쪽을 결정하지는 않습니다 | `main.css:2908-2909` vs `:2972-2974`; note at `main.js:6966` | 08-11 | **OPEN** — 2c neutralised the `.vt-*` side only; the alert axis was ruled out of scope, so the tints no longer collide but the alert badge still carries orange/red on an axis colour was never asked to encode | none — no test or gate pins either rule |
 
 ## F. Weekly / claim pages (the pages the outreach emails point at)
 | # | Defect | Reader saw | Where | First | State | Gate |

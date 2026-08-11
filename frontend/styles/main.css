@@ -2969,9 +2969,15 @@
       line-height: 1.35;
       white-space: nowrap;
     }
-    .verdict-pill.vt-green  { background: #e7f6ef; color: #0e9f6e; }
-    .verdict-pill.vt-orange { background: #fff7ed; color: #c2410c; }
-    .verdict-pill.vt-red    { background: #fef2f2; color: #b91c1c; }
+    /* 2c: the four tiers render in ONE neutral pair — the same one .vt-muted
+       already used. Colour encodes NOTHING on this axis: a stored label says how
+       far evidence checking got, never whether a claim is true, and green/red are
+       read as true/false. Status is carried by the adjacent text only. NOT shades
+       of grey per tier — density would read as a gauge. Values only; the class
+       names and the map keys behind them are unchanged. */
+    .verdict-pill.vt-green  { background: #f1f5f9; color: var(--slate); }
+    .verdict-pill.vt-orange { background: #f1f5f9; color: var(--slate); }
+    .verdict-pill.vt-red    { background: #f1f5f9; color: var(--slate); }
     .verdict-pill.vt-muted  { background: #f1f5f9; color: var(--slate); }
     .verdict-dot {
       width: 9px;
