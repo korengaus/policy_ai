@@ -6898,7 +6898,11 @@
           renderCollapsibleSection(
             "출처와 공식 근거",
             `${renderSourceReliabilitySummary(sourceReliabilitySummary, cardHasGenuineOfficial)}${renderSourceCandidates(sourceCandidates, cardHasGenuineOfficial, sourceReliabilitySummary)}${renderSourceQueries(sourceQueries)}`,
-            false,
+            // 3b: opens by default, inheriting the open-by-default intent the
+            // deleted 고급 검증 정보 보기 wrapper carried. This is the section the
+            // product exists to show, so evidence lands without a second click.
+            // Its siblings all stay open=false.
+            true,
             "공식기관 후보와 언론 출처가 실제 주장 검증에 얼마나 도움이 되는지 보여줍니다."
           ),
           renderCollapsibleSection(
@@ -6925,20 +6929,15 @@
             "검수자가 분석 단계별 작동 여부와 공식 근거 확보 상태를 확인하는 요약입니다."
           ) : "",
         ].join("");
-        const advancedVerificationDetails = renderCollapsibleSection(
-          "고급 검증 정보 보기",
-          verificationDetails,
-          // MOBILE-POLISH J: the OUTER container opens by default so the rich
-          // analysis is not missed behind a closed summary. Its 8 inner
-          // sub-sections are separate renderCollapsibleSection calls that each
-          // still pass open=false, so they stay individually collapsed (headers
-          // only). The site-wide default at renderCollapsibleSection stays false.
-          true,
-          "핵심 판단을 뒷받침하는 주장 추출, 근거 매칭, 반박 검사, 프레이밍 검사, 출처 후보, 내부 점검 정보를 한곳에 모았습니다.",
-          // DESIGN-DETAIL-5d FIX 3b: mark the OUTER advanced container so CSS un-boxes
-          // only it (not the top-level reader reading-guide, which shares the class).
-          "vrf-outer"
-        );
+        // 3b: the 고급 검증 정보 보기 wrapper is GONE. It held zero content of its
+        // own — its entire body was verificationDetails, i.e. more collapsibles —
+        // so it was a summary row that bought the reader nothing while adding a
+        // whole nesting level to every section and every candidate row beneath it.
+        // MOBILE-POLISH J's intent (the rich analysis must not hide behind a closed
+        // summary) is preserved and improved: the wrapper was open=true, and now
+        // its children ARE the level, with 출처와 공식 근거 opening by default in
+        // its place. Nothing is deleted — the same six sections render, in the same
+        // order, at the same mount point, one level shallower.
         // DETAIL-IA Layer 2 — "우리가 어떻게 판단했나": the verdict block
         // (판정 단계 / AI 초안 판정 / 공식 출처 상태 + 왜 이렇게 판단했나요), the
         // 리뷰 상태 tile, and the reading guide, MOVED here byte-identical from
@@ -7015,9 +7014,9 @@
             ${renderCollapsibleSection("이 리포트는 이렇게 읽으면 됩니다", renderReadingGuide(userContext), false, "처음 보는 분을 위한 안내입니다. 경고 단계·공식 출처·근거를 어떻게 읽으면 되는지 설명합니다.")}
             <!-- STEP 2 items 6+7: the AI 종합 검증 판단 residual card. STEP 3c removed
                  the duplicate 초안 판정 tile (now led by the top verdict block); kept:
-                 리뷰 상태 + 핵심 주장 + the advanced collapsible. STEP 5: the advanced
-                 collapsible (고급 검증 정보 보기 + its 8 sub-collapsibles) is KEPT and
-                 COLLAPSED with internals UNTOUCHED — presentation redesign is DETAIL-5.
+                 리뷰 상태 + 핵심 주장 + the advanced sub-sections. 3b: the wrapper
+                 that used to hold them (고급 검증 정보 보기) is DELETED — the
+                 sub-sections mount here directly, one level shallower.
                  DETAIL-POLISH item 1: moved verbatim from its own top-level slot into
                  this block; the h3 now reads as this block's sub-heading. -->
             <section class="verification-card">
@@ -7030,8 +7029,14 @@
               ${operatorToolsFlagSet() ? renderReviewerCheckpoints(result) : ""}
               ${operatorToolsFlagSet() ? renderReviewerActionCard(result, userContext) : ""}
               <div class="news-section-title">상세 검증 정보</div>
-              <div class="reader-note">더 자세한 주장별 근거, 반박 가능성, 표현 방식 점검은 아래 고급 정보에서 펼쳐볼 수 있습니다.</div>
-              ${advancedVerificationDetails}
+              <!-- 3b-FIX: this named a control (고급 정보) that 3b deleted, and it
+                   also still promised 표현 방식 점검 — the 프레이밍/편향 검사 section
+                   CARD-SIMPLIFY took off the card. Both referents were gone. The
+                   replacement names the sections that ACTUALLY render below, using
+                   their own titles verbatim, and names no control at all, so it
+                   cannot dangle again if a wrapper moves. -->
+              <div class="reader-note">핵심 주장과 정규화, 근거 문장, 반박/모순 검사, 출처와 공식 근거, 근거 요약과 부족한 맥락을 아래에 정리합니다.</div>
+              ${verificationDetails}
             </section>
           `,
           false
@@ -7175,7 +7180,7 @@
                  into the collapsed 우리가 어떻게 판단했나 block above — two adjacent
                  blocks both named for "our judgement process" gave the reader no way
                  to tell them apart. Every child (reviewer mounts, 상세 검증 정보,
-                 고급 검증 정보 보기 + its 8 sub-collapsibles) still renders there. -->
+                 and the advanced sub-sections) still renders there. -->
             <!-- CARD-3LAYER S4a: 이미지로 공유 button — split out of the (moved)
                  spread placeholder's conditional, byte-identical markup/condition;
                  stays low near the footer while the spread section sits up top. -->
