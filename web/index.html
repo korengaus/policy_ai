@@ -19,7 +19,7 @@
   <meta property="og:image:type" content="image/png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="tickedin — 정책 뉴스 검증">
+  <meta property="og:image:alt" content="tickedin — 정책 뉴스 확산 기록">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="tickedin — 정책 뉴스 확산 기록 · 공식 근거 확인">
   <meta name="twitter:description" content="AI가 한국 정책·뉴스를 정부 공식 문서·법령과 대조해, 무엇이 공식 근거로 확인되는지 투명하게 보여주는 기록 도구. 확산 규모 기준이며 사실 검증이 아닙니다.">
@@ -5126,7 +5126,10 @@
         <a class="brand-home" href="/" aria-label="tickedin 홈으로">
           <h1 class="brand"><img class="logo-tick" src="/web/assets/favicon-180.png" alt="" aria-hidden="true">tickedin</h1>
         </a>
-        <p class="subtitle">정책 뉴스를 공식 출처로 검증합니다</p>
+        <!-- 6a: identity line — the page title's own noun phrase (:6/:16), not a
+             verb claiming verification as what we ARE. Process surfaces
+             (검증 방법, 이렇게 검증합니다) describe what we DO and stay. -->
+        <p class="subtitle">정책 뉴스 확산 기록</p>
       </div>
       <!-- DESIGN-3A2: compact search relocated into the brand row (right side).
            The whole section + every analyze id (#query/#maxNews/#analyzeBtn/
@@ -5369,9 +5372,9 @@
           </div>
           <!-- LABEL-1 STEP 5: legend rebuilt into TWO labeled axes. GROUP 1 (공식 근거)
                = evidence-presence layer, colors matched to the card's green evidence pill
-               (.card-source-head) + the blue 공식자료 참고 status. GROUP 2 (AI 검증 상태) = the
-               verdict-dot color axis (green/orange/red/muted), now INCLUDING the previously
-               missing green draft_verified row. Colors mirror the card labels exactly. -->
+               (.card-source-head) + the blue 공식자료 참고 status. GROUP 2 (AI 검증 상태):
+               2c neutralised the verdict colour axis and 6a removed these rows'
+               dots entirely — text labels only, mirroring the card labels. -->
           <!-- LABEL-1b STEP 1: each row's leading mark (✓ swatch OR round dot) is
                wrapped in a fixed 18px .legend-lead cell so every row LABEL left-aligns
                regardless of the mark's own width. Group headers have no lead cell. -->
@@ -5389,20 +5392,28 @@
               <div class="legend-body"><span class="legend-label">공식자료 참고</span></div>
             </li>
             <li class="legend-group-head">AI 검증 상태</li>
+            <!-- 6a: the verdict-axis dots are GONE from these four rows. 2c made
+                 all four render the identical neutral slate, so four dots implied
+                 four distinguishable marks that did not exist — the LABEL text is
+                 what distinguishes the states, and it stays byte-identical. The
+                 empty .legend-lead cell is kept on purpose: it is the fixed 18px
+                 spacer that left-aligns these labels with the 공식 근거 group
+                 above (whose ✓ swatch and --brand dot are the evidence axis,
+                 still accurate, untouched). No new CSS needed. -->
             <li class="legend-row">
-              <span class="legend-lead"><span class="verdict-dot" style="background:var(--slate)"></span></span>
+              <span class="legend-lead"></span>
               <div class="legend-body"><span class="legend-label">공식 근거 확인, 사람 검토 대기</span></div>
             </li>
             <li class="legend-row">
-              <span class="legend-lead"><span class="verdict-dot" style="background:var(--slate)"></span></span>
+              <span class="legend-lead"></span>
               <div class="legend-body"><span class="legend-label">검토 필요</span></div>
             </li>
             <li class="legend-row">
-              <span class="legend-lead"><span class="verdict-dot" style="background:var(--slate)"></span></span>
+              <span class="legend-lead"></span>
               <div class="legend-body"><span class="legend-label">상충·오해 가능성</span></div>
             </li>
             <li class="legend-row">
-              <span class="legend-lead"><span class="verdict-dot" style="background:var(--slate)"></span></span>
+              <span class="legend-lead"></span>
               <div class="legend-body"><span class="legend-label">추가 검증 필요</span></div>
             </li>
           </ul>
