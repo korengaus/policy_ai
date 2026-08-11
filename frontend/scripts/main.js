@@ -459,20 +459,24 @@
     ];
     // DESIGN-C3h-2: static per-domain section subtitles (display-only UI copy; no
     // per-card data). Keyed by the raw domain key (note "기타-미분류").
+    // 6c: identity strings — the sections record circulation, they do not issue
+    // 검증. Trailing 검증 → 확산 기록 (the title's shipped noun), pattern applied
+    // to all 13 incl. the two irregular forms (finance 정책·제도, statistics
+    // 공식 통계·지표).
     const DOMAIN_SUBTITLE = {
-      realestate: "주택·부동산 정책 뉴스 검증",
-      finance: "금융 정책·제도 뉴스 검증",
-      welfare: "복지 정책 뉴스 검증",
-      labor: "노동·고용 정책 뉴스 검증",
-      health: "보건·의료 정책 뉴스 검증",
-      environment: "환경·에너지 정책 뉴스 검증",
-      SMB: "소상공인 정책 뉴스 검증",
-      agriculture: "농업·농촌 정책 뉴스 검증",
-      statistics: "공식 통계·지표 검증",
-      education: "교육 정책 뉴스 검증",
-      scitech: "과학기술·AI 정책 뉴스 검증",
-      trade: "산업·통상 정책 뉴스 검증",
-      "기타-미분류": "기타 정책 뉴스 검증",
+      realestate: "주택·부동산 정책 뉴스 확산 기록",
+      finance: "금융 정책·제도 뉴스 확산 기록",
+      welfare: "복지 정책 뉴스 확산 기록",
+      labor: "노동·고용 정책 뉴스 확산 기록",
+      health: "보건·의료 정책 뉴스 확산 기록",
+      environment: "환경·에너지 정책 뉴스 확산 기록",
+      SMB: "소상공인 정책 뉴스 확산 기록",
+      agriculture: "농업·농촌 정책 뉴스 확산 기록",
+      statistics: "공식 통계·지표 확산 기록",
+      education: "교육 정책 뉴스 확산 기록",
+      scitech: "과학기술·AI 정책 뉴스 확산 기록",
+      trade: "산업·통상 정책 뉴스 확산 기록",
+      "기타-미분류": "기타 정책 뉴스 확산 기록",
     };
     // Normalize a card's domain to a comparison key. Missing/empty domain falls
     // into the "기타-미분류" bucket so a card is NEVER dropped (removal-free).
@@ -2512,7 +2516,7 @@
       if (!safeResults.length) {
         selectedIssueIntroEl.style.display = "";
         selectedIssueIntroEl.innerHTML = `
-          <h2>선택한 이슈 검증 리포트</h2>
+          <h2>선택한 이슈 확산 기록</h2>
           <p>관심 있는 이슈의 상세 보기를 누르거나 검색어를 입력하면, 현재 확보 가능한 기사와 공식 자료를 기준으로 검증 리포트가 표시됩니다.</p>
         `;
         return;
@@ -2807,7 +2811,7 @@
         { title: result?.title, original_url: result?.original_url || record?.original_url },
         feedOutletTailEvidence());
       const cardTitle = stripVerifiedOutletTail(
-        stripLeadingTitleMarker(publicInstitutionName(result?.title || record?.query || "검증 뉴스")),
+        stripLeadingTitleMarker(publicInstitutionName(result?.title || record?.query || "정책 뉴스")),
         result?.original_url || record?.original_url || "",
         feedOutletTailEvidence());
       const strippedSummary = stripCardFaceWrapper(topSummaryLine(result));
@@ -2989,7 +2993,7 @@
           <div class="topic-card-top">
             <span class="card-domain">${domainIconMarkup(cardDomainKey(card))}${escapeHtml(domainDisplayLabel(cardDomainKey(card)))}</span>
             <span class="card-watch ${alertClass(card.alert)}">${escapeHtml(formatAlert(card.alert))}</span>
-            ${isTodayCard(card) ? `<span class="card-today-badge">오늘 검증</span>` : ""}
+            ${isTodayCard(card) ? `<span class="card-today-badge">오늘 기록</span>` : ""}
             ${(card.contentNature === "market_commercial" && !card.hasGenuineOfficial) ? `<span class="card-today-badge">시장·시세</span>` : ""}
             ${card.freshness ? `<span class="card-fresh">🔥 ${escapeHtml(FRESHNESS_BADGE_LABEL)}</span>` : ""}
             ${card.humanReviewedAt ? `<span class="review-status review-approved">${escapeHtml(HUMAN_REVIEWED_LABEL)}</span>` : ""}
@@ -3575,7 +3579,7 @@
         el.hidden = true;
         return;
       }
-      el.innerHTML = `<div class="recent-viewed-heading">최근 본 검증</div>`
+      el.innerHTML = `<div class="recent-viewed-heading">최근 본 기록</div>`
         + `<div class="recent-viewed-strip">${items.join("")}</div>`;
       el.hidden = false;
     }
@@ -7186,7 +7190,7 @@
               <div class="platform-kicker">
                 <span class="card-watch ${alertClass(level)}">${escapeHtml(formatAlert(level))}</span>
                 <span class="card-domain">${escapeHtml(topic)}</span>
-                <span class="card-domain">검증 뉴스</span>
+                <span class="card-domain">정책 뉴스</span>
                 ${renderAiStatusBadge(result)}
               </div>
               <h2 class="result-title">
@@ -9975,7 +9979,7 @@
         if (record) {
           // DETAIL-FIX B: loadHistoryRecord is async; it scrolls to the report top
           // itself AFTER renderResults paints (scrolling here would fire pre-render).
-          loadHistoryRecord(record, `"${record.query || "검증 뉴스"}" 카드를 불러왔습니다.`, selectedResultIndex);
+          loadHistoryRecord(record, `"${record.query || "정책 뉴스"}" 카드를 불러왔습니다.`, selectedResultIndex);
           return;
         }
       }

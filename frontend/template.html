@@ -97,7 +97,7 @@
              and is revealed by renderWeeklyStats only once a real number lands, so a
              missing/older payload degrades to the 이번 주 clause alone rather than
              showing a fabricated total. Replaces the old 검증 진행 (draft) figure. -->
-        <span class="utility-counts"><span id="utilityCumulativeClause" hidden>누적 검증 <strong class="utility-count-num" id="utilityTotalCount">—</strong>건 · </span>이번 주 <strong class="utility-count-num" id="utilityUpdateCount">—</strong>건</span>
+        <span class="utility-counts"><span id="utilityCumulativeClause" hidden>누적 기록 <strong class="utility-count-num" id="utilityTotalCount">—</strong>건 · </span>이번 주 <strong class="utility-count-num" id="utilityUpdateCount">—</strong>건</span>
       </div>
       <!-- NAV-RESTRUCTURE: this header carries the CONTENT/FEATURE destinations only.
            The two SITE-UNDERSTANDING links (검증 방법 / 등급·상태 안내) live in the tab
@@ -123,7 +123,9 @@
         <!-- 6a: identity line — the page title's own noun phrase (:6/:16), not a
              verb claiming verification as what we ARE. Process surfaces
              (검증 방법, 이렇게 검증합니다) describe what we DO and stay. -->
-        <p class="subtitle">정책 뉴스 확산 기록</p>
+        <!-- 6c: BOTH axes, the title's own full phrase (:6) — 6a's edit dropped
+             the second half and understated the real official-evidence work. -->
+        <p class="subtitle">정책 뉴스 확산 기록 · 공식 근거 확인</p>
       </div>
       <!-- DESIGN-3A2: compact search relocated into the brand row (right side).
            The whole section + every analyze id (#query/#maxNews/#analyzeBtn/
@@ -134,7 +136,7 @@
         <div class="controls">
           <div>
             <label for="query">검색어</label>
-            <input id="query" type="text" placeholder="주장·키워드로 검증 결과 검색" autocomplete="off" maxlength="200">
+            <input id="query" type="text" placeholder="주장·키워드로 기록 검색" autocomplete="off" maxlength="200">
           </div>
           <div>
             <label for="maxNews">뉴스 개수</label>
@@ -267,7 +269,7 @@
         </div>
         <section class="news-home-section">
           <div id="hotTopics" class="topic-card-grid">
-            <div class="empty-state">분석을 실행하거나 최근 분석을 불러오면 검증 뉴스 카드가 표시됩니다.</div>
+            <div class="empty-state">분석을 실행하거나 최근 분석을 불러오면 정책 뉴스 카드가 표시됩니다.</div>
           </div>
           <!-- PAGINATION-CENTER: #feedPagination was moved OUT of this left-column
                section to a full-width .pagination-full row (3rd child of .home-shell,
@@ -332,15 +334,15 @@
              read-only GET /stats (renderWeeklyStats fills #statTotal/#statOfficial/
              #statDraft + #statRange). Shows "–" until the fetch resolves and on
              failure (fail-quiet). No hardcoded numbers. -->
-        <section class="stat-panel" aria-label="최근 7일 검증 현황">
+        <section class="stat-panel" aria-label="최근 7일 기록 현황">
           <div class="rank-panel-heading">
-            <h2>최근 7일 검증 현황</h2>
+            <h2>최근 7일 기록 현황</h2>
             <p id="statRange">최근 7일</p>
           </div>
           <div class="stat-row">
             <div class="stat-cell">
               <div id="statTotal" class="stat-num">–</div>
-              <div class="stat-label">총검증</div>
+              <div class="stat-label">총기록</div>
             </div>
             <div class="stat-cell">
               <div id="statOfficial" class="stat-num">–</div>
@@ -360,9 +362,11 @@
         <!-- MOBILE-POLISH G(c): #gradeLegend is the scroll target for the footer's
              등급 안내 link. The panel lives inside #homeScreen, so the handler shows
              home first, then scrolls here. -->
-        <section id="gradeLegend" class="legend-panel" aria-label="검증 등급 안내">
+        <!-- 6c: 검증 등급 → 상태 안내 — we do not issue grades; the panel explains
+             the status labels. aria-label changed WITH its heading, never alone. -->
+        <section id="gradeLegend" class="legend-panel" aria-label="상태 안내">
           <div class="rank-panel-heading">
-            <h2>검증 등급</h2>
+            <h2>상태 안내</h2>
           </div>
           <!-- LABEL-1 STEP 5: legend rebuilt into TWO labeled axes. GROUP 1 (공식 근거)
                = evidence-presence layer, colors matched to the card's green evidence pill
@@ -829,7 +833,7 @@
     </section>
 
     <section id="selectedIssueIntro" class="selected-issue-intro">
-      <h2>선택한 이슈 검증 리포트</h2>
+      <h2>선택한 이슈 확산 기록</h2>
       <p>관심 있는 이슈의 상세 보기를 누르거나 검색어를 입력하면 검증 리포트가 표시됩니다.</p>
     </section>
 

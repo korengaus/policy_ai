@@ -5103,7 +5103,7 @@
              and is revealed by renderWeeklyStats only once a real number lands, so a
              missing/older payload degrades to the 이번 주 clause alone rather than
              showing a fabricated total. Replaces the old 검증 진행 (draft) figure. -->
-        <span class="utility-counts"><span id="utilityCumulativeClause" hidden>누적 검증 <strong class="utility-count-num" id="utilityTotalCount">—</strong>건 · </span>이번 주 <strong class="utility-count-num" id="utilityUpdateCount">—</strong>건</span>
+        <span class="utility-counts"><span id="utilityCumulativeClause" hidden>누적 기록 <strong class="utility-count-num" id="utilityTotalCount">—</strong>건 · </span>이번 주 <strong class="utility-count-num" id="utilityUpdateCount">—</strong>건</span>
       </div>
       <!-- NAV-RESTRUCTURE: this header carries the CONTENT/FEATURE destinations only.
            The two SITE-UNDERSTANDING links (검증 방법 / 등급·상태 안내) live in the tab
@@ -5129,7 +5129,9 @@
         <!-- 6a: identity line — the page title's own noun phrase (:6/:16), not a
              verb claiming verification as what we ARE. Process surfaces
              (검증 방법, 이렇게 검증합니다) describe what we DO and stay. -->
-        <p class="subtitle">정책 뉴스 확산 기록</p>
+        <!-- 6c: BOTH axes, the title's own full phrase (:6) — 6a's edit dropped
+             the second half and understated the real official-evidence work. -->
+        <p class="subtitle">정책 뉴스 확산 기록 · 공식 근거 확인</p>
       </div>
       <!-- DESIGN-3A2: compact search relocated into the brand row (right side).
            The whole section + every analyze id (#query/#maxNews/#analyzeBtn/
@@ -5140,7 +5142,7 @@
         <div class="controls">
           <div>
             <label for="query">검색어</label>
-            <input id="query" type="text" placeholder="주장·키워드로 검증 결과 검색" autocomplete="off" maxlength="200">
+            <input id="query" type="text" placeholder="주장·키워드로 기록 검색" autocomplete="off" maxlength="200">
           </div>
           <div>
             <label for="maxNews">뉴스 개수</label>
@@ -5273,7 +5275,7 @@
         </div>
         <section class="news-home-section">
           <div id="hotTopics" class="topic-card-grid">
-            <div class="empty-state">분석을 실행하거나 최근 분석을 불러오면 검증 뉴스 카드가 표시됩니다.</div>
+            <div class="empty-state">분석을 실행하거나 최근 분석을 불러오면 정책 뉴스 카드가 표시됩니다.</div>
           </div>
           <!-- PAGINATION-CENTER: #feedPagination was moved OUT of this left-column
                section to a full-width .pagination-full row (3rd child of .home-shell,
@@ -5338,15 +5340,15 @@
              read-only GET /stats (renderWeeklyStats fills #statTotal/#statOfficial/
              #statDraft + #statRange). Shows "–" until the fetch resolves and on
              failure (fail-quiet). No hardcoded numbers. -->
-        <section class="stat-panel" aria-label="최근 7일 검증 현황">
+        <section class="stat-panel" aria-label="최근 7일 기록 현황">
           <div class="rank-panel-heading">
-            <h2>최근 7일 검증 현황</h2>
+            <h2>최근 7일 기록 현황</h2>
             <p id="statRange">최근 7일</p>
           </div>
           <div class="stat-row">
             <div class="stat-cell">
               <div id="statTotal" class="stat-num">–</div>
-              <div class="stat-label">총검증</div>
+              <div class="stat-label">총기록</div>
             </div>
             <div class="stat-cell">
               <div id="statOfficial" class="stat-num">–</div>
@@ -5366,9 +5368,11 @@
         <!-- MOBILE-POLISH G(c): #gradeLegend is the scroll target for the footer's
              등급 안내 link. The panel lives inside #homeScreen, so the handler shows
              home first, then scrolls here. -->
-        <section id="gradeLegend" class="legend-panel" aria-label="검증 등급 안내">
+        <!-- 6c: 검증 등급 → 상태 안내 — we do not issue grades; the panel explains
+             the status labels. aria-label changed WITH its heading, never alone. -->
+        <section id="gradeLegend" class="legend-panel" aria-label="상태 안내">
           <div class="rank-panel-heading">
-            <h2>검증 등급</h2>
+            <h2>상태 안내</h2>
           </div>
           <!-- LABEL-1 STEP 5: legend rebuilt into TWO labeled axes. GROUP 1 (공식 근거)
                = evidence-presence layer, colors matched to the card's green evidence pill
@@ -5835,7 +5839,7 @@
     </section>
 
     <section id="selectedIssueIntro" class="selected-issue-intro">
-      <h2>선택한 이슈 검증 리포트</h2>
+      <h2>선택한 이슈 확산 기록</h2>
       <p>관심 있는 이슈의 상세 보기를 누르거나 검색어를 입력하면 검증 리포트가 표시됩니다.</p>
     </section>
 
@@ -6698,20 +6702,24 @@
     ];
     // DESIGN-C3h-2: static per-domain section subtitles (display-only UI copy; no
     // per-card data). Keyed by the raw domain key (note "기타-미분류").
+    // 6c: identity strings — the sections record circulation, they do not issue
+    // 검증. Trailing 검증 → 확산 기록 (the title's shipped noun), pattern applied
+    // to all 13 incl. the two irregular forms (finance 정책·제도, statistics
+    // 공식 통계·지표).
     const DOMAIN_SUBTITLE = {
-      realestate: "주택·부동산 정책 뉴스 검증",
-      finance: "금융 정책·제도 뉴스 검증",
-      welfare: "복지 정책 뉴스 검증",
-      labor: "노동·고용 정책 뉴스 검증",
-      health: "보건·의료 정책 뉴스 검증",
-      environment: "환경·에너지 정책 뉴스 검증",
-      SMB: "소상공인 정책 뉴스 검증",
-      agriculture: "농업·농촌 정책 뉴스 검증",
-      statistics: "공식 통계·지표 검증",
-      education: "교육 정책 뉴스 검증",
-      scitech: "과학기술·AI 정책 뉴스 검증",
-      trade: "산업·통상 정책 뉴스 검증",
-      "기타-미분류": "기타 정책 뉴스 검증",
+      realestate: "주택·부동산 정책 뉴스 확산 기록",
+      finance: "금융 정책·제도 뉴스 확산 기록",
+      welfare: "복지 정책 뉴스 확산 기록",
+      labor: "노동·고용 정책 뉴스 확산 기록",
+      health: "보건·의료 정책 뉴스 확산 기록",
+      environment: "환경·에너지 정책 뉴스 확산 기록",
+      SMB: "소상공인 정책 뉴스 확산 기록",
+      agriculture: "농업·농촌 정책 뉴스 확산 기록",
+      statistics: "공식 통계·지표 확산 기록",
+      education: "교육 정책 뉴스 확산 기록",
+      scitech: "과학기술·AI 정책 뉴스 확산 기록",
+      trade: "산업·통상 정책 뉴스 확산 기록",
+      "기타-미분류": "기타 정책 뉴스 확산 기록",
     };
     // Normalize a card's domain to a comparison key. Missing/empty domain falls
     // into the "기타-미분류" bucket so a card is NEVER dropped (removal-free).
@@ -8751,7 +8759,7 @@
       if (!safeResults.length) {
         selectedIssueIntroEl.style.display = "";
         selectedIssueIntroEl.innerHTML = `
-          <h2>선택한 이슈 검증 리포트</h2>
+          <h2>선택한 이슈 확산 기록</h2>
           <p>관심 있는 이슈의 상세 보기를 누르거나 검색어를 입력하면, 현재 확보 가능한 기사와 공식 자료를 기준으로 검증 리포트가 표시됩니다.</p>
         `;
         return;
@@ -9046,7 +9054,7 @@
         { title: result?.title, original_url: result?.original_url || record?.original_url },
         feedOutletTailEvidence());
       const cardTitle = stripVerifiedOutletTail(
-        stripLeadingTitleMarker(publicInstitutionName(result?.title || record?.query || "검증 뉴스")),
+        stripLeadingTitleMarker(publicInstitutionName(result?.title || record?.query || "정책 뉴스")),
         result?.original_url || record?.original_url || "",
         feedOutletTailEvidence());
       const strippedSummary = stripCardFaceWrapper(topSummaryLine(result));
@@ -9228,7 +9236,7 @@
           <div class="topic-card-top">
             <span class="card-domain">${domainIconMarkup(cardDomainKey(card))}${escapeHtml(domainDisplayLabel(cardDomainKey(card)))}</span>
             <span class="card-watch ${alertClass(card.alert)}">${escapeHtml(formatAlert(card.alert))}</span>
-            ${isTodayCard(card) ? `<span class="card-today-badge">오늘 검증</span>` : ""}
+            ${isTodayCard(card) ? `<span class="card-today-badge">오늘 기록</span>` : ""}
             ${(card.contentNature === "market_commercial" && !card.hasGenuineOfficial) ? `<span class="card-today-badge">시장·시세</span>` : ""}
             ${card.freshness ? `<span class="card-fresh">🔥 ${escapeHtml(FRESHNESS_BADGE_LABEL)}</span>` : ""}
             ${card.humanReviewedAt ? `<span class="review-status review-approved">${escapeHtml(HUMAN_REVIEWED_LABEL)}</span>` : ""}
@@ -9814,7 +9822,7 @@
         el.hidden = true;
         return;
       }
-      el.innerHTML = `<div class="recent-viewed-heading">최근 본 검증</div>`
+      el.innerHTML = `<div class="recent-viewed-heading">최근 본 기록</div>`
         + `<div class="recent-viewed-strip">${items.join("")}</div>`;
       el.hidden = false;
     }
@@ -13425,7 +13433,7 @@
               <div class="platform-kicker">
                 <span class="card-watch ${alertClass(level)}">${escapeHtml(formatAlert(level))}</span>
                 <span class="card-domain">${escapeHtml(topic)}</span>
-                <span class="card-domain">검증 뉴스</span>
+                <span class="card-domain">정책 뉴스</span>
                 ${renderAiStatusBadge(result)}
               </div>
               <h2 class="result-title">
@@ -16214,7 +16222,7 @@
         if (record) {
           // DETAIL-FIX B: loadHistoryRecord is async; it scrolls to the report top
           // itself AFTER renderResults paints (scrolling here would fire pre-render).
-          loadHistoryRecord(record, `"${record.query || "검증 뉴스"}" 카드를 불러왔습니다.`, selectedResultIndex);
+          loadHistoryRecord(record, `"${record.query || "정책 뉴스"}" 카드를 불러왔습니다.`, selectedResultIndex);
           return;
         }
       }
