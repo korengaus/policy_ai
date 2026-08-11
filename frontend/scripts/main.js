@@ -2331,9 +2331,25 @@
       // DESIGN-DETAIL-5d FIX 1: show the first 6 candidates; the rest go inside a
       // "전체 보기" expander. ALL N candidates stay in the DOM (the overflow ones are
       // inside the nested <details>) — no truncation, just not all visible at once.
+      // 3a-2: the inline set is CONTRIBUTING rows only, not "the first 6". A
+      // reader opening a 대전 동구 welfare card met 외교부 / 소방청 / 해양수산부
+      // inline — candidates the system fetched, read and correctly discarded.
+      // The predicate is the SHIPPED one, called exactly as renderCand calls it
+      // (sourceTraceability with the same {} row-level summary and the same
+      // cardHasGenuineOfficial): a row contributes iff its trace tier is
+      // 공식 직접 근거 / 공식 맥락 근거 / 뉴스 원문. No new condition, no
+      // threshold, nothing about #20's matcher. Everything else — plus any
+      // contributing row past the existing 6-row cap — falls into the SAME
+      // .vrf-cand-more expander that already exists, in original order, so no
+      // candidate leaves the DOM and the full roster also ships in the report.
+      const CONTRIBUTING_TIERS = ["trace-direct", "trace-context", "trace-news"];
       const VISIBLE = 6;
-      const head = list.slice(0, VISIBLE);
-      const overflow = list.slice(VISIBLE);
+      const head = list
+        .filter((source) => CONTRIBUTING_TIERS.includes(
+          sourceTraceability(source, {}, cardHasGenuineOfficial).className))
+        .slice(0, VISIBLE);
+      const inline = new Set(head);
+      const overflow = list.filter((source) => !inline.has(source));
       // CANDIDATE-SECTION-FRAMING: "공식 출처 후보 N개" read as "N pieces of
       // candidate evidence" on cards whose roster is in fact swept-and-set-
       // aside. The heading now states the split, reusing EXACTLY the shipped
@@ -2353,7 +2369,7 @@
           : `공식 출처 후보 ${list.length}개 중 ${excludedCount}개 직접 근거에서 제외됨`);
       return `
         <div class="vrf-cand-count">${countLine}</div>
-        <div class="vrf-cand-list">${head.map(renderCand).join("")}</div>
+        ${head.length ? `<div class="vrf-cand-list">${head.map(renderCand).join("")}</div>` : ""}
         ${overflow.length ? `
           <details class="vrf-cand-more">
             <summary class="vrf-cand-more-summary">공식 출처 후보 ${list.length}개 전체 보기</summary>
