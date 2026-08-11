@@ -194,10 +194,18 @@
     // the old resultCategory()-based activeCategory tab filter.
     let activeDomain = "전체";
     // HOMEPAGE-TIERED: client-side sort over the ≤50-item ranked pool. No
-    // server-side view/engagement counter exists (honest signals only), so the
-    // default "뜨는순" is a composite proxy: 위험도(alert) → freshness → 신뢰도
-    // → recency tiebreak (stable sort preserves server id-DESC order).
-    let activeSort = "뜨는순";
+    // server-side view/engagement counter exists (honest signals only). The
+    // "뜨는순" composite proxy (위험도(alert) → freshness → 신뢰도) stays as an
+    // option, labelled 주목순.
+    // 5d1: the DEFAULT is now circulation — 전체 기간 매체 수 순, the ordering
+    // weekly.html has published for six weeks. The product records circulation;
+    // ordering by the judgement axes (alert × confidence) asserted exactly what
+    // the product says it does not. The basis is stated on screen (the
+    // #feedSortBasis line), mitigating the importance reading, exactly as
+    // weekly states its own. Hero band + the 13 domain sections deliberately
+    // KEEP 뜨는순 (their ids sit outside the pooled size call) — a stated
+    // asymmetry, not drift.
+    let activeSort = "전체 기간 매체 수 순";
     // DESIGN-C3-2: page-number pagination over the post-hero grid — 12 cards/page
     // (3×4). currentPage is module state (survives a card-open → detail → BACK
     // round-trip with no reload, so BACK returns to the SAME page); it resets to 1
@@ -280,6 +288,35 @@
     // top hot-topic area when there is no live session search. Populated on
     // load from GET /history; never written to localStorage.
     let serverHotTopicResults = [];
+    // 5d1: whole-pool cluster sizes for the circulation sort — the SAME batched
+    // /api/cluster-sizes endpoint the card chips use (5-min HTTP cache), called
+    // once per pool BEFORE that pool's first paint (fetch-then-render, so the
+    // default order never visibly reshuffles). The API omits <2-outlet and
+    // never-clustered ids on purpose; only counts >= 2 enter this map, so an
+    // absent id means "no recorded 2+ spread" — those cards sort to the tail,
+    // uncaptioned (labelling them would need a string this codebase does not
+    // have, and "1개 매체" would be false for never-clustered rows). On fetch
+    // failure the map simply stays as-is and the sort degrades to server order
+    // (id DESC = 최신순) — a defined order, never blank.
+    const clusterSizeMap = new Map();
+    async function loadClusterSizesForSort(results) {
+      try {
+        const ids = [...new Set((Array.isArray(results) ? results : [])
+          .map((r) => Number(r?.result_id))
+          .filter((n) => Number.isInteger(n) && n > 0))].slice(0, 60);
+        if (!ids.length) return;
+        const response = await fetch(`${API_BASE}/api/cluster-sizes?ids=${encodeURIComponent(ids.join(","))}`);
+        if (!response.ok) return;
+        const data = await response.json();
+        const sizes = data && data.sizes ? data.sizes : {};
+        for (const [rid, count] of Object.entries(sizes)) {
+          const n = Number(count);
+          if (Number.isFinite(n) && n >= 2) clusterSizeMap.set(Number(rid), n);
+        }
+      } catch (_) {
+        // fail-silent: sort degrades to server order; the feed must never break
+      }
+    }
     // STABLE-TABS S2: in-memory (no localStorage) cache of domain-scoped feed
     // results, keyed by the STORED English domain key (e.g. "realestate"). A
     // domain tab click fetches GET /history?domain=<key> once and reuses the
@@ -2871,6 +2908,14 @@
           // existing hasGenuineOfficial predicate; never recomputed.
           + ((c.contentNature === "market_commercial" && !c.hasGenuineOfficial) ? -1000000 : 0);
         list.sort((a, b) => score(b) - score(a));
+      } else if (sortKey === "전체 기간 매체 수 순") {
+        // 5d1: circulation order — outlet count from clusterSizeMap, desc.
+        // Absent-from-map = 0, so cards with no recorded 2+ spread trail as
+        // plain cards in the stable sort's input order (server id-DESC). NOT
+        // captioned, NOT collapsed, never rendered as "1개 매체". A count is a
+        // recorded fact, not importance — the on-screen basis line says so.
+        const outletCount = (c) => clusterSizeMap.get(Number(c.recordId)) || 0;
+        list.sort((a, b) => outletCount(b) - outletCount(a));
       } else if (sortKey === "위험도순") {
         list.sort((a, b) => (ALERT_RANK[b.alert] || 0) - (ALERT_RANK[a.alert] || 0));
       } else if (sortKey === "검토됨 우선") {
@@ -3256,6 +3301,12 @@
 
     function renderHotTopics(preferredResults) {
       if (!hotTopicsEl) return;
+      // 5d1: the on-screen sorting BASIS (static #feedSortBasis node in the
+      // .feed-sort-row). Visible ONLY while the circulation sort is active —
+      // other sorts hide it rather than claim a basis they don't use. Toggled
+      // on every paint so tab/sort changes can never leave it stale.
+      const sortBasisEl = document.getElementById("feedSortBasis");
+      if (sortBasisEl) sortBasisEl.hidden = activeSort !== "전체 기간 매체 수 순";
       const allCards = currentTopicCards(preferredResults);
       // HOME-TOP5 S5b: 오늘의 한 장 applies ONLY to the genuine 전체 home feed —
       // never to a domain tab's hero or a search/preferred-results render.
@@ -8783,7 +8834,16 @@
         } else {
           domainResultsCache.set(domainKey, results);
         }
-        if (activeDomain === domainKey) renderHotTopics();
+        // 5d1: domain pools get their sizes the same fetch-then-render way (one
+        // batched call per ≤50-row domain pool, then the repaint) so the
+        // circulation default holds on domain tabs too — the loading line is
+        // already showing, so this adds no flash. Failure degrades identically.
+        const repaintIfActive = () => { if (activeDomain === domainKey) renderHotTopics(); };
+        if (Array.isArray(results) && results.length) {
+          loadClusterSizesForSort(results).then(repaintIfActive);
+        } else {
+          repaintIfActive();
+        }
       });
     }
 
@@ -11240,6 +11300,12 @@
     (async () => {
       const serverResults = await getServerRecentAnalyses();
       if (serverResults.length) {
+        // 5d1: fetch-then-render — the size map lands BEFORE the pool's first
+        // paint, so the circulation default paints sorted once instead of
+        // flashing server order and reshuffling. Costs one sequential request
+        // (5-min HTTP cache); on failure the map stays empty and this renders
+        // in server order (id DESC), a defined degrade.
+        await loadClusterSizesForSort(serverResults);
         serverHotTopicResults = serverResults;
         renderHotTopics();
       }
