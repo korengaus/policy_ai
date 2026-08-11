@@ -13250,6 +13250,30 @@
               ${(hasFocus || displayResults.length === 1) && Number(result.result_id) > 0 ? `<div class="answer-line" data-answer-id="${Number(result.result_id)}" data-answer-official="${answerOfficialMode}" style="margin-top:8px;" hidden></div>` : ""}
             </div>
 
+            <!-- 3c: the card's own AI 검증 상태, promoted out of the closed
+                 우리가 어떻게 판단했나 block. The kicker above carries the ALERT axis
+                 and the AI-assist chip — neither is this — so a reader who opened
+                 the detail could not see the status the card face had just shown
+                 them. Identical call to the in-section copy below
+                 (safeAiDraftVerdictForExport(result)) on the same result, so the
+                 two can never disagree; that copy STAYS, because the dual-axis
+                 reader-note beside it explains this value. UNGATED on purpose: the
+                 quiet-card value 사람 검토 대기 states our own process state, true by
+                 construction, not a claim about the world — so unlike the 2a
+                 sentence there is nothing here to guard against. Same classes as
+                 the in-section copy (no grid dependency), existing label text, no
+                 colour, badge or icon.
+                 ORDER: this sits ABOVE the contradiction note. It is the card's
+                 STANDING state and frames everything after it, including that
+                 sentence, which is a signal about THIS card and reads as the
+                 reason for the state — general before specific. It is also
+                 unconditional while the note is gated, so the header's first line
+                 never disappears. -->
+            <div class="verdict-indicator">
+              <span class="verdict-label">AI 검증 상태</span>
+              <span class="verdict-value">${escapeHtml(safeAiDraftVerdictForExport(result))}</span>
+            </div>
+
             <!-- 2a: the contradiction explanation, surfaced here as its ONE reader
                  surface (it was previously only inside the reading guide, two
                  collapses down, and was sliced off the 3-bullet list entirely).
