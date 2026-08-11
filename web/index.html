@@ -12653,11 +12653,32 @@
             : nearShown >= 1
               ? `<div class="spread-syndication-line">이 중 ${escapeHtml(nearShown)}개 매체는 첫 보도와 제목·주장 문구가 거의 동일합니다.${exactNote}</div>`
               : `<div class="spread-syndication-line">첫 보도와 제목·주장 문구가 거의 동일한 매체는 없습니다.</div>`;
+          // 4b: the ARTICLE count beside the OUTLET count. The block stated only
+          // "{N}개 매체", so 40 outlets / 158 articles and 40 / 40 read identically
+          // to a reader. api_server.py:1566 records the two as deliberately
+          // separate fields — "conflating them would overstate reach (78 vs 156)"
+          // — and cluster.size is the article-row count that was never drawn.
+          // NO new sentence pattern: 기사 {N}건 is the shipped form
+          // web/claim.html:392 uses for the SAME quantity (cluster.member_count),
+          // and (수집 기사 기준) is this block's own qualifier, taken from the
+          // 확산 기간 line below. Circulation fact only — no chart, no ordering,
+          // no emphasis, nothing implying importance.
+          // Renders NOTHING when size is absent/null/non-finite (legacy graph
+          // rows predate the field), and ALSO nothing when size < outletCount:
+          // the two are precomputed separately, so that combination is
+          // inconsistent data, and printing 기사 30건 under 79개 매체 would put a
+          // self-contradiction on the reader's screen. Suppressing is honest;
+          // guessing which of the two is right would not be.
+          const memberSize = Number(data?.cluster?.size);
+          const sizeLine = Number.isFinite(memberSize) && memberSize >= outletCount
+            ? `<div class="spread-size-line">기사 ${escapeHtml(memberSize)}건 (수집 기사 기준)</div>`
+            : "";
           // DETAIL-IA MERGE: this div is a CHILD of the 얼마나 퍼졌나 wrapper —
           // the section h3 and the ONE consolidated caveat live on the wrapper
           // (the old per-part h3/caveat here were consolidated, not deleted).
           section.innerHTML = `
             <div>이 주장과 유사한 내용이 ${escapeHtml(outletCount)}개 매체에서 보도되었습니다.</div>
+            ${sizeLine}
             ${corpusDistributionHtml(data?.corpus_outlet_distribution, outletCount)}
             ${syndicationLine}
             ${timelineLine}
