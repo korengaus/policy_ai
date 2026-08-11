@@ -2999,8 +2999,13 @@
           ${hashtagRow}
           <div class="topic-card-verdict">
             ${sourcePill}
+            <!-- 6b: the verdict dot is GONE — after 2c every tier's dot rendered
+                 the identical neutral slate, so the mark distinguished nothing,
+                 and 6a already removed its legend rows' dots; card and legend now
+                 agree. The status TEXT beside it carries the state, unchanged.
+                 Pill, classes and label text untouched; the evidence-axis ✓ pill
+                 is a different axis and stays. -->
             <span class="verdict-pill ${verdictTierClass(card.verdictLabel)}">
-              <span class="verdict-dot" style="background:${verdictDotColor(card.verdictLabel)}"></span>
               <span class="verdict-text">AI 검증 상태 ${escapeHtml(verdictLabelKo(card.verdictLabel))}</span>
             </span>
           </div>
@@ -3557,8 +3562,9 @@
           <div class="rank-body">
             <span class="rank-domain">${escapeHtml(domainDisplayLabel(cardDomainKey(card)))}</span>
             <span class="rank-title">${escapeHtml(card.title)}</span>
+            <!-- 6b: dot removed, same reason as the card face — it rendered one
+                 neutral slate for every state and distinguished nothing. -->
             <span class="rank-verdict">
-              <span class="verdict-dot" style="background:${verdictDotColor(card.verdictLabel)}"></span>
               <span class="rank-verdict-text">AI 검증 상태 ${escapeHtml(verdictLabelKo(card.verdictLabel))}</span>
             </span>
           </div>
