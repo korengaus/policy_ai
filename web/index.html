@@ -11693,6 +11693,18 @@
       return "직접적인 반박 근거는 확인되지 않았습니다.";
     }
 
+    // 2a: does the contradiction summary carry an actual signal? Reads the SAME
+    // fields through the SAME numberValue() coercion as contradictionExplanation
+    // above, so the gate and the sentence can never disagree. Counts only — never
+    // verdict_label, never a stored value. Used to keep the all-zero fallback OFF
+    // the detail header: a zero count means "반박을 찾지 못했다", and rendering it
+    // unconditionally would assert "반박이 없다" on every quiet card.
+    function contradictionSignalPresent(summary) {
+      const data = summary || {};
+      return numberValue(data.confirmed_contradiction_count ?? data.confirmed_contradictions, 0) > 0
+        || numberValue(data.possible_contradiction_count ?? data.possible_contradictions, 0) > 0;
+    }
+
 
     function alertReasonBullets(level, decision, confidence, impact, quality, sourceReliabilitySummary, contradictionSummary, debugSummary) {
       // CARD-SIMPLIFY: the "최종 점수 N점" mentions are OFF the public bullets —
@@ -11799,7 +11811,10 @@
     function renderReadingGuide(context) {
       const officialText = officialVerificationExplanation(context.sourceReliabilitySummary, context.debugSummary);
       const evidenceText = evidenceQualityExplanation(context.quality, context.strength, officialEvidenceIsGenuine(context.sourceReliabilitySummary, context.debugSummary));
-      const contradictionText = contradictionExplanation(context.contradictionSummary);
+      // 2a DEDUPE: the contradiction sentence MOVED to the detail header (one
+      // reader surface, gated on an actual signal). It is not deleted — the same
+      // contradictionExplanation output still renders there, and the text export
+      // keeps the full record. Removed here so the two do not both speak.
       // DETAIL-CLEANUP-V2: header removed — this guide now lives inside a collapsed
       // renderCollapsibleSection whose <summary> provides the title.
       // CARD-SIMPLIFY: the 근거 수준 guide card is gone with the score it explained
@@ -11821,8 +11836,8 @@
               ${escapeHtml(officialText)}
             </div>
             <div class="reading-guide-card">
-              <strong>근거와 반박</strong>
-              ${escapeHtml(evidenceText)} ${escapeHtml(contradictionText)}
+              <strong>근거</strong>
+              ${escapeHtml(evidenceText)}
             </div>
           </div>
         </section>
@@ -13202,6 +13217,18 @@
                    in hand. Plain text, no colour/badge/gauge. -->
               ${(hasFocus || displayResults.length === 1) && Number(result.result_id) > 0 ? `<div class="answer-line" data-answer-id="${Number(result.result_id)}" data-answer-official="${answerOfficialMode}" style="margin-top:8px;" hidden></div>` : ""}
             </div>
+
+            <!-- 2a: the contradiction explanation, surfaced here as its ONE reader
+                 surface (it was previously only inside the reading guide, two
+                 collapses down, and was sliced off the 3-bullet list entirely).
+                 GATED on an actual signal via contradictionSignalPresent — with
+                 all-zero counts this renders NOTHING: no element, no blank line.
+                 Sits BELOW the headline-card, not inside it: the answer line there
+                 is async and conditional. Plain text, no colour/badge/icon. Same
+                 producer, same wording; display only. -->
+            ${contradictionSignalPresent(userContext.contradictionSummary)
+              ? `<div class="reader-note">${escapeHtml(contradictionExplanation(userContext.contradictionSummary))}</div>`
+              : ""}
 
             <!-- CARD-AISUMMARY: the 핵심 주장 claim summary MOVED here from the
                  verification-card (bottom) — the always-read "what's claimed"
