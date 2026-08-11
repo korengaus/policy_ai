@@ -12904,7 +12904,20 @@
             // guards against double-patching on overlapping hydrations.
             chip.className = "card-domain card-outlet-chip";
             chip.textContent = `${count}개 매체`;
-            top.appendChild(chip);
+            // 4c: FIXED SLOT — directly after .card-domain, not appended last.
+            // Appending put the chip after 0-4 conditional badges (오늘 검증 /
+            // 시장·시세 / 🔥 / 사람 검토됨), so its horizontal position jittered
+            // card-to-card and a skimming eye could not find it. Same element,
+            // class, text and gates — position only, no added emphasis: cards
+            // outside a 2+ cluster still show nothing, and making this chip
+            // louder would read as "this card matters more". renderTopicCardHtml
+            // always emits .card-domain first in .topic-card-top, so the
+            // fallback append should be unreachable — kept so a future card
+            // variant without the domain badge degrades to today's behaviour
+            // instead of silently dropping the count.
+            const domainEl = top.querySelector(".card-domain");
+            if (domainEl) top.insertBefore(chip, domainEl.nextSibling);
+            else top.appendChild(chip);
           }
         }
       } catch (error) {
