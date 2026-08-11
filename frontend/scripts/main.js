@@ -8355,6 +8355,35 @@
         exportLine(lines, "근거와 출처 요약");
         publicSourceNotesForReport(result).forEach((item) => lines.push(`- ${sanitizePublicExportText(item)}`));
         lines.push("");
+        // 3a-1: the FULL per-candidate roster — EVERY candidate, no slice. The
+        // screen's list is the only place this record exists today; this is the
+        // destination it collapses into, built FIRST so that change is a move and
+        // not a deletion. Fields are exactly what the screen already shows in the
+        // collapsed summary line and the exclusion label (renderSourceCandidates
+        // :2243-2258 / :2216) and NOTHING more — EXCLUDED-ROW-SCORE-AND-ROLE took
+        // the reliability score and the 검증 역할 off excluded rows deliberately,
+        // and the report must not put them back. No verdict, review status or
+        // official-confirmation value is read on this path: source_type,
+        // publisher, title and the exclusion label only, each through the
+        // existing helper the screen uses. Every line goes through exportLine,
+        // i.e. sanitizePublicExportText, like the rest of the report.
+        const exportCandidates = Array.isArray(parts.sourceCandidates) ? parts.sourceCandidates : [];
+        if (exportCandidates.length) {
+          exportLine(lines, `공식 출처 후보 ${exportCandidates.length}개`);
+          exportCandidates.forEach((source) => {
+            const candidateBits = [
+              source.source_type ? formatSourceType(source.source_type) : "",
+              source.publisher ? publicInstitutionName(source.publisher) : "",
+              sourceExclusionLabel(source, {}, parts.cardHasGenuineOfficial),
+            ].filter((bit) => bit && String(bit).trim() && String(bit).trim() !== "-");
+            const candidateTitle = userFacingReportText(
+              publicInstitutionName(source.title || source.url || "출처 후보"), "출처 후보");
+            exportLine(lines, candidateBits.length
+              ? `- ${candidateTitle} — ${candidateBits.join(" · ")}`
+              : `- ${candidateTitle}`);
+          });
+          lines.push("");
+        }
         lines.push(`AI 초안 상태: ${sanitizePublicExportText(safeAiDraftVerdictForExport(result))}`);
         lines.push(`핵심 주장: ${sanitizePublicExportText(plain(exportClaimText(result)))}`);
         lines.push(`근거 요약: ${getSafeAiDraftEvidenceSummary(result)}`);
