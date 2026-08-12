@@ -865,10 +865,19 @@
       white-space: nowrap;
     }
 
-    .alert-watch { background: var(--orange); }
-    .alert-low { background: var(--gray); }
-    .alert-medium { background: var(--blue); }
-    .alert-high { background: var(--red); }
+    /* ALERT-NEUTRAL (25-APPLY): the alert level derives from model-assessed
+       confidence/risk/impact (policy_decision._policy_alert_level) — a
+       judgement axis, so its colour distinction goes the way 2c took the
+       verdict pills': every tier renders the SAME neutral pair the verdict
+       pills use. Labels, classes and levels untouched — the words carry the
+       level. (No live producer emits these bare .badge alert-* forms today;
+       neutralised anyway so a revived renderer cannot bring the colour back.
+       color overrides the .badge base white, which would vanish on this
+       light neutral.) */
+    .alert-watch { background: #f1f5f9; color: var(--slate); }
+    .alert-low { background: #f1f5f9; color: var(--slate); }
+    .alert-medium { background: #f1f5f9; color: var(--slate); }
+    .alert-high { background: #f1f5f9; color: var(--slate); }
     .ai-status-active { background: #15803d; }
     .ai-status-inactive { background: #475569; }
     .ai-status-error { background: #b45309; }
@@ -2896,11 +2905,17 @@
       line-height: 1.35;
       white-space: nowrap;
     }
-    /* editorial WATCH tag — light tint + colored text per alert tier (overrides
-       the chunky solid .alert-* backgrounds in the card context). */
-    .card-watch.alert-watch  { background: #fff7ed; color: #c2410c; }
-    .card-watch.alert-high   { background: #fef2f2; color: #b91c1c; }
-    .card-watch.alert-medium { background: #eff6ff; color: var(--brand-ink); }
+    /* ALERT-NEUTRAL (25-APPLY): was a per-tier tint pair (orange WATCH, red
+       HIGH, blue MEDIUM) — byte-identical pairs to the pre-2c verdict pills
+       (ledger 67). The level is a model judgement (confidence/risk/impact),
+       so the colour distinction goes the way 2c took the verdict axis: all
+       four tiers render the SAME neutral pair .verdict-pill.vt-* uses. The
+       tier is still stated in words (낮음/관찰/높음) — classes, labels and
+       ordering untouched. The evidence axis (✓ 공식 근거 확인, --brand) is a
+       different axis and keeps its colour. */
+    .card-watch.alert-watch  { background: #f1f5f9; color: var(--slate); }
+    .card-watch.alert-high   { background: #f1f5f9; color: var(--slate); }
+    .card-watch.alert-medium { background: #f1f5f9; color: var(--slate); }
     .card-watch.alert-low    { background: #f1f5f9; color: var(--slate); }
     .card-fresh {
       font-size: 0.72rem;
