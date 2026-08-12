@@ -294,16 +294,30 @@
       try {
         const ids = [...new Set((Array.isArray(results) ? results : [])
           .map((r) => Number(r?.result_id))
-          .filter((n) => Number.isInteger(n) && n > 0))].slice(0, 60);
+          .filter((n) => Number.isInteger(n) && n > 0))];
         if (!ids.length) return;
-        const response = await fetch(`${API_BASE}/api/cluster-sizes?ids=${encodeURIComponent(ids.join(","))}`);
-        if (!response.ok) return;
-        const data = await response.json();
-        const sizes = data && data.sizes ? data.sizes : {};
-        for (const [rid, count] of Object.entries(sizes)) {
-          const n = Number(count);
-          if (Number.isFinite(n) && n >= 2) clusterSizeMap.set(Number(rid), n);
-        }
+        // POOL-WINDOW (29-APPLY): the server answers at most 60 ids per call
+        // (_CLUSTER_SIZES_MAX_IDS) — the old `.slice(0, 60)` silently dropped
+        // every id past 60, so a 100-row pool would have left rows 61-100
+        // (the OLDEST, i.e. exactly the multi-day rows the wider window is
+        // for) permanently uncounted. Chunk into ≤60-id calls issued in
+        // PARALLEL and merge: first-paint still waits ~one RTT, and a failed
+        // chunk degrades only its own rows to the uncounted state (same
+        // fail-silent contract as before).
+        const chunks = [];
+        for (let i = 0; i < ids.length; i += 60) chunks.push(ids.slice(i, i + 60));
+        await Promise.all(chunks.map(async (chunk) => {
+          try {
+            const response = await fetch(`${API_BASE}/api/cluster-sizes?ids=${encodeURIComponent(chunk.join(","))}`);
+            if (!response.ok) return;
+            const data = await response.json();
+            const sizes = data && data.sizes ? data.sizes : {};
+            for (const [rid, count] of Object.entries(sizes)) {
+              const n = Number(count);
+              if (Number.isFinite(n) && n >= 2) clusterSizeMap.set(Number(rid), n);
+            }
+          } catch (_) { /* chunk fails alone — its rows stay uncounted */ }
+        }));
         // CLUSTER-FOLD: sequential-after-sizes — the size map decides WHICH
         // rows are worth a members call (count>=2 only; absent from the map =
         // no call, ever). One parallel batch, awaited, so the fold is settled
@@ -8988,7 +9002,15 @@
     // the homepage hot-topic area with cron/server output. Fail-open: any
     // error or empty body returns [] so the area falls back to its existing
     // placeholder (mirrors loadServerResultById's graceful handling).
-    async function getServerRecentAnalyses(limit = 50) {
+    // POOL-WINDOW (29-APPLY): 50 → 100. Fifty rows covered ~15 hours at the
+    // measured collection rate (81 rows on 2026-08-12 alone) while circulation
+    // is a multi-day fact — today's only clustered row sat at depth 85, so the
+    // feed had NO counted row, no hero and no regions purely because of the
+    // window. 100 is the server's own ceiling: /history's slim reader returns
+    // at most the recent-100 window (api_server.py history / limit=300 → 100
+    // rows, measured), so this is the widest the shipped endpoint goes —
+    // deeper needs a backend change, deliberately not made here.
+    async function getServerRecentAnalyses(limit = 100) {
       try {
         const response = await fetch(`${API_BASE}/history?limit=${encodeURIComponent(limit)}`);
         if (!response.ok) return [];
