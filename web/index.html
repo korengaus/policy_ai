@@ -6568,9 +6568,42 @@
           const n = Number(count);
           if (Number.isFinite(n) && n >= 2) clusterSizeMap.set(Number(rid), n);
         }
+        // CLUSTER-FOLD: sequential-after-sizes — the size map decides WHICH
+        // rows are worth a members call (count>=2 only; absent from the map =
+        // no call, ever). One parallel batch, awaited, so the fold is settled
+        // before this pool's first paint (same fetch-then-render contract as
+        // the size map itself — the feed never folds after it painted).
+        await loadClusterFoldKeys(ids);
       } catch (_) {
         // fail-silent: sort degrades to server order; the feed must never break
       }
+    }
+    // CLUSTER-FOLD: result_id -> cluster stable_id, ONLY for rows the size map
+    // already counted (>=2). Filled by one /api/cluster/{id}/members call per
+    // counted row, all in parallel. A failed call or found:false leaves the id
+    // keyless for the session (attempted set — no retry storm on repaints),
+    // and a keyless row NEVER folds: both members then render exactly as the
+    // feed does today. No cluster key is ever guessed client-side.
+    const clusterFoldKeyMap = new Map();
+    const clusterFoldKeyAttempted = new Set();
+    async function loadClusterFoldKeys(ids) {
+      const pending = (Array.isArray(ids) ? ids : []).filter((id) =>
+        clusterSizeMap.get(id) >= 2 && !clusterFoldKeyAttempted.has(id));
+      if (!pending.length) return;
+      pending.forEach((id) => clusterFoldKeyAttempted.add(id));
+      await Promise.all(pending.map(async (id) => {
+        try {
+          const response = await fetch(`${API_BASE}/api/cluster/${encodeURIComponent(id)}/members`);
+          if (!response.ok) return;
+          const data = await response.json();
+          const key = data && data.found === true && data.cluster
+            && typeof data.cluster.stable_id === "string"
+            ? data.cluster.stable_id : "";
+          if (key) clusterFoldKeyMap.set(id, key);
+        } catch (_) {
+          // fail-silent: this id stays keyless -> unfolded (today's feed)
+        }
+      }));
     }
     // STABLE-TABS S2: in-memory (no localStorage) cache of domain-scoped feed
     // results, keyed by the STORED English domain key (e.g. "realestate"). A
@@ -9124,12 +9157,42 @@
     }
 
 
+    // CLUSTER-FOLD: one card per cluster, pool-relative and display-only. The
+    // kept member is the LOWEST result_id among the members present in THIS
+    // pool — the graph's own generate_faded_candidates fallback rule (id is
+    // ingest order, never outlet weight), adopted rather than invented. Rows
+    // without a fold key (count<2, never clustered, failed/absent members
+    // call) always pass through, so the degrade is exactly today's feed.
+    // Nothing is deleted: a dropped member stays reachable via the detail
+    // view's sibling list and the claim page, and a direct ?result_id= open
+    // renders a 1-row pool whose lowest id is that row itself.
+    function foldClusteredCards(cards) {
+      const list = Array.isArray(cards) ? cards : [];
+      const repOf = new Map();
+      for (const c of list) {
+        const rid = Number(c?.recordId);
+        if (!Number.isInteger(rid) || rid <= 0) continue;
+        const key = clusterFoldKeyMap.get(rid);
+        if (key === undefined) continue;
+        const prev = repOf.get(key);
+        if (prev === undefined || rid < prev) repOf.set(key, rid);
+      }
+      if (!repOf.size) return list;
+      return list.filter((c) => {
+        const rid = Number(c?.recordId);
+        const key = Number.isInteger(rid) && rid > 0
+          ? clusterFoldKeyMap.get(rid) : undefined;
+        return key === undefined || repOf.get(key) === rid;
+      });
+    }
+
     function currentTopicCards(preferredResults) {
       const currentResults = Array.isArray(preferredResults) && preferredResults.length
         ? preferredResults
         : (Array.isArray(currentReportContext?.results) ? currentReportContext.results : []);
       if (currentResults.length) {
-        return currentResults.map((result, index) => topicCardFromResult(result, index, "current"));
+        return foldClusteredCards(
+          currentResults.map((result, index) => topicCardFromResult(result, index, "current")));
       }
       // M17-search-quality: do NOT fall back to localStorage history.
       // The previous behaviour surfaced prior 전세대출 analyses as if
@@ -9139,8 +9202,8 @@
       // the homepage's "오늘의 정책 이슈" feed. Empty server list → []
       // → renderHotTopics shows its existing placeholder.
       if (serverHotTopicResults.length) {
-        return serverHotTopicResults.map((result, index) =>
-          topicCardFromResult(result, index, "server"));
+        return foldClusteredCards(serverHotTopicResults.map((result, index) =>
+          topicCardFromResult(result, index, "server")));
       }
       return [];
     }
@@ -9330,8 +9393,12 @@
     function domainSectionTopCards(d) {
       const results = domainSectionCache.get(d);
       if (!results || !results.length) return [];
-      const domainCards = results.map((result, index) =>
-        topicCardFromResult(result, index, "server"));
+      // CLUSTER-FOLD: fold applies here too so a section can never show two
+      // members of one cluster side by side. Section pools fetch no sizes of
+      // their own, so only rows whose keys an earlier pool load fetched can
+      // fold — unkeyed rows render as today.
+      const domainCards = foldClusteredCards(results.map((result, index) =>
+        topicCardFromResult(result, index, "server")));
       if (!domainCards.length) return [];
       const shown = feedShownIds;
       const eligible = (shown && shown.size)
@@ -9594,8 +9661,10 @@
       if (activeDomain === "전체") {
         filtered = allCards;
       } else if (domainResultsCache.has(activeDomain)) {
-        filtered = domainResultsCache.get(activeDomain)
-          .map((result, index) => topicCardFromResult(result, index, "server"));
+        // CLUSTER-FOLD: same fold as the 전체 pool — domain tab pools load
+        // their sizes+keys through the same loadClusterSizesForSort path.
+        filtered = foldClusteredCards(domainResultsCache.get(activeDomain)
+          .map((result, index) => topicCardFromResult(result, index, "server")));
       } else {
         filtered = [];
         domainPending = true;
