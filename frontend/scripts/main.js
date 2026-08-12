@@ -218,12 +218,6 @@
     // for the 오늘의 한 장 hero pick. null until the fetch lands; stays null on
     // failure (the hero then keeps its pre-S5b two-card behavior).
     let trendingHeroRows = null;
-    // SIDEBAR-HERO-DEDUP: repaint hook for the Top 5 list, assigned by
-    // renderTrendingTop5 (the list builder is NESTED there — the
-    // TRENDING-URL-TAIL gate pins the title path to that renderer). Called
-    // when the hero pick settles so the pick's row leaves the sidebar and
-    // rank 6 backfills. null until the trending fetch lands.
-    let trendingSidebarRepaint = null;
     // HERO-TRENDING: the resolved hero result object (mapHistoryRowToResult
     // shape) for the first non-market trending entry, fetched by id via
     // GET /history/{id} — trending representatives are usually OLDER than the
@@ -3172,6 +3166,14 @@
     // Fail-quiet per entry (a missing/failed id just advances to the next
     // row); when no entry qualifies, trendingHeroPick stays null and the
     // Branch B two-card severity hero renders unchanged.
+    // HERO-CUMULATIVE: NO CALLER. renderTrendingTop5 stopped invoking this —
+    // the home hero now takes the circulation (Branch B) band from the pool,
+    // the same rule every domain tab uses, so growth selects nothing outside
+    // the sidebar. RETAINED, not removed, because the HERO-FALLTHROUGH and
+    // HERO-MARKET-SKIP audit gates parse this body (its skip rules and the
+    // heroRankNote fragment in heroBandHtml) as their source anchors —
+    // deleting it fails the render scan. Removing picker + gates together
+    // needs its own ruling.
     async function resolveTrendingHeroPick() {
       const rows = Array.isArray(trendingHeroRows) ? trendingHeroRows : [];
       for (const row of rows) {
@@ -3192,9 +3194,6 @@
         // is absent from the feed pool (the normal case: trending
         // representatives are usually older than the recent-50 window).
         settleHeroBand();
-        // SIDEBAR-HERO-DEDUP: the pick's claim is on the band now — repaint
-        // the sidebar without its row (backfilled from rank 6+).
-        if (trendingSidebarRepaint) trendingSidebarRepaint();
         return;
       }
       // Ran the whole trending list without a usable entry: that is a
@@ -3710,65 +3709,43 @@
         const response = await fetch(`${API_BASE}/api/trending`);
         if (!response.ok) { settleHeroBand(); return; }
         const body = await response.json();
-        // SIDEBAR-HERO-DEDUP: keep the FULL payload (10 rows by default —
-        // headroom beyond the Top 5, see _TRENDING_DEFAULT_LIMIT) so the
-        // sidebar can drop the hero's row and still backfill to five from
-        // rank 6+. The hero pick below still walks only the top-5 slice
-        // (same row objects), so the pick and its N위 disclosure are
-        // unchanged.
-        const all = Array.isArray(body?.trending) ? body.trending : [];
-        const rows = all.slice(0, 5);
-        // HOME-TOP5 S5b → HERO-TRENDING: cache the rows, then kick off the
-        // async by-id resolve of the hero pick (fire-and-forget; it repaints
-        // the idempotent home render when it lands, and every failure path
-        // leaves the two-card severity hero in place).
+        const rows = Array.isArray(body?.trending) ? body.trending.slice(0, 5) : [];
+        // HERO-CUMULATIVE: the home hero no longer resolves from these rows —
+        // it takes the circulation (Branch B) band from the pool, the same
+        // rule every domain tab uses — so the band settles NOW: growth lives
+        // only in this sidebar, and rank N here is growth rank N again (no
+        // exclusion, no backfill). trendingHeroRows is still cached because
+        // the retained (uncalled) picker reads it; see resolveTrendingHeroPick.
         trendingHeroRows = rows;
-        if (rows.length) resolveTrendingHeroPick();
-        else settleHeroBand();
-        // SIDEBAR-HERO-DEDUP: ONE nested list builder — the sidebar's title
-        // path (stripVerifiedOutletTail against the row's OWN original_url)
-        // stays inside this renderer, the surface the TRENDING-URL-TAIL gate
-        // pins. Painted immediately (no pick yet → the plain top 5; the panel
-        // never waits for the pick's by-id fetches) and re-run via
-        // trendingSidebarRepaint when the hero pick settles: the pick's row
-        // leaves and rank 6 backfills, so the panel still holds five rows and
-        // the band never shows a claim the sidebar repeats. The band is empty
-        // until that same settle, so the reader never sees the claim twice.
-        // With no resolved pick — fetch failure, every row skipped — the
-        // plain five stand. Row markup and numbering (list position) are
-        // unchanged.
-        const paintSidebar = () => {
-          const shown = (trendingHeroPickRow
-            ? all.filter((row) => row !== trendingHeroPickRow)
-            : all).slice(0, 5);
-          const items = shown.map((row, i) => {
-            const rid = Number(row?.representative_analysis_id);
-            // MOBILE-POLISH F: trending rows come straight off GET /api/trending,
-            // bypassing topicCardFromResult — strip the leading marker here too.
-            const marked = stripLeadingTitleMarker(row?.title) || (rid > 0 ? `기사 #${rid}` : "");
-            // TRENDING-URL-TAIL: the outlet tail, through the SAME pinned verifier
-            // the card and detail titles use — no second implementation and no
-            // outlet list. /api/trending now carries the representative row's
-            // original_url, which is the only thing that was missing: the strip
-            // removes a tail ONLY when that url proves the tail is this row's own
-            // publisher (literal host match, or a >=2-row same-apex evidence
-            // majority). An unverifiable tail is returned byte-identical, so a
-            // publisher named as data and a prose subtitle both stay. Shortens or
-            // does nothing — it can never lengthen or reword a title.
-            const title = stripVerifiedOutletTail(
-              marked, row?.original_url || "", feedOutletTailEvidence());
-            if (!title) return "";
-            const outlets = Number(row?.current_outlet_count);
-            const growth = Number(row?.growth);
-            const badge = row?.is_new ? " · NEW"
-              : (Number.isFinite(growth) && growth > 0 ? ` · ↑${growth}` : "");
-            const meta = Number.isFinite(outlets) && outlets > 0
-              ? `${outlets}개 매체${badge}`
-              : badge.replace(" · ", "");
-            const titleHtml = rid > 0
-              ? `<a class="rank-title" href="/?result_id=${encodeURIComponent(rid)}">${escapeHtml(title)}</a>`
-              : `<span class="rank-title">${escapeHtml(title)}</span>`;
-            return `
+        settleHeroBand();
+        const items = rows.map((row, i) => {
+          const rid = Number(row?.representative_analysis_id);
+          // MOBILE-POLISH F: trending rows come straight off GET /api/trending,
+          // bypassing topicCardFromResult — strip the leading marker here too.
+          const marked = stripLeadingTitleMarker(row?.title) || (rid > 0 ? `기사 #${rid}` : "");
+          // TRENDING-URL-TAIL: the outlet tail, through the SAME pinned verifier
+          // the card and detail titles use — no second implementation and no
+          // outlet list. /api/trending now carries the representative row's
+          // original_url, which is the only thing that was missing: the strip
+          // removes a tail ONLY when that url proves the tail is this row's own
+          // publisher (literal host match, or a >=2-row same-apex evidence
+          // majority). An unverifiable tail is returned byte-identical, so a
+          // publisher named as data and a prose subtitle both stay. Shortens or
+          // does nothing — it can never lengthen or reword a title.
+          const title = stripVerifiedOutletTail(
+            marked, row?.original_url || "", feedOutletTailEvidence());
+          if (!title) return "";
+          const outlets = Number(row?.current_outlet_count);
+          const growth = Number(row?.growth);
+          const badge = row?.is_new ? " · NEW"
+            : (Number.isFinite(growth) && growth > 0 ? ` · ↑${growth}` : "");
+          const meta = Number.isFinite(outlets) && outlets > 0
+            ? `${outlets}개 매체${badge}`
+            : badge.replace(" · ", "");
+          const titleHtml = rid > 0
+            ? `<a class="rank-title" href="/?result_id=${encodeURIComponent(rid)}">${escapeHtml(title)}</a>`
+            : `<span class="rank-title">${escapeHtml(title)}</span>`;
+          return `
         <li class="rank-row">
           <span class="rank-num">${i + 1}</span>
           <div class="rank-body">
@@ -3776,13 +3753,10 @@
             ${meta ? `<span class="rank-domain">${escapeHtml(meta)}</span>` : ""}
           </div>
         </li>`;
-          }).filter(Boolean);
-          if (!items.length) return;
-          trendingListEl.innerHTML = items.join("");
-          trendingPanelEl.hidden = false;
-        };
-        trendingSidebarRepaint = paintSidebar;
-        paintSidebar();
+        }).filter(Boolean);
+        if (!items.length) return;
+        trendingListEl.innerHTML = items.join("");
+        trendingPanelEl.hidden = false;
       } catch (error) {
         // fail-silent: the trending panel is optional; the sidebar must never break
         // HERO-PAINT-ORDER: a rejected fetch is terminal for the pick — release
