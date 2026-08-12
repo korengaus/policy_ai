@@ -2600,49 +2600,6 @@
       align-self: center;
     }
 
-    /* DESIGN-C2: editorial top band — the hero (left, 1.6fr) + a secondary card
-       (right, 1fr) sit in a 2-column band at the top of #hotTopics. The band is a
-       single row inside the C-1 single-column .topic-card-grid and forms its own
-       2-col grid; the remaining cards flow single-column below it. Its own gap +
-       a bottom margin separate it from the below-list. Stacks to 1col at <=960px
-       (below). The two cards keep their own divider/padding from .topic-card. */
-    .feed-hero-band {
-      display: grid;
-      grid-template-columns: 1.6fr 1fr;
-      gap: 24px;
-      align-items: start;
-      margin-bottom: 4px;
-    }
-    /* The band's two cards drop their bottom divider (the band frames them);
-       the below-list rows keep theirs. */
-    .feed-hero-band > .topic-card {
-      border-bottom: none;
-    }
-    /* DESIGN-C2b: thin grey newspaper rule between the hero (left) and the
-       secondary card (right). The existing 24px gap + this padding-left keep the
-       secondary's text off the rule. Nulled at <=960px (below) when the band
-       stacks, so no stray border on the stacked card.
-       DESIGN-C2c: lightened --rule (#9ca3af) → --line (#e2e8f0) so it matches the
-       sidebar .rank-row dividers and the feed card dividers — consistent light grey. */
-    .feed-hero-band > .topic-card:nth-child(2) {
-      border-left: 1px solid var(--line);
-      padding-left: 24px;
-    }
-    /* DESIGN-C2d: stop the band cards shifting on hover. The C-1 hover bleed
-       (margin:0 -12px + padding:16px 12px) collided with the 2nd cell's border-left
-       + padding-left:24px, moving the card and the vertical rule. Higher-specificity
-       than .topic-card:hover, so it wins for margin/padding here and neutralizes the
-       bleed — the tint (background from .topic-card:hover) and the divider stay, and
-       the normal single-column feed hover is untouched. The 2nd cell re-asserts its
-       24px divider padding (the general rule below zeroes left padding). */
-    .feed-hero-band > .topic-card:hover {
-      margin: 0;
-      padding: 16px 0;
-    }
-    .feed-hero-band > .topic-card:nth-child(2):hover {
-      padding-left: 24px;
-    }
-
     /* HERO-PAINT-ORDER: space reserved for the hero band while the pick is in
        flight, so the grid below paints at its FINAL y-offset and does not move
        when the band fills. Applied to #hotTopicsTop by renderHotTopics only
@@ -2684,8 +2641,8 @@
       -webkit-line-clamp: 3;
       /* FONT-WEIGHT-FIX-2: the big hero headline is the LIGHTEST type on the page
          — at 3.0rem a regular weight still reads as dominant, and the extra weight
-         was what made it look thick. Hero-scoped: .topic-card--secondary and the
-         grid cards keep the 500 base above. */
+         was what made it look thick. Hero-scoped: the grid cards keep the 500
+         base above. */
       font-weight: 400;
     }
     .topic-card--hero .topic-card-summary {
@@ -2706,17 +2663,16 @@
     .topic-card--hero .card-source-label {
       font-size: 0.9rem;
     }
-
-    /* LABEL-1 STEP 6: hero-band MIDDLE tier (Joe's 3-tier band). The RIGHT band card
-       (hot[1], rendered with {secondary:true}) sits BETWEEN the ordinary feed card
-       (1.077rem / 0.923rem) and the big left hero (3.0rem / 1.28rem). Unlike the hero
-       it KEEPS its .card-domain badge. Stays inside the 1fr grid column. */
-    .topic-card--secondary .topic-card-title {
-      font-size: 1.6rem;
-      line-height: 1.25;
+    /* HERO-SPREAD-FACTS (23-APPLY): the hero reuses region 1's facts line and
+       strip verbatim (.feed-spread-facts + feedSpreadStripHtml output); these
+       two hero-scoped rules only space them under the summary and keep a long
+       daily series from spanning the full hero width. */
+    .topic-card--hero .feed-spread-facts {
+      margin-top: 10px;
     }
-    .topic-card--secondary .topic-card-summary {
-      font-size: 1.08rem;
+    .topic-card--hero .feed-spread-strip {
+      margin-top: 6px;
+      max-width: 320px;
     }
 
     /* DESIGN-C3d: "오늘의 검증 / LATEST CHECKS" row — a re-chunk of the first ≤3
@@ -4704,8 +4660,7 @@
          min-track is 0 — the card can shrink below its content's min-content and
          the title/summary wrap + ellipsis engage instead of a long token pushing
          the card past the mobile viewport. Mirrors the base minmax(0,1fr). */
-      .topic-card-grid,
-      .feed-hero-band {
+      .topic-card-grid {
         grid-template-columns: minmax(0, 1fr);
       }
       /* VERIFY-STEPS-REDESIGN: the how-we-verify steps stack to one column here, so
@@ -4719,14 +4674,6 @@
       }
       .verify-how-desc {
         max-width: none;
-      }
-
-      /* DESIGN-C2b: the band has stacked to one column here, so drop the hero|
-         secondary vertical rule (it would become a stray left border on the
-         stacked secondary card). */
-      .feed-hero-band > .topic-card:nth-child(2) {
-        border-left: none;
-        padding-left: 0;
       }
 
       /* DESIGN-DETAIL-4: the 4-up verdict indicator row goes 2-up on narrow screens. */

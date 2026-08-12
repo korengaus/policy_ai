@@ -3089,11 +3089,40 @@
       `;
         }
       }
+      // HERO-SPREAD-FACTS (23-APPLY): the hero mirrors region 1's facts line
+      // and strip — the same shipped forms (기사 {N}건 / {N}일, absent value →
+      // nothing, never a zero), the same helper, the same gates: no
+      // clusterSpreadMap entry → nothing extra renders at all; daily_truncated
+      // (or empty daily) → facts without the strip. Reuses .feed-spread-facts
+      // + feedSpreadStripHtml — no new component. Hero only; grid and region
+      // cards are untouched. The N개 매체 chip is NOT emitted here — the
+      // loadClusterSizeChips patcher already chips the hero card.
+      const heroSpreadBlock = (() => {
+        if (!(opts && opts.hero)) return "";
+        const info = clusterSpreadMap.get(Number(card.recordId)) || null;
+        if (!info) return "";
+        const parts = [];
+        const articleTotal = Number(info.size);
+        if (Number.isFinite(articleTotal) && articleTotal > 0) {
+          parts.push(`기사 ${articleTotal}건`);
+        }
+        const spanDays = Number(info.span_days);
+        if (Number.isFinite(spanDays) && spanDays > 0) {
+          parts.push(`${spanDays}일`);
+        }
+        const facts = parts.length
+          ? `<div class="feed-spread-facts">${escapeHtml(parts.join(" · "))}</div>`
+          : "";
+        const strip = info.daily_truncated !== true
+          ? feedSpreadStripHtml(info.daily)
+          : "";
+        return facts + strip;
+      })();
       // CARD-SIMPLIFY: the front-face 근거 수준 number is OFF the card face.
       // Display only — card.confidence stays mapped (topicCardFromResult) because
       // the 뜨는순 composite sort and the hero pick read it (sortTopicCards).
       return `
-        <article class="topic-card ${opts && opts.hero ? "topic-card--hero " : ""}${opts && opts.secondary ? "topic-card--secondary " : ""}${selected ? "selected" : ""}" data-topic-key="${escapeHtml(card.key)}" data-topic-source="${escapeHtml(card.source)}" data-topic-index="${escapeHtml(card.index)}" data-topic-record-id="${escapeHtml(card.recordId)}">
+        <article class="topic-card ${opts && opts.hero ? "topic-card--hero " : ""}${selected ? "selected" : ""}" data-topic-key="${escapeHtml(card.key)}" data-topic-source="${escapeHtml(card.source)}" data-topic-index="${escapeHtml(card.index)}" data-topic-record-id="${escapeHtml(card.recordId)}">
           <div class="topic-card-top">
             <span class="card-domain">${domainIconMarkup(cardDomainKey(card))}${escapeHtml(domainDisplayLabel(cardDomainKey(card)))}</span>
             <span class="card-watch ${alertClass(card.alert)}">${escapeHtml(formatAlert(card.alert))}</span>
@@ -3104,6 +3133,7 @@
           </div>
           <h3 class="topic-card-title">${escapeHtml(card.title)}</h3>
           ${card.summary ? `<div class="topic-card-summary">${escapeHtml(card.summary)}</div>` : ""}
+          ${heroSpreadBlock}
           ${hashtagRow}
           <div class="topic-card-verdict">
             ${sourcePill}
@@ -3299,13 +3329,11 @@
       // the order.
       const fallbackEyebrow =
         '<div class="public-eyebrow">전체 기간 매체 수 순 · 검증이 아닙니다</div>';
-      if (hot.length >= 2) {
-        const band = `<div class="feed-hero-band">`
-          + renderTopicCardHtml(hot[0], { detailed: true, hero: true })
-          + renderTopicCardHtml(hot[1], { detailed: true, secondary: true })
-          + `</div>`;
-        return fallbackEyebrow + band;
-      }
+      // HERO-ONE-CARD (23-APPLY): ONE card, always. hot[0] and hot[1] are
+      // selected by the same cumulative count, and rendering the same measured
+      // value at two sizes lets size imply an importance this product does not
+      // assert. hot[1] stays in the pool (heroKeys holds one key) and renders
+      // as region 1's first row instead.
       return fallbackEyebrow
         + renderTopicCardHtml(hot[0], { detailed: true, hero: true });
     }
@@ -3492,8 +3520,10 @@
       // 뜨는순 cards flow back into the grid; on fallback the pre-S5b 2-card
       // exclusion applies unchanged.
       // HERO-NO-JUDGEMENT: bandless render → nothing leaves the grid.
+      // HERO-ONE-CARD (23-APPLY): the band holds ONE card, so exactly one key
+      // leaves the pool — hot[1] flows back to region 1's first row.
       const heroKeys = heroCirculation
-        ? new Set(hot.slice(0, 2).map((c) => c.key)) : new Set();
+        ? new Set(hot.slice(0, 1).map((c) => c.key)) : new Set();
       // HERO-PAINT-ORDER: while the branch is unknown the grid must not depend
       // on it — excluding hot[0]/hot[1] now would DROP two cards from the page
       // the moment Branch A wins, which is the content-shuffle being removed.
