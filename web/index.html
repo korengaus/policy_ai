@@ -2628,10 +2628,21 @@
       align-items: flex-start;
       gap: 14px;
     }
-    .feed-spread-row > .card-outlet-chip {
-      flex: 0 0 auto;
-      min-width: 76px;
+    /* FEED-SPREAD (13-APPLY): the fixed left column now stacks the chip and
+       the 건수·기간 facts line (both centred); the chip's own look is still
+       the untouched shared .card-domain styling. Muted small facts text —
+       same size class as other quiet metadata, no emphasis. */
+    .feed-spread-left {
+      flex: 0 0 96px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
       text-align: center;
+    }
+    .feed-spread-facts {
+      font-size: 0.82rem;
+      color: var(--muted);
     }
     .feed-spread-body {
       flex: 1 1 auto;
@@ -6649,32 +6660,45 @@
         // fail-silent: sort degrades to server order; the feed must never break
       }
     }
-    // CLUSTER-FOLD: result_id -> cluster stable_id, ONLY for rows the size map
-    // already counted (>=2). Filled by one /api/cluster/{id}/members call per
-    // counted row, all in parallel. A failed call or found:false leaves the id
+    // CLUSTER-FOLD + FEED-SPREAD (13-APPLY): result_id -> cluster stable_id,
+    // ONLY for rows the size map already counted (>=2). ONE batched
+    // /api/cluster-spreads call now replaces the former per-row
+    // /api/cluster/{id}/members calls (1 sizes + N members -> 1 sizes +
+    // 1 spreads round trips before first paint). The SAME failure contract
+    // holds: a failed call or an id absent from the response leaves the id
     // keyless for the session (attempted set — no retry storm on repaints),
     // and a keyless row NEVER folds: both members then render exactly as the
-    // feed does today. No cluster key is ever guessed client-side.
+    // feed does today; no row is ever dropped. No key is guessed client-side.
+    // The response's circulation facts (size / span_days / daily /
+    // daily_truncated / first_at / last_at) land in clusterSpreadMap for the
+    // region-1 rows. clusterSizeMap stays a plain {id -> number} map — the
+    // fold, hero predicate, region split and sort all read it as a number.
     const clusterFoldKeyMap = new Map();
     const clusterFoldKeyAttempted = new Set();
+    const clusterSpreadMap = new Map();
     async function loadClusterFoldKeys(ids) {
       const pending = (Array.isArray(ids) ? ids : []).filter((id) =>
         clusterSizeMap.get(id) >= 2 && !clusterFoldKeyAttempted.has(id));
       if (!pending.length) return;
       pending.forEach((id) => clusterFoldKeyAttempted.add(id));
-      await Promise.all(pending.map(async (id) => {
-        try {
-          const response = await fetch(`${API_BASE}/api/cluster/${encodeURIComponent(id)}/members`);
-          if (!response.ok) return;
-          const data = await response.json();
-          const key = data && data.found === true && data.cluster
-            && typeof data.cluster.stable_id === "string"
-            ? data.cluster.stable_id : "";
-          if (key) clusterFoldKeyMap.set(id, key);
-        } catch (_) {
-          // fail-silent: this id stays keyless -> unfolded (today's feed)
+      try {
+        const response = await fetch(
+          `${API_BASE}/api/cluster-spreads?ids=${encodeURIComponent(pending.join(","))}`);
+        if (!response.ok) return;
+        const data = await response.json();
+        const spreads = data && data.spreads ? data.spreads : {};
+        for (const [rid, spread] of Object.entries(spreads)) {
+          const id = Number(rid);
+          if (!Number.isInteger(id) || id <= 0
+            || !spread || typeof spread !== "object") continue;
+          if (typeof spread.stable_id === "string" && spread.stable_id) {
+            clusterFoldKeyMap.set(id, spread.stable_id);
+          }
+          clusterSpreadMap.set(id, spread);
         }
-      }));
+      } catch (_) {
+        // fail-silent: keyless rows render unfolded (today's feed)
+      }
     }
     // STABLE-TABS S2: in-memory (no localStorage) cache of domain-scoped feed
     // results, keyed by the STORED English domain key (e.g. "realestate"). A
@@ -9387,9 +9411,36 @@
       if (opts && opts.spreadRow) {
         const rowCount = Number(clusterSizeMap.get(Number(card.recordId)));
         if (Number.isFinite(rowCount) && rowCount >= 2) {
+          // FEED-SPREAD (13-APPLY): second line + strip from the batched
+          // clusterSpreadMap. Shipped forms only: "기사 {N}건" (claim.html's
+          // member-group form) and "{N}일" (the answer line's span form, and
+          // like it rendered only for span_days > 0 — a same-day spread shows
+          // no span, and an absent value renders NOTHING, never a zero).
+          // daily_truncated -> the strip is NOT drawn (a cut series that
+          // looks whole would lie about the range; labelling the cut would
+          // need unshipped wording). Missing/empty daily -> no strip either.
+          const spreadInfo = clusterSpreadMap.get(Number(card.recordId)) || null;
+          const factParts = [];
+          const articleCount = Number(spreadInfo?.size);
+          if (Number.isFinite(articleCount) && articleCount > 0) {
+            factParts.push(`기사 ${articleCount}건`);
+          }
+          const rowSpanDays = Number(spreadInfo?.span_days);
+          if (Number.isFinite(rowSpanDays) && rowSpanDays > 0) {
+            factParts.push(`${rowSpanDays}일`);
+          }
+          const factsLine = factParts.length
+            ? `<div class="feed-spread-facts">${escapeHtml(factParts.join(" · "))}</div>`
+            : "";
+          const spreadStrip = spreadInfo && spreadInfo.daily_truncated !== true
+            ? feedSpreadStripHtml(spreadInfo.daily)
+            : "";
           return `
         <article class="topic-card feed-spread-row ${selected ? "selected" : ""}" data-topic-key="${escapeHtml(card.key)}" data-topic-source="${escapeHtml(card.source)}" data-topic-index="${escapeHtml(card.index)}" data-topic-record-id="${escapeHtml(card.recordId)}">
-          <span class="card-domain card-outlet-chip">${escapeHtml(String(rowCount))}개 매체</span>
+          <div class="feed-spread-left">
+            <span class="card-domain card-outlet-chip">${escapeHtml(String(rowCount))}개 매체</span>
+            ${factsLine}
+          </div>
           <div class="feed-spread-body">
             <div class="topic-card-top">
               <span class="card-domain">${domainIconMarkup(cardDomainKey(card))}${escapeHtml(domainDisplayLabel(cardDomainKey(card)))}</span>
@@ -9400,6 +9451,7 @@
               ${card.humanReviewedAt ? `<span class="review-status review-approved">${escapeHtml(HUMAN_REVIEWED_LABEL)}</span>` : ""}
             </div>
             <h3 class="topic-card-title">${escapeHtml(card.title)}</h3>
+            ${spreadStrip}
             ${hashtagRow}
             <div class="topic-card-verdict">
               ${sourcePill}
@@ -12750,6 +12802,44 @@
                 ${labelRow}
               </div>
             </div>`;
+    }
+
+    // FEED-SPREAD-STRIP (13-APPLY): bars-only variant of spreadSparklineHtml
+    // for region-1 rows. The full sparkline is too heavy for a feed row (48px
+    // bars + a date/peak label line ≈ 80px); this keeps the SAME derivation —
+    // zero-filled days between first and last, peak-scaled heights, the >60-day
+    // and unparseable-date fail-silent guards — at a fixed 18px with no labels.
+    // Time and volume ONLY: brand/line tokens, identical height on every row
+    // (a denser week reads denser, never bigger). Tooltip and aria strings are
+    // the sparkline's own shipped forms. Empty/absent daily -> "" (no box).
+    function feedSpreadStripHtml(daily) {
+      if (!Array.isArray(daily) || !daily.length) return "";
+      const counts = new Map();
+      for (const entry of daily) {
+        const day = typeof entry?.date === "string" ? entry.date.slice(0, 10) : "";
+        const count = Number(entry?.count);
+        if (day && Number.isFinite(count) && count > 0) counts.set(day, count);
+      }
+      if (!counts.size) return "";
+      const days = [...counts.keys()].sort();
+      const startMs = Date.parse(`${days[0]}T00:00:00Z`);
+      const endMs = Date.parse(`${days[days.length - 1]}T00:00:00Z`);
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return "";
+      const totalDays = Math.round((endMs - startMs) / 86400000) + 1;
+      if (totalDays < 1 || totalDays > 60) return "";
+      let peak = 0;
+      counts.forEach((count) => { peak = Math.max(peak, count); });
+      if (peak <= 0) return "";
+      const bars = [];
+      for (let i = 0; i < totalDays; i += 1) {
+        const day = new Date(startMs + i * 86400000).toISOString().slice(0, 10);
+        const count = counts.get(day) || 0;
+        const heightPct = count > 0 ? Math.max(12, Math.round((count / peak) * 100)) : 0;
+        bars.push(
+          `<div title="${escapeHtml(day)} · ${escapeHtml(count)}건" style="flex:1 1 8px;max-width:10px;min-width:0;align-self:flex-end;height:${count > 0 ? heightPct + "%" : "2px"};background:${count > 0 ? "var(--brand)" : "var(--line)"};border-radius:1px 1px 0 0;"></div>`
+        );
+      }
+      return `<div class="feed-spread-strip" role="img" aria-label="일별 보도량, 최다 ${escapeHtml(peak)}건" style="display:flex;align-items:flex-end;gap:2px;height:18px;max-width:100%;">${bars.join("")}</div>`;
     }
 
     // SHARE-IMAGE Slice 1: the spread payload each card fetched, kept for the

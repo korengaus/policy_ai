@@ -2592,10 +2592,21 @@
       align-items: flex-start;
       gap: 14px;
     }
-    .feed-spread-row > .card-outlet-chip {
-      flex: 0 0 auto;
-      min-width: 76px;
+    /* FEED-SPREAD (13-APPLY): the fixed left column now stacks the chip and
+       the 건수·기간 facts line (both centred); the chip's own look is still
+       the untouched shared .card-domain styling. Muted small facts text —
+       same size class as other quiet metadata, no emphasis. */
+    .feed-spread-left {
+      flex: 0 0 96px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
       text-align: center;
+    }
+    .feed-spread-facts {
+      font-size: 0.82rem;
+      color: var(--muted);
     }
     .feed-spread-body {
       flex: 1 1 auto;
