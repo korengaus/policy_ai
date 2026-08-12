@@ -3612,14 +3612,20 @@
           writeFeedGridHtml('<div class="empty-state">검색을 실행하거나 최근 분석을 불러오면 검증 카드가 표시됩니다.</div>');
         }
       } else if (dailyPick || heroPending || !heroCirculation || hot.length >= 2) {
-        // FEED-SPLIT: active only on genuine feed renders (home + domain tabs)
-        // under the circulation sort, and only when the POOL has a counted row
-        // somewhere — so page 2+ still shows the region-2 heading while a
-        // fully-uncounted pool (or a search/narrowed render, or another sort)
-        // gets today's flat grid.
+        // FEED-SPLIT: active on genuine feed renders (home + domain tabs)
+        // under the circulation sort. REGION-2-ALWAYS (31-APPLY): the old
+        // third condition (pool has a counted row somewhere) turned the WHOLE
+        // split off on a quiet day, leaving an unlabelled card list. The two
+        // headings are not symmetric: 여러 매체로 퍼진 주장 asserts something
+        // about its rows and stays gated per-region inside feedGridInnerHtml
+        // (no counted rows → no heading); 아직 한 곳만 보도한 주장 states
+        // membership — true of every uncounted card regardless of what sits
+        // above — so it now renders whenever its region has rows. An empty
+        // region still renders no heading (feedGridInnerHtml emits each
+        // section only with rows), and a search/narrowed render or another
+        // sort still gets today's flat grid.
         const feedSplitActive = isHomeFeedRender
-          && activeSort === "전체 기간 매체 수 순"
-          && gridPool.some((c) => clusterSizeMap.get(Number(c.recordId)) >= 2);
+          && activeSort === "전체 기간 매체 수 순";
         writeFeedGridHtml(feedGridInnerHtml(pageSlice, feedSplitActive));
       } else {
         // <2 fallback — the single card renders as the hero alone (no grid
