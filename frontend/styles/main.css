@@ -2063,6 +2063,43 @@
     .verify-how-full {
       margin-top: 8px;
     }
+    /* BRAINMAP-HOME-CARD (33-APPLY): dark connection-map card below the feed
+       (design-target arrangement). Existing tokens only: --ink ground,
+       --paper text (17.9:1), the description at .78 opacity (~10:1) — no new
+       colour literals. Full-width sibling wrapper like .verify-how-full. */
+    .brainmap-home-full {
+      margin-top: 24px;
+    }
+    .brainmap-home-card {
+      background: var(--ink);
+      color: var(--paper);
+      border-radius: var(--radius);
+      padding: 28px 32px;
+    }
+    .brainmap-home-title {
+      font-size: 1.154rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .brainmap-home-desc {
+      margin: 0 0 16px;
+      max-width: 640px;
+      font-size: 0.923rem;
+      line-height: 1.6;
+      opacity: 0.78;
+    }
+    .brainmap-home-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--paper);
+      font-size: 0.923rem;
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .brainmap-home-link:hover {
+      text-decoration: underline;
+    }
     .verify-how {
       margin: 18px 0 24px;
       padding: 30px 30px 24px;
@@ -2571,6 +2608,25 @@
        left column (layout-only sizing here — the chip's own look is the
        shared .card-domain styling, untouched), the card body flows beside it.
        Region-2 cards render through the unchanged .topic-card-grid rules. */
+    /* REGION2-COLLAPSE (33-APPLY): the single-outlet region is a disclosure
+       row. <summary> keeps its DEFAULT display (list-item) — flex/grid/
+       contents make Chromium drop the control semantics and collapse the
+       closed element to zero height. The heading renders inline beside the
+       marker; the count is quiet slate. */
+    .feed-region-single > .feed-region-summary {
+      cursor: pointer;
+      padding: 26px 0 12px;
+    }
+    .feed-region-single > .feed-region-summary .feed-region-heading {
+      display: inline;
+      margin: 0;
+    }
+    .feed-region-count {
+      margin-left: 8px;
+      color: var(--slate);
+      font-size: 0.923rem;
+      font-weight: 700;
+    }
     .feed-region-heading {
       margin: 26px 0 12px;
       font-size: 1.08rem;
@@ -2698,24 +2754,35 @@
     .topic-card--hero > * {
       grid-column: 1;
     }
-    .topic-card--hero > .feed-spread-facts {
+    /* HERO-FACT-CELLS (33-APPLY): the right rail now holds the 5b fact-cell
+       grid (labelled, bordered, values large); the strip returns to column 1
+       under the title at FULL column width, with the date range beneath. */
+    .topic-card--hero > .hero-spread-cells {
       grid-column: 2;
-      grid-row: 2;
+      grid-row: 1 / span 5;
+      align-self: start;
+      grid-template-columns: minmax(0, 1fr);
     }
-    .topic-card--hero > .feed-spread-strip {
-      grid-column: 2;
-      grid-row: 3;
+    .topic-card--hero .spread-fact-value {
+      font-size: 1.308rem;
+    }
+    .hero-spread-range {
+      color: var(--slate);
+      font-size: 0.923rem;
+    }
+    .hero-spread-range .spread-facts-note {
+      display: inline;
+      margin: 0;
     }
     /* HERO-SPREAD-FACTS (23-APPLY): the hero reuses region 1's facts line and
        strip verbatim (.feed-spread-facts + feedSpreadStripHtml output); these
        two hero-scoped rules only space them under the summary and keep a long
        daily series from spanning the full hero width. */
-    .topic-card--hero .feed-spread-facts {
-      margin-top: 10px;
-    }
     .topic-card--hero .feed-spread-strip {
       margin-top: 6px;
-      max-width: 320px;
+      /* 33-APPLY: full column width under the title (was capped 320px when it
+         sat in the rail). */
+      max-width: none;
     }
 
     /* DESIGN-C3d: "오늘의 검증 / LATEST CHECKS" row — a re-chunk of the first ≤3

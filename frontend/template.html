@@ -448,6 +448,24 @@
       </div>
     </div>
 
+    <!-- BRAINMAP-HOME-CARD (33-APPLY): dark connection-map card near the feed's
+         bottom (design-target arrangement). EVERY string ships: title
+         뉴스 연결지도 = brainmap.html:243 (.map-title); the two body sentences =
+         brainmap.html's own intro/disclaimer (이 지도는… / 가까이 모인 점은…);
+         the link label 연결지도 → = the verify-how strip's shipped link. The
+         target's 노드/클러스터 counts are OMITTED: their only source is the
+         full 4.7MB /api/brainmap graph — no cheap endpoint ships, and
+         hardcoding numbers is worse than none. Dark = existing tokens only
+         (--ink ground, --paper text). -->
+    <div class="brainmap-home-full">
+      <section class="brainmap-home-card" aria-label="뉴스 연결지도">
+        <div class="brainmap-home-title">뉴스 연결지도</div>
+        <p class="brainmap-home-desc">이 지도는 뉴스의 유통·연결을 보여줍니다. 검증이 아닙니다.
+          가까이 모인 점은 비슷한 내용이 여러 매체에 보도되었다는 뜻일 뿐, 사실 여부와는 무관합니다.</p>
+        <a class="brainmap-home-link" href="/web/brainmap.html"><svg class="utility-icon" aria-hidden="true"><use href="#ic-network"/></svg>연결지도 →</a>
+      </section>
+    </div>
+
     <!-- VERIFY-STRIP-RELOCATE: the "이렇게 검증합니다" 3-step strip, moved here from
          under the hero to a FULL-WIDTH sibling below the 2-col .home-shell block and
          ABOVE the domain sections. Page now reads: [2-col hero+sort+cards+pagination |
