@@ -3461,16 +3461,14 @@
     // membership, not ordering — deliberately no basis line there.
     const FEED_REGION_SPREAD_HEADING = "여러 매체로 퍼진 주장";
     const FEED_REGION_SINGLE_HEADING = "아직 한 곳만 보도한 주장";
-    // REGION2-COLLAPSE (33-APPLY): region 2 renders collapsed by default — a
-    // real <details>/<summary> row with the shipped heading and the pool's
-    // uncounted total in the shipped {N}건 value form (the 오늘 N건 hint in
-    // the design target does NOT fit: this region is not day-scoped, and the
-    // bare N건 counter ships on the 보도 건수 cells). Every card stays in the
-    // DOM; one click opens the list. The open state persists across
-    // re-renders (sort/page clicks repaint the grid) via this module flag,
-    // synced by a capturing toggle listener at init.
-    let feedSingleRegionOpen = false;
-    function feedGridInnerHtml(cards, split, singleTotal) {
+    // REGION2-UNCOLLAPSED (34-APPLY): 33's <details> collapse REVERTED. With
+    // zero counted rows in the pool — the common case — folding the tail left
+    // the page holding one hero, a collapsed row over hundreds of px of white
+    // space, and a pager paging an invisible list. The target's fold was
+    // right for its data (three filled rows above) and wrong for ours. Not
+    // re-collapsed conditionally: a region that folds on some days makes the
+    // page differ for reasons a reader cannot see (31-APPLY's principle).
+    function feedGridInnerHtml(cards, split) {
       const grid = (list) => `<div class="topic-card-grid">`
         + list.map((card) => renderTopicCardHtml(card, { detailed: true })).join("")
         + `</div>`;
@@ -3486,19 +3484,9 @@
           + `</div></section>`;
       }
       if (uncounted.length) {
-        // REGION2-COLLAPSE: <summary> keeps its default display (Chromium
-        // drops the disclosure semantics — and the closed element collapses
-        // to zero height — if summary is given flex/grid/contents).
-        const total = Number(singleTotal);
-        const countBadge = Number.isFinite(total) && total > 0
-          ? `<span class="feed-region-count">${escapeHtml(String(total))}건</span>`
-          : "";
-        html += `<details class="feed-region feed-region-single"${feedSingleRegionOpen ? " open" : ""}>`
-          + `<summary class="feed-region-summary">`
+        html += `<section class="feed-region">`
           + `<h2 class="feed-region-heading">${escapeHtml(FEED_REGION_SINGLE_HEADING)}</h2>`
-          + countBadge
-          + `</summary>`
-          + grid(uncounted) + `</details>`;
+          + grid(uncounted) + `</section>`;
       }
       return html;
     }
@@ -3666,12 +3654,7 @@
         // sort still gets today's flat grid.
         const feedSplitActive = isHomeFeedRender
           && activeSort === "전체 기간 매체 수 순";
-        // REGION2-COLLAPSE: the summary row's count is the WHOLE pool's
-        // uncounted total (a per-page count under a collapsed row would
-        // read as the region's size and be false).
-        const feedSingleTotal = gridPool.filter(
-          (c) => !(clusterSizeMap.get(Number(c.recordId)) >= 2)).length;
-        writeFeedGridHtml(feedGridInnerHtml(pageSlice, feedSplitActive, feedSingleTotal));
+        writeFeedGridHtml(feedGridInnerHtml(pageSlice, feedSplitActive));
       } else {
         // <2 fallback — the single card renders as the hero alone (no grid
         // below). `heroPending` is in the condition above so a one-card pool
@@ -10047,17 +10030,6 @@
     // DESIGN-DETAIL-2: land on the home screen (hides #methodology, which is no
     // longer an always-on in-page section).
     showScreen("home");
-    // REGION2-COLLAPSE (33-APPLY): keep the disclosure's open state across
-    // repaints (sort/page/tab all rewrite #hotTopics innerHTML). toggle does
-    // not bubble — capturing listener on the stable container.
-    if (hotTopicsEl) {
-      hotTopicsEl.addEventListener("toggle", (event) => {
-        const t = event.target;
-        if (t && t.classList && t.classList.contains("feed-region-single")) {
-          feedSingleRegionOpen = t.open;
-        }
-      }, true);
-    }
     if (hotTopicsSortEl) {
       hotTopicsSortEl.addEventListener("change", () => {
         activeSort = hotTopicsSortEl.value || "뜨는순";
