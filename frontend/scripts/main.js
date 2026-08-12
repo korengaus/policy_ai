@@ -3115,7 +3115,8 @@
             </div>
             <h3 class="topic-card-title">${escapeHtml(card.title)}</h3>
             ${spreadStrip}
-            ${hashtagRow}
+          </div>
+          <div class="feed-spread-status">
             <div class="topic-card-verdict">
               ${sourcePill}
               <span class="verdict-pill ${verdictTierClass(card.verdictLabel)}">

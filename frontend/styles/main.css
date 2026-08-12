@@ -2591,6 +2591,10 @@
       flex-direction: row;
       align-items: flex-start;
       gap: 14px;
+      /* 14-APPLY: the status sits at the row's right edge when there is room
+         and REFLOWS below when there is not — no fixed status column (the
+         shipped strings run long and would wrap or clip in one). */
+      flex-wrap: wrap;
     }
     /* FEED-SPREAD (13-APPLY): the fixed left column now stacks the chip and
        the 건수·기간 facts line (both centred); the chip's own look is still
@@ -2609,11 +2613,20 @@
       color: var(--muted);
     }
     .feed-spread-body {
-      flex: 1 1 auto;
+      /* 14-APPLY: a 200px basis (not auto/max-content) makes the wrap decision
+         deterministic: at 390 the [left|body] pair fills the line so the
+         status wraps below; at desktop widths the status fits at the right
+         and the body then grows into the slack. */
+      flex: 1 1 200px;
       min-width: 0;
       display: flex;
       flex-direction: column;
       gap: 10px;
+    }
+    .feed-spread-status {
+      flex: 0 1 auto;
+      margin-left: auto;
+      align-self: center;
     }
 
     /* DESIGN-C2: editorial top band — the hero (left, 1.6fr) + a secondary card
