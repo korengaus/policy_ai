@@ -92,7 +92,7 @@
       gap: 12px;
       flex-wrap: wrap;
       position: relative;
-      padding: 5px 0 9px;
+      padding: 4px 0 8px;
       margin-bottom: 10px;
       font-size: 0.95rem;
     }
@@ -240,7 +240,7 @@
     .utility-link--icon {
       display: inline-flex;
       align-items: center;
-      gap: 5px;
+      gap: 4px;
     }
     .utility-icon {
       width: 15px;
@@ -269,7 +269,7 @@
     .verify-how-link--map {
       display: inline-flex;
       align-items: center;
-      gap: 5px;
+      gap: 4px;
     }
     .verify-how-link--map .utility-icon {
       width: 14px;
@@ -364,7 +364,7 @@
     .topbar .panel label {
       font-size: 0.7rem;
       font-weight: 600;
-      margin-bottom: 1px;
+      margin-bottom: 2px;
       color: var(--muted);
     }
     /* Borderless inner inputs — the outer box is the only frame. */
@@ -536,7 +536,7 @@
 
     label {
       display: block;
-      margin-bottom: 7px;
+      margin-bottom: 8px;
       color: var(--dark);
       font-size: 1rem;
       font-weight: 700;
@@ -653,7 +653,7 @@
       margin-top: 4px;
       display: flex;
       flex-direction: column;
-      gap: 5px;
+      gap: 4px;
       pointer-events: none;
     }
 
@@ -729,7 +729,7 @@
     }
 
     .metric-value {
-      margin-top: 7px;
+      margin-top: 8px;
       color: var(--rule-strong);
       font-size: 24px;
       font-weight: 900;
@@ -821,7 +821,7 @@
       display: inline-flex;
       align-items: center;
       border-radius: 999px;
-      padding: 5px 10px;
+      padding: 4px 10px;
       color: white;
       font-size: 0.923rem;
       font-weight: 700;
@@ -910,7 +910,7 @@
 
     .summary-tile strong {
       display: block;
-      margin-top: 5px;
+      margin-top: 4px;
       color: var(--rule-strong);
       font-size: 15px;
       line-height: 1.35;
@@ -987,7 +987,7 @@
       color: var(--slate);
       font-size: 12px;
       font-weight: 700;
-      margin-bottom: 5px;
+      margin-bottom: 4px;
     }
     .spread-fact-value {
       display: block;
@@ -1022,7 +1022,7 @@
       color: var(--slate);
       font-size: 12px;
       font-weight: 700;
-      margin-bottom: 5px;
+      margin-bottom: 4px;
     }
 
     .verdict-value {
@@ -1108,7 +1108,7 @@
       width: 100%;
       border: 1px solid #fdba74;
       border-radius: 8px;
-      padding: 9px 10px;
+      padding: 8px 10px;
       color: var(--ink);
       font: inherit;
       background: #fff;
@@ -1152,7 +1152,7 @@
       border-radius: 999px;
       background: #ffedd5;
       color: #9a3412;
-      padding: 4px 9px;
+      padding: 4px 8px;
       font-size: 12px;
       font-weight: 900;
       margin-left: 6px;
@@ -1237,7 +1237,7 @@
     .reviewer-chip-row {
       display: flex;
       flex-wrap: wrap;
-      gap: 7px;
+      gap: 8px;
       margin-top: 12px;
     }
 
@@ -1248,7 +1248,7 @@
       color: #1e3a8a;
       font-size: 12px;
       font-weight: 800;
-      padding: 6px 9px;
+      padding: 6px 8px;
     }
 
     .score-explain {
@@ -1270,7 +1270,7 @@
       color: #1e3a8a;
       font-size: 16px;
       font-weight: 900;
-      margin-bottom: 9px;
+      margin-bottom: 8px;
     }
 
     .takeaway-list {
@@ -1319,7 +1319,7 @@
 
     .reading-guide-card strong {
       display: block;
-      margin-bottom: 5px;
+      margin-bottom: 4px;
       color: var(--ink);
       font-size: 13px;
     }
@@ -1534,7 +1534,9 @@
          top while the select's text centres. Centre the children so all three
          texts share one visual line; the select's 30px box is untouched. */
       align-items: center;
-      margin: 22px 0 0;
+      /* 32-APPLY: 22px read as leftover under the hero's own 16px bottom
+         padding — tightened onto the rhythm. */
+      margin: 16px 0 0;
     }
     .feed-sort-row + .news-home-section {
       margin-top: 0;
@@ -1607,7 +1609,7 @@
       color: var(--brand);
       border: 1px solid var(--line);
       border-radius: var(--radius-sm);
-      padding: 7px 16px;
+      padding: 8px 16px;
       font-size: 0.92rem;
       font-weight: 600;
     }
@@ -1925,7 +1927,7 @@
     .legend-row {
       display: flex;
       align-items: flex-start;
-      gap: 9px;
+      gap: 8px;
     }
     /* LABEL-1b STEP 1: fixed-width centered leading cell so ALL legend row labels
        left-align, regardless of whether the mark is the 9px round dot or the 15px
@@ -2088,7 +2090,7 @@
       min-width: 0;
     }
     .verify-how-sub {
-      margin: 7px 0 0;
+      margin: 8px 0 0;
       color: var(--slate);
       font-size: 0.875rem;
       line-height: 1.45;
@@ -2468,7 +2470,10 @@
     .topic-card-grid {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 20px 24px;
+      /* RULE-AND-SPACE (32-APPLY): boxes gone (below) — the space between
+         cards does the separating, so it grows to the design target's
+         generous rhythm (multiples of 4). */
+      gap: 28px 32px;
     }
 
     /* DESIGN-C1: borderless editorial row — the box chrome (border / radius /
@@ -2515,30 +2520,35 @@
       padding: 16px 12px 16px 9px;
     }
 
-    /* C3-1: light-bordered card INSIDE the 3-col grid (scoped so the divider-list
-       .topic-card look elsewhere — hero band, per-domain .latest-checks-row — is
-       untouched). Neutralizes the divider-list border-bottom (the shorthand border
-       covers all sides) and the hover margin:0 -12px bleed (which would collide with
-       grid tracks). Reuses existing tokens; no new colors. */
+    /* RULE-AND-SPACE (32-APPLY): was C3-1's boxed card (full border + radius +
+       16px padding). The design target separates by hairline rules and space,
+       not boxes — each grid card now carries ONE top hairline (the same
+       var(--line) the divider list uses) and the grid gap does the rest. The
+       hairline is KEPT at every width on purpose: at 390's single column,
+       space-only separation reads as one undifferentiated stream. Scoped so
+       the divider-list .topic-card elsewhere (hero, region-1 rows) is
+       untouched; neutralizes the divider-list border-bottom and hover bleed
+       exactly as the boxed rule did. Same tokens; no new colors. */
     .topic-card-grid > .topic-card {
-      border: 1px solid var(--line);
-      border-radius: var(--radius-sm);
-      padding: 16px;
+      border: none;
+      border-top: 1px solid var(--line);
+      border-radius: 0;
+      padding: 16px 0 0;
     }
     .topic-card-grid > .topic-card:hover {
       margin: 0;
-      padding: 16px;
+      padding: 16px 0 0;
       background: var(--surface-soft);
-      border-color: var(--brand);
+      border-top-color: var(--brand);
     }
-    /* .selected inside the grid → a full brand border with a thicker 3px left accent
-       + faint tint, no negative-margin bleed (adapts the divider-list left-bar marker
-       to a bordered card). */
+    /* .selected inside the grid → the divider-list left-bar marker, adapted:
+       3px brand bar + brand top rule + faint tint; padding-left clears the bar. */
     .topic-card-grid > .topic-card.selected {
       margin: 0;
-      padding: 16px;
-      border: 1px solid var(--brand);
-      border-left-width: 3px;
+      padding: 16px 0 0 12px;
+      border: none;
+      border-top: 1px solid var(--brand);
+      border-left: 3px solid var(--brand);
       background: #f7faff;
     }
     /* CARD-FOOT-ALIGN: grid stretch already equalises the three card BOXES in a
@@ -2672,6 +2682,30 @@
     .topic-card--hero .card-source-label {
       font-size: 0.923rem;
     }
+    /* HERO-RAIL (32-APPLY): the hero row's right half was simply not filled —
+       the card spans the full content width but its text column ends at
+       ~55% and the strip is capped at 320px, leaving dead space. The
+       circulation block (facts line + strip) now sits in a RIGHT RAIL beside
+       the title, the design target's own arrangement (title | numeric block
+       + strip). Layout only: no type size/weight/colour change. Collapses
+       back to the stacked flow at <=960px (media block below). */
+    .topic-card--hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      column-gap: 48px;
+      align-items: start;
+    }
+    .topic-card--hero > * {
+      grid-column: 1;
+    }
+    .topic-card--hero > .feed-spread-facts {
+      grid-column: 2;
+      grid-row: 2;
+    }
+    .topic-card--hero > .feed-spread-strip {
+      grid-column: 2;
+      grid-row: 3;
+    }
     /* HERO-SPREAD-FACTS (23-APPLY): the hero reuses region 1's facts line and
        strip verbatim (.feed-spread-facts + feedSpreadStripHtml output); these
        two hero-scoped rules only space them under the summary and keep a long
@@ -2728,7 +2762,7 @@
     .topic-card-top {
       display: flex;
       flex-wrap: wrap;
-      gap: 7px;
+      gap: 8px;
       align-items: center;
     }
 
@@ -2863,7 +2897,7 @@
       height: 18px;
       flex: none;
       vertical-align: -3px;
-      margin-right: 7px;
+      margin-right: 8px;
       color: var(--brand);
       fill: none;
       stroke: currentColor;
@@ -2897,7 +2931,7 @@
       font-size: 0.8rem;
       font-weight: 700;
       letter-spacing: 0.01em;
-      padding: 2px 9px;
+      padding: 2px 8px;
       border-radius: 999px;
       line-height: 1.35;
       white-space: nowrap;
@@ -2935,7 +2969,7 @@
       font-size: 0.72rem;
       font-weight: 700;
       letter-spacing: 0.01em;
-      padding: 1px 7px;
+      padding: 2px 8px;
       line-height: 1.4;
     }
     .topic-card-tags {
@@ -2949,7 +2983,7 @@
       color: var(--brand-ink);
       background: #eff6ff;
       border-radius: 4px;
-      padding: 1px 7px;
+      padding: 2px 8px;
     }
     .topic-card-verdict {
       display: flex;
@@ -2968,7 +3002,7 @@
       align-items: center;
       gap: 4px;
       border-radius: 999px;
-      padding: 2px 9px;
+      padding: 2px 8px;
       font-size: 0.8rem;
       font-weight: 700;
       line-height: 1.35;
@@ -3037,7 +3071,7 @@
       color: var(--verify);
       background: var(--verify-soft);
       border-radius: 999px;
-      padding: 2px 9px;
+      padding: 2px 8px;
       font-size: 0.74rem;
       font-weight: 700;
       line-height: 1.35;
@@ -3128,7 +3162,7 @@
       color: var(--slate);
       font-size: 12px;
       line-height: 1.5;
-      margin-top: 7px;
+      margin-top: 8px;
       overflow-wrap: anywhere;
     }
 
@@ -3654,7 +3688,7 @@
     }
     .server-review-history-audit span {
       background: #f1f5f9;
-      padding: 1px 6px;
+      padding: 2px 6px;
       border-radius: 4px;
     }
 
@@ -3969,7 +4003,7 @@
 
     .verification-item {
       border-top: 1px solid #e5e7eb;
-      padding-top: 9px;
+      padding-top: 8px;
       font-size: 14px;
       line-height: 1.55;
     }
@@ -3998,9 +4032,9 @@
     .vrf-cell {
       display: flex;
       flex-direction: column;
-      gap: 1px;
+      gap: 2px;
       min-width: 0;
-      padding: 7px 0;
+      padding: 8px 0;
       border-top: 1px solid var(--line);
       font-size: 0.923rem;
       line-height: 1.5;
@@ -4059,7 +4093,7 @@
     }
     .vrf-cand-more-summary {
       cursor: pointer;
-      padding: 9px 0;
+      padding: 8px 0;
       color: var(--brand);
       font-weight: 700;
       font-size: 0.86rem;
@@ -4079,7 +4113,7 @@
        structural correctness — appearance identical. */
     .vrf-cand-summary {
       cursor: pointer;
-      padding: 9px 0;
+      padding: 8px 0;
       font-size: 0.923rem;
       list-style: none;
     }
@@ -4222,7 +4256,7 @@
       border: 1px solid #e5e7eb;
       border-radius: 8px;
       background: #fff;
-      padding: 9px;
+      padding: 8px;
       font-size: 13px;
     }
 
@@ -4241,7 +4275,7 @@
     }
 
     .evidence-snippet-text {
-      margin: 7px 0;
+      margin: 8px 0;
       line-height: 1.55;
     }
 
@@ -4255,7 +4289,7 @@
     .risk-flags {
       color: #b45309;
       font-size: 12px;
-      margin-top: 5px;
+      margin-top: 4px;
     }
 
     /* DESIGN-DETAIL-5a: de-boxed (was a #d1d5db debug box) — flat on the collapsible
@@ -4557,14 +4591,14 @@
     .history-row .current-badge {
       font-size: 10.4px;
       font-weight: 700;
-      padding: 1px 7px;
+      padding: 2px 8px;
     }
     .history-meta .review-status-badge {
       background: var(--surface-soft);
       color: var(--muted);
       font-size: 11px;
       font-weight: 700;
-      padding: 2px 7px;
+      padding: 2px 8px;
     }
 
     .history-actions {
@@ -4580,7 +4614,7 @@
     .review-filter {
       min-height: 32px;
       border-radius: 7px;
-      padding: 7px 10px;
+      padding: 8px 10px;
       font-size: 12px;
       font-weight: 900;
     }
@@ -4632,7 +4666,7 @@
       /* LABEL-1: unify to the severity pill base geometry (was 0.846rem/900/4px 8px
          via .review-status). Green fill/text preserved. */
       border-radius: 999px;
-      padding: 2px 9px;
+      padding: 2px 8px;
       font-size: 0.74rem;
       font-weight: 700;
       gap: 4px;
@@ -4710,6 +4744,12 @@
          the card past the mobile viewport. Mirrors the base minmax(0,1fr). */
       .topic-card-grid {
         grid-template-columns: minmax(0, 1fr);
+      }
+      /* HERO-RAIL (32-APPLY): the right rail needs the width — stacked flow
+         here (display:flex restores the base .topic-card column flow; the
+         children's grid-column placements are inert under flex). */
+      .topic-card--hero {
+        display: flex;
       }
       /* VERIFY-STEPS-REDESIGN: the how-we-verify steps stack to one column here, so
          hide the horizontal flow arrows (a sideways arrow between stacked steps reads
