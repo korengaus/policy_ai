@@ -287,12 +287,6 @@
              here (below the card grid) to directly under the hero (#hotTopicsTop),
              so first-time visitors meet it before the feed. See the section above. -->
 
-        <!-- DOMAIN-SECTION-REVAMP: #feedDomainSections was RELOCATED out of .home-main
-             to a FULL-PAGE-WIDTH sibling immediately after .home-shell (below), so the
-             per-domain sections span the full content width (4 cards across) while the
-             hero + main grid + sidebar above stay 2-col. Its id is unchanged
-             (getElementById + the delegated click listener still resolve). -->
-
         <!-- HOMEPAGE-TIERED: TIER 2 "나머지 뉴스" — concise cards for items ranked
              beyond the tier-1 cut. #domainSections (formerly the per-domain browse
              container) is repurposed as the tier-2 card grid. Hidden + emptied on the
@@ -541,18 +535,6 @@
           <a class="verify-how-link verify-how-link--map" href="/web/brainmap.html"><svg class="utility-icon" aria-hidden="true"><use href="#ic-network"/></svg>연결지도 →</a>
         </nav>
       </section>
-    </div>
-
-    <!-- DOMAIN-SECTION-REVAMP: per-domain grouped sections — filled by
-         renderDomainSections() on the 전체 tab ONLY (one section per domain that has
-         cards, top-4 by 뜨는순 in TAB_ORDER). RELOCATED here (full-page-width sibling
-         after .home-shell) so the sections span the full content width at 4-across;
-         the .domain-sections-full wrapper aligns its edges to the page content width
-         (matches .home-shell), NOT the browser edges. Emptied on single-domain tabs.
-         Cards render via renderTopicCardHtml verbatim; the #homeScreen-level click
-         delegation covers them (id unchanged). -->
-    <div class="domain-sections-full">
-      <div id="feedDomainSections"></div>
     </div>
 
     <!-- DESIGN-DETAIL-3: #selectedIssueIntro / #reportActions / #results were

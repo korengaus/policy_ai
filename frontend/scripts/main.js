@@ -147,8 +147,6 @@
     // DESIGN-C3h-1d: top feed container (hero band + 오늘의 검증 row) — sits above the
     // static sort row, with the card-row + 1-col list rendering into #hotTopics below.
     const hotTopicsTopEl = document.getElementById("hotTopicsTop");
-    // DESIGN-C3h-2: per-domain grouped sections container (filled on the 전체 tab only).
-    const feedDomainSectionsEl = document.getElementById("feedDomainSections");
     const verifyHowEl = document.getElementById("verifyHowSection");
     // SIDEBAR-RANK-B2: weekly-stats panel numbers + range; 제보 input/button.
     // HOME-TOP5 S5a: 확산 성장 Top 5 sidebar panel (filled from /api/trending).
@@ -263,13 +261,6 @@
     // only a full render can do. Without this the page silently lost two cards
     // on the late-pick path (caught in validation, not by reading the code).
     let feedGridExcludedCount = 0;
-    // FEED-PAGE-DEDUP: result ids already rendered higher up the page (the hero
-    // plus the recent grid's current page slice), recorded at grid-write time
-    // and read by domainSectionTopCards so a domain section never repeats a
-    // card the reader has already passed. Rebuilt on every home render, so a
-    // sort/page/tab change re-derives it; emptied on any non-전체 render, where
-    // the sections are not shown at all.
-    let feedShownIds = new Set();
     // Backstop for a HUNG request only: every explicit failure path (fetch
     // rejected, !response.ok, empty trending, no qualifying entry) settles
     // immediately and does not wait for this. 3000ms because the slowest
@@ -371,14 +362,6 @@
     const domainResultsCache = new Map();
     let domainLoadingKey = null;
     let domainFetchErrorKey = null;
-    // HOME-SECTION-FIX A1: per-domain cache for the home 분야별 sections. The
-    // sections used to filter the GLOBAL recent-50 pool (allCards), so a domain
-    // whose rows are older than that window showed 0–1 cards (보건 showed 1;
-    // education, all re-classified from old rows, showed none). Each section now
-    // draws its OWN top rows from GET /history?domain=<key> — the same read-only
-    // endpoint the tabs use. Display only; no localStorage.
-    const domainSectionCache = new Map();
-    const domainSectionLoading = new Set();
     // TITLE-TAIL-STRIP: tail->apex evidence folded (via the pure
     // outletTailEvidenceAdd) over every row the page has loaded — the recent
     // feed plus all per-domain caches. DERIVED AT LOAD TIME from the data
@@ -389,7 +372,6 @@
     let outletTailEvidenceSig = "";
     function feedOutletTailEvidence() {
       let sig = `r${serverHotTopicResults.length}`;
-      for (const [k, v] of domainSectionCache) sig += `|s${k}:${(v || []).length}`;
       for (const [k, v] of domainResultsCache) sig += `|d${k}:${(v || []).length}`;
       if (outletTailEvidenceCache && sig === outletTailEvidenceSig) {
         return outletTailEvidenceCache;
@@ -402,7 +384,6 @@
         }
       };
       fold(serverHotTopicResults);
-      for (const rows of domainSectionCache.values()) fold(rows);
       for (const rows of domainResultsCache.values()) fold(rows);
       outletTailEvidenceSig = sig;
       outletTailEvidenceCache = evidence;
@@ -503,27 +484,6 @@
       "finance", "trade", "SMB", "environment", "labor", "health",
       "statistics", "기타-미분류",
     ];
-    // DESIGN-C3h-2: static per-domain section subtitles (display-only UI copy; no
-    // per-card data). Keyed by the raw domain key (note "기타-미분류").
-    // 6c: identity strings — the sections record circulation, they do not issue
-    // 검증. Trailing 검증 → 확산 기록 (the title's shipped noun), pattern applied
-    // to all 13 incl. the two irregular forms (finance 정책·제도, statistics
-    // 공식 통계·지표).
-    const DOMAIN_SUBTITLE = {
-      realestate: "주택·부동산 정책 뉴스 확산 기록",
-      finance: "금융 정책·제도 뉴스 확산 기록",
-      welfare: "복지 정책 뉴스 확산 기록",
-      labor: "노동·고용 정책 뉴스 확산 기록",
-      health: "보건·의료 정책 뉴스 확산 기록",
-      environment: "환경·에너지 정책 뉴스 확산 기록",
-      SMB: "소상공인 정책 뉴스 확산 기록",
-      agriculture: "농업·농촌 정책 뉴스 확산 기록",
-      statistics: "공식 통계·지표 확산 기록",
-      education: "교육 정책 뉴스 확산 기록",
-      scitech: "과학기술·AI 정책 뉴스 확산 기록",
-      trade: "산업·통상 정책 뉴스 확산 기록",
-      "기타-미분류": "기타 정책 뉴스 확산 기록",
-    };
     // Normalize a card's domain to a comparison key. Missing/empty domain falls
     // into the "기타-미분류" bucket so a card is NEVER dropped (removal-free).
     function cardDomainKey(card) {
@@ -3185,82 +3145,6 @@
       }).join("");
     }
 
-    // DESIGN-C3h-2: per-domain grouped sections for the 전체 tab. Groups the full
-    // all-domain card set by cardDomainKey, iterates DOMAIN_ORDER, and for each
-    // domain WITH cards emits a section: a heavy black rule (.domain-section, CSS)
-    // + a big serif header + a static subtitle + a "{label} 전체 →" tab-switch
-    // button + the domain's top-3 by 뜨는순 as a 3-col .latest-checks-row. Reuses
-    // renderTopicCardHtml + sortTopicCards verbatim (no card-render change). Returns
-    // an innerHTML string (""→ no sections). Duplicates with the top feed are
-    // allowed (top = 전체 인기/최신; sections = browse-by-category).
-    // FEED-PAGE-DEDUP: the cards ONE domain section renders — its own top-4,
-    // MINUS anything the recent grid (and the hero) already showed higher up
-    // the same page. 7 of the 12 grid cards were reappearing below, so a
-    // reader scrolling one page met the same card twice.
-    //
-    // WHY THE SECTION GIVES WAY AND NOT THE GRID. Excluding on the grid side
-    // was tried first and is RACY: the grid is written exactly once
-    // (HERO-PAINT-ORDER) and can only exclude domains whose fetch has already
-    // landed, so with the 13 per-domain fetches resolving at ~0.9-1.8s against
-    // a grid paint at ~2.3s it deduplicated only 2 of the 7 — a different
-    // subset on every load. Making it deterministic would mean either blocking
-    // the grid on 13 fetches or repainting it, and HERO-PAINT-ORDER exists to
-    // forbid the second. This direction has no race: renderDomainSections is
-    // called from renderHotTopics IMMEDIATELY AFTER the grid write, so the
-    // grid's ids are always already known here, and the later per-domain
-    // repaints (pre-existing behaviour, and confined to #feedDomainSections)
-    // re-read the same settled set. No new paint of any kind is introduced.
-    //
-    // NOTHING IS HIDDEN: a card removed here is on the page in the grid above,
-    // and the filter runs BEFORE the slice so each section still backfills to
-    // a full 4 from its own newest-12. Empty grid-id set (grid not yet painted,
-    // or a non-전체 tab) => no exclusion, i.e. today's behaviour exactly.
-    // Asserts nothing about sameness: it is one card shown once, not a group.
-    function domainSectionTopCards(d) {
-      const results = domainSectionCache.get(d);
-      if (!results || !results.length) return [];
-      // CLUSTER-FOLD: fold applies here too so a section can never show two
-      // members of one cluster side by side. Section pools fetch no sizes of
-      // their own, so only rows whose keys an earlier pool load fetched can
-      // fold — unkeyed rows render as today.
-      const domainCards = foldClusteredCards(results.map((result, index) =>
-        topicCardFromResult(result, index, "server")));
-      if (!domainCards.length) return [];
-      const shown = feedShownIds;
-      const eligible = (shown && shown.size)
-        ? domainCards.filter((c) => !(c.recordId && shown.has(String(c.recordId))))
-        : domainCards;
-      return sortTopicCards(eligible, "뜨는순").slice(0, 4);
-    }
-
-    function renderDomainSections() {
-      // HOME-SECTION-FIX A1: source each section from its OWN per-domain fetch
-      // (domainSectionCache), not the global recent pool — so every domain with
-      // rows gets a section and its real top-3 (fixes 보건=1 and missing 교육).
-      // DOMAIN-SECTION-REVAMP: iterate TAB_ORDER (corpus-volume-descending) so the
-      // sections match the top tabs. "전체" is not a real domain (skip it); the
-      // remaining keys — incl. "기타-미분류" last — are identical to DOMAIN_ORDER's,
-      // so domainSectionCache + domainDisplayLabel resolve unchanged. DOMAIN_ORDER
-      // itself is untouched (still drives ensureDomainSectionsLoaded's fetch loop).
-      return TAB_ORDER.filter((d) => d !== "전체").map((d) => {
-        const top3 = domainSectionTopCards(d);
-        if (!top3.length) return "";
-        const label = domainDisplayLabel(d);
-        return `<section class="domain-section">`
-          + `<div class="domain-section-head">`
-          + `<div class="domain-section-titles">`
-          + `<h2 class="domain-section-title">${escapeHtml(label)}</h2>`
-          + `<p class="domain-section-sub">${escapeHtml(DOMAIN_SUBTITLE[d] || "")}</p>`
-          + `</div>`
-          + `<button type="button" class="domain-section-all" data-domain="${escapeHtml(d)}">${escapeHtml(label)} 전체 →</button>`
-          + `</div>`
-          + `<div class="latest-checks-row">`
-          + top3.map((card) => renderTopicCardHtml(card, { detailed: true })).join("")
-          + `</div>`
-          + `</section>`;
-      }).join("");
-    }
-
     // HOMEPAGE-TIERED: two-tier feed from ONE ranked pool. The active tab is a
     // range filter (전체 = global; specific = that domain). Both tiers use the
     // same sort (default 뜨는순) so ranking is consistent: tier-1 = global top,
@@ -3350,7 +3234,7 @@
     // non-circulation selection. Branch A (trending pick) is untouched — it
     // states its own circulation basis (확산 성장). Both callers
     // (renderHotTopics, paintHeroBandOnly) build `hot` from this predicate,
-    // and that array is the SAME one heroKeys / feedShownIds read, so the
+    // and that array is the SAME one heroKeys reads, so the
     // band's cards always leave the grid.
     function heroPoolHasCount(cards) {
       return (Array.isArray(cards) ? cards : []).some(
@@ -3642,28 +3526,6 @@
       // is still in flight on the true home feed, nothing at a RESERVED height.
       // The grid write below runs on THIS pass either way, which is what makes
       // it the only grid write of a normal load.
-      // FEED-PAGE-DEDUP: record what THIS render places above the domain
-      // sections — the band's card(s) plus the grid's current page slice — so
-      // renderDomainSections, called a few lines below in this same pass, can
-      // skip a repeat. Rebuilt every render, so sort / page / tab changes
-      // re-derive it; left empty on a non-전체 render, where no sections show.
-      // Reads the SAME `dailyPick` / `hot` / `pageSlice` this pass renders, so
-      // it can never describe a card the page did not actually put up there.
-      feedShownIds = new Set();
-      if (isTrueHomeFeed) {
-        if (!heroPending) {
-          if (dailyPick) {
-            if (dailyPick.recordId) feedShownIds.add(String(dailyPick.recordId));
-          } else {
-            for (const c of hot.slice(0, 2)) {
-              if (c && c.recordId) feedShownIds.add(String(c.recordId));
-            }
-          }
-        }
-        for (const c of pageSlice) {
-          if (c && c.recordId) feedShownIds.add(String(c.recordId));
-        }
-      }
       if (heroPending) {
         hotTopicsTopEl.classList.add("hero-band-reserved");
         writeHeroBandHtml("");
@@ -3706,19 +3568,9 @@
 
       // C3-1: RETIRE the TIER-2 "나머지 뉴스" block on BOTH tabs — the domain grid now
       // shows the full domain pool, so the separate tier is redundant. Kept hidden +
-      // emptied (shells preserved for C3-2). renderDomainSections stays 전체-only (C3-3
-      // handles gating); #verifyHowSection is untouched.
-      if (activeDomain === "전체") {
-        // HOME-SECTION-FIX A1: kick off (idempotent) per-domain prefetch, then
-        // render whatever has landed. Each fetch repaints the sections as it
-        // resolves, so all domains fill in without blocking the feed.
-        ensureDomainSectionsLoaded();
-        if (feedDomainSectionsEl) feedDomainSectionsEl.innerHTML = renderDomainSections();
-      } else {
-        if (feedDomainSectionsEl) feedDomainSectionsEl.innerHTML = "";
-      }
+      // emptied (shells preserved for C3-2). #verifyHowSection is untouched.
       // C3-3: the "이렇게 검증합니다" intro box is a site intro → 전체 tab only, hidden on
-      // domain tabs. Mirrors the per-domain-section 전체-only gate above.
+      // domain tabs.
       if (verifyHowEl) verifyHowEl.hidden = activeDomain !== "전체";
       if (tier2SectionEl) tier2SectionEl.hidden = true;
       if (tier2GridEl) tier2GridEl.innerHTML = "";
@@ -9126,27 +8978,6 @@
       });
     }
 
-    // HOME-SECTION-FIX A1: ensure every DOMAIN_ORDER domain has its top rows
-    // cached for the home 분야별 sections, then repaint. Fire-and-forget and
-    // fail-quiet: a domain that errors just has no section (never blocks the
-    // others). Reuses getServerDomainAnalyses — the SAME read-only /history
-    // adapter the tabs use. A small limit gives 뜨는순 a real pool to rank while
-    // keeping the per-domain payloads light. Repaint writes ONLY the sections
-    // container (never calls renderHotTopics), so there is no re-entrancy loop.
-    function ensureDomainSectionsLoaded() {
-      for (const domainKey of DOMAIN_ORDER) {
-        if (domainSectionCache.has(domainKey) || domainSectionLoading.has(domainKey)) continue;
-        domainSectionLoading.add(domainKey);
-        getServerDomainAnalyses(domainKey, 12).then((results) => {
-          domainSectionLoading.delete(domainKey);
-          if (results !== null) domainSectionCache.set(domainKey, results);
-          if (activeDomain === "전체" && feedDomainSectionsEl) {
-            feedDomainSectionsEl.innerHTML = renderDomainSections();
-          }
-        });
-      }
-    }
-
     // After a V2 job finishes, the SSE "completed" event carries the
     // `pipeline_worker._build_summary_payload` shape — which only
     // includes `saved_result_ids`, not the full per-news results.
@@ -10069,26 +9900,6 @@
     // DESIGN-DETAIL-2: land on the home screen (hides #methodology, which is no
     // longer an always-on in-page section).
     showScreen("home");
-    // DESIGN-C3h-2: the "{label} 전체 →" section links switch to that domain tab via
-    // the SAME setActiveDomain. They carry [data-domain] (not [data-topic-source]),
-    // so the .home-main card-open delegation ignores them and these never open a card.
-    if (feedDomainSectionsEl) {
-      feedDomainSectionsEl.addEventListener("click", (event) => {
-        const btn = event.target.closest("[data-domain]");
-        if (btn) {
-          setActiveDomain(btn.dataset.domain || "전체");
-          window.scrollTo({ top: 0, behavior: "smooth" });
-          return;
-        }
-        // DOMAIN-SECTION-REVAMP: #feedDomainSections was relocated OUT of .home-main,
-        // so the .home-main card-open delegation (below) no longer reaches these
-        // cards — bind the SAME closest("[data-topic-source]") → openTopicCard
-        // pattern here so section cards still open the detail view.
-        const card = event.target.closest("[data-topic-source]");
-        if (!card) return;
-        openTopicCard(card);
-      });
-    }
     if (hotTopicsSortEl) {
       hotTopicsSortEl.addEventListener("change", () => {
         activeSort = hotTopicsSortEl.value || "뜨는순";

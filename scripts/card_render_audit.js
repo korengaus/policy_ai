@@ -560,7 +560,6 @@ function trendingJoinPrefersLineage(apiPy) {
 // (2) grid-write-single-path  ZERO, source-shape. See the note at its call
 //     site: the real assertion (the grid is written once per load) needs a
 //     browser and cannot be made here.
-// (3) page-dedup-wiring       ZERO, source-shape. Same limitation.
 // ---------------------------------------------------------------------------
 
 // (set after the parser is defined; see below)
@@ -592,20 +591,6 @@ function faceTrailingTail(face) {
 // paint COUNT itself is not (see the call site).
 function gridWriteSites(js) {
   return (js.match(/hotTopicsEl\.innerHTML\s*=/g) || []).length;
-}
-
-// (3) FEED-PAGE-DEDUP made the domain sections skip ids the grid already
-// showed, by filtering their candidates against feedShownIds BEFORE the slice.
-// If that filter disappears, or moves after the slice, a card renders twice on
-// one page again.
-function pageDedupWired(js) {
-  const fn = js.indexOf("function domainSectionTopCards(");
-  if (fn < 0) return null;
-  const body = js.slice(fn, js.indexOf("\n    }", fn));
-  const filtered = /feedShownIds/.test(body) && /\.filter\(/.test(body);
-  const filterBeforeSlice = body.indexOf(".filter(") >= 0
-    && body.indexOf(".filter(") < body.indexOf(".slice(0, 4)");
-  return filtered && filterBeforeSlice;
 }
 
 BINDING_TAIL_RE = bindingTailReFromJs(mainJs);
@@ -1864,14 +1849,9 @@ function trendingTailWiring(js) {
       }
     }
   }
-  // (2)/(3) source-shape guards must reject their pre-fix shapes.
+  // (2) source-shape guard must reject its pre-fix shape.
   if (gridWriteSites("hotTopicsEl.innerHTML = a; hotTopicsEl.innerHTML = b;") !== 2) {
     failures.push("VACUOUS DETECTOR: gridWriteSites cannot count its control");
-  }
-  if (pageDedupWired("function domainSectionTopCards(d) {\n"
-      + "  return sortTopicCards(domainCards, x).slice(0, 4);\n    }") !== false) {
-    failures.push("VACUOUS DETECTOR: pageDedupWired accepts an unfiltered "
-      + "pre-fix domainSectionTopCards");
   }
 
   // --- HERO-FALLTHROUGH-DISCLOSURE ----------------------------------------
@@ -2117,15 +2097,6 @@ function trendingTailWiring(js) {
       + "hotTopicsEl.innerHTML assignments (expected exactly 1, inside "
       + "writeFeedGridHtml). A second write path bypasses the write-once guard "
       + "and restores the double paint HERO-PAINT-ORDER removed");
-  }
-  const dedup = pageDedupWired(mainJs);
-  if (dedup === null) {
-    failures.push("UNGATED-FIX page-dedup-wiring: domainSectionTopCards not "
-      + "found — the dedup check is blind");
-  } else if (!dedup) {
-    failures.push("UNGATED-FIX page-dedup-wiring: domain sections no longer "
-      + "filter against feedShownIds before slicing, so a result id can render "
-      + "twice on one page again");
   }
 }
 
