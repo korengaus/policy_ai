@@ -1575,6 +1575,11 @@
     .feed-sort-row {
       display: flex;
       justify-content: flex-end;
+      /* SORT-ROW-BASELINE: #feedSortBasis is a flex SIBLING of .hot-topics-sort
+         here (not a child), so the default stretch pinned its text to the row
+         top while the select's text centres. Centre the children so all three
+         texts share one visual line; the select's 30px box is untouched. */
+      align-items: center;
       margin: 22px 0 0;
     }
     .feed-sort-row + .news-home-section {
@@ -1585,6 +1590,24 @@
     }
     .feed-sort-row .hot-topics-sort {
       margin: 0;
+    }
+    /* SORT-ROW-BASELINE: the 정렬 label carried the global `label` rule's 7px
+       margin-bottom and a 1rem size; the basis span carried .public-eyebrow's
+       8px margin-bottom and 0.923rem — three sizes/offsets on one row. Match
+       both texts to the select's 0.92rem and zero the stray bottom margins so
+       the centred boxes put the text on one line. Scoped to .feed-sort-row:
+       the tabs-row sort variant and other .public-eyebrow uses are untouched. */
+    .feed-sort-row .hot-topics-sort-label {
+      font-size: 0.92rem;
+      margin-bottom: 0;
+      /* At 390px the flex squeeze wrapped the 2-char label into a vertical
+         1-char column (pre-existing). Keep it on one line; the basis text is
+         the row's flexible piece and already wraps to two centred lines. */
+      white-space: nowrap;
+    }
+    .feed-sort-row #feedSortBasis {
+      font-size: 0.92rem;
+      margin-bottom: 0;
     }
 
     /* PAGINATION-CENTER: full-width pagination row — a 3rd child of the 2-col
@@ -2573,6 +2596,18 @@
       border: 1px solid var(--brand);
       border-left-width: 3px;
       background: #f7faff;
+    }
+    /* CARD-FOOT-ALIGN: grid stretch already equalises the three card BOXES in a
+       row (measured equal); the ragged look is the content ending at different
+       heights — the summary is absent or shorter than its existing 3-line clamp
+       on some cards, and titles run 1 vs 2 clamped lines. A clamp is a cap, not
+       a floor, so it cannot equalise; instead pin the card FOOT (the status
+       line, plus the 공식 근거 block when present — the N개 매체 chip rides the
+       top badge row) to the card's bottom edge so a row reads as a row. In the
+       1-col mobile flow the card box shrinks to its content and the auto margin
+       resolves to 0 — no change there. Nothing hidden, nothing newly truncated. */
+    .topic-card-grid > .topic-card > .topic-card-verdict {
+      margin-top: auto;
     }
 
     /* DESIGN-C2: editorial top band — the hero (left, 1.6fr) + a secondary card
