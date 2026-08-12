@@ -141,11 +141,19 @@
   }
   /* Daily curve: calendar-day axis — scaled brand bars on article days, fixed
      2px --line slots between them (spacing, not a measurement; see the JS). */
-  .spark-row { display: flex; align-items: flex-end; gap: 6px; overflow-x: auto; padding: 4px 2px 0; }
-  .spark-col { display: flex; flex-direction: column; align-items: center; gap: 3px; flex: 0 0 auto; }
+  /* 17-APPLY: columns SHARE the row width (no fixed minimum, no horizontal
+     scroll at any span up to the 60-day cap). gap 2px matches the detail
+     sparkline; bars cap at the old 20px so short spans look as before.
+     overflow-x:auto stays as a safety net only. */
+  .spark-row { display: flex; align-items: flex-end; gap: 2px; overflow-x: auto; padding: 4px 2px 0; }
+  .spark-col { display: flex; flex-direction: column; align-items: center; gap: 3px; flex: 1 1 0; min-width: 0; }
   /* CLAIM-GRAPHS: solid — opacity never appears in a data mark (a faded mark
      reads as "less certain", a verdict leaking through styling). */
-  .spark-bar { width: 20px; background: var(--brand); border-radius: 2px 2px 0 0; }
+  .spark-bar { width: 100%; max-width: 20px; background: var(--brand); border-radius: 2px 2px 0 0; }
+  /* 17-APPLY: thinned label line (first date / 최다 N건·일 / last date — the
+     detail sparkline's own label pattern) shown when per-column labels no
+     longer fit; same muted tokens as .spark-date. */
+  .spark-axis { display: flex; justify-content: space-between; gap: 12px; margin-top: 3px; font-size: 10px; color: var(--muted); }
   .spark-count { font-size: 10.5px; color: var(--slate); font-weight: 700; }
   .spark-date { font-size: 10px; color: var(--muted); }
   .spark-note { margin-top: 8px; font-size: 12px; color: var(--muted); line-height: 1.5; }
@@ -458,7 +466,10 @@
         var col = el("div", "spark-col");
         col.appendChild(el("span", "spark-count", count));
         var bar = el("div", "spark-bar");
-        bar.style.height = Math.max(3, Math.round((count / max) * 44)) + "px";
+        // 17-APPLY: min height 3 -> 6px. Columns can now shrink to a few px,
+        // and a 3px blue bar next to a 2px grey slot stopped being readable —
+        // 6px keeps the smallest real bar unmistakably a bar at every width.
+        bar.style.height = Math.max(6, Math.round((count / max) * 44)) + "px";
         bar.title = date + " · " + count + "건";
         col.appendChild(bar);
         col.appendChild(el("span", "spark-date", String(date || "").slice(5)));
@@ -504,6 +515,32 @@
         });
       }
       document.getElementById("timelinePanel").hidden = false;
+      // 17-APPLY FIT-PASS (measured AFTER unhide, so clientWidth is real):
+      // when the per-column share can no longer fit a date label (<34px),
+      // per-column dates give way to ONE axis line — first date / 최다 N건·일
+      // / last date, the detail sparkline's own label pattern (shipped
+      // strings; dates are data). Below 14px the count labels go too (their
+      // numbers stay in every bar's tooltip). Overlapping text never ships.
+      (function fitSparkLabels() {
+        var cols = row.children;
+        var n = cols.length;
+        if (!n) return;
+        var colW = (row.clientWidth - 2 * (n - 1)) / n;
+        if (colW >= 34) return;
+        var dates = row.querySelectorAll(".spark-date");
+        for (var li = 0; li < dates.length; li += 1) dates[li].style.display = "none";
+        if (colW < 14) {
+          var cnts = row.querySelectorAll(".spark-count");
+          for (var ci = 0; ci < cnts.length; ci += 1) cnts[ci].style.display = "none";
+        }
+        if (validDays.length) {
+          var axis = el("div", "spark-axis");
+          axis.appendChild(el("span", null, validDays[0].slice(5)));
+          axis.appendChild(el("span", null, "최다 " + max + "건/일"));
+          axis.appendChild(el("span", null, validDays[validDays.length - 1].slice(5)));
+          row.parentNode.insertBefore(axis, row.nextSibling);
+        }
+      })();
     }
 
     // CLAIM-GRAPHS: corpus distribution — SHOW, never assert. Bars are the
