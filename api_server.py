@@ -1542,6 +1542,135 @@ def cluster_sizes(ids: Optional[str] = None) -> Response:
 
 
 # ---------------------------------------------------------------------------
+# FEED-SPREAD (12-APPLY) — GET /api/cluster-spreads?ids=1,2,3: the batched
+# circulation-spread map for the feed's region-1 rows. One call answers the
+# whole visible pool, exactly like /api/cluster-sizes (which stays byte-
+# identical — its whole-body-equality test is a gate). Each qualifying id
+# (outlet_count >= 2, mirroring the sizes/spread gate; absent = no recorded
+# 2+ cluster, NEVER "1개 매체") maps to circulation facts only:
+#   outlet_count / size          — from the SAME cached spread indexes,
+#   first_at / last_at /         — members' published_at, fetched in ONE
+#   span_days / daily            combined query for ALL matched clusters
+#                                  (never one query per cluster),
+#   stable_id                    — lets the feed fold same-cluster rows with
+#                                  this one batched call instead of the
+#                                  per-row /api/cluster/{id}/members calls.
+#
+# SAFETY / HONESTY:
+#   * READ-ONLY, circulation only. NO verdict/score/confidence/label column
+#     anywhere — same hygiene the sizes endpoint's source-scan test pins.
+#   * daily is CAPPED at the most recent _CLUSTER_SPREADS_DAILY_CAP buckets.
+#     Truncation is NEVER silent: "daily_truncated": true is set explicitly,
+#     and first_at/last_at always describe the FULL range, so a series that
+#     does not span them is visibly cut.
+#   * NEVER 500: empty/malformed ids, no graph, PG off, any failure ->
+#     {"spreads": {}} at HTTP 200. A failed published_at read degrades to
+#     null timeline fields (counts still ship), never an emptied map.
+#   * Ids capped at 60 per call, mirroring the sizes endpoint.
+# ---------------------------------------------------------------------------
+_CLUSTER_SPREADS_EMPTY_JSON = '{"spreads": {}}'
+_CLUSTER_SPREADS_MAX_IDS = 60
+_CLUSTER_SPREADS_DAILY_CAP = 14
+
+
+def _fetch_published_at_by_id(member_ids):
+    """Read-only {analysis id: published_at} in ONE combined batch (the same
+    two-column pattern _fetch_member_original_urls uses). Any failure -> {}
+    so spreads still ship with null timelines rather than vanishing/500ing."""
+    if not member_ids:
+        return {}
+    try:
+        import sqlalchemy as sa
+
+        import postgres_storage
+
+        engine = postgres_storage.get_engine()
+        if engine is None:
+            return {}
+        stmt = sa.text(
+            "SELECT id, published_at FROM analysis_results WHERE id IN :ids"
+        ).bindparams(sa.bindparam("ids", expanding=True))
+        with engine.connect() as conn:
+            rows = conn.execute(stmt, {"ids": list(member_ids)}).fetchall()
+        return {rid: value for rid, value in rows}
+    except Exception:
+        logger.exception("Failed to fetch batched published_at")
+        return {}
+
+
+@app.get("/api/cluster-spreads")
+def cluster_spreads(ids: Optional[str] = None) -> Response:
+    try:
+        parsed = []
+        for token in (ids or "").split(","):
+            token = token.strip()
+            if token.isdigit():  # malformed / negative tokens are ignored
+                parsed.append(int(token))
+        parsed = parsed[:_CLUSTER_SPREADS_MAX_IDS]
+        if not parsed:
+            return _spread_response(_CLUSTER_SPREADS_EMPTY_JSON)
+        indexes = _load_spread_indexes()
+        if indexes is None:
+            return _spread_response(_CLUSTER_SPREADS_EMPTY_JSON)
+        # Pass 1: match qualifying ids and pool every matched cluster's
+        # members so published_at is ONE combined query, never per-cluster.
+        matched = {}
+        member_pool = set()
+        for rid in parsed:
+            # cluster_id 0 is a real cluster — explicit None checks only.
+            cluster_id = indexes["cluster_of"].get(rid)
+            if cluster_id is None:
+                continue
+            cluster_meta = indexes["clusters"].get(cluster_id) or {}
+            outlet_count = cluster_meta.get("outlet_count")
+            if not (isinstance(outlet_count, int) and outlet_count >= 2):
+                continue
+            matched[rid] = (cluster_id, cluster_meta)
+            member_pool.update(indexes["members"].get(cluster_id) or [])
+        if not matched:
+            return _spread_response(_CLUSTER_SPREADS_EMPTY_JSON)
+        published_of = _fetch_published_at_by_id(sorted(member_pool))
+        # Pass 2: pure aggregation per id (same daily/span derivation as
+        # _build_spread_payload; NULL published_at members are excluded from
+        # the timeline but stay inside outlet_count/size).
+        spreads = {}
+        for rid, (cluster_id, cluster_meta) in matched.items():
+            member_ids = indexes["members"].get(cluster_id) or []
+            dated = sorted(v for v in (published_of.get(mid)
+                                       for mid in member_ids) if v)
+            daily_counts: dict = {}
+            for value in dated:
+                day = value[:10]
+                daily_counts[day] = daily_counts.get(day, 0) + 1
+            first_at = dated[0] if dated else None
+            last_at = dated[-1] if dated else None
+            span_days = None
+            if dated:
+                span_days = (date.fromisoformat(last_at[:10])
+                             - date.fromisoformat(first_at[:10])).days
+            daily = [{"date": day, "count": count}
+                     for day, count in sorted(daily_counts.items())]
+            daily_truncated = len(daily) > _CLUSTER_SPREADS_DAILY_CAP
+            if daily_truncated:
+                daily = daily[-_CLUSTER_SPREADS_DAILY_CAP:]
+            spreads[str(rid)] = {
+                "outlet_count": cluster_meta.get("outlet_count"),
+                "size": cluster_meta.get("size"),
+                "first_at": first_at,
+                "last_at": last_at,
+                "span_days": span_days,
+                "daily": daily,
+                "daily_truncated": daily_truncated,
+                "stable_id": cluster_meta.get("stable_id"),
+            }
+        return _spread_response(json.dumps({"spreads": spreads},
+                                           ensure_ascii=False))
+    except Exception:
+        logger.exception("Failed to build cluster spreads")
+        return _spread_response(_CLUSTER_SPREADS_EMPTY_JSON)
+
+
+# ---------------------------------------------------------------------------
 # CLAIM-PAGE Phase 2 — read-only WHOLE-CLAIM (cluster) payload, addressed by
 # the DURABLE lineage id (build_brainmap_graph.assign_lineage_ids), so a
 # standalone claim page can hold a URL that survives brainmap rebuilds.
