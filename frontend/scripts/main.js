@@ -3258,7 +3258,25 @@
     // deferred band-only paint and the ordinary renderHotTopics paint emit the
     // SAME bytes. Every string, number and class here is lifted verbatim from
     // the previous inline branches — this milestone changes paint TIMING only.
-    function heroBandHtml(hot, dailyPick) {
+    // HERO-CIRC: Branch B (fallback band) selection rule. The grid beside the
+    // hero is circulation-ordered by default and states that basis on screen;
+    // picking the page's largest card by 뜨는순 put a judgement axis on top of
+    // a circulation-ordered list (the 5d-1 asymmetry). When the pool has ANY
+    // mapped count (this predicate; clusterSizeMap stores only >=2), Branch B
+    // now orders `hot` by the SAME shipped circulation sort key (stable
+    // tie-break = server order); with no counted card it keeps today's 뜨는순
+    // selection unchanged, so a circulation eyebrow is never forced onto a
+    // non-circulation selection. Branch A (trending pick) is untouched — it
+    // states its own circulation basis (확산 성장). Both callers
+    // (renderHotTopics, paintHeroBandOnly) build `hot` from this predicate,
+    // and that array is the SAME one heroKeys / feedShownIds read, so the
+    // band's cards always leave the grid.
+    function heroPoolHasCount(cards) {
+      return (Array.isArray(cards) ? cards : []).some(
+        (c) => clusterSizeMap.get(Number(c.recordId)) >= 2);
+    }
+
+    function heroBandHtml(hot, dailyPick, circulation) {
       if (dailyPick) {
         const heroOutlets = Number(trendingHeroPickRow?.current_outlet_count);
         const heroGrowth = Number(trendingHeroPickRow?.growth);
@@ -3296,14 +3314,23 @@
           + renderTopicCardHtml(dailyPick, { detailed: true, hero: true });
       }
       if (!hot.length) return "";
+      // HERO-CIRC: both fallback eyebrows are shipped strings — the circulation
+      // one is #feedSortBasis's exact text (template.html), the other is
+      // today's, byte-identical. The flag comes from heroFallbackOrder, so the
+      // stated basis can never disagree with how `hot` was actually ordered.
+      // HERO-CIRC: the flag arrives from the same heroPoolHasCount read that
+      // ordered `hot`, so the stated basis can never disagree with the order.
+      const fallbackEyebrow = circulation
+        ? '<div class="public-eyebrow">전체 기간 매체 수 순 · 검증이 아닙니다</div>'
+        : '<div class="public-eyebrow">주목순 · 검증이 아닙니다</div>';
       if (hot.length >= 2) {
         const band = `<div class="feed-hero-band">`
           + renderTopicCardHtml(hot[0], { detailed: true, hero: true })
           + renderTopicCardHtml(hot[1], { detailed: true, secondary: true })
           + `</div>`;
-        return '<div class="public-eyebrow">주목순 · 검증이 아닙니다</div>' + band;
+        return fallbackEyebrow + band;
       }
-      return '<div class="public-eyebrow">주목순 · 검증이 아닙니다</div>'
+      return fallbackEyebrow
         + renderTopicCardHtml(hot[0], { detailed: true, hero: true });
     }
 
@@ -3321,7 +3348,10 @@
       // Domain tabs / narrowed renders own their band through renderHotTopics;
       // a late pick must never repaint a view the reader has navigated to.
       if (activeDomain !== "전체") return;
-      const hot = sortTopicCards(currentTopicCards(), "뜨는순");
+      const heroPool = currentTopicCards();
+      const heroCirculation = heroPoolHasCount(heroPool);
+      const hot = sortTopicCards(heroPool,
+        heroCirculation ? "전체 기간 매체 수 순" : "뜨는순");
       const dailyPick = trendingDailyPickCard();
       const pickInGrid = !!(dailyPick && hotTopicsEl && (
         (dailyPick.recordId && hotTopicsEl.querySelector(
@@ -3337,7 +3367,7 @@
       }
       hotTopicsTopEl.classList.remove("hero-band-reserved");
       // The grid keeps its existing chips; this repaints the band's own.
-      if (writeHeroBandHtml(heroBandHtml(hot, dailyPick))) loadClusterSizeChips();
+      if (writeHeroBandHtml(heroBandHtml(hot, dailyPick, heroCirculation))) loadClusterSizeChips();
     }
 
     // Minimal escape for embedding a value inside a [attr="…"] selector.
@@ -3415,7 +3445,8 @@
         domainPending = true;
       }
       // DESIGN-C3h-1c: per-tab feed (every tab, filtered by activeDomain):
-      //   hero      = top-2 by 뜨는순 (the band)
+      //   hero      = top-2 of `hot` (HERO-CIRC: circulation order when the
+      //               pool has a mapped count, else 뜨는순) (the band)
       //   오늘의 검증 = TODAY-verified, newest-first, ≤3 — SORT-INDEPENDENT (unchanged)
       //   card row  = first 3 of the sort-controlled pool (no header)
       //   list      = the rest of the pool, 1-col divider list + 더 보기
@@ -3425,7 +3456,9 @@
       // server order). The card row + the list are the SAME poolSorted array, chunked,
       // so BOTH obey the dropdown. Today cards are excluded from the pool so the card
       // row never duplicates the 오늘의 검증 row.
-      const hot = sortTopicCards(filtered, "뜨는순");
+      const heroCirculation = heroPoolHasCount(filtered);
+      const hot = sortTopicCards(filtered,
+        heroCirculation ? "전체 기간 매체 수 순" : "뜨는순");
       // DESIGN-C3h-3: the dedicated 오늘의 검증 row was removed — today cards now flow
       // into the normal sorted feed carrying the per-card "오늘 검증" badge (isTodayCard).
       // So the pool excludes ONLY the hero cards (no longer the today cards).
@@ -3452,7 +3485,7 @@
       // DESIGN-C3-2: ONE uniform 3-col grid, PAGE_SIZE (12) cards per page. gridPool =
       // poolSorted (filtered MINUS the 2 hero cards, already sorted by activeSort so the
       // sort dropdown still drives grid order). Only the grid pages — the hero band
-      // (hot[0]/hot[1], fixed 뜨는순) is independent of currentPage.
+      // (hot[0]/hot[1], HERO-CIRC order) is independent of currentPage.
       const gridPool = poolSorted;
       // Pages over the post-hero pool. DESIGN-C3-2-FIX (BUG 1): the clamp must NOT be
       // destructive on a NARROWED render. Opening a card calls renderResults(results) →
@@ -3518,7 +3551,7 @@
         startHeroBandTimer();
       } else {
         hotTopicsTopEl.classList.remove("hero-band-reserved");
-        writeHeroBandHtml(heroBandHtml(hot, dailyPick));
+        writeHeroBandHtml(heroBandHtml(hot, dailyPick, heroCirculation));
       }
       if (!hot.length) {
         // STABLE-TABS S2: a domain tab whose data is still fetching / failed shows
