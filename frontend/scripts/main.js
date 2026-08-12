@@ -3048,6 +3048,45 @@
             </div>
           </div>`;
       })();
+      // FEED-SPLIT: compact list row for the 여러 매체로 퍼진 주장 region. The
+      // outlet count leads in a fixed left column — the SAME chip element/classes
+      // loadClusterSizeChips patches onto grid cards, rendered inline here
+      // because the count is already in clusterSizeMap at paint time (the
+      // patcher skips .feed-spread-row so it can never double-chip). ONLY the
+      // summary is dropped — the count is the information in this region; the
+      // badge row, title, tags, status line and 공식 근거 box all render
+      // unchanged. Same data attributes -> same delegated click path
+      // (closest("[data-topic-source]")). If the count is somehow absent the
+      // row falls through to the ordinary card — never an empty count column.
+      if (opts && opts.spreadRow) {
+        const rowCount = Number(clusterSizeMap.get(Number(card.recordId)));
+        if (Number.isFinite(rowCount) && rowCount >= 2) {
+          return `
+        <article class="topic-card feed-spread-row ${selected ? "selected" : ""}" data-topic-key="${escapeHtml(card.key)}" data-topic-source="${escapeHtml(card.source)}" data-topic-index="${escapeHtml(card.index)}" data-topic-record-id="${escapeHtml(card.recordId)}">
+          <span class="card-domain card-outlet-chip">${escapeHtml(String(rowCount))}개 매체</span>
+          <div class="feed-spread-body">
+            <div class="topic-card-top">
+              <span class="card-domain">${domainIconMarkup(cardDomainKey(card))}${escapeHtml(domainDisplayLabel(cardDomainKey(card)))}</span>
+              <span class="card-watch ${alertClass(card.alert)}">${escapeHtml(formatAlert(card.alert))}</span>
+              ${isTodayCard(card) ? `<span class="card-today-badge">오늘 기록</span>` : ""}
+              ${(card.contentNature === "market_commercial" && !card.hasGenuineOfficial) ? `<span class="card-today-badge">시장·시세</span>` : ""}
+              ${card.freshness ? `<span class="card-fresh">🔥 ${escapeHtml(FRESHNESS_BADGE_LABEL)}</span>` : ""}
+              ${card.humanReviewedAt ? `<span class="review-status review-approved">${escapeHtml(HUMAN_REVIEWED_LABEL)}</span>` : ""}
+            </div>
+            <h3 class="topic-card-title">${escapeHtml(card.title)}</h3>
+            ${hashtagRow}
+            <div class="topic-card-verdict">
+              ${sourcePill}
+              <span class="verdict-pill ${verdictTierClass(card.verdictLabel)}">
+                <span class="verdict-text">AI 검증 상태 ${escapeHtml(verdictLabelKo(card.verdictLabel))}</span>
+              </span>
+            </div>
+            ${sourceBody}
+          </div>
+        </article>
+      `;
+        }
+      }
       // CARD-SIMPLIFY: the front-face 근거 수준 number is OFF the card face.
       // Display only — card.confidence stays mapped (topicCardFromResult) because
       // the 뜨는순 composite sort and the hero pick read it (sortTopicCards).
@@ -3405,6 +3444,44 @@
       }
     }
 
+    // FEED-SPLIT: under the circulation sort the feed's page renders as two
+    // labelled regions — counted rows (recorded 2+ spread) as count-led list
+    // rows, uncounted rows as today's cards with summaries UNCHANGED (the
+    // summary is the only signal those rows have). The partition happens on the
+    // already-sliced page (pagination math untouched); under the circulation
+    // sort counted rows are a contiguous prefix, so this is a boundary, not a
+    // reshuffle. Absence from clusterSizeMap includes never-clustered rows, so
+    // region 2 means "no recorded spread", never "1개 매체" — nothing prints a
+    // count there. An empty region omits its heading and container entirely:
+    // pages 2+ (no counted rows left) show only the region-2 heading, and a
+    // pool with no counted rows at all renders today's flat grid (split off).
+    // Region order is the sort's own output; the region-2 heading states
+    // membership, not ordering — deliberately no basis line there.
+    const FEED_REGION_SPREAD_HEADING = "여러 매체로 퍼진 주장";
+    const FEED_REGION_SINGLE_HEADING = "아직 한 곳만 보도한 주장";
+    function feedGridInnerHtml(cards, split) {
+      const grid = (list) => `<div class="topic-card-grid">`
+        + list.map((card) => renderTopicCardHtml(card, { detailed: true })).join("")
+        + `</div>`;
+      if (!split) return grid(cards);
+      const counted = cards.filter((c) => clusterSizeMap.get(Number(c.recordId)) >= 2);
+      const uncounted = cards.filter((c) => !(clusterSizeMap.get(Number(c.recordId)) >= 2));
+      let html = "";
+      if (counted.length) {
+        html += `<section class="feed-region">`
+          + `<h2 class="feed-region-heading">${escapeHtml(FEED_REGION_SPREAD_HEADING)}</h2>`
+          + `<div class="feed-spread-list">`
+          + counted.map((card) => renderTopicCardHtml(card, { detailed: true, spreadRow: true })).join("")
+          + `</div></section>`;
+      }
+      if (uncounted.length) {
+        html += `<section class="feed-region">`
+          + `<h2 class="feed-region-heading">${escapeHtml(FEED_REGION_SINGLE_HEADING)}</h2>`
+          + grid(uncounted) + `</section>`;
+      }
+      return html;
+    }
+
     function renderHotTopics(preferredResults) {
       if (!hotTopicsEl) return;
       // 5d1: the on-screen sorting BASIS (static #feedSortBasis node in the
@@ -3564,9 +3641,15 @@
           writeFeedGridHtml('<div class="empty-state">검색을 실행하거나 최근 분석을 불러오면 검증 카드가 표시됩니다.</div>');
         }
       } else if (dailyPick || heroPending || hot.length >= 2) {
-        writeFeedGridHtml(pageSlice
-          .map((card) => renderTopicCardHtml(card, { detailed: true }))
-          .join(""));
+        // FEED-SPLIT: active only on genuine feed renders (home + domain tabs)
+        // under the circulation sort, and only when the POOL has a counted row
+        // somewhere — so page 2+ still shows the region-2 heading while a
+        // fully-uncounted pool (or a search/narrowed render, or another sort)
+        // gets today's flat grid.
+        const feedSplitActive = isHomeFeedRender
+          && activeSort === "전체 기간 매체 수 순"
+          && gridPool.some((c) => clusterSizeMap.get(Number(c.recordId)) >= 2);
+        writeFeedGridHtml(feedGridInnerHtml(pageSlice, feedSplitActive));
       } else {
         // <2 fallback — the single card renders as the hero alone (no grid
         // below). `heroPending` is in the condition above so a one-card pool
@@ -6923,6 +7006,10 @@
           const count = Number(sizes[rid]);
           if (!Number.isFinite(count) || count < 2) continue;
           for (const card of ridCards) {
+            // FEED-SPLIT: spread rows render their chip inline (fixed left
+            // column, outside .topic-card-top) — skip them or this would
+            // patch a second chip into the row's badge row.
+            if (card.classList && card.classList.contains("feed-spread-row")) continue;
             const top = card.querySelector(".topic-card-top");
             if (!top || top.querySelector(".card-outlet-chip")) continue;
             const chip = document.createElement("span");

@@ -268,7 +268,12 @@
           <span class="public-eyebrow" id="feedSortBasis" hidden>전체 기간 매체 수 순 · 검증이 아닙니다</span>
         </div>
         <section class="news-home-section">
-          <div id="hotTopics" class="topic-card-grid">
+          <!-- FEED-SPLIT: the grid class moved OFF this container onto the inner
+               region wrappers renderHotTopics writes (feedGridInnerHtml) — section
+               wrappers inside a grid container would become grid items and break
+               the 3-col layout. Cards stay direct children of a .topic-card-grid
+               element, so all .topic-card-grid-scoped CSS is unchanged. -->
+          <div id="hotTopics">
             <div class="empty-state">분석을 실행하거나 최근 분석을 불러오면 정책 뉴스 카드가 표시됩니다.</div>
           </div>
           <!-- PAGINATION-CENTER: #feedPagination was moved OUT of this left-column

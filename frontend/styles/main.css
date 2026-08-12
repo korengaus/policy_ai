@@ -2573,6 +2573,37 @@
     .topic-card-grid > .topic-card > .topic-card-verdict {
       margin-top: auto;
     }
+    /* FEED-SPLIT: the two labelled feed regions (circulation sort only).
+       BOTH regions use the same heading rule — the regions differ in shape,
+       not weight; position alone carries the ordering. The spread rows reuse
+       the base divider-list .topic-card (border-bottom, no box, same fonts),
+       laid horizontally: the SAME .card-outlet-chip leads in a fixed-width
+       left column (layout-only sizing here — the chip's own look is the
+       shared .card-domain styling, untouched), the card body flows beside it.
+       Region-2 cards render through the unchanged .topic-card-grid rules. */
+    .feed-region-heading {
+      margin: 26px 0 12px;
+      font-size: 1.08rem;
+      font-weight: 700;
+      color: var(--ink);
+    }
+    .feed-spread-row {
+      flex-direction: row;
+      align-items: flex-start;
+      gap: 14px;
+    }
+    .feed-spread-row > .card-outlet-chip {
+      flex: 0 0 auto;
+      min-width: 76px;
+      text-align: center;
+    }
+    .feed-spread-body {
+      flex: 1 1 auto;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
 
     /* DESIGN-C2: editorial top band — the hero (left, 1.6fr) + a secondary card
        (right, 1fr) sit in a 2-column band at the top of #hotTopics. The band is a
