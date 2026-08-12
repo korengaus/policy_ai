@@ -43,8 +43,11 @@
       cherry-picking. No member is ever labelled origin/source/최초 보도자:
       the earliest member can PREDATE the decision the cluster is about.
     * outlet count (매체) and member count (기사) stay SEPARATE numbers.
-    * gaps_omitted timeline: bars are spaced BY INDEX with date labels —
-      no continuous axis that would imply zero-days were measured.
+    * calendar-day timeline (16-APPLY-2): scaled bars on article days, fixed
+      2px var(--line) slots on the days between — the SAME unscaled slot the
+      detail sparkline ships (time-axis spacing, not a measured zero; the
+      grey-zero proposal stays rejected). Unparseable dates or a 60+ day
+      span fall back to the previous index-spaced form, never a lost chart.
     * superseded=true renders an explicit merge notice — never a different
       cluster silently under the requested id.
   Self-contained: inline CSS + JS, no external lib/CDN. Data is rendered via
@@ -136,8 +139,8 @@
     border-radius: 999px; padding: 2px 10px;
     font-weight: 700; font-size: 12px;
   }
-  /* Daily curve: bars spaced BY INDEX (gaps_omitted honesty — days without
-     articles are not drawn, and no continuous axis implies they were). */
+  /* Daily curve: calendar-day axis — scaled brand bars on article days, fixed
+     2px --line slots between them (spacing, not a measurement; see the JS). */
   .spark-row { display: flex; align-items: flex-end; gap: 6px; overflow-x: auto; padding: 4px 2px 0; }
   .spark-col { display: flex; flex-direction: column; align-items: center; gap: 3px; flex: 0 0 auto; }
   /* CLAIM-GRAPHS: solid — opacity never appears in a data mark (a faded mark
@@ -272,7 +275,7 @@
   <section class="panel" id="timelinePanel" hidden>
     <div class="panel-title">일자별 보도 건수</div>
     <div class="spark-row" id="sparkRow"></div>
-    <div class="spark-note">기사가 있는 날만 표시합니다 — 사이의 빈 날은 측정값이 아니므로 그리지 않습니다. 보도 건수 기준이며 사실 검증이 아닙니다.</div>
+    <div class="spark-note">보도 건수 기준이며 사실 검증이 아닙니다.</div>
   </section>
   <!-- CLAIM-GRAPHS: three recorded facts. Vocabulary reused verbatim from
        existing surfaces (확산 기간/수집 기사 기준 above; 문구 거의 동일 legend+line
@@ -438,23 +441,68 @@
     }
     document.getElementById("metaPanel").hidden = false;
 
-    // TIMELINE — bars spaced by INDEX (gaps_omitted: days without articles
-    // are not drawn; the note below the bars states this).
+    // TIMELINE — calendar-day axis (16-APPLY-2): iterate every day between
+    // first and last, a scaled brand bar on article days and a fixed 2px
+    // var(--line) slot on days without — the SAME unscaled slot treatment
+    // spreadSparklineHtml ships (an empty slot so the axis cannot compress a
+    // two-week silence into one index step; NOT a measured zero — no count
+    // label, no date label, no height scaling; the grey-zero proposal stays
+    // rejected). Ported guards: unparseable dates or a 60+ day span fall
+    // back to the previous index-spaced rendering of dated days — a long
+    // claim keeps the chart it had, never 200 slot columns, never nothing.
     var daily = Array.isArray(timeline.daily) ? timeline.daily : [];
     if (daily.length) {
       var max = daily.reduce(function (acc, p) { return Math.max(acc, Number(p.count) || 0); }, 1);
       var row = document.getElementById("sparkRow");
-      daily.forEach(function (point) {
-        var count = Number(point.count) || 0;
+      var articleCol = function (date, count) {
         var col = el("div", "spark-col");
         col.appendChild(el("span", "spark-count", count));
         var bar = el("div", "spark-bar");
         bar.style.height = Math.max(3, Math.round((count / max) * 44)) + "px";
-        bar.title = point.date + " · " + count + "건";
+        bar.title = date + " · " + count + "건";
         col.appendChild(bar);
-        col.appendChild(el("span", "spark-date", String(point.date || "").slice(5)));
-        row.appendChild(col);
+        col.appendChild(el("span", "spark-date", String(date || "").slice(5)));
+        return col;
+      };
+      var dayCounts = {};
+      var validDays = [];
+      daily.forEach(function (p) {
+        var day = typeof p.date === "string" ? p.date.slice(0, 10) : "";
+        var c = Number(p.count) || 0;
+        if (day && c > 0) {
+          if (!Object.prototype.hasOwnProperty.call(dayCounts, day)) validDays.push(day);
+          dayCounts[day] = (dayCounts[day] || 0) + c;
+        }
       });
+      validDays.sort();
+      var startMs = validDays.length ? Date.parse(validDays[0] + "T00:00:00Z") : NaN;
+      var endMs = validDays.length ? Date.parse(validDays[validDays.length - 1] + "T00:00:00Z") : NaN;
+      var totalDays = Math.round((endMs - startMs) / 86400000) + 1;
+      if (isFinite(startMs) && isFinite(endMs) && totalDays >= 1 && totalDays <= 60) {
+        for (var di = 0; di < totalDays; di += 1) {
+          var dayIso = new Date(startMs + di * 86400000).toISOString().slice(0, 10);
+          if (Object.prototype.hasOwnProperty.call(dayCounts, dayIso)) {
+            row.appendChild(articleCol(dayIso, dayCounts[dayIso]));
+          } else {
+            var slotCol = el("div", "spark-col");
+            var slot = el("div", "spark-bar spark-slot");
+            slot.style.height = "2px";
+            slot.style.background = "var(--line)";
+            slot.title = dayIso + " · 0건";
+            slotCol.appendChild(slot);
+            // empty date cell (nbsp, no text) so the slot shares the bars'
+            // baseline under align-items:flex-end — labels stay article-only.
+            slotCol.appendChild(el("span", "spark-date", " "));
+            row.appendChild(slotCol);
+          }
+        }
+      } else {
+        // fallback: the pre-16-APPLY-2 index-spaced rendering, byte-for-byte
+        // in behaviour (every daily entry, gaps omitted).
+        daily.forEach(function (point) {
+          row.appendChild(articleCol(point.date, Number(point.count) || 0));
+        });
+      }
       document.getElementById("timelinePanel").hidden = false;
     }
 
