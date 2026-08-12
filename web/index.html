@@ -2855,6 +2855,39 @@
       align-items: center;
       gap: 4px;
     }
+    /* CARD-CIRC-SLOT (26-APPLY): the grid card leads with the circulation
+       figure in its OWN slot — loadClusterSizeChips inserts it as the card's
+       FIRST CHILD, so it sits in the same place on every card that has one;
+       a card with no 2+ cluster gets no element at all. Direct-child
+       selector on purpose: the hero's badge-row chip and region 1's
+       left-column chip are separate treatments and keep the base look.
+       Tier 1 of the size hierarchy — size and weight only, colour unchanged. */
+    .topic-card > .card-outlet-chip {
+      display: block;
+      font-size: 1rem;
+      font-weight: 700;
+      margin: 0 0 6px;
+    }
+    /* CARD-BADGE-TIERS (26-APPLY): the badge row's four kinds of metadata
+       rendered at one 9.4–10px size; now three tiers by SIZE/WEIGHT only —
+       circulation (1rem, above) > domain (0.85rem) > alert/recency (0.8rem,
+       the raised Korean floor). Colours untouched; scoped OFF the hero and
+       region-1 rows (their own treatments) and identical on every grid card,
+       so no card outranks another. :not(.card-outlet-chip) keeps the tier-2
+       rule off the slot chip, which carries .card-domain for its colour. */
+    .topic-card:not(.feed-spread-row):not(.topic-card--hero) .card-domain:not(.card-outlet-chip) {
+      font-size: 0.85rem;
+      font-weight: 700;
+    }
+    .topic-card:not(.feed-spread-row):not(.topic-card--hero) .card-watch {
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+    .topic-card:not(.feed-spread-row):not(.topic-card--hero) .card-today-badge,
+    .topic-card:not(.feed-spread-row):not(.topic-card--hero) .card-fresh {
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
     /* CARD-ICONS: thin-stroke DOMAIN line-icon (metadata only, never a verdict).
        Sizing/stroke here; the per-domain tint comes from the inline color the
        card builder sets (symbols use stroke:currentColor;fill:none). */
@@ -13139,12 +13172,26 @@
             // patch a second chip into the row's badge row.
             if (card.classList && card.classList.contains("feed-spread-row")) continue;
             const top = card.querySelector(".topic-card-top");
-            if (!top || top.querySelector(".card-outlet-chip")) continue;
+            // 26-APPLY: dedupe at CARD level — the grid chip no longer lives
+            // inside .topic-card-top, so a top-scoped check would double-patch.
+            if (!top || card.querySelector(".card-outlet-chip")) continue;
             const chip = document.createElement("span");
             // Reuse the quiet .card-domain chip styling; the marker class only
             // guards against double-patching on overlapping hydrations.
             chip.className = "card-domain card-outlet-chip";
             chip.textContent = `${count}개 매체`;
+            // CARD-CIRC-SLOT (26-APPLY): on GRID cards the circulation figure
+            // gets its OWN slot — the card's first child, before the badge
+            // row — so the remaining badges read as one group and the figure
+            // sits in the same place on every card that has one (the 4c
+            // fixed-slot rule, one level up). A card with no 2+ cluster gets
+            // no element at all: no chip, no reserved empty slot. The hero
+            // keeps its badge-row chip (its own treatment, with the 23-APPLY
+            // facts block below the title); region-1 rows were skipped above.
+            if (!card.classList.contains("topic-card--hero")) {
+              card.insertBefore(chip, card.firstChild);
+              continue;
+            }
             // 4c: FIXED SLOT — directly after .card-domain, not appended last.
             // Appending put the chip after 0-4 conditional badges (오늘 검증 /
             // 시장·시세 / 🔥 / 사람 검토됨), so its horizontal position jittered

@@ -6997,12 +6997,26 @@
             // patch a second chip into the row's badge row.
             if (card.classList && card.classList.contains("feed-spread-row")) continue;
             const top = card.querySelector(".topic-card-top");
-            if (!top || top.querySelector(".card-outlet-chip")) continue;
+            // 26-APPLY: dedupe at CARD level — the grid chip no longer lives
+            // inside .topic-card-top, so a top-scoped check would double-patch.
+            if (!top || card.querySelector(".card-outlet-chip")) continue;
             const chip = document.createElement("span");
             // Reuse the quiet .card-domain chip styling; the marker class only
             // guards against double-patching on overlapping hydrations.
             chip.className = "card-domain card-outlet-chip";
             chip.textContent = `${count}개 매체`;
+            // CARD-CIRC-SLOT (26-APPLY): on GRID cards the circulation figure
+            // gets its OWN slot — the card's first child, before the badge
+            // row — so the remaining badges read as one group and the figure
+            // sits in the same place on every card that has one (the 4c
+            // fixed-slot rule, one level up). A card with no 2+ cluster gets
+            // no element at all: no chip, no reserved empty slot. The hero
+            // keeps its badge-row chip (its own treatment, with the 23-APPLY
+            // facts block below the title); region-1 rows were skipped above.
+            if (!card.classList.contains("topic-card--hero")) {
+              card.insertBefore(chip, card.firstChild);
+              continue;
+            }
             // 4c: FIXED SLOT — directly after .card-domain, not appended last.
             // Appending put the chip after 0-4 conditional badges (오늘 검증 /
             // 시장·시세 / 🔥 / 사람 검토됨), so its horizontal position jittered
