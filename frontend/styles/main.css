@@ -2898,8 +2898,26 @@
     .topic-card--hero .spread-strip-bar::before {
       height: 36px;
     }
+    /* STRIP-EMPTY-AS-ABSENCE (39-APPLY): the hero strip's empty-day SLOT.
+       The div itself is transparent and keeps the full flex slot (equal
+       per-day pitch = honest time axis); the only paint is this centred
+       3px round dot sitting on the baseline — the same --line token, a
+       different KIND of mark from a bar, so "no article recorded" can
+       never read as a measured zero-height bar. */
+    .spread-strip-slot::before {
+      content: "";
+      position: absolute;
+      left: 50%;
+      bottom: 0;
+      transform: translateX(-50%);
+      width: 3px;
+      height: 3px;
+      border-radius: 50%;
+      background: var(--line);
+    }
     .spread-strip-bar:hover::after,
-    .spread-strip-bar:focus::after {
+    .spread-strip-bar:focus::after,
+    .spread-strip-slot:hover::after {
       content: attr(title);
       position: absolute;
       bottom: calc(100% + 5px);

@@ -6491,9 +6491,26 @@
         // accessible name of the focusable bar. Only article days are
         // tabbable (tabindex) so keyboard users tab through counts, not
         // through empty slots.
-        bars.push(
-          `<div class="spread-strip-bar" title="${escapeHtml(day)} · ${escapeHtml(count)}건"${count > 0 ? ' tabindex="0"' : ""} style="${barBasis};min-width:0;align-self:flex-end;height:${count > 0 ? heightPct + "%" : "2px"};background:${count > 0 ? "var(--brand)" : "var(--line)"};border-radius:${radius};"></div>`
-        );
+        // STRIP-EMPTY-AS-ABSENCE (39-APPLY, hero only): empty days were 2px
+        // full-slot-width grey blocks with the same rounded top as real bars
+        // — the same KIND of mark, differing only in hue, so 34 of them
+        // fused into a grey band and the strip read as texture, not a chart.
+        // An empty day now renders as a SLOT div (same flex basis — the time
+        // axis keeps every calendar day at equal pitch) whose only paint is
+        // a small centred dot on the baseline (CSS ::before, the same --line
+        // token). A dot on an axis reads as "calendar slot, no article
+        // recorded"; it has no bar shape, so it can never read as a measured
+        // zero. Region-1 compact strips keep the previous empty-day mark
+        // byte-identically.
+        if (hero && count === 0) {
+          bars.push(
+            `<div class="spread-strip-slot" title="${escapeHtml(day)} · 0건" style="${barBasis};min-width:0;align-self:flex-end;height:3px;position:relative;"></div>`
+          );
+        } else {
+          bars.push(
+            `<div class="spread-strip-bar" title="${escapeHtml(day)} · ${escapeHtml(count)}건"${count > 0 ? ' tabindex="0"' : ""} style="${barBasis};min-width:0;align-self:flex-end;height:${count > 0 ? heightPct + "%" : "2px"};background:${count > 0 ? "var(--brand)" : "var(--line)"};border-radius:${radius};"></div>`
+          );
+        }
       }
       return `<div class="feed-spread-strip" role="img" aria-label="일별 보도량, 최다 ${escapeHtml(peak)}건" style="display:flex;align-items:flex-end;gap:${gap}px;height:${stripH}px;max-width:100%;">${bars.join("")}</div>`;
     }
