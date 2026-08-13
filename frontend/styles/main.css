@@ -2898,23 +2898,45 @@
     .topic-card--hero .spread-strip-bar::before {
       height: 36px;
     }
-    /* STRIP-EMPTY-AS-ABSENCE (39-APPLY): the hero strip's empty-day SLOT.
+    /* STRIP-EMPTY-AS-ABSENCE (39-APPLY): the strip's empty-day SLOT.
        The div itself is transparent and keeps the full flex slot (equal
        per-day pitch = honest time axis); the only paint is this centred
-       3px round dot sitting on the baseline — the same --line token, a
+       round dot sitting on the baseline — the same --line token, a
        different KIND of mark from a bar, so "no article recorded" can
-       never read as a measured zero-height bar. */
+       never read as a measured zero-height bar.
+       ONE-CHART-LANGUAGE (40-APPLY): both strip sizes carry the mark —
+       2px at the compact region scale, 3px at the hero scale. */
     .spread-strip-slot::before {
       content: "";
       position: absolute;
       left: 50%;
       bottom: 0;
       transform: translateX(-50%);
-      width: 3px;
-      height: 3px;
+      width: 2px;
+      height: 2px;
       border-radius: 50%;
       background: var(--line);
     }
+    .topic-card--hero .spread-strip-slot::before {
+      width: 3px;
+      height: 3px;
+    }
+    /* ONE-CHART-LANGUAGE (40-APPLY): the baseline rule is shared by BOTH
+       strip sizes (it was hero-only, so the same data type was drawn two
+       ways on one screen) and strengthened --line → --muted so the bars
+       visibly sit on a ground instead of floating (--muted on the ivory
+       canvas is 2.35:1 vs --line's 1.13:1). Inside the border-box: the
+       hero plot stays 36px of its 37px box; the region strip's box stays
+       exactly 18px — the row does NOT grow — with a 17px plot inside. */
+    .feed-spread-strip {
+      border-bottom: 1px solid var(--muted);
+    }
+    /* ONE-CHART-LANGUAGE (40-APPLY): the region strip carries an explicit
+       inline width (day count × 10px pitch, set in feedSpreadStripHtml) so
+       the now-visible baseline ends where the data ends — a 2-day series
+       must not draw a 640px axis. fit-content was tried and rejected:
+       Chrome resolves a px-basis flex row's intrinsic width to gaps-only
+       (the same collapse the mobile hero strip had). */
     .spread-strip-bar:hover::after,
     .spread-strip-bar:focus::after,
     .spread-strip-slot:hover::after {
@@ -2948,11 +2970,10 @@
       /* 33-APPLY: full column width under the title (was capped 320px when it
          sat in the rail). */
       max-width: none;
-      /* STRIP-FULL-WIDTH (38-APPLY): a 1px baseline rule the bars sit on
-         (the line token — the same quiet hairline the empty-day slots use),
-         instead of floating on the card ground. Inside the border-box: the
+      /* STRIP-FULL-WIDTH (38-APPLY): the 1px baseline rule the bars sit on
+         moved to the shared .feed-spread-strip rule below (40-APPLY: one
+         chart language for both strip sizes). Inside the border-box: the
          inline height is 37px, so bars still scale against 36px. */
-      border-bottom: 1px solid var(--line);
     }
     /* STRIP-FULL-WIDTH (38-APPLY): the strip and its date-range line span
        BOTH hero columns (title + number cells), the design target's full-

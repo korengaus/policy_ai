@@ -6452,9 +6452,18 @@
       // rounding is shape polish only — same token, same scale, no gradient,
       // no interpolation, no colour split.
       const stripH = hero ? 37 : 18;
-      const barBasis = hero ? "flex:1 1 12px;max-width:20px" : "flex:1 1 8px;max-width:10px";
+      // ONE-CHART-LANGUAGE (40-APPLY): region basis 8px → 10px (= its cap).
+      // The region strip now shrink-wraps to its plotted days (CSS
+      // align-self:flex-start) so the shared baseline ends where the data
+      // ends; with basis = cap the rendered bar width stays exactly the
+      // 10px it always was, and long series still compress via flex-shrink
+      // under the inline max-width:100%.
+      const barBasis = hero ? "flex:1 1 12px;max-width:20px" : "flex:1 1 10px;max-width:10px";
       const radius = hero ? "2px 2px 0 0" : "1px 1px 0 0";
-      const gap = 2;
+      // ONE-CHART-LANGUAGE (40-APPLY): gap 2px → 1px so adjacent article
+      // days read as area instead of separate ticks; both sizes share it —
+      // hero and region are the same chart at two scales, nothing else.
+      const gap = 1;
       if (!Array.isArray(daily) || !daily.length) return "";
       const counts = new Map();
       for (const entry of daily) {
@@ -6491,7 +6500,7 @@
         // accessible name of the focusable bar. Only article days are
         // tabbable (tabindex) so keyboard users tab through counts, not
         // through empty slots.
-        // STRIP-EMPTY-AS-ABSENCE (39-APPLY, hero only): empty days were 2px
+        // STRIP-EMPTY-AS-ABSENCE (39-APPLY): empty days were 2px
         // full-slot-width grey blocks with the same rounded top as real bars
         // — the same KIND of mark, differing only in hue, so 34 of them
         // fused into a grey band and the strip read as texture, not a chart.
@@ -6500,9 +6509,11 @@
         // a small centred dot on the baseline (CSS ::before, the same --line
         // token). A dot on an axis reads as "calendar slot, no article
         // recorded"; it has no bar shape, so it can never read as a measured
-        // zero. Region-1 compact strips keep the previous empty-day mark
-        // byte-identically.
-        if (hero && count === 0) {
+        // zero. ONE-CHART-LANGUAGE (40-APPLY): the region strips use the
+        // SAME slot mark (the dot scales down via CSS — 3px hero, 2px
+        // compact), so the same fact is no longer drawn two ways on one
+        // screen.
+        if (count === 0) {
           bars.push(
             `<div class="spread-strip-slot" title="${escapeHtml(day)} · 0건" style="${barBasis};min-width:0;align-self:flex-end;height:3px;position:relative;"></div>`
           );
@@ -6512,7 +6523,13 @@
           );
         }
       }
-      return `<div class="feed-spread-strip" role="img" aria-label="일별 보도량, 최다 ${escapeHtml(peak)}건" style="display:flex;align-items:flex-end;gap:${gap}px;height:${stripH}px;max-width:100%;">${bars.join("")}</div>`;
+      // ONE-CHART-LANGUAGE (40-APPLY): the region strip gets an explicit
+      // width — day count x 10px pitch + 1px gaps — so the baseline ends
+      // where the data ends (max-width:100% still caps long series, whose
+      // bars then compress via flex-shrink exactly as before). The hero
+      // strip keeps no width: the grid stretches it across the full card.
+      const stripW = hero ? "" : `width:${totalDays * 10 + (totalDays - 1) * gap}px;`;
+      return `<div class="feed-spread-strip" role="img" aria-label="일별 보도량, 최다 ${escapeHtml(peak)}건" style="display:flex;align-items:flex-end;gap:${gap}px;height:${stripH}px;max-width:100%;${stripW}">${bars.join("")}</div>`;
     }
 
     // SHARE-IMAGE Slice 1: the spread payload each card fetched, kept for the
