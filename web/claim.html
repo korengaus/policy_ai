@@ -145,11 +145,24 @@
      scroll at any span up to the 60-day cap). gap 2px matches the detail
      sparkline; bars cap at the old 20px so short spans look as before.
      overflow-x:auto stays as a safety net only. */
-  .spark-row { display: flex; align-items: flex-end; gap: 2px; overflow-x: auto; padding: 4px 2px 0; }
+  /* ONE-CHART-LANGUAGE (42-APPLY): gap 2px → 0 (bars fill their day pitch,
+     adjacent article days join into area — the home strips' treatment). */
+  .spark-row { display: flex; align-items: flex-end; gap: 0; overflow-x: auto; padding: 4px 2px 0; }
   .spark-col { display: flex; flex-direction: column; align-items: center; gap: 3px; flex: 1 1 0; min-width: 0; }
+  /* ONE-CHART-LANGUAGE (42-APPLY): the baseline the bars sit on — a per-
+     column full-width hairline ordered directly under the bar; with gap 0
+     the segments join into one continuous 1px --muted axis line, and it
+     survives the fit-pass hiding the date labels (it is its own element).
+     Explicit flex order keeps count → bar → baseline → date stacking. */
+  .spark-col > .spark-count { order: 0; }
+  .spark-col > .spark-bar { order: 1; }
+  .spark-col::after { content: ""; order: 2; width: 100%; border-top: 1px solid var(--muted); }
+  .spark-col > .spark-date { order: 3; }
   /* CLAIM-GRAPHS: solid — opacity never appears in a data mark (a faded mark
      reads as "less certain", a verdict leaking through styling). */
-  .spark-bar { width: 100%; max-width: 20px; background: var(--brand); border-radius: 2px 2px 0 0; }
+  /* ONE-CHART-LANGUAGE (42-APPLY): square tops (radius 2px → 0), matching
+     the home strips. */
+  .spark-bar { width: 100%; max-width: 20px; background: var(--brand); }
   /* 17-APPLY: thinned label line (first date / 최다 N건·일 / last date — the
      detail sparkline's own label pattern) shown when per-column labels no
      longer fit; same muted tokens as .spark-date. */
@@ -466,10 +479,15 @@
         var col = el("div", "spark-col");
         col.appendChild(el("span", "spark-count", count));
         var bar = el("div", "spark-bar");
-        // 17-APPLY: min height 3 -> 6px. Columns can now shrink to a few px,
-        // and a 3px blue bar next to a 2px grey slot stopped being readable —
-        // 6px keeps the smallest real bar unmistakably a bar at every width.
-        bar.style.height = Math.max(6, Math.round((count / max) * 44)) + "px";
+        // ONE-CHART-LANGUAGE (42-APPLY): square-root scale with a 4px floor,
+        // the home strips' scale — the old linear form rendered every count
+        // under ~14% of the peak at the 6px floor, asserting equalities the
+        // data contradicts. BAR HEIGHTS ARE THEREFORE NOT PROPORTIONAL TO
+        // COUNTS (a bar twice as tall is roughly four times the articles);
+        // each bar's exact count stays one hover away in its title, and the
+        // visible per-column count labels carry the real numbers wherever
+        // they fit.
+        bar.style.height = Math.max(4, Math.round(Math.sqrt(count / max) * 44)) + "px";
         bar.title = date + " · " + count + "건";
         col.appendChild(bar);
         col.appendChild(el("span", "spark-date", String(date || "").slice(5)));
@@ -496,9 +514,15 @@
             row.appendChild(articleCol(dayIso, dayCounts[dayIso]));
           } else {
             var slotCol = el("div", "spark-col");
+            // ONE-CHART-LANGUAGE (42-APPLY): the empty day is a 1px-wide,
+            // 2px-tall TICK rising from the baseline in the baseline's own
+            // --muted token (was a full-column-width 2px --line block, i.e.
+            // a bar-shaped mark). The column keeps its full flex slot, so
+            // the calendar pitch — and the axis — still hold.
             var slot = el("div", "spark-bar spark-slot");
             slot.style.height = "2px";
-            slot.style.background = "var(--line)";
+            slot.style.width = "1px";
+            slot.style.background = "var(--muted)";
             slot.title = dayIso + " · 0건";
             slotCol.appendChild(slot);
             // empty date cell (nbsp, no text) so the slot shares the bars'
@@ -525,7 +549,9 @@
         var cols = row.children;
         var n = cols.length;
         if (!n) return;
-        var colW = (row.clientWidth - 2 * (n - 1)) / n;
+        // 42-APPLY: gap is now 0 (was 2px), so the per-column share is the
+        // plain quotient.
+        var colW = row.clientWidth / n;
         if (colW >= 34) return;
         var dates = row.querySelectorAll(".spark-date");
         for (var li = 0; li < dates.length; li += 1) dates[li].style.display = "none";
