@@ -3144,7 +3144,7 @@
           ? `<div class="spread-facts hero-spread-cells">${cells.join("")}</div>`
           : "";
         const strip = info.daily_truncated !== true
-          ? feedSpreadStripHtml(info.daily)
+          ? feedSpreadStripHtml(info.daily, { hero: true })
           : "";
         const firstAt = typeof info.first_at === "string" ? info.first_at.slice(0, 10) : "";
         const lastAt = typeof info.last_at === "string" ? info.last_at.slice(0, 10) : "";
@@ -6430,7 +6430,22 @@
     // Time and volume ONLY: brand/line tokens, identical height on every row
     // (a denser week reads denser, never bigger). Tooltip and aria strings are
     // the sparkline's own shipped forms. Empty/absent daily -> "" (no box).
-    function feedSpreadStripHtml(daily) {
+    // STRIP-HERO-SCALE (37-APPLY): opts.hero renders the SAME strip at hero
+    // proportions — 36px tall with the bar cap raised 10px → 16px — so the
+    // hero's shape reads as area, not a row of ticks. The gap stays 2px:
+    // the hero column is ~544px, so at 44 bars the per-day budget is
+    // ~12.4px and any wider gap comes straight out of the bars; the raised
+    // cap widens every hero series shorter than ~34 days. One derivation,
+    // two sizes: the region-1 rows keep the compact 18px form (a 36px strip
+    // would push those rows taller), so the size is a call-site opt, not a
+    // shared rule. The empty-day slot stays the unscaled 2px line-token
+    // mark in BOTH sizes — its meaning (a slot, not a measured zero) does
+    // not scale.
+    function feedSpreadStripHtml(daily, opts) {
+      const hero = !!(opts && opts.hero);
+      const stripH = hero ? 36 : 18;
+      const barBasis = hero ? "flex:1 1 12px;max-width:16px" : "flex:1 1 8px;max-width:10px";
+      const gap = 2;
       if (!Array.isArray(daily) || !daily.length) return "";
       const counts = new Map();
       for (const entry of daily) {
@@ -6468,10 +6483,10 @@
         // tabbable (tabindex) so keyboard users tab through counts, not
         // through empty slots.
         bars.push(
-          `<div class="spread-strip-bar" title="${escapeHtml(day)} · ${escapeHtml(count)}건"${count > 0 ? ' tabindex="0"' : ""} style="flex:1 1 8px;max-width:10px;min-width:0;align-self:flex-end;height:${count > 0 ? heightPct + "%" : "2px"};background:${count > 0 ? "var(--brand)" : "var(--line)"};border-radius:1px 1px 0 0;"></div>`
+          `<div class="spread-strip-bar" title="${escapeHtml(day)} · ${escapeHtml(count)}건"${count > 0 ? ' tabindex="0"' : ""} style="${barBasis};min-width:0;align-self:flex-end;height:${count > 0 ? heightPct + "%" : "2px"};background:${count > 0 ? "var(--brand)" : "var(--line)"};border-radius:1px 1px 0 0;"></div>`
         );
       }
-      return `<div class="feed-spread-strip" role="img" aria-label="일별 보도량, 최다 ${escapeHtml(peak)}건" style="display:flex;align-items:flex-end;gap:2px;height:18px;max-width:100%;">${bars.join("")}</div>`;
+      return `<div class="feed-spread-strip" role="img" aria-label="일별 보도량, 최다 ${escapeHtml(peak)}건" style="display:flex;align-items:flex-end;gap:${gap}px;height:${stripH}px;max-width:100%;">${bars.join("")}</div>`;
     }
 
     // SHARE-IMAGE Slice 1: the spread payload each card fetched, kept for the
