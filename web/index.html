@@ -2882,8 +2882,16 @@
        their own spaces; values stay on one line). */
     .topic-card--hero > .hero-spread-cells {
       grid-column: 2;
-      grid-row: 1 / span 5;
-      align-self: start;
+      /* HERO-DEAD-SPACE (44-APPLY): span 5 → span 3. The span-5 dates from
+         33-APPLY when column 1 held five rows (strip + range included);
+         38 moved those to full-width rows BELOW, so rows 4-5 had become
+         phantom rows whose only rendered effect was three extra 14px row
+         gaps of dead space between the summary and the strip. Span 3 =
+         the actual column-1 rows beside the rail (chip / title / summary).
+         align-self start → center: the 71px cells row sits centred in the
+         ~165px title-block rail instead of top-stacked above a void. */
+      grid-row: 1 / span 3;
+      align-self: center;
       grid-template-columns: none;
       grid-auto-flow: column;
       grid-auto-columns: minmax(0, 1fr);
@@ -5058,6 +5066,13 @@
          Stretch the strip back to the full card width here. */
       .topic-card--hero .feed-spread-strip {
         align-self: stretch;
+      }
+      /* HERO-DEAD-SPACE (44-APPLY): the desktop align-self:center on the
+         cells is a GRID (block-axis) decision; under this flex column it
+         would centre the compact cells row horizontally. Reset to the
+         container default (start) so the 390 layout is unchanged. */
+      .topic-card--hero > .hero-spread-cells {
+        align-self: auto;
       }
       /* VERIFY-STEPS-REDESIGN: the how-we-verify steps stack to one column here, so
          hide the horizontal flow arrows (a sideways arrow between stacked steps reads

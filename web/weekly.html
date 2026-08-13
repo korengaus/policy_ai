@@ -47,6 +47,7 @@
     --brand: #1e5fd8;
     --brand-ink: #1542a0;
     --shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+    --radius: 12px;
     --radius-sm: 9px;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -99,10 +100,13 @@
   main.report-body { max-width: 860px; margin: 0 auto; padding: 22px 20px 40px; }
   #status { color: var(--slate); font-size: 15px; text-align: center; padding: 48px 24px; }
   ol.top-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+  /* ONE-SITE (44-APPLY): the home page's primary surfaces are hairline
+     cards (1px --line, no shadow, 12px radius); the ranked items join
+     that family — shadow dropped, radius-sm → --radius. */
   .top-item {
     display: flex; align-items: flex-start; gap: 14px;
     background: var(--paper); border: 1px solid var(--line);
-    border-radius: var(--radius-sm); box-shadow: var(--shadow);
+    border-radius: var(--radius);
     padding: 14px 16px;
   }
   .top-rank {
