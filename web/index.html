@@ -2114,15 +2114,21 @@
       position: relative;
       overflow: hidden;
     }
-    /* MAP-CARD-DOTS (34-APPLY): decorative scattered-dot field on the card's
-       right (the design target's arrangement). PURE CSS — a ::before pseudo-
-       element with hand-placed radial-gradient dots: zero requests, zero
-       assets, ~20 lines. Deliberately NOT data: the positions and sizes are
-       fixed literals unrelated to the graph, identical on every load, at low
-       opacity, pointer-events none, on a pseudo-element (no DOM node, no
-       text, invisible to assistive tech) — nothing a reader could count or
-       read as a measurement. Colours are token-derived via color-mix (no new
-       hex). Hidden at <=960px so the text is never overlapped or squeezed. */
+    /* MAP-CARD-DOTS (34-APPLY, reworked 35-APPLY): decorative CONNECTED-field
+       on the card's right — the card is about a connection graph, so the
+       ornament now shows connection: three small clusters of varied-size dots,
+       a few loose dots, and faint hairlines between near neighbours. PURE
+       CSS — ::before carries the dots (radial-gradients), ::after carries the
+       lines (each a corner-to-corner 2px linear-gradient stripe inside its
+       own positioned background box, so the segment runs exactly between two
+       dot centres): zero requests, zero assets, no DOM node, no new Korean.
+       Deliberately NOT data: every coordinate, size and line is a fixed CSS
+       literal chosen by hand — no JS, no randomness, identical bytes on every
+       load — and the counts (14 dots, 8 lines) match nothing in the real
+       graph (14k+ nodes, 1k+ clusters); low opacity, pointer-events none,
+       invisible to assistive tech — nothing a reader could count or read as
+       a measurement. Colours are token-derived via color-mix (no new hex).
+       Hidden at <=960px so the text is never overlapped or squeezed. */
     .brainmap-home-card::before {
       content: "";
       position: absolute;
@@ -2132,22 +2138,70 @@
       width: 360px;
       pointer-events: none;
       background-image:
-        radial-gradient(circle 4px at 46px 38px, color-mix(in srgb, var(--paper) 34%, transparent) 97%, transparent),
-        radial-gradient(circle 2px at 96px 92px, color-mix(in srgb, var(--paper) 26%, transparent) 97%, transparent),
-        radial-gradient(circle 3px at 158px 30px, color-mix(in srgb, var(--paper) 30%, transparent) 97%, transparent),
+        /* cluster 1 (left) */
+        radial-gradient(circle 4px at 40px 36px, color-mix(in srgb, var(--paper) 34%, transparent) 97%, transparent),
+        radial-gradient(circle 2.5px at 66px 54px, color-mix(in srgb, var(--paper) 28%, transparent) 97%, transparent),
+        radial-gradient(circle 2px at 52px 72px, color-mix(in srgb, var(--paper) 24%, transparent) 97%, transparent),
+        /* cluster 2 (centre, brand hub) */
+        radial-gradient(circle 3px at 186px 62px, color-mix(in srgb, var(--paper) 30%, transparent) 97%, transparent),
         radial-gradient(circle 5px at 214px 84px, color-mix(in srgb, var(--brand) 55%, transparent) 97%, transparent),
-        radial-gradient(circle 2px at 262px 40px, color-mix(in srgb, var(--paper) 24%, transparent) 97%, transparent),
-        radial-gradient(circle 3px at 306px 110px, color-mix(in srgb, var(--paper) 30%, transparent) 97%, transparent),
-        radial-gradient(circle 2px at 70px 140px, color-mix(in srgb, var(--paper) 22%, transparent) 97%, transparent),
-        radial-gradient(circle 4px at 130px 118px, color-mix(in srgb, var(--brand) 45%, transparent) 97%, transparent),
-        radial-gradient(circle 2px at 188px 152px, color-mix(in srgb, var(--paper) 24%, transparent) 97%, transparent),
-        radial-gradient(circle 3px at 246px 132px, color-mix(in srgb, var(--paper) 28%, transparent) 97%, transparent),
+        radial-gradient(circle 2.5px at 240px 102px, color-mix(in srgb, var(--paper) 26%, transparent) 97%, transparent),
+        radial-gradient(circle 2px at 196px 110px, color-mix(in srgb, var(--paper) 24%, transparent) 97%, transparent),
+        /* cluster 3 (upper right) */
+        radial-gradient(circle 2px at 288px 26px, color-mix(in srgb, var(--paper) 24%, transparent) 97%, transparent),
+        radial-gradient(circle 3px at 306px 44px, color-mix(in srgb, var(--paper) 30%, transparent) 97%, transparent),
         radial-gradient(circle 2px at 330px 60px, color-mix(in srgb, var(--paper) 22%, transparent) 97%, transparent),
-        radial-gradient(circle 3px at 26px 96px, color-mix(in srgb, var(--paper) 26%, transparent) 97%, transparent);
+        /* loose dots */
+        radial-gradient(circle 4px at 130px 118px, color-mix(in srgb, var(--brand) 45%, transparent) 97%, transparent),
+        radial-gradient(circle 2px at 96px 140px, color-mix(in srgb, var(--paper) 22%, transparent) 97%, transparent),
+        radial-gradient(circle 2.5px at 158px 30px, color-mix(in srgb, var(--paper) 26%, transparent) 97%, transparent),
+        radial-gradient(circle 2px at 26px 96px, color-mix(in srgb, var(--paper) 24%, transparent) 97%, transparent);
+      background-repeat: no-repeat;
+    }
+    /* The hairlines. Each background box's corners ARE two dot centres; the
+       gradient's centre stripe (2px) is the segment between them. Direction
+       rule: "to top right" draws the top-left↔bottom-right diagonal,
+       "to bottom right" the bottom-left↔top-right one. */
+    .brainmap-home-card::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 360px;
+      pointer-events: none;
+      background-image:
+        linear-gradient(to top right,    transparent calc(50% - 1px), color-mix(in srgb, var(--paper) 13%, transparent) calc(50% - 1px), color-mix(in srgb, var(--paper) 13%, transparent) calc(50% + 1px), transparent calc(50% + 1px)),
+        linear-gradient(to bottom right, transparent calc(50% - 1px), color-mix(in srgb, var(--paper) 13%, transparent) calc(50% - 1px), color-mix(in srgb, var(--paper) 13%, transparent) calc(50% + 1px), transparent calc(50% + 1px)),
+        linear-gradient(to top right,    transparent calc(50% - 1px), color-mix(in srgb, var(--paper) 13%, transparent) calc(50% - 1px), color-mix(in srgb, var(--paper) 13%, transparent) calc(50% + 1px), transparent calc(50% + 1px)),
+        linear-gradient(to top right,    transparent calc(50% - 1px), color-mix(in srgb, var(--paper) 13%, transparent) calc(50% - 1px), color-mix(in srgb, var(--paper) 13%, transparent) calc(50% + 1px), transparent calc(50% + 1px)),
+        linear-gradient(to bottom right, transparent calc(50% - 1px), color-mix(in srgb, var(--paper) 13%, transparent) calc(50% - 1px), color-mix(in srgb, var(--paper) 13%, transparent) calc(50% + 1px), transparent calc(50% + 1px)),
+        linear-gradient(to top right,    transparent calc(50% - 1px), color-mix(in srgb, var(--paper) 13%, transparent) calc(50% - 1px), color-mix(in srgb, var(--paper) 13%, transparent) calc(50% + 1px), transparent calc(50% + 1px)),
+        linear-gradient(to top right,    transparent calc(50% - 1px), color-mix(in srgb, var(--paper) 13%, transparent) calc(50% - 1px), color-mix(in srgb, var(--paper) 13%, transparent) calc(50% + 1px), transparent calc(50% + 1px)),
+        linear-gradient(to bottom right, transparent calc(50% - 1px), color-mix(in srgb, var(--paper) 9%, transparent) calc(50% - 1px), color-mix(in srgb, var(--paper) 9%, transparent) calc(50% + 1px), transparent calc(50% + 1px));
+      background-position:
+        40px 36px,   /* (40,36)-(66,54) */
+        52px 54px,   /* (52,72)-(66,54) */
+        186px 62px,  /* (186,62)-(214,84) */
+        214px 84px,  /* (214,84)-(240,102) */
+        196px 84px,  /* (196,110)-(214,84) */
+        288px 26px,  /* (288,26)-(306,44) */
+        306px 44px,  /* (306,44)-(330,60) */
+        130px 62px;  /* (130,118)-(186,62) bridge */
+      background-size:
+        26px 18px,
+        14px 18px,
+        28px 22px,
+        26px 18px,
+        18px 26px,
+        18px 18px,
+        24px 16px,
+        56px 56px;
       background-repeat: no-repeat;
     }
     @media (max-width: 960px) {
-      .brainmap-home-card::before {
+      .brainmap-home-card::before,
+      .brainmap-home-card::after {
         display: none;
       }
     }
@@ -2812,15 +2866,32 @@
     }
     /* HERO-FACT-CELLS (33-APPLY): the right rail now holds the 5b fact-cell
        grid (labelled, bordered, values large); the strip returns to column 1
-       under the title at FULL column width, with the date range beneath. */
+       under the title at FULL column width, with the date range beneath.
+       HERO-CELLS-ROW (35-APPLY): the cells sit SIDE BY SIDE in the rail (the
+       design target's .mets row), not one per line. auto-flow column makes
+       exactly N equal columns for the 1-3 cells the JS emits — no empty
+       tracks when a value is missing. The same rule carries to <=960px where
+       the hero stacks: three cells across the full mobile width still hold
+       the widest shipped value ("NN개 매체") without clipping (labels wrap at
+       their own spaces; values stay on one line). */
     .topic-card--hero > .hero-spread-cells {
       grid-column: 2;
       grid-row: 1 / span 5;
       align-self: start;
-      grid-template-columns: minmax(0, 1fr);
+      grid-template-columns: none;
+      grid-auto-flow: column;
+      grid-auto-columns: minmax(0, 1fr);
+    }
+    /* HERO-CELLS-ROW: with labels of different line counts side by side
+       (전체 확산 매체 수 wraps, 보도 건수 does not), pin the VALUES to a
+       shared bottom line so the row reads as one row of numbers. */
+    .topic-card--hero .hero-spread-cells .spread-fact {
+      display: flex;
+      flex-direction: column;
     }
     .topic-card--hero .spread-fact-value {
       font-size: 1.308rem;
+      margin-top: auto;
     }
     .hero-spread-range {
       color: var(--slate);
@@ -2830,6 +2901,50 @@
       display: inline;
       margin: 0;
     }
+    /* STRIP-TOOLTIP (35-APPLY): instant styled tooltip for the strip bars,
+       replacing the browser's ~1s grey title box as the VISIBLE surface. The
+       text is the bar's own shipped title attribute ("YYYY-MM-DD · N건"),
+       read verbatim via attr(title) — no second copy, no new Korean; the
+       attribute itself stays as the native fallback and the focusable bar's
+       accessible name. Shows on :hover and on :focus (keyboard). On touch
+       there is no hover and a tap keeps its existing meaning (the whole card
+       is the click target) — same reachability as the native title had
+       there, nothing lost. The ::before is an invisible full-strip-height
+       hit target so a 2px bar is hoverable without pixel-hunting. */
+    .spread-strip-bar {
+      position: relative;
+    }
+    .spread-strip-bar::before {
+      content: "";
+      position: absolute;
+      left: -1px;
+      right: -1px;
+      bottom: 0;
+      height: 18px;
+    }
+    .spread-strip-bar:hover::after,
+    .spread-strip-bar:focus::after {
+      content: attr(title);
+      position: absolute;
+      bottom: calc(100% + 5px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--ink);
+      color: var(--paper);
+      font-size: 0.78rem;
+      line-height: 1.5;
+      font-variant-numeric: tabular-nums;
+      padding: 2px 8px;
+      border-radius: 4px;
+      white-space: nowrap;
+      pointer-events: none;
+      z-index: 40;
+    }
+    .spread-strip-bar:focus-visible {
+      outline: 2px solid var(--brand);
+      outline-offset: 1px;
+    }
+
     /* HERO-SPREAD-FACTS (23-APPLY): the hero reuses region 1's facts line and
        strip verbatim (.feed-spread-facts + feedSpreadStripHtml output); these
        two hero-scoped rules only space them under the summary and keep a long
@@ -12772,9 +12887,23 @@
       for (let i = 0; i < totalDays; i += 1) {
         const day = new Date(startMs + i * 86400000).toISOString().slice(0, 10);
         const count = counts.get(day) || 0;
-        const heightPct = count > 0 ? Math.max(12, Math.round((count / peak) * 100)) : 0;
+        // STRIP-LEGIBLE-MIN (35-APPLY): the article-day floor was 12% (2.16px
+        // of 18px) — visually identical to the 2px empty-day slot, so the
+        // strip read as a dotted line. 33% (~6px) makes "has articles" 3x the
+        // empty slot at a glance. Floor only: peak scaling above the floor,
+        // calendar-day iteration, the 60-day bail-out and the truncation rule
+        // are untouched, and the empty-day slot stays an unscaled 2px mark in
+        // the line token (a slot, not a measured zero).
+        const heightPct = count > 0 ? Math.max(33, Math.round((count / peak) * 100)) : 0;
+        // STRIP-TOOLTIP (35-APPLY): .spread-strip-bar carries an instant
+        // styled tooltip (CSS ::after reads THIS title attribute verbatim) on
+        // hover and keyboard focus. The title attribute is KEPT — it is the
+        // tooltip's single source of text, the native fallback, and the
+        // accessible name of the focusable bar. Only article days are
+        // tabbable (tabindex) so keyboard users tab through counts, not
+        // through empty slots.
         bars.push(
-          `<div title="${escapeHtml(day)} · ${escapeHtml(count)}건" style="flex:1 1 8px;max-width:10px;min-width:0;align-self:flex-end;height:${count > 0 ? heightPct + "%" : "2px"};background:${count > 0 ? "var(--brand)" : "var(--line)"};border-radius:1px 1px 0 0;"></div>`
+          `<div class="spread-strip-bar" title="${escapeHtml(day)} · ${escapeHtml(count)}건"${count > 0 ? ' tabindex="0"' : ""} style="flex:1 1 8px;max-width:10px;min-width:0;align-self:flex-end;height:${count > 0 ? heightPct + "%" : "2px"};background:${count > 0 ? "var(--brand)" : "var(--line)"};border-radius:1px 1px 0 0;"></div>`
         );
       }
       return `<div class="feed-spread-strip" role="img" aria-label="일별 보도량, 최다 ${escapeHtml(peak)}건" style="display:flex;align-items:flex-end;gap:2px;height:18px;max-width:100%;">${bars.join("")}</div>`;

@@ -6452,9 +6452,23 @@
       for (let i = 0; i < totalDays; i += 1) {
         const day = new Date(startMs + i * 86400000).toISOString().slice(0, 10);
         const count = counts.get(day) || 0;
-        const heightPct = count > 0 ? Math.max(12, Math.round((count / peak) * 100)) : 0;
+        // STRIP-LEGIBLE-MIN (35-APPLY): the article-day floor was 12% (2.16px
+        // of 18px) — visually identical to the 2px empty-day slot, so the
+        // strip read as a dotted line. 33% (~6px) makes "has articles" 3x the
+        // empty slot at a glance. Floor only: peak scaling above the floor,
+        // calendar-day iteration, the 60-day bail-out and the truncation rule
+        // are untouched, and the empty-day slot stays an unscaled 2px mark in
+        // the line token (a slot, not a measured zero).
+        const heightPct = count > 0 ? Math.max(33, Math.round((count / peak) * 100)) : 0;
+        // STRIP-TOOLTIP (35-APPLY): .spread-strip-bar carries an instant
+        // styled tooltip (CSS ::after reads THIS title attribute verbatim) on
+        // hover and keyboard focus. The title attribute is KEPT — it is the
+        // tooltip's single source of text, the native fallback, and the
+        // accessible name of the focusable bar. Only article days are
+        // tabbable (tabindex) so keyboard users tab through counts, not
+        // through empty slots.
         bars.push(
-          `<div title="${escapeHtml(day)} · ${escapeHtml(count)}건" style="flex:1 1 8px;max-width:10px;min-width:0;align-self:flex-end;height:${count > 0 ? heightPct + "%" : "2px"};background:${count > 0 ? "var(--brand)" : "var(--line)"};border-radius:1px 1px 0 0;"></div>`
+          `<div class="spread-strip-bar" title="${escapeHtml(day)} · ${escapeHtml(count)}건"${count > 0 ? ' tabindex="0"' : ""} style="flex:1 1 8px;max-width:10px;min-width:0;align-self:flex-end;height:${count > 0 ? heightPct + "%" : "2px"};background:${count > 0 ? "var(--brand)" : "var(--line)"};border-radius:1px 1px 0 0;"></div>`
         );
       }
       return `<div class="feed-spread-strip" role="img" aria-label="일별 보도량, 최다 ${escapeHtml(peak)}건" style="display:flex;align-items:flex-end;gap:2px;height:18px;max-width:100%;">${bars.join("")}</div>`;
