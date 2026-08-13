@@ -2898,28 +2898,24 @@
     .topic-card--hero .spread-strip-bar::before {
       height: 36px;
     }
-    /* STRIP-EMPTY-AS-ABSENCE (39-APPLY): the strip's empty-day SLOT.
-       The div itself is transparent and keeps the full flex slot (equal
-       per-day pitch = honest time axis); the only paint is this centred
-       round dot sitting on the baseline — the same --line token, a
-       different KIND of mark from a bar, so "no article recorded" can
-       never read as a measured zero-height bar.
-       ONE-CHART-LANGUAGE (40-APPLY): both strip sizes carry the mark —
-       2px at the compact region scale, 3px at the hero scale. */
+    /* STRIP-EMPTY-AS-ABSENCE (39-APPLY) → AXIS-TICKS (41-APPLY): the
+       strip's empty-day SLOT. The div is transparent and keeps the full
+       flex slot (equal per-day pitch = honest time axis); the only paint
+       is a 1px-wide, 2px-tall TICK rising from the baseline, in the
+       baseline's own --muted token. The 40-APPLY round dots read as dust
+       detached from the rule (the underline gestalt); regular ticks make
+       line + marks read as an axis. A 1px tick has no bar shape, so "no
+       article recorded" can never read as a measured zero-height bar.
+       Both strip sizes share the mark. */
     .spread-strip-slot::before {
       content: "";
       position: absolute;
       left: 50%;
       bottom: 0;
       transform: translateX(-50%);
-      width: 2px;
+      width: 1px;
       height: 2px;
-      border-radius: 50%;
-      background: var(--line);
-    }
-    .topic-card--hero .spread-strip-slot::before {
-      width: 3px;
-      height: 3px;
+      background: var(--muted);
     }
     /* ONE-CHART-LANGUAGE (40-APPLY): the baseline rule is shared by BOTH
        strip sizes (it was hero-only, so the same data type was drawn two

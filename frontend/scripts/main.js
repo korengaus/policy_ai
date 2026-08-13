@@ -3150,8 +3150,17 @@
           : "";
         const firstAt = typeof info.first_at === "string" ? info.first_at.slice(0, 10) : "";
         const lastAt = typeof info.last_at === "string" ? info.last_at.slice(0, 10) : "";
+        // STRIP-CAPTION (41-APPLY): the peak, in the sparkline's own shipped
+        // form "최다 N건/일" (spreadSparklineHtml's visible label row),
+        // joined with the shipped interpunct. The target's "눈금 하나가
+        // 보도 1건" half composes from NO shipped string (and would be false
+        // under the sqrt scale anyway), so it is not drawn.
+        const dailyPeak = Array.isArray(info.daily)
+          ? info.daily.reduce((m, d) => Math.max(m, Number(d?.count) || 0), 0)
+          : 0;
+        const peakNote = dailyPeak > 0 ? ` · 최다 ${escapeHtml(dailyPeak)}건/일` : "";
         const range = (strip && firstAt && lastAt)
-          ? `<div class="hero-spread-range">${escapeHtml(firstAt)} → ${escapeHtml(lastAt)} <span class="spread-facts-note">(수집 기사 기준)</span></div>`
+          ? `<div class="hero-spread-range">${escapeHtml(firstAt)} → ${escapeHtml(lastAt)}${peakNote} <span class="spread-facts-note">(수집 기사 기준)</span></div>`
           : "";
         return factCells + strip + range;
       })();
@@ -6452,18 +6461,22 @@
       // rounding is shape polish only — same token, same scale, no gradient,
       // no interpolation, no colour split.
       const stripH = hero ? 37 : 18;
-      // ONE-CHART-LANGUAGE (40-APPLY): region basis 8px → 10px (= its cap).
-      // The region strip now shrink-wraps to its plotted days (CSS
-      // align-self:flex-start) so the shared baseline ends where the data
-      // ends; with basis = cap the rendered bar width stays exactly the
-      // 10px it always was, and long series still compress via flex-shrink
-      // under the inline max-width:100%.
-      const barBasis = hero ? "flex:1 1 12px;max-width:20px" : "flex:1 1 10px;max-width:10px";
-      const radius = hero ? "2px 2px 0 0" : "1px 1px 0 0";
-      // ONE-CHART-LANGUAGE (40-APPLY): gap 2px → 1px so adjacent article
-      // days read as area instead of separate ticks; both sizes share it —
-      // hero and region are the same chart at two scales, nothing else.
-      const gap = 1;
+      // SQRT-SCALE (41-APPLY): plot height the bars scale against (the box
+      // minus the 1px baseline border inside the border-box).
+      const plotH = hero ? 36 : 17;
+      // ONE-CHART-LANGUAGE (40-APPLY): region basis 10px (= its cap) so the
+      // explicit strip width below equals the rendered bars; long series
+      // still compress via flex-shrink under the inline max-width:100%.
+      // BAR-PITCH (41-APPLY): hero bars fill their whole day slot — with 44
+      // days in a ~912px card the pitch is ~20.7px and that pitch is the
+      // hard ceiling on bar width (equal per-day pitch is the time axis;
+      // only aggregation could widen further, and that changes the unit).
+      const barBasis = hero ? "flex:1 1 12px;max-width:24px" : "flex:1 1 10px;max-width:10px";
+      // BAR-PITCH (41-APPLY): gap 1px → 0. Bars take the full pitch and
+      // adjacent article days join into area, the target's read; empty-day
+      // ticks are 1px marks centred in their slot, so bar/slot boundaries
+      // stay visible where it matters.
+      const gap = 0;
       if (!Array.isArray(daily) || !daily.length) return "";
       const counts = new Map();
       for (const entry of daily) {
@@ -6485,14 +6498,20 @@
       for (let i = 0; i < totalDays; i += 1) {
         const day = new Date(startMs + i * 86400000).toISOString().slice(0, 10);
         const count = counts.get(day) || 0;
-        // STRIP-LEGIBLE-MIN (35-APPLY): the article-day floor was 12% (2.16px
-        // of 18px) — visually identical to the 2px empty-day slot, so the
-        // strip read as a dotted line. 33% (~6px) makes "has articles" 3x the
-        // empty slot at a glance. Floor only: peak scaling above the floor,
-        // calendar-day iteration, the 60-day bail-out and the truncation rule
-        // are untouched, and the empty-day slot stays an unscaled 2px mark in
-        // the line token (a slot, not a measured zero).
-        const heightPct = count > 0 ? Math.max(33, Math.round((count / peak) * 100)) : 0;
+        // SQRT-SCALE (41-APPLY): the 33% floor asserted an equality the data
+        // contradicts — counts 1, 24 and 26 all rendered 11.88px against a
+        // 102 peak. Linear cannot fix it: 1/102 of a 36px plot is 0.35px,
+        // invisible. Heights are now sqrt(count/peak) x plot, floored at
+        // 4px, so distinct counts render distinctly (1→4, 24→17, 26→18,
+        // 102→36) and a 1-article day stays visible. BAR HEIGHTS ARE
+        // THEREFORE NOT PROPORTIONAL TO COUNTS — a bar twice as tall is
+        // roughly FOUR times the articles. Disclosure: every bar's exact
+        // count is one hover/focus away (the shipped "날짜 · N건" tooltip)
+        // and the strip caption now carries the shipped 최다 N건/일 peak; no
+        // shipped Korean names the scale itself, so nothing more is drawn.
+        // Calendar-day iteration, the 60-day bail-out and the truncation
+        // rule are untouched.
+        const barPx = count > 0 ? Math.max(4, Math.round(Math.sqrt(count / peak) * plotH)) : 0;
         // STRIP-TOOLTIP (35-APPLY): .spread-strip-bar carries an instant
         // styled tooltip (CSS ::after reads THIS title attribute verbatim) on
         // hover and keyboard focus. The title attribute is KEPT — it is the
@@ -6509,17 +6528,20 @@
         // a small centred dot on the baseline (CSS ::before, the same --line
         // token). A dot on an axis reads as "calendar slot, no article
         // recorded"; it has no bar shape, so it can never read as a measured
-        // zero. ONE-CHART-LANGUAGE (40-APPLY): the region strips use the
-        // SAME slot mark (the dot scales down via CSS — 3px hero, 2px
-        // compact), so the same fact is no longer drawn two ways on one
-        // screen.
+        // zero. ONE-CHART-LANGUAGE (40-APPLY): both strip sizes use the SAME
+        // slot mark. AXIS-TICKS (41-APPLY): the mark is now a 1px-wide tick
+        // rising from the baseline (CSS ::before, the baseline's own token)
+        // — line + regular ticks reads as an axis, where line + detached
+        // dots read as an underline with dust.
         if (count === 0) {
           bars.push(
-            `<div class="spread-strip-slot" title="${escapeHtml(day)} · 0건" style="${barBasis};min-width:0;align-self:flex-end;height:3px;position:relative;"></div>`
+            `<div class="spread-strip-slot" title="${escapeHtml(day)} · 0건" style="${barBasis};min-width:0;align-self:flex-end;height:2px;position:relative;"></div>`
           );
         } else {
+          // SQUARE-TOPS (41-APPLY): border-radius removed (was 2px hero /
+          // 1px region) — the target's bars are square.
           bars.push(
-            `<div class="spread-strip-bar" title="${escapeHtml(day)} · ${escapeHtml(count)}건"${count > 0 ? ' tabindex="0"' : ""} style="${barBasis};min-width:0;align-self:flex-end;height:${count > 0 ? heightPct + "%" : "2px"};background:${count > 0 ? "var(--brand)" : "var(--line)"};border-radius:${radius};"></div>`
+            `<div class="spread-strip-bar" title="${escapeHtml(day)} · ${escapeHtml(count)}건" tabindex="0" style="${barBasis};min-width:0;align-self:flex-end;height:${barPx}px;background:var(--brand);"></div>`
           );
         }
       }
