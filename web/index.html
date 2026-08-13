@@ -2966,6 +2966,20 @@
       /* 33-APPLY: full column width under the title (was capped 320px when it
          sat in the rail). */
       max-width: none;
+      /* STRIP-FULL-WIDTH (38-APPLY): a 1px baseline rule the bars sit on
+         (the line token — the same quiet hairline the empty-day slots use),
+         instead of floating on the card ground. Inside the border-box: the
+         inline height is 37px, so bars still scale against 36px. */
+      border-bottom: 1px solid var(--line);
+    }
+    /* STRIP-FULL-WIDTH (38-APPLY): the strip and its date-range line span
+       BOTH hero columns (title + number cells), the design target's full-
+       width run. Auto-placement puts them in the first row below the rail
+       cells' 1/span 5 block, so nothing overlaps. Inert at <=960px where
+       the hero is a flex column (already full width there). */
+    .topic-card--hero > .feed-spread-strip,
+    .topic-card--hero > .hero-spread-range {
+      grid-column: 1 / -1;
     }
 
     /* DESIGN-C3d: "오늘의 검증 / LATEST CHECKS" row — a re-chunk of the first ≤3
@@ -5668,94 +5682,12 @@
       </section>
     </div>
 
-    <!-- VERIFY-STRIP-RELOCATE: the "이렇게 검증합니다" 3-step strip, moved here from
-         under the hero to a FULL-WIDTH sibling below the 2-col .home-shell block and
-         ABOVE the domain sections. Page now reads: [2-col hero+sort+cards+pagination |
-         sidebar] -> 이렇게 검증합니다 (full-width) -> domain sections (full-width).
-         .verify-how-full carries no width of its own (inherits the page content
-         column, edges aligned to .home-shell/header). The .verify-how white card + its
-         stepper are byte-identical to before — only the position changed. The stepper's
-         line/chip positions are gap-derived (not width-derived), so they stay centered
-         at full page width with no recompute. Copy/microcopy unchanged (STEP 02 keeps
-         the honesty-safe "공식 근거가 있는지 확인합니다" framing). -->
-    <div class="verify-how-full">
-      <section id="verifyHowSection" class="verify-how" aria-label="이렇게 검증합니다">
-        <div class="verify-how-head">
-          <div class="verify-how-titles">
-            <h2>이렇게 검증합니다</h2>
-            <p class="verify-how-sub">뉴스 속 주장을 공식 1차 자료로 검증하는 3단계</p>
-          </div>
-        </div>
-        <!-- V2 stepper: a light brand track line runs behind the icon-tile row
-             (absolute, tile-center height); two round arrow chips sit ON the line
-             at the column boundaries (placed AFTER the grid in DOM so they paint
-             above it). Tiles are SOLID tinted chips so they mask the line;
-             STEP 03's tile fills solid --brand (emphasis). Track + chips are
-             desktop-only — the shared <=960px block hides them when stacked. -->
-        <div class="verify-how-flow">
-          <div class="verify-how-track" aria-hidden="true"></div>
-          <div class="verify-how-steps">
-            <div class="verify-how-step">
-              <div class="verify-how-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M7 3h7l4 4v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/>
-                  <path d="M14 3v4h4"/>
-                  <path d="M9 12h6"/>
-                  <path d="M9 16h5"/>
-                </svg>
-              </div>
-              <div class="verify-how-eyebrow">STEP 01</div>
-              <h3 class="verify-how-title">주장 수집·분류</h3>
-              <p class="verify-how-desc">온라인·제보·언론에서 확인이 필요한 주장을 모아 도메인별로 분류합니다.</p>
-            </div>
-            <div class="verify-how-step">
-              <div class="verify-how-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <circle cx="11" cy="11" r="6"/>
-                  <path d="M20 20l-3.6-3.6"/>
-                  <path d="M8.4 11l1.9 1.9 3.3-3.7"/>
-                </svg>
-              </div>
-              <div class="verify-how-eyebrow">STEP 02</div>
-              <h3 class="verify-how-title">1차·공식 출처 대조</h3>
-              <p class="verify-how-desc">정부·기관 원문과 공개 데이터에 주장을 직접 대조해, 공식 근거가 있는지 확인합니다.</p>
-            </div>
-            <div class="verify-how-step">
-              <div class="verify-how-icon verify-how-icon--fill" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M12 2.5l7.5 3.2v5.6c0 4.6-3.2 7.9-7.5 9.7-4.3-1.8-7.5-5.1-7.5-9.7V5.7L12 2.5z"/>
-                  <path d="M8.7 11.8l2.3 2.3 4.3-4.8"/>
-                </svg>
-              </div>
-              <div class="verify-how-eyebrow">STEP 03</div>
-              <!-- HIGH-RISK-LABEL: the last reader-reachable 판정. This step
-                   describes PUBLISHING, not labelling, so it is not given a
-                   status string — it keeps 근거 등급 (the thing published) and
-                   drops the adjudication word from both title and body. -->
-              <h3 class="verify-how-title">근거 등급·출처 공개</h3>
-              <p class="verify-how-desc">근거 등급과 확인된 공식 출처를 링크와 함께 공개하고, 새 사실이 나오면 정정합니다.</p>
-            </div>
-          </div>
-          <div class="verify-how-arrow verify-how-arrow--a" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M5 12h14"/>
-              <path d="M13 6l6 6-6 6"/>
-            </svg>
-          </div>
-          <div class="verify-how-arrow verify-how-arrow--b" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M5 12h14"/>
-              <path d="M13 6l6 6-6 6"/>
-            </svg>
-          </div>
-        </div>
-        <nav class="verify-how-links" aria-label="자세히 보기">
-          <a class="verify-how-link" href="#methodology">검증 방법 전체 →</a>
-          <a class="verify-how-link" href="#gradeStatus">상태 안내 →</a>
-          <a class="verify-how-link verify-how-link--map" href="/web/brainmap.html"><svg class="utility-icon" aria-hidden="true"><use href="#ic-network"/></svg>연결지도 →</a>
-        </nav>
-      </section>
-    </div>
+    <!-- VERIFY-HOW-TO-METHODOLOGY (38-APPLY): the "이렇게 검증합니다" 3-step
+         strip (#verifyHowSection) MOVED from here to the 검증 방법 page
+         (#methodology, below) — a process description was sitting mid-home
+         and reading as the product's identity. The section itself is
+         byte-identical; only its position changed. Home now ends with the
+         dark 뉴스 연결지도 card above (then the site footer). -->
 
     <!-- DESIGN-DETAIL-3: #selectedIssueIntro / #reportActions / #results were
          RELOCATED into #detailScreen (a sibling of #homeScreen below), so the
@@ -6091,6 +6023,92 @@
           AI 결과는 사람 검토 전 초안입니다. 공식 상세문서, 의미 매칭, 반박 가능성, 시점과 대상이 충분히 확인되지 않으면
           관찰 또는 사람 검토 필요로 표시합니다.
         </p>
+      </div>
+
+      <!-- VERIFY-HOW-TO-METHODOLOGY (38-APPLY): the "이렇게 검증합니다" 3-step
+           strip, MOVED here from mid-home (it was reading as the product's
+           identity there; here it is the overview of this very page). The
+           section markup below is byte-identical to what home carried —
+           wording, three steps and links untouched. Its 검증 방법 전체 → link
+           now points at the page it sits on (the #methodology click handler
+           re-shows this screen — a no-op landing, never a dead link). -->
+      <div class="verify-how-full">
+        <section id="verifyHowSection" class="verify-how" aria-label="이렇게 검증합니다">
+        <div class="verify-how-head">
+          <div class="verify-how-titles">
+            <h2>이렇게 검증합니다</h2>
+            <p class="verify-how-sub">뉴스 속 주장을 공식 1차 자료로 검증하는 3단계</p>
+          </div>
+        </div>
+        <!-- V2 stepper: a light brand track line runs behind the icon-tile row
+             (absolute, tile-center height); two round arrow chips sit ON the line
+             at the column boundaries (placed AFTER the grid in DOM so they paint
+             above it). Tiles are SOLID tinted chips so they mask the line;
+             STEP 03's tile fills solid --brand (emphasis). Track + chips are
+             desktop-only — the shared <=960px block hides them when stacked. -->
+        <div class="verify-how-flow">
+          <div class="verify-how-track" aria-hidden="true"></div>
+          <div class="verify-how-steps">
+            <div class="verify-how-step">
+              <div class="verify-how-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M7 3h7l4 4v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/>
+                  <path d="M14 3v4h4"/>
+                  <path d="M9 12h6"/>
+                  <path d="M9 16h5"/>
+                </svg>
+              </div>
+              <div class="verify-how-eyebrow">STEP 01</div>
+              <h3 class="verify-how-title">주장 수집·분류</h3>
+              <p class="verify-how-desc">온라인·제보·언론에서 확인이 필요한 주장을 모아 도메인별로 분류합니다.</p>
+            </div>
+            <div class="verify-how-step">
+              <div class="verify-how-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="11" cy="11" r="6"/>
+                  <path d="M20 20l-3.6-3.6"/>
+                  <path d="M8.4 11l1.9 1.9 3.3-3.7"/>
+                </svg>
+              </div>
+              <div class="verify-how-eyebrow">STEP 02</div>
+              <h3 class="verify-how-title">1차·공식 출처 대조</h3>
+              <p class="verify-how-desc">정부·기관 원문과 공개 데이터에 주장을 직접 대조해, 공식 근거가 있는지 확인합니다.</p>
+            </div>
+            <div class="verify-how-step">
+              <div class="verify-how-icon verify-how-icon--fill" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 2.5l7.5 3.2v5.6c0 4.6-3.2 7.9-7.5 9.7-4.3-1.8-7.5-5.1-7.5-9.7V5.7L12 2.5z"/>
+                  <path d="M8.7 11.8l2.3 2.3 4.3-4.8"/>
+                </svg>
+              </div>
+              <div class="verify-how-eyebrow">STEP 03</div>
+              <!-- HIGH-RISK-LABEL: the last reader-reachable 판정. This step
+                   describes PUBLISHING, not labelling, so it is not given a
+                   status string — it keeps 근거 등급 (the thing published) and
+                   drops the adjudication word from both title and body. -->
+              <h3 class="verify-how-title">근거 등급·출처 공개</h3>
+              <p class="verify-how-desc">근거 등급과 확인된 공식 출처를 링크와 함께 공개하고, 새 사실이 나오면 정정합니다.</p>
+            </div>
+          </div>
+          <div class="verify-how-arrow verify-how-arrow--a" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M5 12h14"/>
+              <path d="M13 6l6 6-6 6"/>
+            </svg>
+          </div>
+          <div class="verify-how-arrow verify-how-arrow--b" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M5 12h14"/>
+              <path d="M13 6l6 6-6 6"/>
+            </svg>
+          </div>
+        </div>
+        <nav class="verify-how-links" aria-label="자세히 보기">
+          <a class="verify-how-link" href="#methodology">검증 방법 전체 →</a>
+          <a class="verify-how-link" href="#gradeStatus">상태 안내 →</a>
+          <a class="verify-how-link verify-how-link--map" href="/web/brainmap.html"><svg class="utility-icon" aria-hidden="true"><use href="#ic-network"/></svg>연결지도 →</a>
+        </nav>
+        </section>
       </div>
 
       <div class="methodology-grid">
@@ -6603,7 +6621,9 @@
     // DESIGN-C3h-1d: top feed container (hero band + 오늘의 검증 row) — sits above the
     // static sort row, with the card-row + 1-col list rendering into #hotTopics below.
     const hotTopicsTopEl = document.getElementById("hotTopicsTop");
-    const verifyHowEl = document.getElementById("verifyHowSection");
+    // VERIFY-HOW-TO-METHODOLOGY (38-APPLY): #verifyHowSection moved off home
+    // onto the 검증 방법 page (#methodology), so the C3-3 domain-tab hide
+    // below no longer applies — visibility now follows the screen toggle.
     // SIDEBAR-RANK-B2: weekly-stats panel numbers + range; 제보 input/button.
     // HOME-TOP5 S5a: 확산 성장 Top 5 sidebar panel (filled from /api/trending).
     const trendingPanelEl = document.getElementById("trendingPanel");
@@ -10125,10 +10145,10 @@
 
       // C3-1: RETIRE the TIER-2 "나머지 뉴스" block on BOTH tabs — the domain grid now
       // shows the full domain pool, so the separate tier is redundant. Kept hidden +
-      // emptied (shells preserved for C3-2). #verifyHowSection is untouched.
-      // C3-3: the "이렇게 검증합니다" intro box is a site intro → 전체 tab only, hidden on
-      // domain tabs.
-      if (verifyHowEl) verifyHowEl.hidden = activeDomain !== "전체";
+      // emptied (shells preserved for C3-2).
+      // C3-3 (retired 38-APPLY): the "이렇게 검증합니다" strip left the home page
+      // for #methodology, so the 전체-tab-only hide is gone — on its new page
+      // it must show regardless of which home domain tab was last active.
       if (tier2SectionEl) tier2SectionEl.hidden = true;
       if (tier2GridEl) tier2GridEl.innerHTML = "";
       if (tier2LoadMoreEl) tier2LoadMoreEl.hidden = true;
@@ -12899,8 +12919,15 @@
     // not scale.
     function feedSpreadStripHtml(daily, opts) {
       const hero = !!(opts && opts.hero);
-      const stripH = hero ? 36 : 18;
-      const barBasis = hero ? "flex:1 1 12px;max-width:16px" : "flex:1 1 8px;max-width:10px";
+      // STRIP-FULL-WIDTH (38-APPLY): the hero strip now spans the WHOLE hero
+      // card (grid-column 1/-1 in main.css), so the bar cap rises 16px →
+      // 20px to let 44 bars fill the ~912px row. 37px = 36px of bars + the
+      // 1px CSS baseline rule inside the border-box. The hero bars' 2px top
+      // rounding is shape polish only — same token, same scale, no gradient,
+      // no interpolation, no colour split.
+      const stripH = hero ? 37 : 18;
+      const barBasis = hero ? "flex:1 1 12px;max-width:20px" : "flex:1 1 8px;max-width:10px";
+      const radius = hero ? "2px 2px 0 0" : "1px 1px 0 0";
       const gap = 2;
       if (!Array.isArray(daily) || !daily.length) return "";
       const counts = new Map();
@@ -12939,7 +12966,7 @@
         // tabbable (tabindex) so keyboard users tab through counts, not
         // through empty slots.
         bars.push(
-          `<div class="spread-strip-bar" title="${escapeHtml(day)} · ${escapeHtml(count)}건"${count > 0 ? ' tabindex="0"' : ""} style="${barBasis};min-width:0;align-self:flex-end;height:${count > 0 ? heightPct + "%" : "2px"};background:${count > 0 ? "var(--brand)" : "var(--line)"};border-radius:1px 1px 0 0;"></div>`
+          `<div class="spread-strip-bar" title="${escapeHtml(day)} · ${escapeHtml(count)}건"${count > 0 ? ' tabindex="0"' : ""} style="${barBasis};min-width:0;align-self:flex-end;height:${count > 0 ? heightPct + "%" : "2px"};background:${count > 0 ? "var(--brand)" : "var(--line)"};border-radius:${radius};"></div>`
         );
       }
       return `<div class="feed-spread-strip" role="img" aria-label="일별 보도량, 최다 ${escapeHtml(peak)}건" style="display:flex;align-items:flex-end;gap:${gap}px;height:${stripH}px;max-width:100%;">${bars.join("")}</div>`;

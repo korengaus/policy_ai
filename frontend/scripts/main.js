@@ -147,7 +147,9 @@
     // DESIGN-C3h-1d: top feed container (hero band + 오늘의 검증 row) — sits above the
     // static sort row, with the card-row + 1-col list rendering into #hotTopics below.
     const hotTopicsTopEl = document.getElementById("hotTopicsTop");
-    const verifyHowEl = document.getElementById("verifyHowSection");
+    // VERIFY-HOW-TO-METHODOLOGY (38-APPLY): #verifyHowSection moved off home
+    // onto the 검증 방법 page (#methodology), so the C3-3 domain-tab hide
+    // below no longer applies — visibility now follows the screen toggle.
     // SIDEBAR-RANK-B2: weekly-stats panel numbers + range; 제보 input/button.
     // HOME-TOP5 S5a: 확산 성장 Top 5 sidebar panel (filled from /api/trending).
     const trendingPanelEl = document.getElementById("trendingPanel");
@@ -3669,10 +3671,10 @@
 
       // C3-1: RETIRE the TIER-2 "나머지 뉴스" block on BOTH tabs — the domain grid now
       // shows the full domain pool, so the separate tier is redundant. Kept hidden +
-      // emptied (shells preserved for C3-2). #verifyHowSection is untouched.
-      // C3-3: the "이렇게 검증합니다" intro box is a site intro → 전체 tab only, hidden on
-      // domain tabs.
-      if (verifyHowEl) verifyHowEl.hidden = activeDomain !== "전체";
+      // emptied (shells preserved for C3-2).
+      // C3-3 (retired 38-APPLY): the "이렇게 검증합니다" strip left the home page
+      // for #methodology, so the 전체-tab-only hide is gone — on its new page
+      // it must show regardless of which home domain tab was last active.
       if (tier2SectionEl) tier2SectionEl.hidden = true;
       if (tier2GridEl) tier2GridEl.innerHTML = "";
       if (tier2LoadMoreEl) tier2LoadMoreEl.hidden = true;
@@ -6443,8 +6445,15 @@
     // not scale.
     function feedSpreadStripHtml(daily, opts) {
       const hero = !!(opts && opts.hero);
-      const stripH = hero ? 36 : 18;
-      const barBasis = hero ? "flex:1 1 12px;max-width:16px" : "flex:1 1 8px;max-width:10px";
+      // STRIP-FULL-WIDTH (38-APPLY): the hero strip now spans the WHOLE hero
+      // card (grid-column 1/-1 in main.css), so the bar cap rises 16px →
+      // 20px to let 44 bars fill the ~912px row. 37px = 36px of bars + the
+      // 1px CSS baseline rule inside the border-box. The hero bars' 2px top
+      // rounding is shape polish only — same token, same scale, no gradient,
+      // no interpolation, no colour split.
+      const stripH = hero ? 37 : 18;
+      const barBasis = hero ? "flex:1 1 12px;max-width:20px" : "flex:1 1 8px;max-width:10px";
+      const radius = hero ? "2px 2px 0 0" : "1px 1px 0 0";
       const gap = 2;
       if (!Array.isArray(daily) || !daily.length) return "";
       const counts = new Map();
@@ -6483,7 +6492,7 @@
         // tabbable (tabindex) so keyboard users tab through counts, not
         // through empty slots.
         bars.push(
-          `<div class="spread-strip-bar" title="${escapeHtml(day)} · ${escapeHtml(count)}건"${count > 0 ? ' tabindex="0"' : ""} style="${barBasis};min-width:0;align-self:flex-end;height:${count > 0 ? heightPct + "%" : "2px"};background:${count > 0 ? "var(--brand)" : "var(--line)"};border-radius:1px 1px 0 0;"></div>`
+          `<div class="spread-strip-bar" title="${escapeHtml(day)} · ${escapeHtml(count)}건"${count > 0 ? ' tabindex="0"' : ""} style="${barBasis};min-width:0;align-self:flex-end;height:${count > 0 ? heightPct + "%" : "2px"};background:${count > 0 ? "var(--brand)" : "var(--line)"};border-radius:${radius};"></div>`
         );
       }
       return `<div class="feed-spread-strip" role="img" aria-label="일별 보도량, 최다 ${escapeHtml(peak)}건" style="display:flex;align-items:flex-end;gap:${gap}px;height:${stripH}px;max-width:100%;">${bars.join("")}</div>`;

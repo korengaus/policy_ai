@@ -2930,6 +2930,20 @@
       /* 33-APPLY: full column width under the title (was capped 320px when it
          sat in the rail). */
       max-width: none;
+      /* STRIP-FULL-WIDTH (38-APPLY): a 1px baseline rule the bars sit on
+         (the line token — the same quiet hairline the empty-day slots use),
+         instead of floating on the card ground. Inside the border-box: the
+         inline height is 37px, so bars still scale against 36px. */
+      border-bottom: 1px solid var(--line);
+    }
+    /* STRIP-FULL-WIDTH (38-APPLY): the strip and its date-range line span
+       BOTH hero columns (title + number cells), the design target's full-
+       width run. Auto-placement puts them in the first row below the rail
+       cells' 1/span 5 block, so nothing overlaps. Inert at <=960px where
+       the hero is a flex column (already full width there). */
+    .topic-card--hero > .feed-spread-strip,
+    .topic-card--hero > .hero-spread-range {
+      grid-column: 1 / -1;
     }
 
     /* DESIGN-C3d: "오늘의 검증 / LATEST CHECKS" row — a re-chunk of the first ≤3
