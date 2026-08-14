@@ -4224,12 +4224,20 @@
       padding: 8px 0 0;
     }
 
+    /* SUMMARY-LEVELS (49-APPLY): TWO explicit levels inside the process block,
+       by size/weight/indent ONLY (no colour, no icons, and NEVER display —
+       the SUMMARY-FLEX-FIX / DESIGN-DETAIL-5f closed-details rule below).
+       Level 1 = section summaries (this rule + the nested-section rule):
+       15px / 800, no indent. Level 2 = candidate rows + their 전체 보기
+       expander: 1rem (13px) with a 12px indent (row text keeps its existing
+       400 weight via .vrf-cand-line). Before: 14px/900 vs 1rem/700 vs
+       0.923rem — 1px steps that read as one flat level. */
     .collapsible-section summary {
       cursor: pointer;
       padding: 11px 12px;
       color: var(--text);
-      font-size: 14px;
-      font-weight: 900;
+      font-size: 15px;
+      font-weight: 800;
       list-style-position: inside;
     }
 
@@ -4246,8 +4254,11 @@
        (no serif; the detail is single-font, hierarchy by size/weight). Scoped to nested
        collapsibles so the top-level reader-view reading guide is unaffected. */
     .collapsible-section .collapsible-section > summary {
-      font-size: 1rem;
-      font-weight: 700;
+      /* SUMMARY-LEVELS (49-APPLY): nested SECTION summaries join level 1
+         (15px/800) — the section/row distinction is the hierarchy, not the
+         nesting depth of the wrapper. */
+      font-size: 15px;
+      font-weight: 800;
       color: var(--ink);
       padding: 10px 0;
     }
@@ -4362,12 +4373,17 @@
     .vrf-cand-more {
       margin-top: 4px;
     }
-    .vrf-cand-more-summary {
+    /* SUMMARY-LEVELS (49-APPLY): level 2 — the extra .collapsible-section
+       ancestor out-specifies the base `.collapsible-section summary` rule
+       (0,1,1), which silently won over these single-class rules before and is
+       WHY every summary measured as one flat level. Same 12px indent and 1rem
+       size as the candidate rows it expands; existing brand colour/weight. */
+    .collapsible-section .vrf-cand-more-summary {
       cursor: pointer;
-      padding: 8px 0;
+      padding: 8px 0 8px 12px;
       color: var(--brand);
       font-weight: 700;
-      font-size: 0.86rem;
+      font-size: 1rem;
       list-style-position: inside;
     }
     .vrf-cand-more-summary:hover {
@@ -4382,10 +4398,14 @@
        the working .review-tools-details > summary does it (list-style:none +
        ::-webkit-details-marker) so the prior no-triangle flex look is unchanged. Pure
        structural correctness — appearance identical. */
-    .vrf-cand-summary {
+    /* SUMMARY-LEVELS (49-APPLY): level 2 — ancestor added for specificity (see
+       the note above): 12px indent, 1rem, weight 400 (the .vrf-cand-trace pill
+       keeps its own 700 mini-label). display untouched (closed-details rule). */
+    .collapsible-section .vrf-cand-summary {
       cursor: pointer;
-      padding: 8px 0;
-      font-size: 0.923rem;
+      padding: 8px 0 8px 12px;
+      font-size: 1rem;
+      font-weight: 400;
       list-style: none;
     }
     .vrf-cand-summary::-webkit-details-marker {
@@ -4616,6 +4636,68 @@
     .source-link {
       font-size: 13px;
       word-break: break-all;
+    }
+
+    /* DETAIL-ACTIONS (49-APPLY): the one action row under the detail header
+       stack (원문 보기 / 이미지로 공유 / 신고하기). The moved blocks keep their
+       own classes and wiring; this wrapper only lays them out on one line and
+       neutralises the bottom-of-card spacing they carried there. */
+    .detail-action-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px 16px;
+      margin-top: 12px;
+    }
+    .detail-action-row .report-error-link {
+      margin-top: 0;
+      text-align: left;
+    }
+
+    /* DETAIL-NAV (49-APPLY): >=1440px only — #detailScreen becomes a 2-column
+       grid; every existing child stays in column 1 and the nav takes column 2
+       (the space the hidden home aside leaves empty on this screen), sticky.
+       Below 1440 the nav is display:none — a mobile between-title-and-body
+       placement would need unshipped wording. .screen-hidden (display:none
+       !important) still wins over the grid, so screen toggling is unchanged. */
+    .detail-page-nav {
+      display: none;
+    }
+    @media (min-width: 1440px) {
+      #detailScreen {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 228px;
+        column-gap: 28px;
+      }
+      #detailScreen > * {
+        grid-column: 1;
+        min-width: 0;
+      }
+      #detailScreen > .detail-page-nav:not([hidden]) {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        grid-column: 2;
+        grid-row: 1 / span 30;
+        align-self: start;
+        position: sticky;
+        top: 88px;
+        border-left: 1px solid var(--line);
+        padding: 4px 0 4px 14px;
+      }
+      .detail-nav-link {
+        background: none;
+        border: 0;
+        padding: 6px 0;
+        cursor: pointer;
+        text-align: left;
+        color: var(--slate);
+        font-size: 13px;
+        font-weight: 700;
+      }
+      .detail-nav-link:hover {
+        color: var(--brand-ink);
+      }
     }
 
     .source-button {

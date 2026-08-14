@@ -5896,7 +5896,7 @@
       const officialText = officialVerificationExplanation(reliability, (result?.verification_card || result || {}).debug_summary || {});
       if (!items.length) {
         return `
-          <section class="public-source-section">
+          <section class="public-source-section source-summary-section">
             <h3>근거와 출처 요약</h3>
             <div class="reader-note">현재 공개 리포트에 표시할 수 있는 뚜렷한 출처 카드가 부족합니다. ${escapeHtml(officialLimitation || officialText)}</div>
           </section>
@@ -5908,7 +5908,7 @@
       const periodSuppressed = !!(reliability && typeof reliability === "object"
         && OFFICIAL_PERIOD_SUPPRESSED_SUMMARIES.has(reliability));
       return `
-        <section class="public-source-section">
+        <section class="public-source-section source-summary-section">
           <h3>근거와 출처 요약</h3>
           <div class="reader-note">${escapeHtml(officialLimitation || officialText)}</div>
           <div class="public-source-grid">
@@ -5933,7 +5933,12 @@
                   <div class="public-source-meta">출처 유형: ${escapeHtml(publicSourceTypeLabel(source))}</div>
                   ${(source.evidence_strength || source.evidence_quality_label || source.supports_claim) ? `<div class="public-source-meta">근거 강도: ${escapeHtml((periodSuppressed && isOfficialLikeSource(source)) ? formatSupportsClaim("unclear") : formatTechnicalLabel(source.evidence_strength || source.evidence_quality_label || source.supports_claim))}</div>` : ""}
                   ${score !== "-" ? `<div class="public-source-meta">신뢰/관련 점수: ${escapeHtml(score)}</div>` : ""}
-                  <div class="public-source-meta">링크: ${url ? `<a href="${escapeHtml(safeUrl(url))}" target="_blank" rel="noopener noreferrer">원문 보기</a>` : "URL 없음"}</div>
+                  <!-- DETAIL-ACTIONS (49-APPLY): the "링크: 원문 보기" meta line is
+                       REMOVED — it was the page's duplicate 원문 보기 instance
+                       (the header action row keeps the single one), and this
+                       card's TITLE above already carries the SAME href
+                       (titleHtml), so no destination is lost; a url-less card
+                       simply renders its title unlinked, as it already did. -->
                   <div class="public-source-meta">${escapeHtml(reason)}</div>
                   ${fetchWarning}
                 </article>
@@ -7760,6 +7765,29 @@
               현재 수집된 기사와 공식 자료 기준의 검증 초안입니다. 절대적 결론이 아니라, 확인 가능한 근거를 바탕으로 한 판단입니다.
             </div>
 
+            <!-- DETAIL-ACTIONS (49-APPLY): ONE action row directly under the
+                 header stack. Measured before this change, every reader control
+                 sat at 1,209px+ — below the fold at both 1440x900 and 390x844 —
+                 so nothing a reader could DO was on the first screen. The three
+                 controls MOVED here byte-identical (same classes and wiring:
+                 the .source-button article link, the delegated
+                 [data-share-image] canvas button, the mailto report link) —
+                 moves, not copies; their old bottom-of-card slots are gone. The
+                 brainmap link stays inside 얼마나 퍼졌나 (already above the
+                 fold). The per-source "링크:" line inside 근거와 출처 요약 was
+                 the duplicate 원문 보기 instance — removed there (each source
+                 card's TITLE already carries the same href), keeping this the
+                 page's single 원문 보기. -->
+            <div class="detail-action-row">
+              <div class="source-link">
+                <a class="source-button" href="${url}" target="_blank" rel="noopener noreferrer">원문 보기</a>
+              </div>
+              ${(hasFocus || displayResults.length === 1) && Number(result.result_id) > 0 ? `<div class="report-error-link"><button type="button" class="secondary" data-share-image="${Number(result.result_id)}" data-share-title="${title}" data-share-official="${escapeHtml(officialStatusLabel(result))}">이미지로 공유</button></div>` : ""}
+              <div class="report-error-link">
+                <a href="mailto:contact@tickedin.org?subject=${encodeURIComponent('[tickedin 오류신고] 분석 오류 제보')}">이 분석에 오류가 있나요? 신고하기</a>
+              </div>
+            </div>
+
             <!-- DETAIL-IA MERGE — 얼마나 퍼졌나: ONE spread section. The static
                  <h3> and the ONE consolidated caveat live on this WRAPPER; the
                  two async hydrators (loadSpreadAnnotations /api/spread,
@@ -7778,14 +7806,14 @@
               <div class="reader-note">확산 정보는 유통 규모와 그 변화를 보여줄 뿐, 사실 여부에 대한 검증이 아닙니다.</div>
             </section>` : ""}
 
-            <!-- CLUSTER-SURFACE S-a: sibling-coverage placeholder (같은 클러스터의
-                 다른 보도 — 유통 정보만, 판정 아님), right after the spread section
-                 as part of the layer-1 cluster context. Stays hidden until
-                 /api/cluster/{id}/members returns found + members; found:false /
-                 empty / fetch failure all render NOTHING (fail-silent). Hydrated
-                 AFTER the innerHTML pass by loadClusterMembers() — position-
-                 independent. Same gate as the spread placeholder. -->
-            ${(hasFocus || displayResults.length === 1) && Number(result.result_id) > 0 ? `<section class="public-source-section cluster-members-section" data-cluster-id="${Number(result.result_id)}" hidden></section>` : ""}
+            <!-- STEP 2 item 5 → DETAIL-ORDER (49-APPLY): 근거와 출처 요약 SWAPPED
+                 above 어떤 매체가 보도했나 — the section the product exists to
+                 show (the 3b open-by-default reasoning) measured as the deepest
+                 open section (980px, below the fold) while two circulation
+                 sections sat above it. A pure pairwise position swap with the
+                 cluster-members placeholder below; both hydrators select by
+                 class/data-attr, so nothing reads the order. -->
+            ${renderPublicSourceCards(result)}
 
             <!-- STEP 2 item 3: the news CONTENT lead (the article's own claim quote)
                  + the muted verification note, just under the verdict so the reader
@@ -7809,14 +7837,19 @@
                  영향 grid + .user-explain) is OFF the card — see the note at the
                  removed renderUserSummarySections definition. -->
 
-            <!-- STEP 2 item 5: 근거와 출처 요약. -->
-            ${renderPublicSourceCards(result)}
+            <!-- CLUSTER-SURFACE S-a → DETAIL-ORDER (49-APPLY): the sibling-
+                 coverage section now renders BELOW 근거와 출처 요약 (see the
+                 swap note there). Hydration is unchanged and position-
+                 independent: loadClusterMembers() finds this node by its
+                 data-cluster-id after the innerHTML pass; same gate, same
+                 fail-silent contract (found:false / empty / fetch failure
+                 render NOTHING). -->
+            ${(hasFocus || displayResults.length === 1) && Number(result.result_id) > 0 ? `<section class="public-source-section cluster-members-section" data-cluster-id="${Number(result.result_id)}" hidden></section>` : ""}
 
-            <!-- DETAIL-IA: 원문 보기 moved UP into layer 1 — the original
-                 article stays reachable without opening any collapsible. -->
-            <div class="source-link">
-              <a class="source-button" href="${url}" target="_blank" rel="noopener noreferrer">원문 보기</a>
-            </div>
+            <!-- DETAIL-IA: 원문 보기 moved UP — now the first control of the
+                 DETAIL-ACTIONS row under the header stack (49-APPLY); the
+                 original article stays reachable without opening any
+                 collapsible. -->
 
             <!-- DETAIL-IA Layer 2: the collapsed 우리가 어떻게 판단했나 block
                  (verdict indicators + bullets + 리뷰 상태 + reading guide —
@@ -7828,16 +7861,34 @@
                  blocks both named for "our judgement process" gave the reader no way
                  to tell them apart. Every child (reviewer mounts, 상세 검증 정보,
                  and the advanced sub-sections) still renders there. -->
-            <!-- CARD-3LAYER S4a: 이미지로 공유 button — split out of the (moved)
-                 spread placeholder's conditional, byte-identical markup/condition;
-                 stays low near the footer while the spread section sits up top. -->
-            ${(hasFocus || displayResults.length === 1) && Number(result.result_id) > 0 ? `<div class="report-error-link"><button type="button" class="secondary" data-share-image="${Number(result.result_id)}" data-share-title="${title}" data-share-official="${escapeHtml(officialStatusLabel(result))}">이미지로 공유</button></div>` : ""}
-            <div class="report-error-link">
-              <a href="mailto:contact@tickedin.org?subject=${encodeURIComponent('[tickedin 오류신고] 분석 오류 제보')}">이 분석에 오류가 있나요? 신고하기</a>
-            </div>
+            <!-- CARD-3LAYER S4a → DETAIL-ACTIONS (49-APPLY): the 이미지로 공유
+                 button and the 신고하기 link moved into the action row under
+                 the header stack — same markup, same delegated wiring. -->
           </article>
         `;
       }).join("");
+      // DETAIL-NAV (49-APPLY): fill the >=1440 in-page nav (static template
+      // node, sibling of #results) with the four section headings VERBATIM, in
+      // page order, for single-card renders only — a multi-result render has
+      // no single section set to point at. data-nav-target holds the section's
+      // own selector (the judgement block is the card's only DIRECT details
+      // child); the delegated click handler scrolls without touching
+      // location.hash, so HISTORY-BACK is unaffected, and a target that is
+      // absent or still hidden (fail-silent hydrators) makes the click a
+      // no-op rather than a jump to nowhere.
+      const detailNavEl = document.getElementById("detailPageNav");
+      if (detailNavEl) {
+        const showDetailNav = displayResults.length === 1;
+        detailNavEl.hidden = !showDetailNav;
+        detailNavEl.innerHTML = !showDetailNav ? "" : [
+          ["얼마나 퍼졌나", ".result-card .spread-merged-section"],
+          ["근거와 출처 요약", ".result-card .source-summary-section"],
+          ["어떤 매체가 보도했나", ".result-card .cluster-members-section"],
+          ["우리가 어떻게 판단했나", ".result-card > details.collapsible-section"],
+        ].map(([label, sel]) =>
+          `<button type="button" class="detail-nav-link" data-nav-target="${escapeHtml(sel)}">${escapeHtml(label)}</button>`
+        ).join("");
+      }
       // SPREAD-TIMELINE Slice 2: hydrate the detail card's spread placeholder
       // after the innerHTML pass. Fire-and-forget; internally fail-silent.
       loadSpreadAnnotations();
@@ -10255,6 +10306,19 @@
     if (scrollTopLinkEl) {
       scrollTopLinkEl.addEventListener("click", () => {
         window.scrollTo({ top: 0, behavior: "smooth" });
+      });
+    }
+    // DETAIL-NAV (49-APPLY): delegated scroll for the in-page nav buttons.
+    // scrollIntoView only — location.hash and the history stack are never
+    // touched, so the popstate router / HISTORY-BACK behaviour is unchanged.
+    const detailPageNavEl = document.getElementById("detailPageNav");
+    if (detailPageNavEl) {
+      detailPageNavEl.addEventListener("click", (event) => {
+        const btn = event.target.closest("[data-nav-target]");
+        if (!btn) return;
+        const target = document.querySelector(btn.getAttribute("data-nav-target"));
+        if (!target || target.hidden) return; // un-hydrated section → no-op
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
       });
     }
     if (categoryTabsEl) {
