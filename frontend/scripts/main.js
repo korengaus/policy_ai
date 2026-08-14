@@ -3985,11 +3985,22 @@
           if (!title) return "";
           const outlets = Number(row?.current_outlet_count);
           const growth = Number(row?.growth);
-          const badge = row?.is_new ? " · NEW"
-            : (Number.isFinite(growth) && growth > 0 ? ` · ↑${growth}` : "");
-          const meta = Number.isFinite(outlets) && outlets > 0
-            ? `${outlets}개 매체${badge}`
-            : badge.replace(" · ", "");
+          // AXIS-LEAD (55-APPLY): this panel ranks by WEEKLY GROWTH, but each
+          // row led with "{N}개 매체" — the same unit and phrasing the hero
+          // uses for its CUMULATIVE axis — while the growth marker trailed as
+          // a small badge. The row now LEADS with the growth form (NEW / ↑N)
+          // and the cumulative count trails. Both fragments are this row's
+          // own shipped forms, reordered verbatim; nothing added. A row with
+          // no growth marker (growth <= 0, not new) keeps the count alone,
+          // and a row with no count keeps the marker alone — as before.
+          const growthLead = row?.is_new ? "NEW"
+            : (Number.isFinite(growth) && growth > 0 ? `↑${growth}` : "");
+          const countTail = Number.isFinite(outlets) && outlets > 0
+            ? `${outlets}개 매체`
+            : "";
+          const meta = growthLead && countTail
+            ? `${growthLead} · ${countTail}`
+            : (growthLead || countTail);
           const titleHtml = rid > 0
             ? `<a class="rank-title" href="/?result_id=${encodeURIComponent(rid)}">${escapeHtml(title)}</a>`
             : `<span class="rank-title">${escapeHtml(title)}</span>`;
@@ -6786,7 +6797,23 @@
       // exactly as before). The hero strip keeps no width: the grid
       // stretches it across the full card.
       const stripW = hero ? "" : `width:${totalDays * 9 + (totalDays - 1) * gap}px;`;
-      return `<div class="feed-spread-strip" role="img" aria-label="일별 보도량, 최다 ${escapeHtml(peak)}건" style="display:flex;align-items:flex-end;gap:${gap}px;height:${stripH}px;max-width:100%;${stripW}">${bars.join("")}</div>`;
+      // SCALE-GRIDLINE (55-APPLY): the bars are sqrt-scaled (SQRT-SCALE above)
+      // and nothing on screen said so. HERO-SIZE STRIPS ONLY (the 17px region
+      // strips have no room — unchanged): one faint dashed reference line at
+      // the rendered height of ~peak/4. Under a proportional scale a quarter
+      // of the peak would sit at a quarter of the height; the sqrt scale puts
+      // it at about HALF — that visible misplacement IS the disclosure. Drawn
+      // in the axis's own quiet vocabulary so it cannot read as a threshold,
+      // target or judgement: the baseline's --line token, dashed, full-width
+      // like a gridline, painted BEHIND the bars (first in DOM), labelled
+      // only with the shipped {N}건 numeral form in --muted — no colour, no
+      // brand, no bold, no words. Skipped when the quarter is not a distinct
+      // count (peak < 4). Derivation, scale, gates, tooltips all untouched.
+      const quarter = Math.round(peak / 4);
+      const gridline = (hero && peak >= 4 && quarter >= 1 && quarter < peak)
+        ? `<div class="spread-strip-gridline" aria-hidden="true" style="position:absolute;left:0;right:0;bottom:${Math.round(Math.sqrt(quarter / peak) * plotH)}px;height:0;border-top:1px dashed var(--line);"><span style="position:absolute;right:0;bottom:2px;font-size:9px;color:var(--muted);line-height:1;">${escapeHtml(quarter)}건</span></div>`
+        : "";
+      return `<div class="feed-spread-strip" role="img" aria-label="일별 보도량, 최다 ${escapeHtml(peak)}건" style="position:relative;display:flex;align-items:flex-end;gap:${gap}px;height:${stripH}px;max-width:100%;${stripW}">${gridline}${bars.join("")}</div>`;
     }
 
     // SHARE-IMAGE Slice 1: the spread payload each card fetched, kept for the
@@ -7704,20 +7731,15 @@
                   <span class="verdict-value">${escapeHtml(officialStatusLabel(result))}</span>
                 </div>
               </div>
-              <!-- INDEPENDENCE-LINE-CORRECTION: this said the two axes are
-                   독립된 축. That overstated and, worse, denied a correlation a
-                   reader can see: the axes SHARE INPUTS (evidence strength,
-                   evidence quality, confidence feed both), so they are not
-                   independent in construction — only non-identical in output.
-                   Measured Cramér's V 0.291; draft_verified is 39.8% of HIGH
-                   against 4.1% of LOW. The replacement states the measured
-                   relationship and claims neither independence nor implication.
-                   ORDERING: the concrete "what each shows" sentence now leads,
-                   because the proposed opener (서로 다른 것을 나타냅니다) merely
-                   promised what that sentence already says and repeated
-                   나타냅니다. The alert-axis description and the closing denial
-                   are the shipped strings, unchanged. -->
-              <div class="reader-note">경고 단계는 정책 영향·위험 신호를, AI 검증 상태는 검증 처리가 어디까지 진행됐는지를 나타냅니다. 같은 근거 측정을 일부 공유하기 때문에 함께 높아지는 경우가 많지만, 한쪽이 다른 쪽을 결정하지는 않습니다. 사실 여부에 대한 판단이 아닙니다.</div>
+              <!-- STATUS-WHY-PROMOTED (55-APPLY) / 55-FIX: the dual-axis
+                   reader-note MOVED to the header for good (the page's only
+                   alert-is-not-a-verdict sentence). The 왜 이렇게 판단했나요?
+                   bullets were promoted with it and RETURNED here in 55-FIX:
+                   the two moves together grew the 390 header to 75% of the
+                   viewport, and the bullets answer a follow-up question, not
+                   the misreading the note prevents. Byte-identical round
+                   trip; the two tiles and everything else in this block are
+                   untouched. -->
               <div class="verdict-reasoning">
                 <h3>왜 이렇게 판단했나요?</h3>
                 ${renderBulletList(decisionReasonBullets(userContext, 3))}
@@ -7825,6 +7847,20 @@
               <span class="verdict-label">AI 검증 상태</span>
               <span class="verdict-value">${escapeHtml(safeAiDraftVerdictForExport(result))}</span>
             </div>
+
+            <!-- STATUS-WHY-PROMOTED (55-APPLY) / 55-FIX: only the dual-axis
+                 note stays promoted here — it is the page's ONLY sentence
+                 stopping a reader from reading the alert badge as a verdict.
+                 The 왜 이렇게 판단했나요? bullets RETURNED to the collapsed
+                 block (their promotion grew the 390 header to 75% of the
+                 viewport — worse than the problem it solved; the bullets
+                 answer a follow-up question, not the misreading). The 공식
+                 출처 상태 tile stays unpromoted (duplicates the answer line).
+                 INDEPENDENCE-LINE-CORRECTION (carried with the note): the
+                 note states the measured axis relationship (Cramér's V 0.291)
+                 and claims neither independence nor implication; wording is
+                 the shipped strings, unchanged. -->
+            <div class="reader-note">경고 단계는 정책 영향·위험 신호를, AI 검증 상태는 검증 처리가 어디까지 진행됐는지를 나타냅니다. 같은 근거 측정을 일부 공유하기 때문에 함께 높아지는 경우가 많지만, 한쪽이 다른 쪽을 결정하지는 않습니다. 사실 여부에 대한 판단이 아닙니다.</div>
 
             <!-- 2a: the contradiction explanation, surfaced here as its ONE reader
                  surface (it was previously only inside the reading guide, two

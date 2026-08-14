@@ -319,7 +319,16 @@
         <section id="trendingPanel" class="rank-panel" aria-label="확산 성장 Top 5" hidden>
           <div class="rank-panel-heading">
             <h2>확산 성장 Top 5</h2>
-            <p>여러 매체로 퍼진 정도 · 검증이 아닙니다</p>
+            <!-- AXIS-CAPTION (55-FIX): the old caption (여러 매체로 퍼진 정도)
+                 described EXTENT — the hero's axis — under a panel that ranks
+                 by weekly GROWTH, blurring the very distinction the reordered
+                 rows draw. Replaced with the shipped basis phrase 주간 스냅샷
+                 기준 (main.js spread meta; the method page's lane note),
+                 keeping 검증이 아닙니다 and the existing interpunct — nothing
+                 added. The removed phrase shipped nowhere else; deleting a
+                 sentence that was inaccurate for this panel is accepted as
+                 not a loss (55-FIX ruling). -->
+            <p>주간 스냅샷 기준 · 검증이 아닙니다</p>
           </div>
           <ol id="trendingList" class="rank-list"></ol>
         </section>
