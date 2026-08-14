@@ -17,9 +17,12 @@
 -->
 <style>
   :root {
+    /* ONE-SITE (57-APPLY): tokens aligned to the main system — ivory canvas
+       (CANVAS-IVORY #f5f5f2, was the retired cool #f6f8fb) and the hairline
+       card standard (12px radius, no shadow) claim.html/weekly.html use. */
     --ink: #0f172a; --slate: #475569; --muted: #94a3b8; --line: #e2e8f0;
-    --paper: #ffffff; --canvas: #f6f8fb; --brand: #1e5fd8; --brand-ink: #1542a0;
-    --shadow: 0 8px 24px rgba(15, 23, 42, 0.06); --radius-sm: 9px;
+    --paper: #ffffff; --canvas: #f5f5f2; --brand: #1e5fd8; --brand-ink: #1542a0;
+    --radius: 12px; --radius-sm: 9px;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -42,11 +45,14 @@
     /* FONT-SWITCH: page title joins the body sans stack; only .brand stays serif. */
     font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
   }
-  /* HONESTY (fixed, always visible): coverage-stopped, NOT a verdict. */
+  /* HONESTY (fixed, always visible): coverage-stopped, NOT a verdict.
+     QUIET-FRAMING (57-APPLY): was a brand-outlined tinted box — emphasis on
+     a disclaimer made the denial read like a claim. Restyled to the main
+     system's .reader-note treatment exactly (slate, 13px/1.55, no box);
+     text verbatim, still a permanent always-visible block. */
   .faded-framing {
-    margin-top: 10px; background: #eef4ff; border: 1px solid var(--brand);
-    color: var(--brand-ink); font-size: 12.5px; font-weight: 600; line-height: 1.6;
-    border-radius: var(--radius-sm); padding: 9px 13px; max-width: 760px;
+    margin-top: 10px; color: var(--slate);
+    font-size: 13px; line-height: 1.55; max-width: 760px;
   }
   .faded-subtitle { margin-top: 8px; font-size: 13.5px; line-height: 1.55; color: var(--slate); }
   .faded-subtitle strong { color: var(--ink); font-weight: 700; }
@@ -54,14 +60,18 @@
   #status { color: var(--slate); font-size: 15px; text-align: center; padding: 48px 24px; }
   ol.faded-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
   .faded-item {
+    /* ONE-SITE (57-APPLY): hairline card — shadow dropped, radius-sm → 12px
+       (the aligned claim/weekly card standard). */
     background: var(--paper); border: 1px solid var(--line);
-    border-radius: var(--radius-sm); box-shadow: var(--shadow);
+    border-radius: var(--radius);
     padding: 14px 16px;
   }
   .item-title { color: var(--ink); text-decoration: none; font-size: 15.5px; font-weight: 700; line-height: 1.45; display: inline-block; }
   .item-title:hover { color: var(--brand-ink); text-decoration: underline; }
   .item-meta { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 12.5px; color: var(--slate); }
-  .outlet-badge { display: inline-flex; align-items: center; background: #eef4ff; color: var(--brand-ink); border-radius: 999px; padding: 2px 10px; font-weight: 700; font-size: 12px; }
+  /* ONE-SITE (57-APPLY): chip tint #eef4ff → #eff6ff, the tint the main
+     system's live badge/chip surfaces actually use. */
+  .outlet-badge { display: inline-flex; align-items: center; background: #eff6ff; color: var(--brand-ink); border-radius: 999px; padding: 2px 10px; font-weight: 700; font-size: 12px; }
   footer.faded-foot { max-width: 860px; margin: 0 auto; padding: 0 20px 46px; font-size: 12.5px; color: var(--muted); line-height: 1.7; }
   footer.faded-foot a { color: var(--brand-ink); text-decoration: none; font-weight: 600; }
   footer.faded-foot a:hover { text-decoration: underline; }
