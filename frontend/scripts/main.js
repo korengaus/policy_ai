@@ -234,6 +234,21 @@
     // is a DIFFERENT source (live graph vs snapshot) and is never paired with
     // the trending delta.
     let trendingHeroPickRow = null;
+    // HERO-WHOLE-RECORD (46-APPLY): the Branch B eyebrow claims 전체 기간
+    // 매체 수 순, but its card was the top count WITHIN the newest-100
+    // /history pool — a different statement (measured 2026-08-15: pool best
+    // = a 2-outlet one-day claim; record best = an 80-outlet 43-day cluster
+    // whose rows sit outside the window). The home hero now resolves by
+    // CUMULATIVE outlet count across the whole record (see
+    // resolveCumulativeHeroPick). `cumulativeHeroPick` is the resolved
+    // result object (null until the resolve lands; stays null on every
+    // failure path — the pool-based Branch B then renders unchanged, a
+    // defined degrade). `cumulativeHeroClusterKey` is the pick's cluster
+    // stable_id, the SAME fold key /api/cluster-spreads hands the feed, so
+    // grid exclusion can drop a same-cluster pool row (the same claim)
+    // without ever touching an unrelated card.
+    let cumulativeHeroPick = null;
+    let cumulativeHeroClusterKey = "";
     // HERO-PAINT-ORDER: the hero band used to paint TWICE on a home load —
     // Branch B at feed arrival (pick still null), then Branch A ~240ms later
     // when the chained /api/trending → /history/{id} resolve landed. Because
@@ -3243,9 +3258,10 @@
     // row); when no entry qualifies, trendingHeroPick stays null and the
     // Branch B two-card severity hero renders unchanged.
     // HERO-CUMULATIVE: NO CALLER. renderTrendingTop5 stopped invoking this —
-    // the home hero now takes the circulation (Branch B) band from the pool,
-    // the same rule every domain tab uses, so growth selects nothing outside
-    // the sidebar. RETAINED, not removed, because the HERO-FALLTHROUGH and
+    // growth selects nothing outside the sidebar. (46-APPLY: the home hero's
+    // Branch B card now resolves by whole-record cumulative outlet count —
+    // see resolveCumulativeHeroPick — while domain tabs keep the pool-based
+    // band.) RETAINED, not removed, because the HERO-FALLTHROUGH and
     // HERO-MARKET-SKIP audit gates parse this body (its skip rules and the
     // heroRankNote fragment in heroBandHtml) as their source anchors —
     // deleting it fails the render scan. Removing picker + gates together
@@ -3278,6 +3294,90 @@
       settleHeroBand();
     }
 
+    // HERO-WHOLE-RECORD (46-APPLY): resolve the home hero by cumulative
+    // outlet count across the WHOLE record, so the Branch B eyebrow's 전체
+    // 기간 claim matches its selection. No endpoint returns "top cluster by
+    // cumulative outlet count" directly — /api/trending ranks by GROWTH
+    // between the last two weekly snapshots (measured: its best row today is
+    // ↑3 while the record's top cluster sits at 80 outlets), and the spread
+    // endpoints all answer per-id. The pick therefore comes from the EXISTING
+    // /api/brainmap graph (the 5-min-cached blob the brain-map page loads):
+    // its clusters carry the SAME precomputed outlet_count every spread
+    // endpoint serves. Candidates walk outlet_count DESC (stable_id
+    // tiebreak, mirroring _compute_trending); the representative id is the
+    // server's own display rule (_build_trending_display_index: lowest-id
+    // member whose title equals label_title, else min member id); the row
+    // loads through the SAME deep-link path the trending picker used
+    // (v2FetchHistoryRow → mapHistoryRowToResult) so the pick can sit
+    // anywhere in the record; the market_commercial skip applies unchanged
+    // (HERO-MARKET-SKIP's own reasoning: promoting one would contradict the
+    // site's policy — rank slippage from that skip is NOT disclosed because
+    // no shipped Korean names it, the same wording constraint STRIP-CAPTION
+    // records). Fail-quiet on every path: no graph / no qualifying cluster /
+    // every fetch fails → pick stays null and the pool-based Branch B
+    // renders exactly as before (the eyebrow then overclaims exactly as it
+    // did before this change — a slim server-side top-claim endpoint would
+    // remove both the degrade and the ~1MB transfer; deliberately not added
+    // here, frontend-only change).
+    async function resolveCumulativeHeroPick() {
+      try {
+        const response = await fetch(`${API_BASE}/api/brainmap`);
+        if (!response.ok) { settleHeroBand(); return; }
+        const graph = await response.json();
+        const clusters = (Array.isArray(graph?.clusters) ? graph.clusters : [])
+          .filter((c) => c && c.cluster_id !== null && c.cluster_id !== undefined
+            && Number.isFinite(Number(c.outlet_count)) && Number(c.outlet_count) >= 2);
+        const membersByCluster = new Map();
+        for (const node of (Array.isArray(graph?.nodes) ? graph.nodes : [])) {
+          const cid = node?.cluster_id;
+          const nodeId = Number(node?.id);
+          if (cid === null || cid === undefined || !Number.isInteger(nodeId)) continue;
+          if (!membersByCluster.has(cid)) membersByCluster.set(cid, []);
+          membersByCluster.get(cid).push([nodeId, node?.title || ""]);
+        }
+        clusters.sort((a, b) => (Number(b.outlet_count) - Number(a.outlet_count))
+          || String(a.stable_id || "").localeCompare(String(b.stable_id || "")));
+        // Bounded walk like the trending picker's row list: the top handful
+        // by cumulative count, each candidate fail-quiet.
+        for (const cluster of clusters.slice(0, 5)) {
+          const members = (membersByCluster.get(cluster.cluster_id) || [])
+            .slice().sort((a, b) => a[0] - b[0]);
+          if (!members.length) continue;
+          let rid = members[0][0];
+          const label = cluster.label_title || "";
+          if (label) {
+            for (const [mid, title] of members) {
+              if (title === label) { rid = mid; break; }
+            }
+          }
+          let result = null;
+          try {
+            const raw = await v2FetchHistoryRow(rid);
+            if (raw) result = mapHistoryRowToResult(raw);
+          } catch (_) { /* per-id fetch failure → next cluster */ }
+          if (!result) continue;
+          if ((result.content_nature ?? null) === "market_commercial") continue;
+          // The hero card's fact cells + strip read clusterSizeMap /
+          // clusterSpreadMap — load this ONE id through the SAME batched
+          // loaders the pool uses (two single-id calls) before the band
+          // paints, so the band never paints bare and then grows a chart.
+          try {
+            await loadClusterSizesForSort([{ result_id: rid }]);
+          } catch (_) { /* fact cells/strip degrade to absent — never block */ }
+          cumulativeHeroPick = result;
+          cumulativeHeroClusterKey =
+            typeof cluster.stable_id === "string" ? cluster.stable_id : "";
+          settleHeroBand();
+          return;
+        }
+        settleHeroBand();
+      } catch (_) {
+        // Terminal for the pick — release the band to its fallback rather
+        // than leaving a reserved empty box until the backstop timer.
+        settleHeroBand();
+      }
+    }
+
     // HERO-PAINT-ORDER: mark the pick settled and paint the band exactly once.
     // Idempotent for the FIRST settle; a LATE pick arriving after a
     // timer/failure settle is allowed through so the hero choice is never
@@ -3289,7 +3389,9 @@
         clearTimeout(heroBandTimer);
         heroBandTimer = null;
       }
-      if (!firstSettle && !trendingHeroPick) return; // nothing new to show
+      // HERO-WHOLE-RECORD (46-APPLY): a late CUMULATIVE pick passes through
+      // exactly like a late trending pick.
+      if (!firstSettle && !trendingHeroPick && !cumulativeHeroPick) return; // nothing new to show
       paintHeroBandOnly();
     }
 
@@ -3325,7 +3427,7 @@
         (c) => clusterSizeMap.get(Number(c.recordId)) >= 2);
     }
 
-    function heroBandHtml(hot, dailyPick, circulation) {
+    function heroBandHtml(hot, dailyPick, circulation, cumulativePick) {
       if (dailyPick) {
         const heroOutlets = Number(trendingHeroPickRow?.current_outlet_count);
         const heroGrowth = Number(trendingHeroPickRow?.growth);
@@ -3362,19 +3464,32 @@
         return `<div class="public-eyebrow">확산 성장${heroRankNote}${heroStat ? ` · ${heroStat}` : ""} · 주간 스냅샷 기준 · 검증이 아닙니다</div>`
           + renderTopicCardHtml(dailyPick, { detailed: true, hero: true });
       }
+      // HERO-CIRC: the fallback eyebrow is #feedSortBasis's exact text
+      // (template.html). Shared by the whole-record pick and the pool
+      // fallback below — one string, one claim.
+      const fallbackEyebrow =
+        '<div class="public-eyebrow">전체 기간 매체 수 순 · 검증이 아닙니다</div>';
+      // HERO-WHOLE-RECORD (46-APPLY): with a resolved cumulative pick the
+      // Branch B band renders THAT card, so the eyebrow's 전체 기간 claim
+      // finally matches the selection (whole-record top by outlet count, not
+      // "top of the newest-100 pool"). Deliberately independent of the pool
+      // guards below: the pick renders even when the pool has no counted row
+      // — the pick's own >=2-outlet cluster is the proof that something has
+      // spread, and a record with NO 2+ cluster yields no pick at all, so
+      // the HERO-NO-JUDGEMENT rule (no spread → no band) holds unchanged.
+      if (cumulativePick) {
+        return fallbackEyebrow
+          + renderTopicCardHtml(cumulativePick, { detailed: true, hero: true });
+      }
       if (!hot.length) return "";
       // HERO-NO-JUDGEMENT: no counted row → no fallback band at all. The old
       // 뜨는순-ordered band (eyebrow 주목순) selected the page's largest element
       // by alert level + confidence without naming those ingredients; with no
       // circulation recorded there is no non-judgement basis for a hero, so
       // none is claimed. Callers write "" and the grid shows the whole pool.
+      // `circulation` arrives from the same heroPoolHasCount read that
+      // ordered `hot`, so the stated basis can never disagree with the order.
       if (!circulation) return "";
-      // HERO-CIRC: the fallback eyebrow is #feedSortBasis's exact text
-      // (template.html); `circulation` arrives from the same heroPoolHasCount
-      // read that ordered `hot`, so the stated basis can never disagree with
-      // the order.
-      const fallbackEyebrow =
-        '<div class="public-eyebrow">전체 기간 매체 수 순 · 검증이 아닙니다</div>';
       // HERO-ONE-CARD (23-APPLY): ONE card, always. hot[0] and hot[1] are
       // selected by the same cumulative count, and rendering the same measured
       // value at two sizes lets size imply an importance this product does not
@@ -3405,21 +3520,34 @@
       const hot = heroCirculation
         ? sortTopicCards(heroPool, "전체 기간 매체 수 순") : heroPool;
       const dailyPick = trendingDailyPickCard();
-      const pickInGrid = !!(dailyPick && hotTopicsEl && (
-        (dailyPick.recordId && hotTopicsEl.querySelector(
-          `.topic-card[data-topic-record-id="${cssAttrEscape(String(dailyPick.recordId))}"]`))
+      // HERO-WHOLE-RECORD (46-APPLY): the cumulative pick rides the SAME
+      // band-only shortcut as the trending pick — its normal case is a
+      // representative OUTSIDE the newest-100 pool, so the grid usually
+      // needs no repaint at all.
+      const cumulativePick = cumulativeHeroCard();
+      const bandPick = dailyPick || cumulativePick;
+      const pickInGrid = !!(bandPick && hotTopicsEl && (
+        (bandPick.recordId && hotTopicsEl.querySelector(
+          `.topic-card[data-topic-record-id="${cssAttrEscape(String(bandPick.recordId))}"]`))
         || hotTopicsEl.querySelector(
-          `.topic-card[data-topic-key="${cssAttrEscape(String(dailyPick.key))}"]`)
+          `.topic-card[data-topic-key="${cssAttrEscape(String(bandPick.key))}"]`)
       ));
+      // HERO-WHOLE-RECORD (46-APPLY): a pool row in the pick's CLUSTER is the
+      // same claim under a different id — the DOM lookup above cannot see it,
+      // so check the pool's fold keys; a hit needs the full render's
+      // exclusion (renderHotTopics drops it from the grid).
+      const pickClusterInPool = !!(bandPick && bandPick === cumulativePick
+        && cumulativeHeroClusterKey && heroPool.some((c) =>
+          clusterFoldKeyMap.get(Number(c.recordId)) === cumulativeHeroClusterKey));
       // feedGridExcludedCount > 0 means a fallback band already took cards out
       // of the grid; swapping in the pick's band must give them back.
-      if (!dailyPick || pickInGrid || feedGridExcludedCount > 0) {
+      if (!bandPick || pickInGrid || pickClusterInPool || feedGridExcludedCount > 0) {
         renderHotTopics();
         return;
       }
       hotTopicsTopEl.classList.remove("hero-band-reserved");
       // The grid keeps its existing chips; this repaints the band's own.
-      if (writeHeroBandHtml(heroBandHtml(hot, dailyPick, heroCirculation))) loadClusterSizeChips();
+      if (writeHeroBandHtml(heroBandHtml(hot, dailyPick, heroCirculation, cumulativePick))) loadClusterSizeChips();
     }
 
     // Minimal escape for embedding a value inside a [attr="…"] selector.
@@ -3454,6 +3582,18 @@
         return topicCardFromResult(trendingHeroPick, 0, "server");
       } catch (_) {
         return null; // unusable card object → Branch B fallback
+      }
+    }
+
+    // HERO-WHOLE-RECORD (46-APPLY): the cumulative pick's card, built by the
+    // SAME topicCardFromResult builder the pool and the trending pick use, so
+    // icons/badges/honesty render identically. Null → pool-based Branch B.
+    function cumulativeHeroCard() {
+      if (!cumulativeHeroPick) return null;
+      try {
+        return topicCardFromResult(cumulativeHeroPick, 0, "server");
+      } catch (_) {
+        return null; // unusable card object → pool fallback
       }
     }
 
@@ -3516,6 +3656,11 @@
       const isTrueHomeFeed = activeDomain === "전체"
         && !(Array.isArray(preferredResults) && preferredResults.length);
       const dailyPick = isTrueHomeFeed ? trendingDailyPickCard() : null;
+      // HERO-WHOLE-RECORD (46-APPLY): the cumulative whole-record pick, home
+      // feed ONLY — domain tabs and search/narrowed renders keep their
+      // pool-based band unchanged (only the HOME hero's source changes; the
+      // grid and both regions still read the newest-100 pool).
+      const cumulativePick = isTrueHomeFeed ? cumulativeHeroCard() : null;
       // HERO-PAINT-ORDER: on the genuine home feed the band waits for the pick
       // to settle. Only the BAND waits — the grid paints immediately below the
       // reserved space and is never repainted when the band fills.
@@ -3581,9 +3726,22 @@
       // on it — excluding hot[0]/hot[1] now would DROP two cards from the page
       // the moment Branch A wins, which is the content-shuffle being removed.
       // Once settled this is the pre-change expression, unchanged.
-      const poolBase = heroPending ? filtered.slice() : filtered.filter((c) => dailyPick
-        ? !(c.key === dailyPick.key
-            || (c.recordId && String(c.recordId) === String(dailyPick.recordId)))
+      // HERO-WHOLE-RECORD (46-APPLY): with a cumulative pick the exclusion
+      // follows the ACTUAL hero, exactly like the dailyPick rule — matched by
+      // key OR recordId, PLUS the cluster fold key: a pool row in the pick's
+      // cluster is the SAME claim (it would have folded with the hero were
+      // the hero in the pool), so it leaves the grid rather than rendering
+      // the claim twice. Nothing else leaves: heroKeys (the pool-top rule)
+      // is NOT applied when a pick exists, so the pool's own top card flows
+      // back into region 1 instead of silently vanishing — and when the pick
+      // sits outside the pool entirely (the normal case: that is the whole
+      // point of the change), no card leaves the grid at all.
+      const bandPick = dailyPick || cumulativePick;
+      const poolBase = heroPending ? filtered.slice() : filtered.filter((c) => bandPick
+        ? !(c.key === bandPick.key
+            || (c.recordId && String(c.recordId) === String(bandPick.recordId))
+            || (bandPick === cumulativePick && cumulativeHeroClusterKey
+                && clusterFoldKeyMap.get(Number(c.recordId)) === cumulativeHeroClusterKey))
         : !heroKeys.has(c.key));
       // HERO-PAINT-ORDER: counts the HERO hold-back only. Deliberately measured
       // against poolBase, BEFORE the page-dedup filter below, so the band-only
@@ -3638,7 +3796,7 @@
         startHeroBandTimer();
       } else {
         hotTopicsTopEl.classList.remove("hero-band-reserved");
-        writeHeroBandHtml(heroBandHtml(hot, dailyPick, heroCirculation));
+        writeHeroBandHtml(heroBandHtml(hot, dailyPick, heroCirculation, cumulativePick));
       }
       if (!hot.length) {
         // STABLE-TABS S2: a domain tab whose data is still fetching / failed shows
@@ -3650,7 +3808,7 @@
         } else {
           writeFeedGridHtml('<div class="empty-state">검색을 실행하거나 최근 분석을 불러오면 검증 카드가 표시됩니다.</div>');
         }
-      } else if (dailyPick || heroPending || !heroCirculation || hot.length >= 2) {
+      } else if (dailyPick || cumulativePick || heroPending || !heroCirculation || hot.length >= 2) {
         // FEED-SPLIT: active on genuine feed renders (home + domain tabs)
         // under the circulation sort. REGION-2-ALWAYS (31-APPLY): the old
         // third condition (pool has a counted row somewhere) turned the WHOLE
@@ -3788,25 +3946,26 @@
     // data-topic-*/openTopicCard wiring — a trending representative may be
     // older than the loaded recent-50 feed pool.
     async function renderTrendingTop5() {
-      // HERO-PAINT-ORDER: every path on which the hero pick can NEVER arrive
-      // settles the band immediately, so the reader gets the fallback band at
-      // once instead of waiting out the hung-request backstop. The panel's own
-      // fail-quiet behaviour is unchanged — settling paints the band, not the
-      // sidebar.
-      if (!trendingPanelEl || !trendingListEl) { settleHeroBand(); return; }
+      // HERO-WHOLE-RECORD (46-APPLY): this fetch no longer settles the hero
+      // band on ANY path — the band's pick now resolves from the whole
+      // record (resolveCumulativeHeroPick, fired beside this at init), and
+      // that resolver settles on every terminal path with the 3s backstop
+      // timer unchanged. Settling here would paint the pool fallback and
+      // then swap in the cumulative pick moments later — exactly the double
+      // band paint HERO-PAINT-ORDER removed. This function is sidebar-only
+      // again.
+      if (!trendingPanelEl || !trendingListEl) return;
       try {
         const response = await fetch(`${API_BASE}/api/trending`);
-        if (!response.ok) { settleHeroBand(); return; }
+        if (!response.ok) return;
         const body = await response.json();
         const rows = Array.isArray(body?.trending) ? body.trending.slice(0, 5) : [];
-        // HERO-CUMULATIVE: the home hero no longer resolves from these rows —
-        // it takes the circulation (Branch B) band from the pool, the same
-        // rule every domain tab uses — so the band settles NOW: growth lives
-        // only in this sidebar, and rank N here is growth rank N again (no
-        // exclusion, no backfill). trendingHeroRows is still cached because
-        // the retained (uncalled) picker reads it; see resolveTrendingHeroPick.
+        // HERO-CUMULATIVE: the home hero does not resolve from these rows —
+        // growth lives only in this sidebar, and rank N here is growth rank N
+        // (no exclusion, no backfill). trendingHeroRows is still cached
+        // because the retained (uncalled) picker reads it; see
+        // resolveTrendingHeroPick.
         trendingHeroRows = rows;
-        settleHeroBand();
         const items = rows.map((row, i) => {
           const rid = Number(row?.representative_analysis_id);
           // MOBILE-POLISH F: trending rows come straight off GET /api/trending,
@@ -3847,10 +4006,8 @@
         trendingListEl.innerHTML = items.join("");
         trendingPanelEl.hidden = false;
       } catch (error) {
-        // fail-silent: the trending panel is optional; the sidebar must never break
-        // HERO-PAINT-ORDER: a rejected fetch is terminal for the pick — release
-        // the band to its fallback rather than leaving a reserved empty box.
-        settleHeroBand();
+        // fail-silent: the trending panel is optional; the sidebar must never
+        // break. (46-APPLY: no band settle here — see the function head.)
       }
     }
 
@@ -6464,19 +6621,22 @@
       // SQRT-SCALE (41-APPLY): plot height the bars scale against (the box
       // minus the 1px baseline border inside the border-box).
       const plotH = hero ? 36 : 17;
-      // ONE-CHART-LANGUAGE (40-APPLY): region basis 10px (= its cap) so the
-      // explicit strip width below equals the rendered bars; long series
+      // ONE-CHART-LANGUAGE (40-APPLY): region bars keep an explicit basis so
+      // the explicit strip width below equals the rendered bars; long series
       // still compress via flex-shrink under the inline max-width:100%.
-      // BAR-PITCH (41-APPLY): hero bars fill their whole day slot — with 44
-      // days in a ~912px card the pitch is ~20.7px and that pitch is the
-      // hard ceiling on bar width (equal per-day pitch is the time axis;
-      // only aggregation could widen further, and that changes the unit).
-      const barBasis = hero ? "flex:1 1 12px;max-width:24px" : "flex:1 1 10px;max-width:10px";
-      // BAR-PITCH (41-APPLY): gap 1px → 0. Bars take the full pitch and
-      // adjacent article days join into area, the target's read; empty-day
-      // ticks are 1px marks centred in their slot, so bar/slot boundaries
-      // stay visible where it matters.
-      const gap = 0;
+      // BAR-PITCH (41-APPLY): equal per-day pitch is the time axis; only
+      // aggregation could widen a bar past its day slot, and that changes
+      // the unit.
+      // BAR-GAP (46-APPLY): 41's gap 0 made adjacent article days fuse into
+      // one block — the 1px gap is restored WITHOUT moving the axis pitch:
+      // region bars give the gap its pixel (10px slot → 9px bar + 1px gap,
+      // pitch still 10px/day), and hero bars flex inside the fixed card
+      // width, so the gap comes out of the bar there too (44 days ≈ 20.7px
+      // pitch either way); the short-series cap drops 24px → 23px for the
+      // same reason (23px bar + 1px gap = the old 24px capped pitch).
+      // Empty-day ticks are 1px marks in their slot, unchanged.
+      const barBasis = hero ? "flex:1 1 12px;max-width:23px" : "flex:1 1 9px;max-width:9px";
+      const gap = 1;
       if (!Array.isArray(daily) || !daily.length) return "";
       const counts = new Map();
       for (const entry of daily) {
@@ -6546,11 +6706,12 @@
         }
       }
       // ONE-CHART-LANGUAGE (40-APPLY): the region strip gets an explicit
-      // width — day count x 10px pitch + 1px gaps — so the baseline ends
-      // where the data ends (max-width:100% still caps long series, whose
-      // bars then compress via flex-shrink exactly as before). The hero
-      // strip keeps no width: the grid stretches it across the full card.
-      const stripW = hero ? "" : `width:${totalDays * 10 + (totalDays - 1) * gap}px;`;
+      // width — 9px bars + 1px gaps at the 10px/day pitch (BAR-GAP,
+      // 46-APPLY) — so the baseline ends where the data ends (max-width:100%
+      // still caps long series, whose bars then compress via flex-shrink
+      // exactly as before). The hero strip keeps no width: the grid
+      // stretches it across the full card.
+      const stripW = hero ? "" : `width:${totalDays * 9 + (totalDays - 1) * gap}px;`;
       return `<div class="feed-spread-strip" role="img" aria-label="일별 보도량, 최다 ${escapeHtml(peak)}건" style="display:flex;align-items:flex-end;gap:${gap}px;height:${stripH}px;max-width:100%;${stripW}">${bars.join("")}</div>`;
     }
 
@@ -11606,6 +11767,11 @@
     // HOME-TOP5 S5a: fire-and-forget the read-only trending fetch (fills the
     // 확산 성장 Top 5 panel; fail-quiet, hidden until rows exist).
     renderTrendingTop5();
+    // HERO-WHOLE-RECORD (46-APPLY): fire-and-forget the whole-record hero
+    // resolve (reads the 5-min-cached /api/brainmap + one /history/{id} row);
+    // it settles the hero band on every terminal path — fail-quiet, never
+    // blocks init, and the grid's first paint does not wait on it.
+    resolveCumulativeHeroPick();
     // M45: asynchronously fill the hot-topic area from the server (GET
     // /history, cron output included). Fire-and-forget so it never blocks
     // synchronous init and never touches renderHistory()/localStorage. A
