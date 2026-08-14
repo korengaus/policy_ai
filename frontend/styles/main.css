@@ -4653,6 +4653,40 @@
       margin-top: 0;
       text-align: left;
     }
+    /* DETAIL-ACTIONS (50-APPLY): emphasis inversion. Before, 이미지로 공유
+       (global .secondary = filled var(--dark) + white) outranked 원문 보기
+       (brand-tinted outline) — the loudest control was the one a reader needs
+       least. 원문 보기 now carries the primary treatment: filled var(--brand)
+       with white text (both colours this row already used — brand was its own
+       text colour, white the share button's). The share button drops to a
+       quiet outline of its own existing grey (var(--dark), hover
+       var(--dark-hover) — its existing hover colour). No new colour anywhere;
+       sizes match the old quiet control, so the row does not grow (it
+       shrinks: the filled share button was the row's tallest element).
+       Scoped to the row — global .source-button / .secondary untouched. */
+    .detail-action-row .source-button {
+      background: var(--brand);
+      border-color: var(--brand);
+      color: #fff;
+    }
+    .detail-action-row .source-button:hover {
+      background: var(--brand);
+      color: #fff;
+    }
+    .detail-action-row button.secondary {
+      background: transparent;
+      color: var(--dark);
+      border: 1px solid var(--dark);
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 800;
+      padding: 7px 12px;
+    }
+    .detail-action-row button.secondary:hover:not(:disabled) {
+      background: transparent;
+      color: var(--dark-hover);
+      border-color: var(--dark-hover);
+    }
 
     /* DETAIL-NAV (49-APPLY): >=1440px only — #detailScreen becomes a 2-column
        grid; every existing child stays in column 1 and the nav takes column 2
@@ -4667,7 +4701,13 @@
       #detailScreen {
         display: grid;
         grid-template-columns: minmax(0, 1fr) 228px;
-        column-gap: 28px;
+        /* DETAIL-NAV (50-APPLY): 28px → 16px. The nav read as detached — its
+           rule sat a full 28px off the content column's edge, plus 14px to
+           its labels. Tightened toward the page's own grid rhythm (.results
+           gap 14px) so the rule reads as the content's margin, not a floating
+           strip; the nav still occupies only column 2 and is still hidden
+           below 1440 (this whole block is inside the >=1440 media query). */
+        column-gap: 16px;
       }
       #detailScreen > * {
         grid-column: 1;
@@ -4683,7 +4723,7 @@
         position: sticky;
         top: 88px;
         border-left: 1px solid var(--line);
-        padding: 4px 0 4px 14px;
+        padding: 4px 0 4px 12px;
       }
       .detail-nav-link {
         background: none;

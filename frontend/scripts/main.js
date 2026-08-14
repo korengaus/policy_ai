@@ -6921,8 +6921,15 @@
         const chip = isHere
           ? `<span style="font-size:0.72rem;font-weight:700;color:var(--brand);border:1px solid currentColor;border-radius:999px;padding:0 6px;white-space:nowrap;">이 주장</span>`
           : "";
+        // DIST-LABELS (50-APPLY): the bucket labels rendered 0.75rem (9.75px)
+        // var(--muted) — measured ~2.6:1 on white — while claim.html's SAME
+        // chart (.dist-label) renders 12.5px var(--slate) (~7.6:1) with the
+        // here-bucket at var(--ink) 700. Matched to the claim page's values
+        // (the readable one); the label column widens 58px → 64px for the
+        // larger glyphs. Label TEXT, buckets, bars, chip and the caption line
+        // are unchanged.
         return `<div title="${escapeHtml(label)} 매체 · ${escapeHtml(count)}건" style="display:flex;align-items:center;gap:6px;min-width:0;">
-              <span style="flex:0 0 58px;text-align:right;font-size:0.75rem;color:var(--muted);${isHere ? "font-weight:700;color:inherit;" : ""}">${escapeHtml(label)}</span>
+              <span style="flex:0 0 64px;text-align:right;font-size:12.5px;color:var(--slate);${isHere ? "font-weight:700;color:var(--ink);" : ""}">${escapeHtml(label)}</span>
               <span style="flex:1 1 auto;min-width:0;"><span style="display:block;height:8px;width:${widthPct}%;min-width:2px;background:var(--brand);border-radius:2px;"></span></span>
               <span style="flex:0 0 52px;">${chip}</span>
             </div>`;
