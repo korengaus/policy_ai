@@ -2328,12 +2328,34 @@
       font-weight: 700;
       line-height: 1.4;
     }
-    .vhf-node-desc {
-      margin: 4px auto 0;
+    /* NODE-LEGEND (54-APPLY): replaces the in-node .vhf-node-desc — every
+       node is label-only now (uniform height across both lanes); the three
+       stage sentences render below the diagram, tied to their stages by the
+       stages' own labels through LAYOUT (label column | sentence column) —
+       no connective, no heading, no ordinal, no added punctuation. */
+    .vhf-legend {
+      margin: 20px auto 0;
+      max-width: 760px;
+      display: grid;
+      gap: 8px;
+    }
+    .vhf-legend-row {
+      display: grid;
+      grid-template-columns: 156px minmax(0, 1fr);
+      gap: 12px;
+      align-items: baseline;
+    }
+    .vhf-legend-label {
+      color: var(--ink);
+      font-size: 0.845rem;
+      font-weight: 700;
+      text-align: right;
+    }
+    .vhf-legend-desc {
       color: var(--slate);
       font-size: 0.82rem;
       line-height: 1.55;
-      max-width: 340px;
+      text-align: left;
     }
     .vhf-entry {
       max-width: 420px;
@@ -5269,6 +5291,14 @@
       .vhf-publish {
         width: auto;
       }
+      /* NODE-LEGEND (54-APPLY): stacked — label above its sentence. */
+      .vhf-legend-row {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 2px;
+      }
+      .vhf-legend-label {
+        text-align: left;
+      }
       /* DETAIL-CHARTS (51-APPLY): the chart pair stacks below 960 — the
          distribution keeps its inline cap, the strip takes its own row. */
       .spread-chart-row {
@@ -6352,7 +6382,6 @@
         <div class="vhf-flow">
           <div class="vhf-node vhf-entry">
             <div class="vhf-node-title">주장 수집·분류</div>
-            <p class="vhf-node-desc">온라인·제보·언론에서 확인이 필요한 주장을 모아 도메인별로 분류합니다.</p>
           </div>
           <!-- the split tee, drawn in CSS (stub ::before, rail ::after, two
                drops) so the branch geometry needs no stretched replaced
@@ -6373,7 +6402,6 @@
               <div class="vhf-lane-name">공식 근거 확인</div>
               <div class="vhf-node">
                 <div class="vhf-node-title">1차·공식 출처 대조</div>
-                <p class="vhf-node-desc">정부·기관 원문과 공개 데이터에 주장을 직접 대조해, 공식 근거가 있는지 확인합니다.</p>
               </div>
               <div class="vhf-node"><div class="vhf-node-title">AI 검증 상태 · 사람 검토 대기</div></div>
             </div>
@@ -6383,7 +6411,30 @@
                  card publishes is the confirmed official evidence and
                  sources, not a grade. -->
             <div class="vhf-node-title">공식 근거·출처 공개</div>
-            <p class="vhf-node-desc">공식 근거와 확인된 공식 출처를 링크와 함께 공개하고, 새 사실이 나오면 정정합니다.</p>
+          </div>
+          <!-- NODE-LEGEND (54-APPLY): the three stage sentences MOVED out of
+               their nodes (measured: the one sentence-carrying node rendered
+               81px against every other lane node's 44px — equal-standing
+               stages at unequal visual weight). Nodes are now label-only in
+               BOTH lanes; the sentences render here BYTE-IDENTICAL, each tied
+               to its stage by that stage's own shipped label (verbatim, from
+               the nodes above) through LAYOUT alone — a label column beside a
+               sentence column; no connective word, no heading, no ordinal,
+               no added punctuation. A move, not a removal: these sentences
+               ship nowhere else on the site (53-APPLY finding). -->
+          <div class="vhf-legend">
+            <div class="vhf-legend-row">
+              <span class="vhf-legend-label">주장 수집·분류</span>
+              <span class="vhf-legend-desc">온라인·제보·언론에서 확인이 필요한 주장을 모아 도메인별로 분류합니다.</span>
+            </div>
+            <div class="vhf-legend-row">
+              <span class="vhf-legend-label">1차·공식 출처 대조</span>
+              <span class="vhf-legend-desc">정부·기관 원문과 공개 데이터에 주장을 직접 대조해, 공식 근거가 있는지 확인합니다.</span>
+            </div>
+            <div class="vhf-legend-row">
+              <span class="vhf-legend-label">공식 근거·출처 공개</span>
+              <span class="vhf-legend-desc">공식 근거와 확인된 공식 출처를 링크와 함께 공개하고, 새 사실이 나오면 정정합니다.</span>
+            </div>
           </div>
         </div>
         <nav class="verify-how-links" aria-label="자세히 보기">

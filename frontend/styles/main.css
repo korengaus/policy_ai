@@ -2292,12 +2292,34 @@
       font-weight: 700;
       line-height: 1.4;
     }
-    .vhf-node-desc {
-      margin: 4px auto 0;
+    /* NODE-LEGEND (54-APPLY): replaces the in-node .vhf-node-desc — every
+       node is label-only now (uniform height across both lanes); the three
+       stage sentences render below the diagram, tied to their stages by the
+       stages' own labels through LAYOUT (label column | sentence column) —
+       no connective, no heading, no ordinal, no added punctuation. */
+    .vhf-legend {
+      margin: 20px auto 0;
+      max-width: 760px;
+      display: grid;
+      gap: 8px;
+    }
+    .vhf-legend-row {
+      display: grid;
+      grid-template-columns: 156px minmax(0, 1fr);
+      gap: 12px;
+      align-items: baseline;
+    }
+    .vhf-legend-label {
+      color: var(--ink);
+      font-size: 0.845rem;
+      font-weight: 700;
+      text-align: right;
+    }
+    .vhf-legend-desc {
       color: var(--slate);
       font-size: 0.82rem;
       line-height: 1.55;
-      max-width: 340px;
+      text-align: left;
     }
     .vhf-entry {
       max-width: 420px;
@@ -5232,6 +5254,14 @@
       }
       .vhf-publish {
         width: auto;
+      }
+      /* NODE-LEGEND (54-APPLY): stacked — label above its sentence. */
+      .vhf-legend-row {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 2px;
+      }
+      .vhf-legend-label {
+        text-align: left;
       }
       /* DETAIL-CHARTS (51-APPLY): the chart pair stacks below 960 — the
          distribution keeps its inline cap, the strip takes its own row. */
