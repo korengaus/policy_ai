@@ -1009,6 +1009,24 @@
       font-size: 12px;
       margin: 4px 0 10px;
     }
+    /* DETAIL-CHARTS (51-APPLY): the detail's two charts share one row —
+       distribution (its own 440px inline cap) left, daily strip right in the
+       measured-empty half. align-items:end sits both baselines on one line so
+       the pair reads as a single chart band; <=960 stacks (media block). */
+    .spread-chart-row {
+      display: grid;
+      grid-template-columns: minmax(0, 440px) minmax(0, 1fr);
+      gap: 16px 32px;
+      align-items: end;
+      margin: 2px 0 4px;
+    }
+    .spread-daily-strip {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 0;
+      margin: 10px 0 4px;
+    }
 
     .verdict-indicators {
       display: grid;
@@ -2352,6 +2370,121 @@
       line-height: 1.68;
       max-width: 228px;   /* mockup measure; released when stacked (<=960px) */
     }
+    /* VERIFY-FORK (51-APPLY): the fork layout — start tile | two lanes | end
+       tile. Tiles reuse the existing .verify-how-step/.verify-how-icon
+       family; lane nodes are ONE uniform quiet chip (equal tint/size/weight —
+       deliberately no progression, so nothing reads as certainty rising).
+       The lanes are separate bordered boxes with NO connector between them;
+       each lane ends in its own --out arrow toward the publish tile. The old
+       .verify-how-track/.verify-how-arrow absolute stepper rules above are
+       for the retired 3-step markup and are simply unused now. */
+    .verify-how-fork {
+      display: grid;
+      grid-template-columns: 224px minmax(0, 1fr) 224px;
+      gap: 20px;
+      align-items: center;
+    }
+    .verify-how-lanes {
+      display: grid;
+      gap: 16px;
+      min-width: 0;
+    }
+    .verify-how-lane {
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: var(--paper);
+      padding: 10px 14px 12px;
+      min-width: 0;
+    }
+    .verify-how-lane-name {
+      color: var(--slate);
+      font-size: 0.8rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      margin-bottom: 8px;
+    }
+    .verify-how-lane-flow {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      min-width: 0;
+    }
+    .verify-how-node {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid #c3d4f3;   /* the existing tile tint pair */
+      background: #edf3fc;
+      color: var(--ink);
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 0.845rem;
+      line-height: 1.4;
+      white-space: nowrap;
+    }
+    .verify-how-node-pair {
+      display: inline-flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .verify-how-lane-arrow {
+      display: inline-flex;
+      align-items: center;
+      color: var(--brand);
+      flex: 0 0 auto;
+    }
+    /* the trailing arrow of each lane points AT the publish column; the two
+       render in parallel (one per lane) and never join before the tile. */
+    .verify-how-lane-arrow--out {
+      margin-left: auto;
+    }
+    /* lane B's full tile (one of the original three, keeps its description):
+       icon beside text so the lane row stays one visual line. */
+    .verify-how-step--lane {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      text-align: left;
+      min-width: 0;
+      flex: 0 1 auto;
+    }
+    .verify-how-step--lane .verify-how-icon {
+      width: 40px;
+      height: 40px;
+      margin: 0;
+      flex: 0 0 auto;
+    }
+    .verify-how-step--lane .verify-how-icon svg {
+      width: 20px;
+      height: 20px;
+    }
+    .verify-how-step--lane .verify-how-title {
+      font-size: 1rem;
+      margin-bottom: 2px;
+    }
+    .verify-how-step--lane .verify-how-desc {
+      margin: 0;
+      max-width: 200px;   /* fits tile + arrow + status pair on one lane line */
+      font-size: 0.8rem;
+      line-height: 1.5;
+    }
+    /* VERIFY-FORK (51-APPLY): the numbers row under the section sub — filled
+       from the /stats fetch the page already makes; the scope note is part of
+       the same line so a figure can never render without it. */
+    .verify-how-stats {
+      margin: 6px 0 0;
+      color: var(--slate);
+      font-size: 0.845rem;
+    }
+    .verify-how-stat-num {
+      color: var(--ink);
+      font-weight: 700;
+    }
+    .verify-how-stats-note {
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+
     /* V2: centered go-deeper row (검증 방법 / 등급·상태 안내 / 연결지도) under a
        hairline — replaces the old left-aligned row. */
     .verify-how-links {
@@ -5171,6 +5304,28 @@
       }
       .verify-how-desc {
         max-width: none;
+      }
+      /* VERIFY-FORK (51-APPLY): stacked fork — start tile, then the two lanes
+         as consecutive labeled groups, then the publish tile (the existing
+         stacking behaviour). Sideways lane arrows read wrong stacked, so they
+         hide exactly like the old stepper arrows; chips wrap to lines. */
+      .verify-how-fork {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 14px;
+      }
+      .verify-how-lane-arrow {
+        display: none;
+      }
+      .verify-how-node {
+        white-space: normal;
+      }
+      .verify-how-step--lane {
+        flex-wrap: wrap;
+      }
+      /* DETAIL-CHARTS (51-APPLY): the chart pair stacks below 960 — the
+         distribution keeps its inline cap, the strip takes its own row. */
+      .spread-chart-row {
+        grid-template-columns: minmax(0, 1fr);
       }
 
       /* DESIGN-DETAIL-4: the 4-up verdict indicator row goes 2-up on narrow screens. */

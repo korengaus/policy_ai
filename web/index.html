@@ -1045,6 +1045,24 @@
       font-size: 12px;
       margin: 4px 0 10px;
     }
+    /* DETAIL-CHARTS (51-APPLY): the detail's two charts share one row —
+       distribution (its own 440px inline cap) left, daily strip right in the
+       measured-empty half. align-items:end sits both baselines on one line so
+       the pair reads as a single chart band; <=960 stacks (media block). */
+    .spread-chart-row {
+      display: grid;
+      grid-template-columns: minmax(0, 440px) minmax(0, 1fr);
+      gap: 16px 32px;
+      align-items: end;
+      margin: 2px 0 4px;
+    }
+    .spread-daily-strip {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 0;
+      margin: 10px 0 4px;
+    }
 
     .verdict-indicators {
       display: grid;
@@ -2388,6 +2406,121 @@
       line-height: 1.68;
       max-width: 228px;   /* mockup measure; released when stacked (<=960px) */
     }
+    /* VERIFY-FORK (51-APPLY): the fork layout — start tile | two lanes | end
+       tile. Tiles reuse the existing .verify-how-step/.verify-how-icon
+       family; lane nodes are ONE uniform quiet chip (equal tint/size/weight —
+       deliberately no progression, so nothing reads as certainty rising).
+       The lanes are separate bordered boxes with NO connector between them;
+       each lane ends in its own --out arrow toward the publish tile. The old
+       .verify-how-track/.verify-how-arrow absolute stepper rules above are
+       for the retired 3-step markup and are simply unused now. */
+    .verify-how-fork {
+      display: grid;
+      grid-template-columns: 224px minmax(0, 1fr) 224px;
+      gap: 20px;
+      align-items: center;
+    }
+    .verify-how-lanes {
+      display: grid;
+      gap: 16px;
+      min-width: 0;
+    }
+    .verify-how-lane {
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: var(--paper);
+      padding: 10px 14px 12px;
+      min-width: 0;
+    }
+    .verify-how-lane-name {
+      color: var(--slate);
+      font-size: 0.8rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      margin-bottom: 8px;
+    }
+    .verify-how-lane-flow {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      min-width: 0;
+    }
+    .verify-how-node {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid #c3d4f3;   /* the existing tile tint pair */
+      background: #edf3fc;
+      color: var(--ink);
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 0.845rem;
+      line-height: 1.4;
+      white-space: nowrap;
+    }
+    .verify-how-node-pair {
+      display: inline-flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .verify-how-lane-arrow {
+      display: inline-flex;
+      align-items: center;
+      color: var(--brand);
+      flex: 0 0 auto;
+    }
+    /* the trailing arrow of each lane points AT the publish column; the two
+       render in parallel (one per lane) and never join before the tile. */
+    .verify-how-lane-arrow--out {
+      margin-left: auto;
+    }
+    /* lane B's full tile (one of the original three, keeps its description):
+       icon beside text so the lane row stays one visual line. */
+    .verify-how-step--lane {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      text-align: left;
+      min-width: 0;
+      flex: 0 1 auto;
+    }
+    .verify-how-step--lane .verify-how-icon {
+      width: 40px;
+      height: 40px;
+      margin: 0;
+      flex: 0 0 auto;
+    }
+    .verify-how-step--lane .verify-how-icon svg {
+      width: 20px;
+      height: 20px;
+    }
+    .verify-how-step--lane .verify-how-title {
+      font-size: 1rem;
+      margin-bottom: 2px;
+    }
+    .verify-how-step--lane .verify-how-desc {
+      margin: 0;
+      max-width: 200px;   /* fits tile + arrow + status pair on one lane line */
+      font-size: 0.8rem;
+      line-height: 1.5;
+    }
+    /* VERIFY-FORK (51-APPLY): the numbers row under the section sub — filled
+       from the /stats fetch the page already makes; the scope note is part of
+       the same line so a figure can never render without it. */
+    .verify-how-stats {
+      margin: 6px 0 0;
+      color: var(--slate);
+      font-size: 0.845rem;
+    }
+    .verify-how-stat-num {
+      color: var(--ink);
+      font-weight: 700;
+    }
+    .verify-how-stats-note {
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+
     /* V2: centered go-deeper row (검증 방법 / 등급·상태 안내 / 연결지도) under a
        hairline — replaces the old left-aligned row. */
     .verify-how-links {
@@ -5208,6 +5341,28 @@
       .verify-how-desc {
         max-width: none;
       }
+      /* VERIFY-FORK (51-APPLY): stacked fork — start tile, then the two lanes
+         as consecutive labeled groups, then the publish tile (the existing
+         stacking behaviour). Sideways lane arrows read wrong stacked, so they
+         hide exactly like the old stepper arrows; chips wrap to lines. */
+      .verify-how-fork {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 14px;
+      }
+      .verify-how-lane-arrow {
+        display: none;
+      }
+      .verify-how-node {
+        white-space: normal;
+      }
+      .verify-how-step--lane {
+        flex-wrap: wrap;
+      }
+      /* DETAIL-CHARTS (51-APPLY): the chart pair stacks below 960 — the
+         distribution keeps its inline cap, the strip takes its own row. */
+      .spread-chart-row {
+        grid-template-columns: minmax(0, 1fr);
+      }
 
       /* DESIGN-DETAIL-4: the 4-up verdict indicator row goes 2-up on narrow screens. */
       .verdict-indicators {
@@ -6226,73 +6381,114 @@
         <div class="verify-how-head">
           <div class="verify-how-titles">
             <h2>이렇게 검증합니다</h2>
-            <p class="verify-how-sub">뉴스 속 주장을 공식 1차 자료로 검증하는 3단계</p>
+            <!-- VERIFY-FORK (51-APPLY): the old sub named "3단계", which the
+                 fork below no longer draws — keeping it would be a false
+                 count. Replaced with the masthead's own shipped pair
+                 (site title / og:title), which is exactly what the fork
+                 shows: both halves. No new wording. -->
+            <p class="verify-how-sub">정책 뉴스 확산 기록 · 공식 근거 확인</p>
+            <!-- VERIFY-FORK (51-APPLY): real numbers from the /stats fetch the
+                 page already makes (renderWeeklyStats fills these — zero added
+                 requests). Label forms are the utility bar's own (누적 기록 N건
+                 · 이번 주 N건) plus the sidebar's 공식확인 label with the same
+                 건 counter. Starts hidden and unhides ONLY when all three
+                 values arrive, so no figure ever prints without the shipped
+                 scope note beside it. -->
+            <p class="verify-how-stats" id="verifyHowStats" hidden>누적 기록 <strong class="verify-how-stat-num" id="verifyHowStatCumulative">—</strong>건 · 이번 주 <strong class="verify-how-stat-num" id="verifyHowStatWeekly">—</strong>건 · 공식확인 <strong class="verify-how-stat-num" id="verifyHowStatOfficial">—</strong>건 <span class="verify-how-stats-note">(수집 기사 기준)</span></p>
           </div>
         </div>
-        <!-- V2 stepper: a light brand track line runs behind the icon-tile row
-             (absolute, tile-center height); two round arrow chips sit ON the line
-             at the column boundaries (placed AFTER the grid in DOM so they paint
-             above it). Tiles are SOLID tinted chips so they mask the line;
-             STEP 03's tile fills solid --brand (emphasis). Track + chips are
-             desktop-only — the shared <=960px block hides them when stacked. -->
-        <div class="verify-how-flow">
-          <div class="verify-how-track" aria-hidden="true"></div>
-          <div class="verify-how-steps">
-            <div class="verify-how-step">
-              <div class="verify-how-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M7 3h7l4 4v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/>
-                  <path d="M14 3v4h4"/>
-                  <path d="M9 12h6"/>
-                  <path d="M9 16h5"/>
-                </svg>
-              </div>
-              <div class="verify-how-eyebrow">STEP 01</div>
-              <h3 class="verify-how-title">주장 수집·분류</h3>
-              <p class="verify-how-desc">온라인·제보·언론에서 확인이 필요한 주장을 모아 도메인별로 분류합니다.</p>
+        <!-- VERIFY-FORK (51-APPLY): the 3-step line drew only the evidence
+             half of what the masthead claims; the pipeline also clusters
+             claims across outlets, measures spread, flags near-identical
+             phrasing and tracks week-to-week growth. The flow is now a FORK:
+             one shared start tile, two SEPARATE lanes named by the masthead's
+             own pair (확산 기록 / 공식 근거 확인), one publish tile.
+             HONESTY RULES BAKED INTO THE SHAPE:
+               (1) NO connector runs between the lanes, and each lane carries
+                   its OWN trailing arrow toward the publish tile, in parallel
+                   — circulation reaches publication but never feeds the
+                   evidence result (the shipped boundary: 확산 정보는 검증이
+                   아닙니다 / 사실 여부와는 무관합니다);
+               (2) nothing suggests certainty rising left-to-right — the
+                   STEP 01/02/03 ladder eyebrows are REMOVED, every added node
+                   is the same quiet label chip (equal tint, size and weight,
+                   no numbering), and the only filled tile stays the
+                   pre-existing publish tile (disclosure emphasis, unchanged);
+               (3) nodes beyond the original three are LABEL-ONLY — each label
+                   is a shipped phrase verbatim; a description sentence would
+                   be new Korean;
+               (4) the embedding stage has no shipped name, so it folds
+                   SILENTLY into the 여러 매체로 퍼진 주장 clustering node.
+             Lane arrows are desktop-only — the shared <=960px block stacks
+             the fork into consecutive labeled groups. -->
+        <div class="verify-how-flow verify-how-fork">
+          <div class="verify-how-step verify-how-fork-start">
+            <div class="verify-how-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M7 3h7l4 4v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/>
+                <path d="M14 3v4h4"/>
+                <path d="M9 12h6"/>
+                <path d="M9 16h5"/>
+              </svg>
             </div>
-            <div class="verify-how-step">
-              <div class="verify-how-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <circle cx="11" cy="11" r="6"/>
-                  <path d="M20 20l-3.6-3.6"/>
-                  <path d="M8.4 11l1.9 1.9 3.3-3.7"/>
-                </svg>
+            <h3 class="verify-how-title">주장 수집·분류</h3>
+            <p class="verify-how-desc">온라인·제보·언론에서 확인이 필요한 주장을 모아 도메인별로 분류합니다.</p>
+          </div>
+          <div class="verify-how-lanes">
+            <div class="verify-how-lane">
+              <div class="verify-how-lane-name">확산 기록</div>
+              <div class="verify-how-lane-flow">
+                <span class="verify-how-lane-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg></span>
+                <span class="verify-how-node">여러 매체로 퍼진 주장</span>
+                <span class="verify-how-lane-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg></span>
+                <span class="verify-how-node-pair">
+                  <span class="verify-how-node">얼마나 퍼졌나</span>
+                  <span class="verify-how-node">문구 거의 동일</span>
+                </span>
+                <span class="verify-how-lane-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg></span>
+                <span class="verify-how-node">확산 성장</span>
+                <span class="verify-how-lane-arrow verify-how-lane-arrow--out" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg></span>
               </div>
-              <div class="verify-how-eyebrow">STEP 02</div>
-              <h3 class="verify-how-title">1차·공식 출처 대조</h3>
-              <p class="verify-how-desc">정부·기관 원문과 공개 데이터에 주장을 직접 대조해, 공식 근거가 있는지 확인합니다.</p>
             </div>
-            <div class="verify-how-step">
-              <div class="verify-how-icon verify-how-icon--fill" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M12 2.5l7.5 3.2v5.6c0 4.6-3.2 7.9-7.5 9.7-4.3-1.8-7.5-5.1-7.5-9.7V5.7L12 2.5z"/>
-                  <path d="M8.7 11.8l2.3 2.3 4.3-4.8"/>
-                </svg>
+            <div class="verify-how-lane">
+              <div class="verify-how-lane-name">공식 근거 확인</div>
+              <div class="verify-how-lane-flow">
+                <span class="verify-how-lane-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg></span>
+                <div class="verify-how-step verify-how-step--lane">
+                  <div class="verify-how-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="11" cy="11" r="6"/>
+                      <path d="M20 20l-3.6-3.6"/>
+                      <path d="M8.4 11l1.9 1.9 3.3-3.7"/>
+                    </svg>
+                  </div>
+                  <div class="verify-how-step-text">
+                    <h3 class="verify-how-title">1차·공식 출처 대조</h3>
+                    <p class="verify-how-desc">정부·기관 원문과 공개 데이터에 주장을 직접 대조해, 공식 근거가 있는지 확인합니다.</p>
+                  </div>
+                </div>
+                <span class="verify-how-lane-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg></span>
+                <span class="verify-how-node-pair">
+                  <span class="verify-how-node">AI 검증 상태</span>
+                  <span class="verify-how-node">사람 검토 대기</span>
+                </span>
+                <span class="verify-how-lane-arrow verify-how-lane-arrow--out" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg></span>
               </div>
-              <div class="verify-how-eyebrow">STEP 03</div>
-              <!-- HIGH-RISK-LABEL → GRADE-WORD-RETIRED (42-APPLY): 근거 등급
-                   asserted the product grades a claim's evidence — the same
-                   claim the legend heading and seven links dropped 등급 for.
-                   Replaced with the shipped 공식 근거 (the evidence pill /
-                   counter cell / claim-page fact wording): what STEP 03
-                   publishes is the confirmed official evidence and sources,
-                   not a grade. -->
-              <h3 class="verify-how-title">공식 근거·출처 공개</h3>
-              <p class="verify-how-desc">공식 근거와 확인된 공식 출처를 링크와 함께 공개하고, 새 사실이 나오면 정정합니다.</p>
             </div>
           </div>
-          <div class="verify-how-arrow verify-how-arrow--a" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M5 12h14"/>
-              <path d="M13 6l6 6-6 6"/>
-            </svg>
-          </div>
-          <div class="verify-how-arrow verify-how-arrow--b" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M5 12h14"/>
-              <path d="M13 6l6 6-6 6"/>
-            </svg>
+          <div class="verify-how-step verify-how-fork-end">
+            <div class="verify-how-icon verify-how-icon--fill" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2.5l7.5 3.2v5.6c0 4.6-3.2 7.9-7.5 9.7-4.3-1.8-7.5-5.1-7.5-9.7V5.7L12 2.5z"/>
+                <path d="M8.7 11.8l2.3 2.3 4.3-4.8"/>
+              </svg>
+            </div>
+            <!-- HIGH-RISK-LABEL -> GRADE-WORD-RETIRED (42-APPLY): 근거 등급
+                 asserted the product grades a claim's evidence. Replaced with
+                 the shipped 공식 근거: what this tile publishes is the
+                 confirmed official evidence and sources, not a grade. -->
+            <h3 class="verify-how-title">공식 근거·출처 공개</h3>
+            <p class="verify-how-desc">공식 근거와 확인된 공식 출처를 링크와 함께 공개하고, 새 사실이 나오면 정정합니다.</p>
           </div>
         </div>
         <nav class="verify-how-links" aria-label="자세히 보기">
@@ -10702,6 +10898,28 @@
           utilityTotalCountEl.textContent = String(body.cumulative_total);
           utilityCumulativeClauseEl.hidden = false;
         }
+        // VERIFY-FORK (51-APPLY): the method-page diagram's numbers row — the
+        // SAME /stats payload this function already fetched (zero added
+        // requests). Unhidden only when ALL THREE values are real, so a
+        // figure never prints without the static scope note beside it
+        // (the shipped "(수집 기사 기준)" — see template #verifyHowStats);
+        // fail-quiet keeps the row hidden on any missing field.
+        const verifyHowStatsEl = document.getElementById("verifyHowStats");
+        if (verifyHowStatsEl
+            && body.cumulative_total !== null && body.cumulative_total !== undefined
+            && Number.isFinite(Number(body.cumulative_total))
+            && Number.isFinite(Number(body.total))
+            && Number.isFinite(Number(body.official))) {
+          const vhCum = document.getElementById("verifyHowStatCumulative");
+          const vhWeek = document.getElementById("verifyHowStatWeekly");
+          const vhOfficial = document.getElementById("verifyHowStatOfficial");
+          if (vhCum && vhWeek && vhOfficial) {
+            vhCum.textContent = String(body.cumulative_total);
+            vhWeek.textContent = String(body.total);
+            vhOfficial.textContent = String(body.official);
+            verifyHowStatsEl.hidden = false;
+          }
+        }
         if (statRangeEl && body.range_start && body.range_end) {
           // ISO YYYY-MM-DD → MM.DD; fall back to the raw strings if malformed.
           const mmdd = (iso) => {
@@ -13261,6 +13479,39 @@
             </div>`;
     }
 
+    // DETAIL-STRIP (51-APPLY): the detail page's daily chart, rendered through
+    // the SAME strip language every other strip on the site uses
+    // (feedSpreadStripHtml: square tops, ticked baseline, empty-day ticks,
+    // sqrt scale, the 60-day bail-out) — the old rounded linear sparkline was
+    // the last chart speaking a different language. The caption reuses
+    // spreadSparklineHtml's own shipped label forms VERBATIM ({date} · {N}건
+    // for a single dated day; first / 최다 N건/일 / last otherwise). Gates are
+    // the strip helper's own: unusable/empty daily → "" and no orphan caption
+    // ever renders. spreadSparklineHtml itself stays defined (same
+    // retained-renderer pattern as renderBiasFramingSummary).
+    function detailDailyStripHtml(daily) {
+      const strip = feedSpreadStripHtml(daily, { hero: true });
+      if (!strip) return "";
+      const counts = new Map();
+      for (const entry of (Array.isArray(daily) ? daily : [])) {
+        const day = typeof entry?.date === "string" ? entry.date.slice(0, 10) : "";
+        const count = Number(entry?.count);
+        if (day && Number.isFinite(count) && count > 0) counts.set(day, count);
+      }
+      if (!counts.size) return "";
+      const days = [...counts.keys()].sort();
+      let peak = 0;
+      counts.forEach((count) => { peak = Math.max(peak, count); });
+      const labelRow = counts.size === 1
+        ? `<div style="text-align:center;font-size:0.78rem;color:var(--muted);">${escapeHtml(days[0])} · ${escapeHtml(counts.get(days[0]))}건</div>`
+        : `<div style="display:flex;justify-content:space-between;gap:12px;font-size:0.78rem;color:var(--muted);">
+              <span>${escapeHtml(days[0])}</span>
+              <span>최다 ${escapeHtml(peak)}건/일</span>
+              <span>${escapeHtml(days[days.length - 1])}</span>
+            </div>`;
+      return `<div class="spread-daily-strip">${strip}${labelRow}</div>`;
+    }
+
     // FEED-SPREAD-STRIP (13-APPLY): bars-only variant of spreadSparklineHtml
     // for region-1 rows. The full sparkline is too heavy for a feed row (48px
     // bars + a date/peak label line ≈ 80px); this keeps the SAME derivation —
@@ -13754,11 +14005,26 @@
           // outlet sentence, the 4b sizeLine, the 확산 기간 line) — same numbers,
           // rendered once, as data. The syndication sentence stays (see above);
           // the header answer line stays (different layer, prose summary).
+          // DETAIL-CHARTS (51-APPLY): the two charts answer different
+          // questions — where this claim sits among all claims (distribution)
+          // and when it spread (daily strip) — but measured at 1440 the
+          // 440px distribution left 552px (56%) of the section empty on its
+          // right while the strip sat 149px lower, its plot centered alone in
+          // a full-width row. They now share ONE two-column chart row
+          // (distribution left, daily strip right; stacked <=960), so both
+          // are visible together and the empty half carries the timeline.
+          // Order of the section's parts is otherwise unchanged; either chart
+          // absent → the other keeps its column (grid handles a lone child).
+          const chartRow = (() => {
+            const distHtml = corpusDistributionHtml(data?.corpus_outlet_distribution, outletCount);
+            const stripHtml = detailDailyStripHtml(timeline.daily);
+            if (!distHtml && !stripHtml) return "";
+            return `<div class="spread-chart-row">${distHtml}${stripHtml}</div>`;
+          })();
           section.innerHTML = `
             ${factsGrid}
-            ${corpusDistributionHtml(data?.corpus_outlet_distribution, outletCount)}
+            ${chartRow}
             ${syndicationLine}
-            ${spreadSparklineHtml(timeline.daily)}
             <div class="spread-map-link"><a href="/web/brainmap.html?focus=${encodeURIComponent(id)}" target="_blank" rel="noopener noreferrer">브레인맵에서 유사 보도 보기 →</a></div>
           `;
           section.hidden = false;

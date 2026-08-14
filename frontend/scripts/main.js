@@ -4036,6 +4036,28 @@
           utilityTotalCountEl.textContent = String(body.cumulative_total);
           utilityCumulativeClauseEl.hidden = false;
         }
+        // VERIFY-FORK (51-APPLY): the method-page diagram's numbers row — the
+        // SAME /stats payload this function already fetched (zero added
+        // requests). Unhidden only when ALL THREE values are real, so a
+        // figure never prints without the static scope note beside it
+        // (the shipped "(수집 기사 기준)" — see template #verifyHowStats);
+        // fail-quiet keeps the row hidden on any missing field.
+        const verifyHowStatsEl = document.getElementById("verifyHowStats");
+        if (verifyHowStatsEl
+            && body.cumulative_total !== null && body.cumulative_total !== undefined
+            && Number.isFinite(Number(body.cumulative_total))
+            && Number.isFinite(Number(body.total))
+            && Number.isFinite(Number(body.official))) {
+          const vhCum = document.getElementById("verifyHowStatCumulative");
+          const vhWeek = document.getElementById("verifyHowStatWeekly");
+          const vhOfficial = document.getElementById("verifyHowStatOfficial");
+          if (vhCum && vhWeek && vhOfficial) {
+            vhCum.textContent = String(body.cumulative_total);
+            vhWeek.textContent = String(body.total);
+            vhOfficial.textContent = String(body.official);
+            verifyHowStatsEl.hidden = false;
+          }
+        }
         if (statRangeEl && body.range_start && body.range_end) {
           // ISO YYYY-MM-DD → MM.DD; fall back to the raw strings if malformed.
           const mmdd = (iso) => {
@@ -6595,6 +6617,39 @@
             </div>`;
     }
 
+    // DETAIL-STRIP (51-APPLY): the detail page's daily chart, rendered through
+    // the SAME strip language every other strip on the site uses
+    // (feedSpreadStripHtml: square tops, ticked baseline, empty-day ticks,
+    // sqrt scale, the 60-day bail-out) — the old rounded linear sparkline was
+    // the last chart speaking a different language. The caption reuses
+    // spreadSparklineHtml's own shipped label forms VERBATIM ({date} · {N}건
+    // for a single dated day; first / 최다 N건/일 / last otherwise). Gates are
+    // the strip helper's own: unusable/empty daily → "" and no orphan caption
+    // ever renders. spreadSparklineHtml itself stays defined (same
+    // retained-renderer pattern as renderBiasFramingSummary).
+    function detailDailyStripHtml(daily) {
+      const strip = feedSpreadStripHtml(daily, { hero: true });
+      if (!strip) return "";
+      const counts = new Map();
+      for (const entry of (Array.isArray(daily) ? daily : [])) {
+        const day = typeof entry?.date === "string" ? entry.date.slice(0, 10) : "";
+        const count = Number(entry?.count);
+        if (day && Number.isFinite(count) && count > 0) counts.set(day, count);
+      }
+      if (!counts.size) return "";
+      const days = [...counts.keys()].sort();
+      let peak = 0;
+      counts.forEach((count) => { peak = Math.max(peak, count); });
+      const labelRow = counts.size === 1
+        ? `<div style="text-align:center;font-size:0.78rem;color:var(--muted);">${escapeHtml(days[0])} · ${escapeHtml(counts.get(days[0]))}건</div>`
+        : `<div style="display:flex;justify-content:space-between;gap:12px;font-size:0.78rem;color:var(--muted);">
+              <span>${escapeHtml(days[0])}</span>
+              <span>최다 ${escapeHtml(peak)}건/일</span>
+              <span>${escapeHtml(days[days.length - 1])}</span>
+            </div>`;
+      return `<div class="spread-daily-strip">${strip}${labelRow}</div>`;
+    }
+
     // FEED-SPREAD-STRIP (13-APPLY): bars-only variant of spreadSparklineHtml
     // for region-1 rows. The full sparkline is too heavy for a feed row (48px
     // bars + a date/peak label line ≈ 80px); this keeps the SAME derivation —
@@ -7088,11 +7143,26 @@
           // outlet sentence, the 4b sizeLine, the 확산 기간 line) — same numbers,
           // rendered once, as data. The syndication sentence stays (see above);
           // the header answer line stays (different layer, prose summary).
+          // DETAIL-CHARTS (51-APPLY): the two charts answer different
+          // questions — where this claim sits among all claims (distribution)
+          // and when it spread (daily strip) — but measured at 1440 the
+          // 440px distribution left 552px (56%) of the section empty on its
+          // right while the strip sat 149px lower, its plot centered alone in
+          // a full-width row. They now share ONE two-column chart row
+          // (distribution left, daily strip right; stacked <=960), so both
+          // are visible together and the empty half carries the timeline.
+          // Order of the section's parts is otherwise unchanged; either chart
+          // absent → the other keeps its column (grid handles a lone child).
+          const chartRow = (() => {
+            const distHtml = corpusDistributionHtml(data?.corpus_outlet_distribution, outletCount);
+            const stripHtml = detailDailyStripHtml(timeline.daily);
+            if (!distHtml && !stripHtml) return "";
+            return `<div class="spread-chart-row">${distHtml}${stripHtml}</div>`;
+          })();
           section.innerHTML = `
             ${factsGrid}
-            ${corpusDistributionHtml(data?.corpus_outlet_distribution, outletCount)}
+            ${chartRow}
             ${syndicationLine}
-            ${spreadSparklineHtml(timeline.daily)}
             <div class="spread-map-link"><a href="/web/brainmap.html?focus=${encodeURIComponent(id)}" target="_blank" rel="noopener noreferrer">브레인맵에서 유사 보도 보기 →</a></div>
           `;
           section.hidden = false;
