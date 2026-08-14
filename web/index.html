@@ -2296,214 +2296,131 @@
     .verify-how-link:hover {
       color: var(--brand-ink);
     }
-    /* VERIFY-STEPS-REDESIGN: step / arrow / step / arrow / step so the flow arrows
-       sit BETWEEN the three steps. Arrows collapse (display:none) at the shared
-       <=960px breakpoint where the steps stack (see the media block below). */
-    /* VERIFY-STEPPER-CENTER: geometry for CENTERED step content in three equal
-       1fr columns with a 20px gap. With tiles centered per column, the tile
-       centers sit at exactly (col/2), (50%), and (row - col/2), where one column
-       = (full width - 40px) / 3 — as %-plus-offset: 16.667% ∓ 6.67px on the
-       outer tiles, 50% exact on the middle. Chip positions are the midpoints
-       BETWEEN adjacent tile centers: 33.333% - 3.33px and 66.667% + 3.33px.
-       Vertical: line center = chip center = 27px = the 54px tile row's center
-       (2px line at top 26; 24px chip at top 15). Change the tile size or grid
-       gap and these calcs must move with them.
-       PIN-SAFE: neither values nor comments may spell the literal full-percent
-       token (honesty pin, test_frontend_v2_client §7) — hence the offset forms. */
-    .verify-how-flow {
-      position: relative;
+    /* VERIFY-BRANCH (52-APPLY): the redrawn pipeline diagram (see the
+       template comment for the full rationale). ONE visual language: every
+       node is the same flat bordered text card; every connector is the same
+       2px line in one uniform tint (the retired stepper track's own
+       #d9e5f9) — no icon tiles, no pills, no fills, no numbering, no size or
+       colour escalation anywhere. GEOMETRY: the .vhf-lanes grid has NO
+       column gap (lanes pad internally), so the two lane-rail centers sit at
+       exactly 25% and 75% of the flow — the split tee's drops land on them
+       precisely. Each lane draws its own vertical rail (::before at 50%);
+       lane names, notes and cards carry --paper backgrounds so they sit ON
+       the rail. The rails run in parallel to the lanes' bottom edge, where
+       the publish card (60% wide, centered, spanning 20%..80%) begins — both
+       rails land on its top edge SEPARATELY; no merge point and no
+       cross-lane line is ever drawn between split and publish. */
+    .vhf-flow {
       margin-top: 26px;
+      --vhf-line: #d9e5f9;
     }
-    .verify-how-track {
-      position: absolute;
-      top: 26px;                                 /* 2px line centered on y=27 */
-      left: calc(16.667% - 6.67px);              /* first tile's center */
-      right: calc(16.667% - 6.67px);             /* last tile's center (mirror) */
-      height: 2px;
-      background: #d9e5f9;   /* --brand-derived light tint (no tint token) */
-    }
-    .verify-how-arrow {
-      position: absolute;
-      top: 15px;                                 /* 24px chip centered on y=27 */
-      width: 24px;
-      height: 24px;
-      border-radius: 999px;
-      background: #edf3fc;   /* --brand-derived chip tint, SOLID (masks the line) */
-      color: var(--brand);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transform: translateX(-50%);
-    }
-    .verify-how-arrow--a { left: calc(33.333% - 3.33px); }
-    .verify-how-arrow--b { left: calc(66.667% + 3.33px); }
-    .verify-how-steps {
+    .vhf-node {
       position: relative;
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      align-items: start;
-      gap: 20px;
-    }
-    .verify-how-step {
-      min-width: 0;
-      /* VERIFY-STEPPER-CENTER: each step's content is CENTERED in its column
-         (mockup layout). The grid always spanned the card; the left-bunched look
-         came from left-aligned content leaving dead space on each column's right.
-         Centering also puts the tile centers at exactly 16.667% / 50% / 83.333%
-         of the row — the track/chip offsets below rely on this. */
-      text-align: center;
-    }
-    /* 54px rounded icon tile — SOLID brand-tinted chip (must mask the track line
-       behind it), brand-colored inline line icon. STEP 03's --fill modifier goes
-       solid --brand with a white icon (the mockup's emphasis tile). */
-    .verify-how-icon {
-      width: 54px;
-      height: 54px;
-      border-radius: var(--radius-sm);
-      background: #edf3fc;   /* --brand-derived tile tint, SOLID */
-      border: 1px solid #c3d4f3;   /* --brand-derived tile border */
-      color: var(--brand);
-      /* VERIFY-STEPPER-ALIGN: block-level flex (was inline-flex). An inline-level
-         tile joins the step's text line box and its position depends on baseline/
-         strut metrics — phantom vertical drift the track's y=27 can't account for.
-         Block-level, the tile's top is exactly the grid row's top. Same box,
-         same centering, no visual change to the tile itself. */
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      /* VERIFY-STEPPER-CENTER: auto side margins center the block-level tile in
-         its column (text-align only centers inline content). */
-      margin: 0 auto 12px;
-    }
-    .verify-how-icon svg {
-      width: 26px;
-      height: 26px;
-    }
-    .verify-how-icon--fill {
-      background: var(--brand);
-      border-color: var(--brand);
-      color: #fff;
-    }
-    /* "STEP 01" eyebrow — brand, wide letter-spacing (mockup .12em). */
-    .verify-how-eyebrow {
-      color: var(--brand);
-      font-size: 0.8rem;
-      font-weight: 700;
-      letter-spacing: 0.12em;
-      margin-bottom: 6px;
-    }
-    .verify-how-title {
-      margin: 0 0 6px;
-      color: var(--ink);
-      font-size: 1.16rem;
-      line-height: 1.35;
-      font-weight: 500;   /* FONT-WEIGHT-FIX-2: 600 still read heavy in Pretendard */
-    }
-    .verify-how-desc {
-      margin: 0 auto;   /* VERIFY-STEPPER-CENTER: center the capped measure */
-      color: var(--slate);
-      font-size: 0.845rem;
-      line-height: 1.68;
-      max-width: 228px;   /* mockup measure; released when stacked (<=960px) */
-    }
-    /* VERIFY-FORK (51-APPLY): the fork layout — start tile | two lanes | end
-       tile. Tiles reuse the existing .verify-how-step/.verify-how-icon
-       family; lane nodes are ONE uniform quiet chip (equal tint/size/weight —
-       deliberately no progression, so nothing reads as certainty rising).
-       The lanes are separate bordered boxes with NO connector between them;
-       each lane ends in its own --out arrow toward the publish tile. The old
-       .verify-how-track/.verify-how-arrow absolute stepper rules above are
-       for the retired 3-step markup and are simply unused now. */
-    .verify-how-fork {
-      display: grid;
-      grid-template-columns: 224px minmax(0, 1fr) 224px;
-      gap: 20px;
-      align-items: center;
-    }
-    .verify-how-lanes {
-      display: grid;
-      gap: 16px;
-      min-width: 0;
-    }
-    .verify-how-lane {
       border: 1px solid var(--line);
       border-radius: var(--radius-sm);
       background: var(--paper);
-      padding: 10px 14px 12px;
+      padding: 12px 16px;
+      text-align: center;
+    }
+    .vhf-node-title {
+      color: var(--ink);
+      font-size: 0.965rem;
+      font-weight: 700;
+      line-height: 1.4;
+    }
+    .vhf-node-desc {
+      margin: 4px auto 0;
+      color: var(--slate);
+      font-size: 0.82rem;
+      line-height: 1.55;
+      max-width: 340px;
+    }
+    .vhf-entry {
+      max-width: 420px;
+      margin: 0 auto;
+    }
+    /* the split tee: stub down from the entry card, rail, two drops. */
+    .vhf-split {
+      position: relative;
+      height: 26px;
+    }
+    .vhf-split::before {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 0;
+      width: 2px;
+      height: 12px;
+      margin-left: -1px;
+      background: var(--vhf-line);
+    }
+    .vhf-split::after {
+      content: "";
+      position: absolute;
+      left: 25%;
+      right: 25%;
+      top: 12px;
+      height: 2px;
+      background: var(--vhf-line);
+    }
+    .vhf-split-drop {
+      position: absolute;
+      top: 12px;
+      bottom: 0;
+      width: 2px;
+      margin-left: -1px;
+      background: var(--vhf-line);
+    }
+    .vhf-split-drop--a { left: 25%; }
+    .vhf-split-drop--b { left: 75%; }
+    .vhf-lanes {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+    }
+    .vhf-lane {
+      position: relative;
+      padding: 0 18px 18px;
       min-width: 0;
     }
-    .verify-how-lane-name {
+    .vhf-lane::before {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      margin-left: -1px;
+      background: var(--vhf-line);
+    }
+    .vhf-lane-name {
+      position: relative;
+      width: fit-content;
+      margin: 0 auto;
+      padding: 2px 10px;
+      background: var(--paper);
       color: var(--slate);
       font-size: 0.8rem;
       font-weight: 700;
       letter-spacing: 0.08em;
-      margin-bottom: 8px;
     }
-    .verify-how-lane-flow {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-      min-width: 0;
+    .vhf-lane-note {
+      position: relative;
+      width: fit-content;
+      margin: 2px auto 0;
+      padding: 0 10px;
+      background: var(--paper);
+      color: var(--muted);
+      font-size: 0.75rem;
     }
-    .verify-how-node {
-      display: inline-flex;
-      align-items: center;
-      border: 1px solid #c3d4f3;   /* the existing tile tint pair */
-      background: #edf3fc;
-      color: var(--ink);
-      border-radius: 999px;
-      padding: 4px 10px;
-      font-size: 0.845rem;
-      line-height: 1.4;
-      white-space: nowrap;
+    .vhf-lane > .vhf-node {
+      margin: 14px auto 0;
+      max-width: 380px;
     }
-    .verify-how-node-pair {
-      display: inline-flex;
-      flex-direction: column;
-      gap: 4px;
+    .vhf-publish {
+      width: 60%;
+      margin: 0 auto;
     }
-    .verify-how-lane-arrow {
-      display: inline-flex;
-      align-items: center;
-      color: var(--brand);
-      flex: 0 0 auto;
-    }
-    /* the trailing arrow of each lane points AT the publish column; the two
-       render in parallel (one per lane) and never join before the tile. */
-    .verify-how-lane-arrow--out {
-      margin-left: auto;
-    }
-    /* lane B's full tile (one of the original three, keeps its description):
-       icon beside text so the lane row stays one visual line. */
-    .verify-how-step--lane {
-      display: flex;
-      align-items: flex-start;
-      gap: 10px;
-      text-align: left;
-      min-width: 0;
-      flex: 0 1 auto;
-    }
-    .verify-how-step--lane .verify-how-icon {
-      width: 40px;
-      height: 40px;
-      margin: 0;
-      flex: 0 0 auto;
-    }
-    .verify-how-step--lane .verify-how-icon svg {
-      width: 20px;
-      height: 20px;
-    }
-    .verify-how-step--lane .verify-how-title {
-      font-size: 1rem;
-      margin-bottom: 2px;
-    }
-    .verify-how-step--lane .verify-how-desc {
-      margin: 0;
-      max-width: 200px;   /* fits tile + arrow + status pair on one lane line */
-      font-size: 0.8rem;
-      line-height: 1.5;
-    }
+
     /* VERIFY-FORK (51-APPLY): the numbers row under the section sub — filled
        from the /stats fetch the page already makes; the scope note is part of
        the same line so a figure can never render without it. */
@@ -5284,7 +5201,6 @@
     @media (max-width: 960px) {
       .controls,
       .metrics,
-      .verify-how-steps,
       .public-source-grid,
       .selected-issue-meta,
       .detail-grid,
@@ -5334,29 +5250,24 @@
          wrong). The steps read top-to-bottom instead.
          V2: the horizontal track line is desktop-geometry too — hide it, and release
          the desc's 228px desktop measure so stacked text uses the full width. */
-      .verify-how-arrow,
-      .verify-how-track {
+      /* VERIFY-BRANCH (52-APPLY): stacked — entry, then the two lanes as
+         consecutive labeled groups (each keeps its own rail threading its
+         nodes), then the publish card. The split tee is desktop geometry;
+         hidden here exactly like the retired stepper's arrows were. */
+      .vhf-split {
         display: none;
       }
-      .verify-how-desc {
+      .vhf-lanes {
+        grid-template-columns: 1fr;
+      }
+      .vhf-lane {
+        padding: 14px 0;
+      }
+      .vhf-entry {
         max-width: none;
       }
-      /* VERIFY-FORK (51-APPLY): stacked fork — start tile, then the two lanes
-         as consecutive labeled groups, then the publish tile (the existing
-         stacking behaviour). Sideways lane arrows read wrong stacked, so they
-         hide exactly like the old stepper arrows; chips wrap to lines. */
-      .verify-how-fork {
-        grid-template-columns: minmax(0, 1fr);
-        gap: 14px;
-      }
-      .verify-how-lane-arrow {
-        display: none;
-      }
-      .verify-how-node {
-        white-space: normal;
-      }
-      .verify-how-step--lane {
-        flex-wrap: wrap;
+      .vhf-publish {
+        width: auto;
       }
       /* DETAIL-CHARTS (51-APPLY): the chart pair stacks below 960 — the
          distribution keeps its inline cap, the strip takes its own row. */
@@ -6397,98 +6308,76 @@
             <p class="verify-how-stats" id="verifyHowStats" hidden>누적 기록 <strong class="verify-how-stat-num" id="verifyHowStatCumulative">—</strong>건 · 이번 주 <strong class="verify-how-stat-num" id="verifyHowStatWeekly">—</strong>건 · 공식확인 <strong class="verify-how-stat-num" id="verifyHowStatOfficial">—</strong>건 <span class="verify-how-stats-note">(수집 기사 기준)</span></p>
           </div>
         </div>
-        <!-- VERIFY-FORK (51-APPLY): the 3-step line drew only the evidence
-             half of what the masthead claims; the pipeline also clusters
-             claims across outlets, measures spread, flags near-identical
-             phrasing and tracks week-to-week growth. The flow is now a FORK:
-             one shared start tile, two SEPARATE lanes named by the masthead's
-             own pair (확산 기록 / 공식 근거 확인), one publish tile.
-             HONESTY RULES BAKED INTO THE SHAPE:
-               (1) NO connector runs between the lanes, and each lane carries
-                   its OWN trailing arrow toward the publish tile, in parallel
-                   — circulation reaches publication but never feeds the
-                   evidence result (the shipped boundary: 확산 정보는 검증이
-                   아닙니다 / 사실 여부와는 무관합니다);
-               (2) nothing suggests certainty rising left-to-right — the
-                   STEP 01/02/03 ladder eyebrows are REMOVED, every added node
-                   is the same quiet label chip (equal tint, size and weight,
-                   no numbering), and the only filled tile stays the
-                   pre-existing publish tile (disclosure emphasis, unchanged);
-               (3) nodes beyond the original three are LABEL-ONLY — each label
-                   is a shipped phrase verbatim; a description sentence would
-                   be new Korean;
-               (4) the embedding stage has no shipped name, so it folds
-                   SILENTLY into the 여러 매체로 퍼진 주장 clustering node.
-             Lane arrows are desktop-only — the shared <=960px block stacks
-             the fork into consecutive labeled groups. -->
-        <div class="verify-how-flow verify-how-fork">
-          <div class="verify-how-step verify-how-fork-start">
-            <div class="verify-how-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M7 3h7l4 4v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/>
-                <path d="M14 3v4h4"/>
-                <path d="M9 12h6"/>
-                <path d="M9 16h5"/>
-              </svg>
-            </div>
-            <h3 class="verify-how-title">주장 수집·분류</h3>
-            <p class="verify-how-desc">온라인·제보·언론에서 확인이 필요한 주장을 모아 도메인별로 분류합니다.</p>
+        <!-- VERIFY-BRANCH (52-APPLY): full REDRAW of the pipeline diagram —
+             the 51 fork wedged grey pills into the old icon-tile stepper (two
+             visual languages, six competing arrows, lanes drawn as adjacent
+             boxes). Rebuilt from scratch as a BRANCH DIAGRAM in ONE language:
+             every node is the same flat bordered text card (no icon tiles, no
+             pills, no fills), and every connector is the same 2px light-brand
+             line. The split IS DRAWN: one stub descends from the entry card,
+             tees into a rail, and drops into two vertical lane rails that run
+             in parallel THROUGH their nodes (each lane's cards sit ON its own
+             line) and land separately on the publish card's top edge — a
+             subway-style branch, not two boxes side by side.
+             HONESTY RULES IN THE SHAPE:
+               (1) the ONLY cross-lane geometry is the split tee ABOVE the
+                   lanes; between split and publish no line or arrow connects
+                   or points from one lane to the other — the two rails stay
+                   parallel to the end, so circulation reaches PUBLICATION but
+                   never the evidence result (shipped boundary: 확산 정보는
+                   검증이 아닙니다 / 사실 여부와는 무관합니다);
+               (2) no rising-certainty read: no numbering anywhere, all nodes
+                   identical in size/border/colour (the old filled emphasis
+                   tile is gone), connectors one uniform tint;
+               (3) every label and sentence ships already: the three original
+                   step titles + sentences (this section, pre-change);
+                   확산 기록 / 공식 근거 확인 (masthead pair, site <title>);
+                   여러 매체로 퍼진 주장 (feed region heading, main.js);
+                   얼마나 퍼졌나 (detail h3, main.js); 문구 거의 동일 (spread
+                   fact label, main.js/claim.html/weekly.html); 확산 성장
+                   (sidebar panel, template); AI 검증 상태 (verdict label,
+                   template/main.js); 사람 검토 대기 (review status value,
+                   main.js/claim.html); 주간 스냅샷 기준 (spread meta,
+                   main.js) — the lane A basis note, the one shipped phrase
+                   that expresses the lane's weekly accumulation; lane B has
+                   no shipped per-article counterpart, so it carries no note.
+             The <=960 block hides the split tee and stacks entry → lane A →
+             lane B → publish; each lane keeps its own rail. -->
+        <div class="vhf-flow">
+          <div class="vhf-node vhf-entry">
+            <div class="vhf-node-title">주장 수집·분류</div>
+            <p class="vhf-node-desc">온라인·제보·언론에서 확인이 필요한 주장을 모아 도메인별로 분류합니다.</p>
           </div>
-          <div class="verify-how-lanes">
-            <div class="verify-how-lane">
-              <div class="verify-how-lane-name">확산 기록</div>
-              <div class="verify-how-lane-flow">
-                <span class="verify-how-lane-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg></span>
-                <span class="verify-how-node">여러 매체로 퍼진 주장</span>
-                <span class="verify-how-lane-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg></span>
-                <span class="verify-how-node-pair">
-                  <span class="verify-how-node">얼마나 퍼졌나</span>
-                  <span class="verify-how-node">문구 거의 동일</span>
-                </span>
-                <span class="verify-how-lane-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg></span>
-                <span class="verify-how-node">확산 성장</span>
-                <span class="verify-how-lane-arrow verify-how-lane-arrow--out" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg></span>
-              </div>
+          <!-- the split tee, drawn in CSS (stub ::before, rail ::after, two
+               drops) so the branch geometry needs no stretched replaced
+               element; drops sit at the exact lane-rail centers (25% / 75%). -->
+          <div class="vhf-split" aria-hidden="true">
+            <span class="vhf-split-drop vhf-split-drop--a"></span>
+            <span class="vhf-split-drop vhf-split-drop--b"></span>
+          </div>
+          <div class="vhf-lanes">
+            <div class="vhf-lane">
+              <div class="vhf-lane-name">확산 기록</div>
+              <div class="vhf-lane-note">주간 스냅샷 기준</div>
+              <div class="vhf-node"><div class="vhf-node-title">여러 매체로 퍼진 주장</div></div>
+              <div class="vhf-node"><div class="vhf-node-title">얼마나 퍼졌나 · 문구 거의 동일</div></div>
+              <div class="vhf-node"><div class="vhf-node-title">확산 성장</div></div>
             </div>
-            <div class="verify-how-lane">
-              <div class="verify-how-lane-name">공식 근거 확인</div>
-              <div class="verify-how-lane-flow">
-                <span class="verify-how-lane-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg></span>
-                <div class="verify-how-step verify-how-step--lane">
-                  <div class="verify-how-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                      <circle cx="11" cy="11" r="6"/>
-                      <path d="M20 20l-3.6-3.6"/>
-                      <path d="M8.4 11l1.9 1.9 3.3-3.7"/>
-                    </svg>
-                  </div>
-                  <div class="verify-how-step-text">
-                    <h3 class="verify-how-title">1차·공식 출처 대조</h3>
-                    <p class="verify-how-desc">정부·기관 원문과 공개 데이터에 주장을 직접 대조해, 공식 근거가 있는지 확인합니다.</p>
-                  </div>
-                </div>
-                <span class="verify-how-lane-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg></span>
-                <span class="verify-how-node-pair">
-                  <span class="verify-how-node">AI 검증 상태</span>
-                  <span class="verify-how-node">사람 검토 대기</span>
-                </span>
-                <span class="verify-how-lane-arrow verify-how-lane-arrow--out" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg></span>
+            <div class="vhf-lane">
+              <div class="vhf-lane-name">공식 근거 확인</div>
+              <div class="vhf-node">
+                <div class="vhf-node-title">1차·공식 출처 대조</div>
+                <p class="vhf-node-desc">정부·기관 원문과 공개 데이터에 주장을 직접 대조해, 공식 근거가 있는지 확인합니다.</p>
               </div>
+              <div class="vhf-node"><div class="vhf-node-title">AI 검증 상태 · 사람 검토 대기</div></div>
             </div>
           </div>
-          <div class="verify-how-step verify-how-fork-end">
-            <div class="verify-how-icon verify-how-icon--fill" aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 2.5l7.5 3.2v5.6c0 4.6-3.2 7.9-7.5 9.7-4.3-1.8-7.5-5.1-7.5-9.7V5.7L12 2.5z"/>
-                <path d="M8.7 11.8l2.3 2.3 4.3-4.8"/>
-              </svg>
-            </div>
-            <!-- HIGH-RISK-LABEL -> GRADE-WORD-RETIRED (42-APPLY): 근거 등급
-                 asserted the product grades a claim's evidence. Replaced with
-                 the shipped 공식 근거: what this tile publishes is the
-                 confirmed official evidence and sources, not a grade. -->
-            <h3 class="verify-how-title">공식 근거·출처 공개</h3>
-            <p class="verify-how-desc">공식 근거와 확인된 공식 출처를 링크와 함께 공개하고, 새 사실이 나오면 정정합니다.</p>
+          <div class="vhf-node vhf-publish">
+            <!-- HIGH-RISK-LABEL -> GRADE-WORD-RETIRED (42-APPLY): what this
+                 card publishes is the confirmed official evidence and
+                 sources, not a grade. -->
+            <div class="vhf-node-title">공식 근거·출처 공개</div>
+            <p class="vhf-node-desc">공식 근거와 확인된 공식 출처를 링크와 함께 공개하고, 새 사실이 나오면 정정합니다.</p>
           </div>
         </div>
         <nav class="verify-how-links" aria-label="자세히 보기">
@@ -13509,7 +13398,21 @@
               <span>최다 ${escapeHtml(peak)}건/일</span>
               <span>${escapeHtml(days[days.length - 1])}</span>
             </div>`;
-      return `<div class="spread-daily-strip">${strip}${labelRow}</div>`;
+      // SHORT-SPAN-WIDTH (52-APPLY): measured live, 64.4% of clustered claims
+      // span a SINGLE day (683/1060; 90.9% span <=2 days), and the hero-form
+      // strip stretches those to the full column — one bar in ~520px of empty
+      // plot. The strip now takes its OWN width: calendar days × 24px (the
+      // hero bar cap 23px + 1px gap = one day's full pitch), floored at 140px
+      // so the caption line fits, capped by the column via the wrapper's
+      // natural max width. Width only — derivation, sqrt scale, gates and the
+      // caption forms are untouched; long series fill the column as before.
+      const spanStartMs = Date.parse(`${days[0]}T00:00:00Z`);
+      const spanEndMs = Date.parse(`${days[days.length - 1]}T00:00:00Z`);
+      const spanDays = (Number.isFinite(spanStartMs) && Number.isFinite(spanEndMs))
+        ? Math.round((spanEndMs - spanStartMs) / 86400000) + 1
+        : 60;
+      const ownWidth = Math.max(140, spanDays * 24);
+      return `<div class="spread-daily-strip" style="max-width:${ownWidth}px;">${strip}${labelRow}</div>`;
     }
 
     // FEED-SPREAD-STRIP (13-APPLY): bars-only variant of spreadSparklineHtml

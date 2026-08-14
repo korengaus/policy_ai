@@ -6647,7 +6647,21 @@
               <span>최다 ${escapeHtml(peak)}건/일</span>
               <span>${escapeHtml(days[days.length - 1])}</span>
             </div>`;
-      return `<div class="spread-daily-strip">${strip}${labelRow}</div>`;
+      // SHORT-SPAN-WIDTH (52-APPLY): measured live, 64.4% of clustered claims
+      // span a SINGLE day (683/1060; 90.9% span <=2 days), and the hero-form
+      // strip stretches those to the full column — one bar in ~520px of empty
+      // plot. The strip now takes its OWN width: calendar days × 24px (the
+      // hero bar cap 23px + 1px gap = one day's full pitch), floored at 140px
+      // so the caption line fits, capped by the column via the wrapper's
+      // natural max width. Width only — derivation, sqrt scale, gates and the
+      // caption forms are untouched; long series fill the column as before.
+      const spanStartMs = Date.parse(`${days[0]}T00:00:00Z`);
+      const spanEndMs = Date.parse(`${days[days.length - 1]}T00:00:00Z`);
+      const spanDays = (Number.isFinite(spanStartMs) && Number.isFinite(spanEndMs))
+        ? Math.round((spanEndMs - spanStartMs) / 86400000) + 1
+        : 60;
+      const ownWidth = Math.max(140, spanDays * 24);
+      return `<div class="spread-daily-strip" style="max-width:${ownWidth}px;">${strip}${labelRow}</div>`;
     }
 
     // FEED-SPREAD-STRIP (13-APPLY): bars-only variant of spreadSparklineHtml

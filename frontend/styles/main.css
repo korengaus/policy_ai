@@ -2260,214 +2260,131 @@
     .verify-how-link:hover {
       color: var(--brand-ink);
     }
-    /* VERIFY-STEPS-REDESIGN: step / arrow / step / arrow / step so the flow arrows
-       sit BETWEEN the three steps. Arrows collapse (display:none) at the shared
-       <=960px breakpoint where the steps stack (see the media block below). */
-    /* VERIFY-STEPPER-CENTER: geometry for CENTERED step content in three equal
-       1fr columns with a 20px gap. With tiles centered per column, the tile
-       centers sit at exactly (col/2), (50%), and (row - col/2), where one column
-       = (full width - 40px) / 3 — as %-plus-offset: 16.667% ∓ 6.67px on the
-       outer tiles, 50% exact on the middle. Chip positions are the midpoints
-       BETWEEN adjacent tile centers: 33.333% - 3.33px and 66.667% + 3.33px.
-       Vertical: line center = chip center = 27px = the 54px tile row's center
-       (2px line at top 26; 24px chip at top 15). Change the tile size or grid
-       gap and these calcs must move with them.
-       PIN-SAFE: neither values nor comments may spell the literal full-percent
-       token (honesty pin, test_frontend_v2_client §7) — hence the offset forms. */
-    .verify-how-flow {
-      position: relative;
+    /* VERIFY-BRANCH (52-APPLY): the redrawn pipeline diagram (see the
+       template comment for the full rationale). ONE visual language: every
+       node is the same flat bordered text card; every connector is the same
+       2px line in one uniform tint (the retired stepper track's own
+       #d9e5f9) — no icon tiles, no pills, no fills, no numbering, no size or
+       colour escalation anywhere. GEOMETRY: the .vhf-lanes grid has NO
+       column gap (lanes pad internally), so the two lane-rail centers sit at
+       exactly 25% and 75% of the flow — the split tee's drops land on them
+       precisely. Each lane draws its own vertical rail (::before at 50%);
+       lane names, notes and cards carry --paper backgrounds so they sit ON
+       the rail. The rails run in parallel to the lanes' bottom edge, where
+       the publish card (60% wide, centered, spanning 20%..80%) begins — both
+       rails land on its top edge SEPARATELY; no merge point and no
+       cross-lane line is ever drawn between split and publish. */
+    .vhf-flow {
       margin-top: 26px;
+      --vhf-line: #d9e5f9;
     }
-    .verify-how-track {
-      position: absolute;
-      top: 26px;                                 /* 2px line centered on y=27 */
-      left: calc(16.667% - 6.67px);              /* first tile's center */
-      right: calc(16.667% - 6.67px);             /* last tile's center (mirror) */
-      height: 2px;
-      background: #d9e5f9;   /* --brand-derived light tint (no tint token) */
-    }
-    .verify-how-arrow {
-      position: absolute;
-      top: 15px;                                 /* 24px chip centered on y=27 */
-      width: 24px;
-      height: 24px;
-      border-radius: 999px;
-      background: #edf3fc;   /* --brand-derived chip tint, SOLID (masks the line) */
-      color: var(--brand);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transform: translateX(-50%);
-    }
-    .verify-how-arrow--a { left: calc(33.333% - 3.33px); }
-    .verify-how-arrow--b { left: calc(66.667% + 3.33px); }
-    .verify-how-steps {
+    .vhf-node {
       position: relative;
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      align-items: start;
-      gap: 20px;
-    }
-    .verify-how-step {
-      min-width: 0;
-      /* VERIFY-STEPPER-CENTER: each step's content is CENTERED in its column
-         (mockup layout). The grid always spanned the card; the left-bunched look
-         came from left-aligned content leaving dead space on each column's right.
-         Centering also puts the tile centers at exactly 16.667% / 50% / 83.333%
-         of the row — the track/chip offsets below rely on this. */
-      text-align: center;
-    }
-    /* 54px rounded icon tile — SOLID brand-tinted chip (must mask the track line
-       behind it), brand-colored inline line icon. STEP 03's --fill modifier goes
-       solid --brand with a white icon (the mockup's emphasis tile). */
-    .verify-how-icon {
-      width: 54px;
-      height: 54px;
-      border-radius: var(--radius-sm);
-      background: #edf3fc;   /* --brand-derived tile tint, SOLID */
-      border: 1px solid #c3d4f3;   /* --brand-derived tile border */
-      color: var(--brand);
-      /* VERIFY-STEPPER-ALIGN: block-level flex (was inline-flex). An inline-level
-         tile joins the step's text line box and its position depends on baseline/
-         strut metrics — phantom vertical drift the track's y=27 can't account for.
-         Block-level, the tile's top is exactly the grid row's top. Same box,
-         same centering, no visual change to the tile itself. */
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      /* VERIFY-STEPPER-CENTER: auto side margins center the block-level tile in
-         its column (text-align only centers inline content). */
-      margin: 0 auto 12px;
-    }
-    .verify-how-icon svg {
-      width: 26px;
-      height: 26px;
-    }
-    .verify-how-icon--fill {
-      background: var(--brand);
-      border-color: var(--brand);
-      color: #fff;
-    }
-    /* "STEP 01" eyebrow — brand, wide letter-spacing (mockup .12em). */
-    .verify-how-eyebrow {
-      color: var(--brand);
-      font-size: 0.8rem;
-      font-weight: 700;
-      letter-spacing: 0.12em;
-      margin-bottom: 6px;
-    }
-    .verify-how-title {
-      margin: 0 0 6px;
-      color: var(--ink);
-      font-size: 1.16rem;
-      line-height: 1.35;
-      font-weight: 500;   /* FONT-WEIGHT-FIX-2: 600 still read heavy in Pretendard */
-    }
-    .verify-how-desc {
-      margin: 0 auto;   /* VERIFY-STEPPER-CENTER: center the capped measure */
-      color: var(--slate);
-      font-size: 0.845rem;
-      line-height: 1.68;
-      max-width: 228px;   /* mockup measure; released when stacked (<=960px) */
-    }
-    /* VERIFY-FORK (51-APPLY): the fork layout — start tile | two lanes | end
-       tile. Tiles reuse the existing .verify-how-step/.verify-how-icon
-       family; lane nodes are ONE uniform quiet chip (equal tint/size/weight —
-       deliberately no progression, so nothing reads as certainty rising).
-       The lanes are separate bordered boxes with NO connector between them;
-       each lane ends in its own --out arrow toward the publish tile. The old
-       .verify-how-track/.verify-how-arrow absolute stepper rules above are
-       for the retired 3-step markup and are simply unused now. */
-    .verify-how-fork {
-      display: grid;
-      grid-template-columns: 224px minmax(0, 1fr) 224px;
-      gap: 20px;
-      align-items: center;
-    }
-    .verify-how-lanes {
-      display: grid;
-      gap: 16px;
-      min-width: 0;
-    }
-    .verify-how-lane {
       border: 1px solid var(--line);
       border-radius: var(--radius-sm);
       background: var(--paper);
-      padding: 10px 14px 12px;
+      padding: 12px 16px;
+      text-align: center;
+    }
+    .vhf-node-title {
+      color: var(--ink);
+      font-size: 0.965rem;
+      font-weight: 700;
+      line-height: 1.4;
+    }
+    .vhf-node-desc {
+      margin: 4px auto 0;
+      color: var(--slate);
+      font-size: 0.82rem;
+      line-height: 1.55;
+      max-width: 340px;
+    }
+    .vhf-entry {
+      max-width: 420px;
+      margin: 0 auto;
+    }
+    /* the split tee: stub down from the entry card, rail, two drops. */
+    .vhf-split {
+      position: relative;
+      height: 26px;
+    }
+    .vhf-split::before {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 0;
+      width: 2px;
+      height: 12px;
+      margin-left: -1px;
+      background: var(--vhf-line);
+    }
+    .vhf-split::after {
+      content: "";
+      position: absolute;
+      left: 25%;
+      right: 25%;
+      top: 12px;
+      height: 2px;
+      background: var(--vhf-line);
+    }
+    .vhf-split-drop {
+      position: absolute;
+      top: 12px;
+      bottom: 0;
+      width: 2px;
+      margin-left: -1px;
+      background: var(--vhf-line);
+    }
+    .vhf-split-drop--a { left: 25%; }
+    .vhf-split-drop--b { left: 75%; }
+    .vhf-lanes {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+    }
+    .vhf-lane {
+      position: relative;
+      padding: 0 18px 18px;
       min-width: 0;
     }
-    .verify-how-lane-name {
+    .vhf-lane::before {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      margin-left: -1px;
+      background: var(--vhf-line);
+    }
+    .vhf-lane-name {
+      position: relative;
+      width: fit-content;
+      margin: 0 auto;
+      padding: 2px 10px;
+      background: var(--paper);
       color: var(--slate);
       font-size: 0.8rem;
       font-weight: 700;
       letter-spacing: 0.08em;
-      margin-bottom: 8px;
     }
-    .verify-how-lane-flow {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-      min-width: 0;
+    .vhf-lane-note {
+      position: relative;
+      width: fit-content;
+      margin: 2px auto 0;
+      padding: 0 10px;
+      background: var(--paper);
+      color: var(--muted);
+      font-size: 0.75rem;
     }
-    .verify-how-node {
-      display: inline-flex;
-      align-items: center;
-      border: 1px solid #c3d4f3;   /* the existing tile tint pair */
-      background: #edf3fc;
-      color: var(--ink);
-      border-radius: 999px;
-      padding: 4px 10px;
-      font-size: 0.845rem;
-      line-height: 1.4;
-      white-space: nowrap;
+    .vhf-lane > .vhf-node {
+      margin: 14px auto 0;
+      max-width: 380px;
     }
-    .verify-how-node-pair {
-      display: inline-flex;
-      flex-direction: column;
-      gap: 4px;
+    .vhf-publish {
+      width: 60%;
+      margin: 0 auto;
     }
-    .verify-how-lane-arrow {
-      display: inline-flex;
-      align-items: center;
-      color: var(--brand);
-      flex: 0 0 auto;
-    }
-    /* the trailing arrow of each lane points AT the publish column; the two
-       render in parallel (one per lane) and never join before the tile. */
-    .verify-how-lane-arrow--out {
-      margin-left: auto;
-    }
-    /* lane B's full tile (one of the original three, keeps its description):
-       icon beside text so the lane row stays one visual line. */
-    .verify-how-step--lane {
-      display: flex;
-      align-items: flex-start;
-      gap: 10px;
-      text-align: left;
-      min-width: 0;
-      flex: 0 1 auto;
-    }
-    .verify-how-step--lane .verify-how-icon {
-      width: 40px;
-      height: 40px;
-      margin: 0;
-      flex: 0 0 auto;
-    }
-    .verify-how-step--lane .verify-how-icon svg {
-      width: 20px;
-      height: 20px;
-    }
-    .verify-how-step--lane .verify-how-title {
-      font-size: 1rem;
-      margin-bottom: 2px;
-    }
-    .verify-how-step--lane .verify-how-desc {
-      margin: 0;
-      max-width: 200px;   /* fits tile + arrow + status pair on one lane line */
-      font-size: 0.8rem;
-      line-height: 1.5;
-    }
+
     /* VERIFY-FORK (51-APPLY): the numbers row under the section sub — filled
        from the /stats fetch the page already makes; the scope note is part of
        the same line so a figure can never render without it. */
@@ -5248,7 +5165,6 @@
     @media (max-width: 960px) {
       .controls,
       .metrics,
-      .verify-how-steps,
       .public-source-grid,
       .selected-issue-meta,
       .detail-grid,
@@ -5298,29 +5214,24 @@
          wrong). The steps read top-to-bottom instead.
          V2: the horizontal track line is desktop-geometry too — hide it, and release
          the desc's 228px desktop measure so stacked text uses the full width. */
-      .verify-how-arrow,
-      .verify-how-track {
+      /* VERIFY-BRANCH (52-APPLY): stacked — entry, then the two lanes as
+         consecutive labeled groups (each keeps its own rail threading its
+         nodes), then the publish card. The split tee is desktop geometry;
+         hidden here exactly like the retired stepper's arrows were. */
+      .vhf-split {
         display: none;
       }
-      .verify-how-desc {
+      .vhf-lanes {
+        grid-template-columns: 1fr;
+      }
+      .vhf-lane {
+        padding: 14px 0;
+      }
+      .vhf-entry {
         max-width: none;
       }
-      /* VERIFY-FORK (51-APPLY): stacked fork — start tile, then the two lanes
-         as consecutive labeled groups, then the publish tile (the existing
-         stacking behaviour). Sideways lane arrows read wrong stacked, so they
-         hide exactly like the old stepper arrows; chips wrap to lines. */
-      .verify-how-fork {
-        grid-template-columns: minmax(0, 1fr);
-        gap: 14px;
-      }
-      .verify-how-lane-arrow {
-        display: none;
-      }
-      .verify-how-node {
-        white-space: normal;
-      }
-      .verify-how-step--lane {
-        flex-wrap: wrap;
+      .vhf-publish {
+        width: auto;
       }
       /* DETAIL-CHARTS (51-APPLY): the chart pair stacks below 960 — the
          distribution keeps its inline cap, the strip takes its own row. */
