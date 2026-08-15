@@ -36,43 +36,78 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@600;700&display=swap">
   <style>
     :root {
-      /* VISUAL-REDESIGN "Verification Stamp" tokens — single source of truth.
-         Old names below are re-pointed to these so untouched rules keep working. */
-      --ink: #0f172a;            /* headings / strong text */
-      --slate: #475569;          /* body text */
-      --muted: #94a3b8;          /* captions / secondary */
-      --line: #e2e8f0;           /* borders */
-      --rule: #9ca3af;           /* DESIGN-3A4: medium-dark — utility/search header lines */
-      --rule-strong: #111827;    /* DESIGN-3A4: near-black — the strongest under-tabs line */
-      --paper: #ffffff;          /* card surface */
-      /* CANVAS-IVORY (37-APPLY): was #f6f8fb (cool blue-white). The design
-         target's page ground is a warm ivory; this is the single page-
-         background token — cards (--paper), the sidebar and the dark map
-         card (--ink) all sit on it unchanged. NOTE: web/claim.html and
-         web/weekly.html carry hand-copied token blocks that still say
-         #f6f8fb — recorded divergence, to be aligned in their own task. */
-      --canvas: #f5f5f2;         /* page background */
-      --brand: #1e5fd8;          /* tickedin blue (consolidates the 3 prior blues) */
-      --brand-ink: #1542a0;      /* darker blue: hover / links / eyebrows */
-      --verify: #0e9f6e;         /* verification green — the ✓ signature */
-      --verify-soft: #e7f6ef;    /* green tint for verified emphasis */
+      /* 58-APPLY token layer — the delivered visual system, sections 01 COLOUR /
+         02 SPACING / 03 TYPE. Warm ink ramp, recalibrated accent, one recessed
+         well. Old names are re-pointed so untouched rules keep working. */
+      --ink: #1e1e1b;            /* ink-900 — titles, figures, primary text (15.3:1 on ground) */
+      --slate: #45453e;          /* ink-700 — body, table cells, secondary values (8.9:1) */
+      --muted: #6b6b62;          /* ink-500 — meta, captions, axis labels (4.9:1, clears 4.5) */
+      --ink-400: #8a8a80;        /* NON-TEXT only: axis baselines, neutral glyphs — never words */
+      --line: #d9d8cf;           /* line-200 — card borders & region rules */
+      --line-100: #e8e7e0;       /* in-card hairlines */
+      --line-300: #c0bfb4;       /* input borders — the edges a hand touches */
+      --rule: var(--ink-400);    /* utility/search header lines (non-text) — warm, was cool #9ca3af */
+      --rule-strong: var(--ink); /* strongest under-tabs line — no pure black on ivory */
+      --paper: #fbfbf9;          /* surface — cards, inputs, chart panels; no pure white anywhere */
+      /* CANVAS-IVORY (37-APPLY), CONFIRMED by 01: page ground kept — "the
+         warmth is the product's temperature; white read colder". NOTE:
+         web/claim.html and web/weekly.html carry hand-copied token blocks
+         (still cool) — recorded divergence, aligned in their own pass. */
+      --canvas: #f5f5f2;         /* page ground, kept */
+      --well: #edece6;           /* ONE recessed tone for recorded state — never per-value tints */
+      --dark-field: #161a21;     /* the connection-map card only — the single illustrative field */
+      --df-text: #eceae4;        /* dark-field text (12.9:1) */
+      --df-meta: #b9beb8;        /* dark-field meta (7.6:1) */
+      --df-link: #a9c0ec;        /* dark-field links */
+      --df-node: #8fa5d4;        /* constellation nodes; lines at 38% of this */
+      --brand: #1f4fa8;          /* accent — actionable or the data mark, never a state (7.0:1);
+                                    was #1e5fd8 ("a consumer-app blue; at today's volume it argues") */
+      --brand-ink: #173e88;      /* press — hover/pressed accent (9.4:1) */
+      --tint: #e4e9f4;           /* identity fill ONLY (the row that IS this claim), never endorsement */
+      --verify: #1b7a41;         /* doc-green — the ✓ beside 공식 근거 확인 and nowhere else (4.9:1);
+                                    a fact about a document, not a verdict */
+      --verify-soft: var(--well);/* 01: green is never a fill — the former green tint is now the well */
       --shadow: 0 8px 24px rgba(15, 23, 42, 0.06);  /* softened */
       --radius: 12px;
       --radius-sm: 9px;
 
+      /* 02 SPACING — 4px base, ten steps; one 1200px grid = main 792 + gutter
+         48 + rail 360. Defined here for consuming passes; geometry itself is
+         deliberately untouched in the token pass. */
+      --sp-1: 4px;   /* glyph→label gap, chip padding-y */
+      --sp-2: 8px;   /* label→value, gaps inside chip rows */
+      --sp-3: 12px;  /* intra-block gaps, chip padding-x, input padding */
+      --sp-4: 16px;  /* stat label→figure, sidebar block padding-y */
+      --sp-5: 20px;  /* list-row vertical padding (the scan rhythm) */
+      --sp-6: 24px;  /* card padding, grid gutters, nav tab gaps */
+      --sp-7: 32px;  /* section-card padding, chart→caption */
+      --sp-8: 40px;  /* masthead→content, footer padding */
+      --sp-9: 56px;  /* between page regions */
+      --sp-10: 80px; /* method-page breath, page bottom margin */
+      --container: 1200px;
+      --col-main: 792px;
+      --gutter: 48px;
+      --rail: 360px;
+
+      /* 03 TYPE — stacks as tokens; the scale (figure-xl 40/700/44 …
+         micro 11.5/500/16, date 13/500/20 mono) is applied per-component in
+         the surface passes, not by blanket rewrite here. */
+      --font-sans: system-ui, -apple-system, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif;
+      --font-mono: ui-monospace, 'SF Mono', Consolas, monospace;
+
       /* Backward-compat aliases — existing rules reference these names. */
       --bg: var(--canvas);
       --surface: var(--paper);
-      --surface-soft: #f8fafc;
+      --surface-soft: var(--well);
       --border: var(--line);
-      --text: #1f2937;
+      --text: var(--slate);
       --blue: var(--brand);
       --blue-dark: var(--brand-ink);
-      --dark: #374151;
-      --dark-hover: #111827;
+      --dark: #45453e;
+      --dark-hover: #1e1e1b;
       --red: #dc2626;
       --orange: #f59e0b;
-      --gray: #6b7280;
+      --gray: var(--muted);
     }
 
     * {
@@ -88,7 +123,10 @@
 
     body {
       margin: 0;
-      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', system-ui, sans-serif;
+      /* 58-APPLY (03 TYPE): the specified system stack replaces the Pretendard
+         webfont — "a machine-recorded feel"; Korean falls to Apple SD Gothic
+         Neo / Malgun Gothic / Noto Sans KR per platform. */
+      font-family: var(--font-sans);
       background: var(--bg);
       color: var(--text);
       /* DESIGN-3A4.5: clip the 1px the full-bleed 100vw header line can exceed the
@@ -520,7 +558,7 @@
     .recent-head h2,
     .latest-checks-head h2,
     .rank-panel-heading h2 {
-      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', system-ui, sans-serif;
+      font-family: var(--font-sans); /* 58-APPLY: heading group follows the body stack token */
     }
     /* DESIGN-C3g: the brand wordmark (+ the footer brand via the shared .brand
        class) reverts to the prior Noto Serif KR; all the other headings above stay
@@ -669,7 +707,9 @@
     }
 
     .status-line.success {
-      color: #047857;
+      /* 58-APPLY (01 ★NEUTRALISED): the loaded-result notice was green — "a
+         green notice is colour asserting quality". Set in ink instead. */
+      color: var(--ink);
     }
 
     /*
@@ -1966,7 +2006,9 @@
     /* LABEL-1b STEP 4: semantic number colors matching the legend/card labels.
        Numbers only — the .stat-label captions stay muted. */
     #statTotal { color: var(--brand); }      /* 총검증 — blue (the total) */
-    #statOfficial { color: var(--verify); }  /* 공식확인 — green (matches 공식 근거 확인) */
+    /* 58-APPLY (01 ★NEUTRALISED): the 공식확인 count is set in ink — "a green
+       numeral is colour asserting quality, outside the one permitted glyph". */
+    #statOfficial { color: var(--ink); }
     #statDraft { color: var(--slate); }       /* AI 초안 — muted slate (draft/unverified) */
     .stat-label {
       margin-top: 4px;
@@ -2131,8 +2173,10 @@
       margin-top: 24px;
     }
     .brainmap-home-card {
-      background: var(--ink);
-      color: var(--paper);
+      /* 58-APPLY (01): the single illustrative dark field gets its own ground
+         (#161a21) and companion text — no longer borrowed from the ink token. */
+      background: var(--dark-field);
+      color: var(--df-text);
       border-radius: var(--radius);
       padding: 28px 32px;
       position: relative;
@@ -2151,7 +2195,9 @@
        load — and the counts (14 dots, 8 lines) match nothing in the real
        graph (14k+ nodes, 1k+ clusters); low opacity, pointer-events none,
        invisible to assistive tech — nothing a reader could count or read as
-       a measurement. Colours are token-derived via color-mix (no new hex).
+       a measurement. 58-APPLY (01): nodes are the flat dark-field companion
+       --df-node and the hairlines --df-node at 38% (spec rgba(143,165,212,.38))
+       — desaturated so the one decoration stays quiet; still token-derived.
        Hidden at <=960px so the text is never overlapped or squeezed. */
     .brainmap-home-card::before {
       content: "";
@@ -2163,23 +2209,23 @@
       pointer-events: none;
       background-image:
         /* cluster 1 (left) */
-        radial-gradient(circle 4px at 40px 36px, color-mix(in srgb, var(--paper) 34%, transparent) 97%, transparent),
-        radial-gradient(circle 2.5px at 66px 54px, color-mix(in srgb, var(--paper) 28%, transparent) 97%, transparent),
-        radial-gradient(circle 2px at 52px 72px, color-mix(in srgb, var(--paper) 24%, transparent) 97%, transparent),
+        radial-gradient(circle 4px at 40px 36px, var(--df-node) 97%, transparent),
+        radial-gradient(circle 2.5px at 66px 54px, var(--df-node) 97%, transparent),
+        radial-gradient(circle 2px at 52px 72px, var(--df-node) 97%, transparent),
         /* cluster 2 (centre, brand hub) */
-        radial-gradient(circle 3px at 186px 62px, color-mix(in srgb, var(--paper) 30%, transparent) 97%, transparent),
-        radial-gradient(circle 5px at 214px 84px, color-mix(in srgb, var(--brand) 55%, transparent) 97%, transparent),
-        radial-gradient(circle 2.5px at 240px 102px, color-mix(in srgb, var(--paper) 26%, transparent) 97%, transparent),
-        radial-gradient(circle 2px at 196px 110px, color-mix(in srgb, var(--paper) 24%, transparent) 97%, transparent),
+        radial-gradient(circle 3px at 186px 62px, var(--df-node) 97%, transparent),
+        radial-gradient(circle 5px at 214px 84px, var(--df-node) 97%, transparent),
+        radial-gradient(circle 2.5px at 240px 102px, var(--df-node) 97%, transparent),
+        radial-gradient(circle 2px at 196px 110px, var(--df-node) 97%, transparent),
         /* cluster 3 (upper right) */
-        radial-gradient(circle 2px at 288px 26px, color-mix(in srgb, var(--paper) 24%, transparent) 97%, transparent),
-        radial-gradient(circle 3px at 306px 44px, color-mix(in srgb, var(--paper) 30%, transparent) 97%, transparent),
-        radial-gradient(circle 2px at 330px 60px, color-mix(in srgb, var(--paper) 22%, transparent) 97%, transparent),
+        radial-gradient(circle 2px at 288px 26px, var(--df-node) 97%, transparent),
+        radial-gradient(circle 3px at 306px 44px, var(--df-node) 97%, transparent),
+        radial-gradient(circle 2px at 330px 60px, var(--df-node) 97%, transparent),
         /* loose dots */
-        radial-gradient(circle 4px at 130px 118px, color-mix(in srgb, var(--brand) 45%, transparent) 97%, transparent),
-        radial-gradient(circle 2px at 96px 140px, color-mix(in srgb, var(--paper) 22%, transparent) 97%, transparent),
-        radial-gradient(circle 2.5px at 158px 30px, color-mix(in srgb, var(--paper) 26%, transparent) 97%, transparent),
-        radial-gradient(circle 2px at 26px 96px, color-mix(in srgb, var(--paper) 24%, transparent) 97%, transparent);
+        radial-gradient(circle 4px at 130px 118px, var(--df-node) 97%, transparent),
+        radial-gradient(circle 2px at 96px 140px, var(--df-node) 97%, transparent),
+        radial-gradient(circle 2.5px at 158px 30px, var(--df-node) 97%, transparent),
+        radial-gradient(circle 2px at 26px 96px, var(--df-node) 97%, transparent);
       background-repeat: no-repeat;
     }
     /* The hairlines. Each background box's corners ARE two dot centres; the
@@ -2195,14 +2241,14 @@
       width: 360px;
       pointer-events: none;
       background-image:
-        linear-gradient(to top right,    transparent calc(50% - 1px), color-mix(in srgb, var(--paper) 13%, transparent) calc(50% - 1px), color-mix(in srgb, var(--paper) 13%, transparent) calc(50% + 1px), transparent calc(50% + 1px)),
-        linear-gradient(to bottom right, transparent calc(50% - 1px), color-mix(in srgb, var(--paper) 13%, transparent) calc(50% - 1px), color-mix(in srgb, var(--paper) 13%, transparent) calc(50% + 1px), transparent calc(50% + 1px)),
-        linear-gradient(to top right,    transparent calc(50% - 1px), color-mix(in srgb, var(--paper) 13%, transparent) calc(50% - 1px), color-mix(in srgb, var(--paper) 13%, transparent) calc(50% + 1px), transparent calc(50% + 1px)),
-        linear-gradient(to top right,    transparent calc(50% - 1px), color-mix(in srgb, var(--paper) 13%, transparent) calc(50% - 1px), color-mix(in srgb, var(--paper) 13%, transparent) calc(50% + 1px), transparent calc(50% + 1px)),
-        linear-gradient(to bottom right, transparent calc(50% - 1px), color-mix(in srgb, var(--paper) 13%, transparent) calc(50% - 1px), color-mix(in srgb, var(--paper) 13%, transparent) calc(50% + 1px), transparent calc(50% + 1px)),
-        linear-gradient(to top right,    transparent calc(50% - 1px), color-mix(in srgb, var(--paper) 13%, transparent) calc(50% - 1px), color-mix(in srgb, var(--paper) 13%, transparent) calc(50% + 1px), transparent calc(50% + 1px)),
-        linear-gradient(to top right,    transparent calc(50% - 1px), color-mix(in srgb, var(--paper) 13%, transparent) calc(50% - 1px), color-mix(in srgb, var(--paper) 13%, transparent) calc(50% + 1px), transparent calc(50% + 1px)),
-        linear-gradient(to bottom right, transparent calc(50% - 1px), color-mix(in srgb, var(--paper) 9%, transparent) calc(50% - 1px), color-mix(in srgb, var(--paper) 9%, transparent) calc(50% + 1px), transparent calc(50% + 1px));
+        linear-gradient(to top right,    transparent calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% + 1px), transparent calc(50% + 1px)),
+        linear-gradient(to bottom right, transparent calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% + 1px), transparent calc(50% + 1px)),
+        linear-gradient(to top right,    transparent calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% + 1px), transparent calc(50% + 1px)),
+        linear-gradient(to top right,    transparent calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% + 1px), transparent calc(50% + 1px)),
+        linear-gradient(to bottom right, transparent calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% + 1px), transparent calc(50% + 1px)),
+        linear-gradient(to top right,    transparent calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% + 1px), transparent calc(50% + 1px)),
+        linear-gradient(to top right,    transparent calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% + 1px), transparent calc(50% + 1px)),
+        linear-gradient(to bottom right, transparent calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% + 1px), transparent calc(50% + 1px));
       background-position:
         40px 36px,   /* (40,36)-(66,54) */
         52px 54px,   /* (52,72)-(66,54) */
@@ -2245,7 +2291,7 @@
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      color: var(--paper);
+      color: var(--df-link); /* 58-APPLY (01): dark-field link companion */
       font-size: 0.923rem;
       font-weight: 700;
       text-decoration: none;
@@ -2634,7 +2680,7 @@
       line-height: 1.3;
       letter-spacing: 0;
       font-weight: 500;   /* FONT-WEIGHT-FIX-2: was browser-default 700 */
-      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', system-ui, sans-serif;
+      font-family: var(--font-sans);
     }
 
     .methodology-card h2 {
@@ -4063,7 +4109,7 @@
       margin: 2px 0 4px;
       color: #64748b;
       font-size: 11px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-family: var(--font-mono);
     }
     .server-review-history-audit span {
       background: #f1f5f9;
@@ -4150,7 +4196,7 @@
       background: var(--ink);
       color: var(--line);
       border-radius: 8px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-family: var(--font-mono);
       font-size: 11px;
       line-height: 1.5;
       max-height: 360px;
