@@ -58,6 +58,24 @@
          the surface passes, not by blanket rewrite here. */
       --font-sans: system-ui, -apple-system, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif;
       --font-mono: ui-monospace, 'SF Mono', Consolas, monospace;
+      /* 59-APPLY: the 03 TYPE scale as size tokens, consumed per component.
+         Steps (size / weight / line-height per spec): figure-xl 40/700/44 ·
+         figure-l 28/700/34 · figure-m 20/700/26 · title-xl 32/600/44 ·
+         title-l 24/600/36 · head 18/700/26 · title-s 17/600/26 ·
+         value 15/600/22 · body 15/400/26 · meta 13/400/20 · micro 11.5/500/16.
+         Existing unitless line-heights are kept (they scale with the new
+         sizes); the spec's absolute line-heights land with the grid pass. */
+      --fs-figure-xl: 40px;
+      --fs-figure-l: 28px;
+      --fs-figure-m: 20px;
+      --fs-title-xl: 32px;
+      --fs-title-l: 24px;
+      --fs-head: 18px;
+      --fs-title-s: 17px;
+      --fs-value: 15px;
+      --fs-body: 15px;
+      --fs-meta: 13px;
+      --fs-micro: 11.5px;
 
       /* Backward-compat aliases — existing rules reference these names. */
       --bg: var(--canvas);
@@ -101,6 +119,14 @@
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
       text-rendering: optimizeLegibility;
+      /* 59-APPLY (03: "word-break:keep-all everywhere"): with the system stack's
+         wider glyphs, default CJK breaking split numbers from their unit
+         (1만700 / 원). keep-all breaks Korean at spaces/phrase boundaries only;
+         break-word (not `anywhere`) is the emergency fallback so an unbreakable
+         token wraps instead of overflowing without changing min-content sizing.
+         Both inherit; mono/debug blocks keep their own explicit overrides. */
+      word-break: keep-all;
+      overflow-wrap: break-word;
     }
 
     .page {
@@ -138,7 +164,7 @@
       position: relative;
       padding: 4px 0 8px;
       margin-bottom: 10px;
-      font-size: 0.95rem;
+      font-size: var(--fs-meta);
     }
     /* DESIGN-3A4.7: grey DOTTED rule below the utility bar, now FULL-BLEED (100vw)
        like the other header rules (was content-width). overflow-x:hidden safe. */
@@ -251,18 +277,18 @@
       flex: 0 0 auto;
     }
     .domain-tabs-row .hot-topics-sort-label {
-      font-size: 0.923rem;
+      font-size: var(--fs-meta);
     }
     /* DESIGN-C3g: match the new base select style (button look + caret room);
        no longer overrides font-size/padding down to the old compact values. */
     .domain-tabs-row .hot-topics-sort-select {
       min-height: 30px;
-      font-size: 0.92rem;
+      font-size: var(--fs-meta);
       padding: 6px 30px 6px 12px;
     }
     .grade-guide-link {
       color: var(--brand);
-      font-size: 0.923rem;
+      font-size: var(--fs-meta);
       font-weight: 650;
       text-decoration: none;
       white-space: nowrap;
@@ -406,7 +432,7 @@
     /* De-emphasize the inline labels (the placeholder carries the cue); kept in
        the DOM for a11y — for/id unchanged. */
     .topbar .panel label {
-      font-size: 0.7rem;
+      font-size: var(--fs-micro);
       font-weight: 600;
       margin-bottom: 2px;
       color: var(--muted);
@@ -451,7 +477,7 @@
     }
     /* DESIGN-3A5: 최근 분석 불러오기 = near-black + white; hover slightly lighter. */
     .topbar .panel #historyBtn {
-      font-size: 0.92rem;
+      font-size: var(--fs-meta);
       padding: 0 12px;
       background: var(--ink);
       color: #fff;
@@ -549,7 +575,7 @@
     .subtitle {
       margin: 8px 0 0;
       color: var(--muted);
-      font-size: 1.08rem;
+      font-size: var(--fs-value);
     }
 
     /* DESIGN-3A2: nav.header-links ("검증 기준 보기 / 뉴스 연결망 보기") was removed
@@ -608,7 +634,7 @@
       border-radius: 8px;
       padding: 10px 16px;
       color: white;
-      font-size: 1.077rem;
+      font-size: var(--fs-value);
       font-weight: 800;
       cursor: pointer;
       transition: background 120ms ease, opacity 120ms ease;
@@ -734,7 +760,7 @@
 
     .v2-progress-text {
       color: var(--muted);
-      font-size: 12px;
+      font-size: var(--fs-meta);
       font-weight: 400;
     }
 
@@ -813,7 +839,7 @@
 
     .report-actions-title {
       color: var(--slate);
-      font-size: 0.86rem;
+      font-size: var(--fs-micro);
       font-weight: 700;
     }
 
@@ -831,7 +857,7 @@
       background: var(--paper);
       color: var(--slate);
       padding: 6px 11px;
-      font-size: 0.8rem;
+      font-size: var(--fs-micro);
       font-weight: 700;
     }
 
@@ -869,7 +895,7 @@
       border-radius: 999px;
       padding: 4px 10px;
       color: white;
-      font-size: 0.923rem;
+      font-size: var(--fs-meta);
       font-weight: 700;
       line-height: 1;
       white-space: nowrap;
@@ -893,7 +919,7 @@
     .ai-status-error { background: #b45309; }
     .ai-status-note {
       margin-top: 6px;
-      font-size: 12px;
+      font-size: var(--fs-meta);
       color: var(--slate);
       line-height: 1.4;
     }
@@ -902,7 +928,7 @@
        Matches the home's small label scale; the status class tints only the TEXT.
        The two-class selectors override the solid-bg .ai-status-* rules above. */
     .ai-status-tag {
-      font-size: 0.72rem;
+      font-size: var(--fs-micro);
       font-weight: 800;
       letter-spacing: 0.01em;
     }
@@ -915,7 +941,7 @@
     .result-title {
       margin: 0 0 14px;
       color: var(--ink);
-      font-size: 1.5rem;
+      font-size: var(--fs-title-l);
       line-height: 1.3;
       font-weight: 700;
     }
@@ -1031,14 +1057,18 @@
     .spread-fact-label {
       display: block;
       color: var(--slate);
-      font-size: 12px;
+      font-size: var(--fs-meta);
       font-weight: 700;
       margin-bottom: 4px;
+      /* 59-APPLY: the label broke at its last space (전체 확산 매체 / 수).
+         balance keeps the same line count but evens the lines, so a lone
+         particle never sits alone on the second line. */
+      text-wrap: balance;
     }
     .spread-fact-value {
       display: block;
       color: var(--ink);
-      font-size: 16px;
+      font-size: var(--fs-figure-m);
       font-weight: 700;
       line-height: 1.35;
       font-variant-numeric: tabular-nums;
@@ -1046,7 +1076,7 @@
     }
     .spread-facts-note {
       color: var(--muted);
-      font-size: 12px;
+      font-size: var(--fs-meta);
       margin: 4px 0 10px;
     }
     /* DETAIL-CHARTS (51-APPLY): the detail's two charts share one row —
@@ -1084,7 +1114,7 @@
     .verdict-label {
       display: block;
       color: var(--slate);
-      font-size: 12px;
+      font-size: var(--fs-meta);
       font-weight: 700;
       margin-bottom: 4px;
     }
@@ -1103,7 +1133,7 @@
     .verdict-note {
       display: block;
       color: var(--slate);
-      font-size: 11px;
+      font-size: var(--fs-micro);
       font-weight: 500;
       line-height: 1.4;
       margin-top: 4px;
@@ -1118,7 +1148,7 @@
     .verdict-reasoning h3 {
       margin: 0 0 10px;
       color: var(--ink);
-      font-size: 1.231rem;
+      font-size: var(--fs-title-s);
       line-height: 1.3;
       font-weight: 700;
     }
@@ -1128,7 +1158,7 @@
       margin: 0;
       padding-left: 18px;
       color: var(--slate);
-      font-size: 0.923rem;
+      font-size: var(--fs-meta);
       line-height: 1.65;
     }
 
@@ -1318,7 +1348,7 @@
     .score-explain {
       margin-top: 6px;
       color: var(--gray);
-      font-size: 12px;
+      font-size: var(--fs-meta);
       line-height: 1.45;
     }
 
@@ -1332,7 +1362,7 @@
 
     .takeaway-title {
       color: #1e3a8a;
-      font-size: 16px;
+      font-size: var(--fs-title-s);
       font-weight: 900;
       margin-bottom: 8px;
     }
@@ -1341,7 +1371,7 @@
       margin: 0;
       padding-left: 18px;
       color: var(--text);
-      font-size: 14px;
+      font-size: var(--fs-value);
       line-height: 1.65;
     }
 
@@ -1361,7 +1391,7 @@
 
     .reading-guide-title {
       color: #065f46;
-      font-size: 16px;
+      font-size: var(--fs-title-s);
       font-weight: 900;
     }
 
@@ -1407,7 +1437,7 @@
     .plain-section h4 {
       margin: 0 0 8px;
       color: var(--ink);
-      font-size: 1.05rem;
+      font-size: var(--fs-value);
       font-weight: 700;
     }
 
@@ -1415,7 +1445,7 @@
       margin: 0;
       padding-left: 18px;
       color: var(--slate);
-      font-size: 0.923rem;
+      font-size: var(--fs-meta);
       line-height: 1.6;
     }
 
@@ -1426,7 +1456,7 @@
       margin: 16px 0;
       padding: 12px 0 0;
       color: var(--slate);
-      font-size: 14px;
+      font-size: var(--fs-value);
       line-height: 1.55;
     }
 
@@ -1459,7 +1489,7 @@
     .news-section-title {
       margin: 20px 0 8px;
       color: var(--ink);
-      font-size: 1.05rem;
+      font-size: var(--fs-value);
       font-weight: 700;
     }
 
@@ -1472,7 +1502,7 @@
 
     .public-eyebrow {
       color: var(--brand);
-      font-size: 0.923rem;
+      font-size: var(--fs-meta);
       font-weight: 700;
       letter-spacing: 0.02em;
       margin-bottom: 8px;
@@ -1516,7 +1546,7 @@
       background: none;
       color: var(--slate);
       padding: 8px 2px;
-      font-size: 1.08rem;
+      font-size: var(--fs-value);
       font-weight: 600;
     }
 
@@ -1557,7 +1587,7 @@
       background-color: var(--paper);
       color: var(--brand);
       padding: 6px 30px 6px 12px;
-      font-size: 0.92rem;
+      font-size: var(--fs-meta);
       font-weight: 600;
       cursor: pointer;
       appearance: none;
@@ -1618,7 +1648,7 @@
        the centred boxes put the text on one line. Scoped to .feed-sort-row:
        the tabs-row sort variant and other .public-eyebrow uses are untouched. */
     .feed-sort-row .hot-topics-sort-label {
-      font-size: 0.923rem;
+      font-size: var(--fs-meta);
       margin-bottom: 0;
       /* At 390px the flex squeeze wrapped the 2-char label into a vertical
          1-char column (pre-existing). Keep it on one line; the basis text is
@@ -1626,7 +1656,7 @@
       white-space: nowrap;
     }
     .feed-sort-row #feedSortBasis {
-      font-size: 0.92rem;
+      font-size: var(--fs-meta);
       margin-bottom: 0;
     }
 
@@ -1674,7 +1704,7 @@
       border: 1px solid var(--line);
       border-radius: var(--radius-sm);
       padding: 8px 16px;
-      font-size: 0.92rem;
+      font-size: var(--fs-meta);
       font-weight: 600;
     }
     .hot-topics-load-more:hover:not(:disabled) {
@@ -1703,7 +1733,7 @@
       color: var(--brand);
       border: 1px solid var(--line);
       border-radius: var(--radius-sm);
-      font-size: 0.92rem;
+      font-size: var(--fs-meta);
       font-weight: 600;
       line-height: 1;
       cursor: pointer;
@@ -1766,14 +1796,14 @@
     .rank-panel-heading h2 {
       margin: 0;
       color: var(--ink);
-      font-size: 1.231rem;
+      font-size: var(--fs-head);
       line-height: 1.25;
       font-weight: 500;   /* FONT-WEIGHT-FIX-2: sidebar headings lighter still */
     }
     .rank-panel-heading p {
       margin: 3px 0 0;
       color: var(--muted);
-      font-size: 0.86rem;
+      font-size: var(--fs-micro);
       line-height: 1.4;
     }
     .rank-list {
@@ -1822,7 +1852,7 @@
     }
     /* mirrors the .card-domain look (small brand-colored domain tag). */
     .rank-domain {
-      font-size: 0.846rem;
+      font-size: var(--fs-micro);
       font-weight: 800;
       letter-spacing: 0.01em;
       color: var(--brand);
@@ -1830,13 +1860,16 @@
     /* title clamped to 2 lines, mirroring .topic-card-title. */
     .rank-title {
       color: var(--ink);
-      font-size: 1.02rem;
+      font-size: var(--fs-value);
       line-height: 1.4;
       font-weight: 600;
       display: -webkit-box;
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
       overflow: hidden;
+      /* 59-APPLY: keep-all (inherited) stops mid-word breaks; balance evens
+         the two clamped lines without changing the line count. */
+      text-wrap: balance;
     }
     /* SPREAD-GRAPH-POLISH A5: the 확산 성장 Top5 title is an <a> (the 인기 랭킹 title
        is a <span>), so the global a:hover underline (above) added an extra underline
@@ -1850,7 +1883,7 @@
       display: flex;
       align-items: center;
       gap: 6px;
-      font-size: 0.846rem;
+      font-size: var(--fs-micro);
     }
     .rank-verdict-text {
       color: var(--slate);
@@ -1869,7 +1902,7 @@
       border-top: 1px solid var(--line);
     }
     .recent-viewed-heading {
-      font-size: 0.98rem;
+      font-size: var(--fs-meta);
       font-weight: 700;
       color: var(--ink);
       margin-bottom: 10px;
@@ -1963,7 +1996,7 @@
     }
     .stat-num {
       color: var(--ink);
-      font-size: 1.692rem;
+      font-size: var(--fs-figure-l);
       font-weight: 900;
       line-height: 1.1;
     }
@@ -1977,7 +2010,7 @@
     .stat-label {
       margin-top: 4px;
       color: var(--muted);
-      font-size: 0.8rem;
+      font-size: var(--fs-micro);
       font-weight: 700;
     }
 
@@ -2011,7 +2044,7 @@
     .legend-group-head {
       list-style: none;
       color: var(--muted);
-      font-size: 0.72rem;
+      font-size: var(--fs-micro);
       font-weight: 800;
       letter-spacing: 0.04em;
       text-transform: uppercase;
@@ -2030,7 +2063,7 @@
       border-radius: 4px;
       background: var(--verify-soft);
       color: var(--verify);
-      font-size: 0.68rem;
+      font-size: var(--fs-micro);
       font-weight: 900;
       line-height: 1;
       display: inline-flex;
@@ -2045,12 +2078,12 @@
     }
     .legend-label {
       color: var(--ink);
-      font-size: 0.923rem;
+      font-size: var(--fs-meta);
       font-weight: 700;
     }
     .legend-desc {
       color: var(--slate);
-      font-size: 0.8rem;
+      font-size: var(--fs-micro);
       line-height: 1.4;
     }
     /* GRADE-STATUS-PAGE: the sidebar keeps only a 2-row taster; this link opens the
@@ -2060,7 +2093,7 @@
       display: inline-block;
       margin-top: 12px;
       color: var(--muted);
-      font-size: 0.846rem;
+      font-size: var(--fs-micro);
       font-weight: 600;
     }
     .legend-more-link:hover {
@@ -2086,7 +2119,7 @@
       flex: 1 1 auto;
       min-width: 0;
       min-height: 36px;
-      font-size: 0.95rem;
+      font-size: var(--fs-meta);
       border: 1px solid var(--line);
       border-radius: var(--radius-sm);
       padding: 8px 12px;
@@ -2101,7 +2134,7 @@
     .report-contact-note {
       margin-top: 8px;
       color: var(--muted);
-      font-size: 0.8rem;
+      font-size: var(--fs-micro);
     }
 
     /* DESIGN-3A: feed sort control row — REMOVED in DESIGN-C2c (the sort control
@@ -2240,14 +2273,14 @@
       }
     }
     .brainmap-home-title {
-      font-size: 1.154rem;
+      font-size: var(--fs-title-s);
       font-weight: 700;
       margin-bottom: 8px;
     }
     .brainmap-home-desc {
       margin: 0 0 16px;
       max-width: 640px;
-      font-size: 0.923rem;
+      font-size: var(--fs-meta);
       line-height: 1.6;
       opacity: 0.78;
     }
@@ -2256,7 +2289,7 @@
       align-items: center;
       gap: 6px;
       color: var(--df-link); /* 58-APPLY (01): dark-field link companion */
-      font-size: 0.923rem;
+      font-size: var(--fs-meta);
       font-weight: 700;
       text-decoration: none;
     }
@@ -2280,7 +2313,7 @@
     .verify-how-head h2 {
       margin: 0;
       color: var(--ink);
-      font-size: 1.38rem;
+      font-size: var(--fs-head);
       line-height: 1.25;
       font-weight: 500;   /* FONT-WEIGHT-FIX-2: 600 still read heavy in Pretendard */
     }
@@ -2292,14 +2325,14 @@
     .verify-how-sub {
       margin: 8px 0 0;
       color: var(--slate);
-      font-size: 0.875rem;
+      font-size: var(--fs-micro);
       line-height: 1.45;
     }
     /* V2: footer links are brand-colored (mockup #1d4ed8 → --brand), darker on
        hover (--brand-ink), site font inherited. */
     .verify-how-link {
       color: var(--brand);
-      font-size: 0.845rem;
+      font-size: var(--fs-micro);
       font-weight: 600;
       white-space: nowrap;
     }
@@ -2334,7 +2367,7 @@
     }
     .vhf-node-title {
       color: var(--ink);
-      font-size: 0.965rem;
+      font-size: var(--fs-meta);
       font-weight: 700;
       line-height: 1.4;
     }
@@ -2357,13 +2390,13 @@
     }
     .vhf-legend-label {
       color: var(--ink);
-      font-size: 0.845rem;
+      font-size: var(--fs-micro);
       font-weight: 700;
       text-align: right;
     }
     .vhf-legend-desc {
       color: var(--slate);
-      font-size: 0.82rem;
+      font-size: var(--fs-micro);
       line-height: 1.55;
       text-align: left;
     }
@@ -2431,7 +2464,7 @@
       padding: 2px 10px;
       background: var(--paper);
       color: var(--slate);
-      font-size: 0.8rem;
+      font-size: var(--fs-micro);
       font-weight: 700;
       letter-spacing: 0.08em;
     }
@@ -2442,7 +2475,7 @@
       padding: 0 10px;
       background: var(--paper);
       color: var(--muted);
-      font-size: 0.75rem;
+      font-size: var(--fs-micro);
     }
     .vhf-lane > .vhf-node {
       margin: 14px auto 0;
@@ -2459,7 +2492,7 @@
     .verify-how-stats {
       margin: 6px 0 0;
       color: var(--slate);
-      font-size: 0.845rem;
+      font-size: var(--fs-micro);
     }
     .verify-how-stat-num {
       color: var(--ink);
@@ -2467,7 +2500,7 @@
     }
     .verify-how-stats-note {
       color: var(--muted);
-      font-size: 0.78rem;
+      font-size: var(--fs-micro);
     }
 
     /* V2: centered go-deeper row (검증 방법 / 등급·상태 안내 / 연결지도) under a
@@ -2506,7 +2539,7 @@
     .recent-head h2 {
       margin: 0;
       color: var(--ink);
-      font-size: 1.308rem;
+      font-size: var(--fs-head);
       line-height: 1.25;
       font-weight: 500;   /* FONT-WEIGHT-FIX-2: 600 still read heavy in Pretendard */
     }
@@ -2536,14 +2569,14 @@
     .corrections-head h2 {
       margin: 0;
       color: var(--ink);
-      font-size: 1.308rem;
+      font-size: var(--fs-head);
       line-height: 1.25;
       font-weight: 500;   /* FONT-WEIGHT-FIX-2: 600 still read heavy in Pretendard */
     }
     .corrections-sub {
       margin: 0;
       color: var(--muted);
-      font-size: 0.92rem;
+      font-size: var(--fs-meta);
       line-height: 1.45;
     }
 
@@ -2558,7 +2591,7 @@
     .section-heading h2 {
       margin: 0;
       color: var(--ink);
-      font-size: 1.308rem;
+      font-size: var(--fs-head);
       line-height: 1.25;
       font-weight: 500;   /* FONT-WEIGHT-FIX-2: 600 still read heavy in Pretendard */
     }
@@ -2625,7 +2658,7 @@
       color: var(--brand-ink);
       text-transform: uppercase;
       letter-spacing: 0.08em;
-      font-size: 0.846rem;
+      font-size: var(--fs-micro);
       font-weight: 700;
       margin-bottom: 10px;
     }
@@ -2652,13 +2685,13 @@
     }
 
     .methodology-card h3 {
-      font-size: 1.231rem;
+      font-size: var(--fs-title-s);
     }
 
     .methodology-card p,
     .methodology-card li {
       color: var(--slate);
-      font-size: 1.077rem;
+      font-size: var(--fs-value);
       line-height: 1.65;
     }
 
@@ -2697,7 +2730,7 @@
     .methodology-definition strong {
       display: block;
       color: var(--ink);
-      font-size: 1.077rem;
+      font-size: var(--fs-value);
       font-weight: 700;
       line-height: 1.45;
     }
@@ -2827,7 +2860,7 @@
        Region-2 cards render through the unchanged .topic-card-grid rules. */
     .feed-region-heading {
       margin: 26px 0 12px;
-      font-size: 1.08rem;
+      font-size: var(--fs-value);
       font-weight: 700;
       color: var(--ink);
     }
@@ -2853,7 +2886,7 @@
       text-align: center;
     }
     .feed-spread-facts {
-      font-size: 0.82rem;
+      font-size: var(--fs-micro);
       color: var(--muted);
     }
     .feed-spread-body {
@@ -2912,6 +2945,9 @@
       font-size: 3.0rem;
       line-height: 1.2;
       -webkit-line-clamp: 3;
+      /* 59-APPLY: hero headlines fit their 3-line clamp; balance evens the
+         lines so a short trailing fragment never sits alone. */
+      text-wrap: balance;
       /* FONT-WEIGHT-FIX-2: the big hero headline is the LIGHTEST type on the page
          — at 3.0rem a regular weight still reads as dominant, and the extra weight
          was what made it look thick. Hero-scoped: the grid cards keep the 500
@@ -2934,7 +2970,7 @@
       font-size: 0.9rem;
     }
     .topic-card--hero .card-source-label {
-      font-size: 0.923rem;
+      font-size: var(--fs-meta);
     }
     /* HERO-RAIL (32-APPLY): the hero row's right half was simply not filled —
        the card spans the full content width but its text column ends at
@@ -2986,12 +3022,17 @@
       flex-direction: column;
     }
     .topic-card--hero .spread-fact-value {
-      font-size: 1.308rem;
+      /* 59-APPLY: spec puts hero stats at figure-xl 40; at 40 (and at 28,
+         measured) "80개 매체" wraps inside the existing fact slot, splitting
+         the numeral from its unit — the very break Change B removes. The
+         strip's geometry is out of scope this pass, so the hero facts sit at
+         figure-m 20 with the detail facts (peer figures share one size). */
+      font-size: var(--fs-figure-m);
       margin-top: auto;
     }
     .hero-spread-range {
       color: var(--slate);
-      font-size: 0.923rem;
+      font-size: var(--fs-meta);
     }
     .hero-spread-range .spread-facts-note {
       display: inline;
@@ -3069,7 +3110,7 @@
       transform: translateX(-50%);
       background: var(--ink);
       color: var(--paper);
-      font-size: 0.78rem;
+      font-size: var(--fs-micro);
       line-height: 1.5;
       font-variant-numeric: tabular-nums;
       padding: 2px 8px;
@@ -3125,13 +3166,13 @@
     .latest-checks-head h2 {
       margin: 0;
       color: var(--ink);
-      font-size: 1.308rem;
+      font-size: var(--fs-head);
       line-height: 1.25;
       font-weight: 500;   /* FONT-WEIGHT-FIX-2: 600 still read heavy in Pretendard */
     }
     .latest-checks-eyebrow {
       color: var(--muted);
-      font-size: 0.8rem;
+      font-size: var(--fs-micro);
       font-weight: 700;
       letter-spacing: 0.08em;
     }
@@ -3158,7 +3199,7 @@
     .topic-card-title {
       margin: 0;
       color: var(--ink);
-      font-size: 1.077rem;
+      font-size: var(--fs-title-s);
       line-height: 1.45;
       /* FONT-WEIGHT-FIX-2: base covers grid + secondary card titles. The LARGE
          3.0rem hero headline overrides this to 400 in .topic-card--hero below —
@@ -3172,24 +3213,29 @@
          English/ticker, URL, bracketed source tag) so it wraps instead of
          inflating the card's min-content width past the mobile viewport. Only
          engages when a token would otherwise overflow — normal Korean/latin
-         wrapping is unaffected; the line-clamp/ellipsis then works as intended. */
+         wrapping is unaffected; the line-clamp/ellipsis then works as intended.
+         59-APPLY: word-break:break-word removed — it re-enabled mid-syllable
+         breaking and split numbers from units; the inherited keep-all now
+         governs normal breaks while overflow-wrap:anywhere keeps the
+         long-token emergency wrap. (text-wrap:balance is hero-scoped below —
+         on grid titles that overflow their 2-line clamp it could pull the
+         truncation point earlier.) */
       overflow-wrap: anywhere;
-      word-break: break-word;
     }
 
     /* HOMEPAGE-TIERED: summary returns on TIER-1 (detailed) cards only; concise
        TIER-2 cards omit it. Clamp keeps detailed cards tidy. */
     .topic-card-summary {
       color: var(--slate);
-      font-size: 0.923rem;
+      font-size: var(--fs-body);
       line-height: 1.55;
       display: -webkit-box;
       -webkit-line-clamp: 3;
       -webkit-box-orient: vertical;
       overflow: hidden;
-      /* MOBILE-OVERFLOW-FIX: same long-token wrap as .topic-card-title. */
+      /* MOBILE-OVERFLOW-FIX: same long-token wrap as .topic-card-title.
+         59-APPLY: break-word removed here too — inherited keep-all governs. */
       overflow-wrap: anywhere;
-      word-break: break-word;
     }
 
     .topic-card-meta {
@@ -3200,7 +3246,7 @@
       grid-template-columns: 1fr;
       gap: 8px;
       color: var(--slate);
-      font-size: 0.923rem;
+      font-size: var(--fs-meta);
     }
 
     .topic-card-meta div {
@@ -3216,14 +3262,14 @@
       background: var(--verify-soft);
       border-color: var(--line);
       color: var(--ink);
-      font-size: 1.231rem;
+      font-size: var(--fs-figure-m);
       font-weight: 700;
       line-height: 1.2;
     }
 
     .topic-card-meta div:first-child strong {
       display: block;
-      font-size: 0.923rem;
+      font-size: var(--fs-meta);
       font-weight: 600;
       color: var(--slate);
     }
@@ -3231,7 +3277,7 @@
     /* DESIGN-3B-1: editorial small-card face. The .topic-card-meta rules above are
        now unused (the 4 sub-boxes moved to the detail view) but kept harmless. */
     .card-domain {
-      font-size: 0.8rem;
+      font-size: var(--fs-micro);
       font-weight: 800;
       letter-spacing: 0.01em;
       /* DESIGN-C3h-2c: --brand → --brand-ink for a touch more contrast on white
@@ -3251,7 +3297,7 @@
        Tier 1 of the size hierarchy — size and weight only, colour unchanged. */
     .topic-card > .card-outlet-chip {
       display: block;
-      font-size: 1rem;
+      font-size: var(--fs-figure-m);
       font-weight: 700;
       margin: 0 0 6px;
     }
@@ -3263,16 +3309,16 @@
        so no card outranks another. :not(.card-outlet-chip) keeps the tier-2
        rule off the slot chip, which carries .card-domain for its colour. */
     .topic-card:not(.feed-spread-row):not(.topic-card--hero) .card-domain:not(.card-outlet-chip) {
-      font-size: 0.846rem;
+      font-size: var(--fs-micro);
       font-weight: 700;
     }
     .topic-card:not(.feed-spread-row):not(.topic-card--hero) .card-watch {
-      font-size: 0.8rem;
+      font-size: var(--fs-micro);
       font-weight: 600;
     }
     .topic-card:not(.feed-spread-row):not(.topic-card--hero) .card-today-badge,
     .topic-card:not(.feed-spread-row):not(.topic-card--hero) .card-fresh {
-      font-size: 0.8rem;
+      font-size: var(--fs-micro);
       font-weight: 600;
     }
     /* CARD-ICONS: thin-stroke DOMAIN line-icon (metadata only, never a verdict).
@@ -3317,7 +3363,7 @@
       display: inline-flex;
       align-items: center;
       gap: 4px;
-      font-size: 0.8rem;
+      font-size: var(--fs-micro);
       font-weight: 700;
       letter-spacing: 0.01em;
       padding: 2px 8px;
@@ -3338,7 +3384,7 @@
     .card-watch.alert-medium { background: #f1f5f9; color: var(--slate); }
     .card-watch.alert-low    { background: #f1f5f9; color: var(--slate); }
     .card-fresh {
-      font-size: 0.72rem;
+      font-size: var(--fs-micro);
       font-weight: 700;
       color: #c2410c;
     }
@@ -3355,7 +3401,7 @@
       background: var(--surface-soft);
       color: var(--slate);
       border-radius: 4px;
-      font-size: 0.72rem;
+      font-size: var(--fs-micro);
       font-weight: 700;
       letter-spacing: 0.01em;
       padding: 2px 8px;
@@ -3367,7 +3413,7 @@
       gap: 6px;
     }
     .topic-card-tag {
-      font-size: 0.8rem;
+      font-size: var(--fs-micro);
       font-weight: 600;
       color: var(--brand-ink);
       background: #eff6ff;
@@ -3380,7 +3426,7 @@
       align-items: center;
       gap: 8px;
       margin-top: 2px;
-      font-size: 0.846rem;
+      font-size: var(--fs-micro);
     }
     /* LABEL-1 STEP 3: verdict wrapped in a tinted pill on the CARD verdict band
        (renderTopicCardHtml only — the detail verdict block is untouched). Shares the
@@ -3392,7 +3438,7 @@
       gap: 4px;
       border-radius: 999px;
       padding: 2px 8px;
-      font-size: 0.8rem;
+      font-size: var(--fs-micro);
       font-weight: 700;
       line-height: 1.35;
       white-space: nowrap;
@@ -3416,14 +3462,14 @@
     .verdict-text {
       /* LABEL-1: inherit the pill tint (was 750/0.86rem/var(--ink)). */
       font-weight: 700;
-      font-size: 0.8rem;
+      font-size: var(--fs-micro);
       color: inherit;
     }
     .card-confidence {
       /* DESIGN-C3h-2c: --muted → --slate (one step darker grey) so 신뢰도 NN reads
          comfortably on white; still lighter than the --ink verdict label beside it. */
       color: var(--slate);
-      font-size: 0.8rem;
+      font-size: var(--fs-micro);
       font-weight: 600;
     }
     /* DESIGN-3B-1b: primary-source compare box (genuine cards only). Understated
@@ -3461,7 +3507,7 @@
       background: var(--verify-soft);
       border-radius: 999px;
       padding: 2px 8px;
-      font-size: 0.74rem;
+      font-size: var(--fs-micro);
       font-weight: 700;
       line-height: 1.35;
       white-space: nowrap;
@@ -3479,7 +3525,7 @@
       border-radius: 6px;
       background: var(--brand);
       color: #fff;
-      font-size: 0.77rem;
+      font-size: var(--fs-micro);
       font-weight: 800;
       display: inline-flex;
       align-items: center;
@@ -3488,7 +3534,7 @@
     .card-source-label {
       flex: 1 1 auto;
       min-width: 0;
-      font-size: 0.8rem;
+      font-size: var(--fs-micro);
       color: var(--slate);
       white-space: nowrap;
       overflow: hidden;
@@ -3512,7 +3558,7 @@
     .public-source-section h3 {
       margin: 0;
       color: var(--ink);
-      font-size: 1.25rem;
+      font-size: var(--fs-title-s);
       line-height: 1.3;
       font-weight: 700;
     }
@@ -3537,7 +3583,7 @@
 
     .public-source-card-title {
       color: var(--ink);
-      font-size: 14px;
+      font-size: var(--fs-value);
       font-weight: 900;
       line-height: 1.45;
       display: -webkit-box;
@@ -3549,7 +3595,7 @@
 
     .public-source-meta {
       color: var(--slate);
-      font-size: 12px;
+      font-size: var(--fs-meta);
       line-height: 1.5;
       margin-top: 8px;
       overflow-wrap: anywhere;
@@ -3561,7 +3607,7 @@
       border-radius: 999px;
       background: #e0f2fe;
       color: #075985;
-      font-size: 11px;
+      font-size: var(--fs-micro);
       font-weight: 900;
       padding: 4px 8px;
       margin-top: 8px;
@@ -3598,7 +3644,7 @@
       border-radius: 8px;
       background: #fff7ed;
       color: #9a3412;
-      font-size: 12px;
+      font-size: var(--fs-meta);
       line-height: 1.45;
     }
 
@@ -3667,7 +3713,7 @@
       background: #eff6ff;
       color: var(--brand);
       padding: 4px 8px;
-      font-size: 11px;
+      font-size: var(--fs-micro);
       font-weight: 900;
     }
 
@@ -3916,7 +3962,7 @@
       align-items: center;
       padding: 3px 8px;
       border-radius: 999px;
-      font-size: 11px;
+      font-size: var(--fs-micro);
       font-weight: 800;
       white-space: nowrap;
     }
@@ -4072,7 +4118,7 @@
       gap: 10px;
       margin: 2px 0 4px;
       color: #64748b;
-      font-size: 11px;
+      font-size: var(--fs-micro);
       font-family: var(--font-mono);
     }
     .server-review-history-audit span {
@@ -4161,7 +4207,7 @@
       color: var(--line);
       border-radius: 8px;
       font-family: var(--font-mono);
-      font-size: 11px;
+      font-size: var(--fs-micro);
       line-height: 1.5;
       max-height: 360px;
       overflow: auto;
@@ -4228,7 +4274,7 @@
       gap: 12px;
       border-top: 1px solid #e5e7eb;
       padding: 8px 0;
-      font-size: 14px;
+      font-size: var(--fs-value);
     }
 
     .detail-row:first-child {
@@ -4262,7 +4308,7 @@
     .verification-card h3 {
       margin: 0 0 10px;
       color: var(--ink);
-      font-size: 1.25rem;
+      font-size: var(--fs-title-s);
       line-height: 1.3;
       font-weight: 700;
     }
@@ -4328,7 +4374,7 @@
       padding: 12px 0;
       border-top: 1px solid var(--line);
       color: var(--ink);
-      font-size: 1rem;
+      font-size: var(--fs-value);
       font-weight: 700;
       line-height: 1.4;
       list-style-position: inside;
@@ -4436,13 +4482,13 @@
       min-width: 0;
       padding: 8px 0;
       border-top: 1px solid var(--line);
-      font-size: 0.923rem;
+      font-size: var(--fs-meta);
       line-height: 1.5;
     }
     .vrf-cell-label {
       color: var(--slate);
       font-weight: 700;
-      font-size: 0.846rem;
+      font-size: var(--fs-micro);
     }
     .vrf-cell-value {
       color: var(--ink);
@@ -4451,13 +4497,13 @@
     .vrf-empty {
       margin-top: 6px;
       color: var(--muted);
-      font-size: 0.86rem;
+      font-size: var(--fs-micro);
     }
     /* One-line collapsed per-claim row (반박·모순 / 프레이밍·편향). */
     .vrf-claim-line {
       color: var(--ink);
       font-weight: 700;
-      font-size: 0.923rem;
+      font-size: var(--fs-meta);
       line-height: 1.5;
       padding: 3px 0;
     }
@@ -4477,7 +4523,7 @@
       margin: 12px 0 2px;
       color: var(--slate);
       font-weight: 700;
-      font-size: 0.86rem;
+      font-size: var(--fs-micro);
     }
     /* DESIGN-DETAIL-5d FIX 4: each candidate is one ITEM — a stronger var(--rule-strong)
        rule (the home's section-divider weight) separates it from the next. */
@@ -4501,7 +4547,7 @@
       padding: 8px 0 8px 12px;
       color: var(--brand);
       font-weight: 700;
-      font-size: 1rem;
+      font-size: var(--fs-value);
       list-style-position: inside;
     }
     .vrf-cand-more-summary:hover {
@@ -4522,7 +4568,7 @@
     .collapsible-section .vrf-cand-summary {
       cursor: pointer;
       padding: 8px 0 8px 12px;
-      font-size: 1rem;
+      font-size: var(--fs-value);
       font-weight: 400;
       list-style: none;
     }
@@ -4552,7 +4598,7 @@
     .vrf-cand-excl {
       margin: 4px 0;
       color: var(--slate);
-      font-size: 0.82rem;
+      font-size: var(--fs-micro);
     }
     .vrf-cand-body .source-candidate-title {
       margin-bottom: 6px;
@@ -4697,7 +4743,7 @@
 
     .risk-flags {
       color: #b45309;
-      font-size: 12px;
+      font-size: var(--fs-meta);
       margin-top: 4px;
     }
 
@@ -4709,7 +4755,7 @@
 
     .pipeline-debug-title {
       color: var(--ink);
-      font-size: 1.05rem;
+      font-size: var(--fs-value);
       font-weight: 700;
       margin-bottom: 4px;
     }
@@ -4725,7 +4771,7 @@
       margin: 8px 0 0;
       padding-left: 18px;
       color: var(--slate);
-      font-size: 12px;
+      font-size: var(--fs-meta);
       line-height: 1.55;
     }
 
@@ -4934,7 +4980,7 @@
       margin: 10px 0 0;
       max-width: 420px;
       color: var(--muted);
-      font-size: 0.92rem;
+      font-size: var(--fs-meta);
       line-height: 1.6;
     }
     .footer-links {
@@ -4949,14 +4995,14 @@
     }
     .footer-col-head {
       color: var(--ink);
-      font-size: 0.8rem;
+      font-size: var(--fs-micro);
       font-weight: 800;
       letter-spacing: 0.02em;
       margin-bottom: 2px;
     }
     .footer-col a {
       color: var(--muted);
-      font-size: 0.92rem;
+      font-size: var(--fs-meta);
       line-height: 1.3;
       text-decoration: none;
     }
@@ -4969,7 +5015,7 @@
       padding-top: 16px;
       border-top: 1px solid var(--line);
       color: var(--muted);
-      font-size: 0.92rem;
+      font-size: var(--fs-meta);
       line-height: 1.65;
     }
     .footer-meta p {
@@ -4989,7 +5035,7 @@
     .footer-copy {
       margin: 0;
       color: var(--muted);
-      font-size: 0.86rem;
+      font-size: var(--fs-micro);
     }
     .footer-policy {
       display: flex;
@@ -4998,7 +5044,7 @@
     }
     .footer-policy a {
       color: var(--muted);
-      font-size: 0.86rem;
+      font-size: var(--fs-micro);
       text-decoration: none;
     }
     .footer-policy a:hover {
@@ -5042,7 +5088,7 @@
       padding: 12px 0;
       margin-top: 0;
       /* LABEL-1c STEP 1: calm the row text to the 정정·업데이트 tone (was 14px). */
-      font-size: 0.86rem;
+      font-size: var(--fs-micro);
       color: var(--slate);
       cursor: pointer;
       transition: background 120ms ease;
@@ -5073,7 +5119,7 @@
     .history-id {
       color: var(--muted);
       font-weight: 700;
-      font-size: 0.86rem;
+      font-size: var(--fs-micro);
     }
 
     .history-meta {
@@ -5086,7 +5132,7 @@
        (0.95rem/700/--ink), NOT the old heavy bold-tag look. Only the title <strong>
        (the .history-meta below carries no <strong>). */
     .history-row strong {
-      font-size: 0.95rem;
+      font-size: var(--fs-meta);
       font-weight: 700;
       color: var(--ink);
     }
@@ -5100,14 +5146,14 @@
        scoped to the recent-analyses rows only; the shared .review-status-badge used
        in the detail/reviewer UI keeps its louder style. */
     .history-row .current-badge {
-      font-size: 10.4px;
+      font-size: var(--fs-micro);
       font-weight: 700;
       padding: 2px 8px;
     }
     .history-meta .review-status-badge {
       background: var(--surface-soft);
       color: var(--muted);
-      font-size: 11px;
+      font-size: var(--fs-micro);
       font-weight: 700;
       padding: 2px 8px;
     }
@@ -5161,7 +5207,7 @@
       align-items: center;
       border-radius: 999px;
       padding: 4px 8px;
-      font-size: 0.846rem;
+      font-size: var(--fs-micro);
       font-weight: 900;
       white-space: nowrap;
     }
@@ -5178,7 +5224,7 @@
          via .review-status). Green fill/text preserved. */
       border-radius: 999px;
       padding: 2px 8px;
-      font-size: 0.74rem;
+      font-size: var(--fs-micro);
       font-weight: 700;
       gap: 4px;
       line-height: 1.35;
@@ -5213,7 +5259,7 @@
       background: #dbeafe;
       color: var(--brand);
       padding: 4px 8px;
-      font-size: 11px;
+      font-size: var(--fs-micro);
       font-weight: 900;
       white-space: nowrap;
     }
@@ -5441,7 +5487,7 @@
       }
       .category-tab {
         padding: 6px 0;
-        font-size: 1rem;
+        font-size: var(--fs-value);
       }
 
       /* MOBILE-POLISH C — move 확산 성장 Top 5 (#trendingPanel) up to just below
