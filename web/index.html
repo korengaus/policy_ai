@@ -67,9 +67,15 @@
       --verify: #1b7a41;         /* doc-green — the ✓ beside 공식 근거 확인 and nowhere else (4.9:1);
                                     a fact about a document, not a verdict */
       --verify-soft: var(--well);/* 01: green is never a fill — the former green tint is now the well */
-      --shadow: 0 8px 24px rgba(15, 23, 42, 0.06);  /* softened */
-      --radius: 12px;
-      --radius-sm: 9px;
+      /* 60-APPLY (04): "Static UI never floats" — this shadow now belongs to
+         TRANSIENT overlays only (open selects, popovers); no static rule may
+         consume it. Radius 0 site-wide: "squared corners echo the mandated
+         square bar tops and read as tabulated print" (only 50% circle glyph
+         dots are exempt — they are glyphs, not surfaces). */
+      --shadow: 0 8px 24px -12px rgba(30, 30, 27, 0.25);
+      --radius: 0;
+      --radius-sm: 0;
+      --row-hover: #f0efe9;      /* 04: record-row hover — background only, 120ms, no lift */
 
       /* 02 SPACING — 4px base, ten steps; one 1200px grid = main 792 + gutter
          48 + rail 360. Defined here for consuming passes; geometry itself is
@@ -163,6 +169,24 @@
          Both inherit; mono/debug blocks keep their own explicit overrides. */
       word-break: keep-all;
       overflow-wrap: break-word;
+    }
+
+    /* 60-APPLY (04): one focus treatment site-wide — 2px accent outline,
+       offset 2, visible on ivory at 3:1+. Keyboard-only (:focus-visible), so
+       pointer clicks stay quiet. Controls with their own spec focus rules
+       (inputs, the sort select) repeat the same values. */
+    :focus-visible {
+      outline: 2px solid var(--brand);
+      outline-offset: 2px;
+    }
+
+    /* 60-APPLY (04): record-row hover is background only — 120ms, no lift,
+       no transform. One transition rule for every row that takes the tint. */
+    .topic-card,
+    .rank-row,
+    .history-row,
+    .recent-viewed-strip .recent-viewed-item {
+      transition: background-color 120ms ease;
     }
 
     .page {
@@ -284,7 +308,7 @@
       transform: translateX(-50%);
       width: 100vw;
       height: 0;
-      border-top: 1px solid var(--rule-strong);
+      border-top: 2px solid var(--rule-strong); /* 60-APPLY (04): masthead base — one of the page's two 2px ink bookends */
     }
     .domain-tabs-row::after {
       content: '';
@@ -437,7 +461,7 @@
          bar reads soft + rounded without boxing each inner control. Intentionally
          reverses the old DESIGN-3A4.6 square-header choice (operator decision). */
       border: 1px solid var(--line);
-      border-radius: var(--radius-sm);
+      border-radius: 0;
       padding: 0;
       overflow: hidden;
       background: var(--paper);
@@ -511,15 +535,19 @@
     .topbar .panel #analyzeBtn:hover:not(:disabled) {
       background: var(--brand-ink);
     }
-    /* DESIGN-3A5: 최근 분석 불러오기 = near-black + white; hover slightly lighter. */
+    /* DESIGN-3A5 최근 분석 불러오기 was near-black + white. 60-APPLY (04): "one
+       solid accent per view region" — this was the second shout beside
+       분석하기. It drops to the quiet segment: surface + ink text, separated
+       by the bar's own internal edge. */
     .topbar .panel #historyBtn {
       font-size: var(--fs-meta);
       padding: 0 12px;
-      background: var(--ink);
-      color: #fff;
+      background: var(--paper);
+      color: var(--ink);
+      border-left: 1px solid var(--line-300);
     }
     .topbar .panel #historyBtn:hover:not(:disabled) {
-      background: var(--text);
+      background: var(--well);
     }
 
     /* DESIGN-PROGRESS-3: nudge the brand down a touch to balance the lowered
@@ -624,8 +652,8 @@
     .history-card {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 10px;
-      box-shadow: var(--shadow);
+      border-radius: 0;
+      /* 60-APPLY (04): static card shadow removed — tone and line carry depth. */
     }
 
     .panel {
@@ -651,23 +679,24 @@
     input {
       width: 100%;
       min-height: 42px;
-      border: 1px solid #cbd5e1;
-      border-radius: 8px;
+      border: 1px solid var(--line-300); /* 60-APPLY (04): input edges — the edges a hand touches */
+      border-radius: 0;
       padding: 10px 12px;
-      background: white;
+      background: var(--paper);
       color: var(--text);
       font-size: 1.154rem;
     }
 
     input:focus {
-      outline: 2px solid rgba(37, 99, 235, 0.22);
-      border-color: var(--blue);
+      /* 60-APPLY (04): focus = 2px accent outline, offset 2 — visible on ivory at 3:1+. */
+      outline: 2px solid var(--brand);
+      outline-offset: 2px;
     }
 
     button {
       min-height: 42px;
       border: 0;
-      border-radius: 8px;
+      border-radius: 0;
       padding: 10px 16px;
       color: white;
       font-size: var(--fs-value);
@@ -690,11 +719,16 @@
     }
 
     .secondary {
-      background: var(--dark);
+      /* 60-APPLY (04): "secondary is outline #c0bfb4 — the current second dark
+         button competed as a second shout." Outline on surface, ink text. */
+      background: var(--paper);
+      color: var(--ink);
+      border: 1px solid var(--line-300);
     }
 
     .secondary:hover:not(:disabled) {
-      background: var(--dark-hover);
+      background: var(--well);
+      border-color: var(--ink-400);
     }
 
     .status-line {
@@ -782,7 +816,7 @@
       width: 100%;
       height: 3px;
       background: var(--line);
-      border-radius: 2px;
+      border-radius: 0;
       overflow: hidden;
     }
 
@@ -790,7 +824,7 @@
       height: 100%;
       width: 0%;
       background: var(--brand);
-      border-radius: 2px;
+      border-radius: 0;
       transition: width 0.3s ease-out;
     }
 
@@ -845,7 +879,7 @@
 
     .empty-state {
       border: 1px dashed #cbd5e1;
-      border-radius: 10px;
+      border-radius: 0;
       background: var(--surface-soft);
       color: var(--muted);
       padding: 28px;
@@ -889,7 +923,7 @@
     .report-download {
       min-height: 30px;
       border: 1px solid var(--line);
-      border-radius: var(--radius-sm);
+      border-radius: 0;
       background: var(--paper);
       color: var(--slate);
       padding: 6px 11px;
@@ -928,7 +962,7 @@
     .badge {
       display: inline-flex;
       align-items: center;
-      border-radius: 999px;
+      border-radius: 0;
       padding: 4px 10px;
       color: white;
       font-size: var(--fs-meta);
@@ -1008,7 +1042,7 @@
 
     .summary-tile {
       border: 1px solid var(--line);
-      border-radius: var(--radius-sm);
+      border-radius: 0;
       background: var(--paper);
       padding: 11px;
       min-height: 74px;
@@ -1083,8 +1117,8 @@
       grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
       gap: 16px;
       padding: 14px 0;
-      border-top: 1px solid var(--line);
-      border-bottom: 1px solid var(--line);
+      border-top: 1px solid var(--line-100); /* 60-APPLY (04): in-card hairlines */
+      border-bottom: 1px solid var(--line-100);
       margin: 10px 0 0;
     }
     .spread-fact {
@@ -1139,8 +1173,8 @@
       grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 16px;
       padding: 14px 0;
-      border-top: 1px solid var(--line);
-      border-bottom: 1px solid var(--line);
+      border-top: 1px solid var(--line-100); /* 60-APPLY (04): in-card hairlines */
+      border-bottom: 1px solid var(--line-100);
     }
 
     .verdict-indicator {
@@ -1200,7 +1234,7 @@
 
     .reviewer-dashboard {
       border: 1px solid #c7d2fe;
-      border-radius: 12px;
+      border-radius: 0;
       background: var(--surface-soft);
       margin: 16px 0;
       padding: 15px;
@@ -1214,7 +1248,7 @@
 
     .reviewer-action-card {
       border: 1px solid #fed7aa;
-      border-radius: 12px;
+      border-radius: 0;
       background: #fff7ed;
       margin: 16px 0;
       padding: 15px;
@@ -1237,11 +1271,11 @@
     .reviewer-action-card textarea {
       width: 100%;
       border: 1px solid #fdba74;
-      border-radius: 8px;
+      border-radius: 0;
       padding: 8px 10px;
       color: var(--ink);
       font: inherit;
-      background: #fff;
+      background: var(--paper);
       box-sizing: border-box;
     }
 
@@ -1260,7 +1294,7 @@
     .reviewer-action-buttons button {
       min-height: 34px;
       border: 0;
-      border-radius: 8px;
+      border-radius: 0;
       padding: 8px 12px;
       color: #fff;
       font-size: 13px;
@@ -1279,7 +1313,7 @@
     .review-status-badge {
       display: inline-flex;
       align-items: center;
-      border-radius: 999px;
+      border-radius: 0;
       background: #ffedd5;
       color: #9a3412;
       padding: 4px 8px;
@@ -1290,7 +1324,7 @@
 
     .verification-summary-card {
       border: 1px solid #bfdbfe;
-      border-radius: 12px;
+      border-radius: 0;
       background: #eff6ff;
       margin: 16px 0;
       padding: 16px;
@@ -1311,8 +1345,8 @@
 
     .verification-summary-item {
       border: 1px solid #dbeafe;
-      border-radius: 10px;
-      background: #fff;
+      border-radius: 0;
+      background: var(--paper);
       padding: 10px;
       min-width: 0;
     }
@@ -1350,7 +1384,7 @@
 
     .reviewer-status-card {
       border: 1px solid #e5e7eb;
-      border-radius: 8px;
+      border-radius: 0;
       background: var(--paper);
       padding: 10px;
       font-size: 12px;
@@ -1373,7 +1407,7 @@
 
     .reviewer-chip {
       border: 1px solid #dbeafe;
-      border-radius: 999px;
+      border-radius: 0;
       background: #eff6ff;
       color: #1e3a8a;
       font-size: 12px;
@@ -1390,7 +1424,7 @@
 
     .takeaway-panel {
       border: 1px solid #bfdbfe;
-      border-radius: 10px;
+      border-radius: 0;
       background: #eff6ff;
       margin: 14px 0;
       padding: 15px 16px;
@@ -1439,7 +1473,7 @@
 
     .reading-guide-card {
       border: 1px solid var(--line);
-      border-radius: var(--radius-sm);
+      border-radius: 0;
       background: var(--paper);
       padding: 11px;
       color: var(--slate);
@@ -1619,7 +1653,7 @@
     .hot-topics-sort-select {
       min-height: 30px;
       border: 1px solid var(--line);
-      border-radius: var(--radius-sm);
+      border-radius: 0;
       background-color: var(--paper);
       color: var(--brand);
       padding: 6px 30px 6px 12px;
@@ -1644,9 +1678,11 @@
        visible but soft indicator, not outline:none alone. */
     .hot-topics-sort-select:focus,
     .hot-topics-sort-select:focus-visible {
-      outline: none;
+      /* 60-APPLY (04): the soft glow ring becomes the spec focus — 2px accent
+         outline, offset 2. */
+      outline: 2px solid var(--brand);
+      outline-offset: 2px;
       border-color: var(--brand);
-      box-shadow: 0 0 0 2px rgba(30, 95, 216, 0.25);
     }
 
     /* DESIGN-C3h-1c: feed sort control relocated above the feed (out of the tab
@@ -1738,7 +1774,7 @@
       background: var(--paper);
       color: var(--brand);
       border: 1px solid var(--line);
-      border-radius: var(--radius-sm);
+      border-radius: 0;
       padding: 8px 16px;
       font-size: var(--fs-meta);
       font-weight: 600;
@@ -1768,7 +1804,7 @@
       background: var(--paper);
       color: var(--brand);
       border: 1px solid var(--line);
-      border-radius: var(--radius-sm);
+      border-radius: 0;
       font-size: var(--fs-meta);
       font-weight: 600;
       line-height: 1;
@@ -1823,7 +1859,7 @@
        run full-width in the sidebar column; the .rank-row dividers (below) keep
        the list legible without a box. */
     .rank-panel {
-      border-top: 1px solid var(--rule-strong);
+      border-top: 1px solid var(--line); /* 60-APPLY (04): section rule — ink lines are bookends only */
       padding: 12px 0 2px;
     }
     .rank-panel-heading {
@@ -1854,7 +1890,7 @@
       align-items: flex-start;
       gap: 10px;
       padding: 10px 2px;
-      border-top: 1px solid var(--line);
+      border-top: 1px solid var(--line-100); /* 60-APPLY (04): record-row separator */
       cursor: pointer;
     }
     .rank-row:first-child {
@@ -1863,7 +1899,7 @@
     .rank-row:hover {
       /* DESIGN-C1b: parity with the feed hover — the panel's white bg is gone, so
          a neutral --surface-soft tint stays visible against the page canvas. */
-      background: var(--surface-soft);
+      background: var(--row-hover); /* 60-APPLY (04): #f0efe9, background only */
     }
     /* DESIGN-C3e FIX 3: the rank-row title turns brand-blue on hover, matching the
        feed card titles (.topic-card:hover .topic-card-title → --brand-ink). Same
@@ -1900,11 +1936,16 @@
       line-height: 1.4;
       font-weight: 600;
       display: -webkit-box;
-      -webkit-line-clamp: 2;
+      /* 60-APPLY (C): 2 → 3 lines. The 2-line clamp cut rank titles
+         mid-phrase and could end on a dangling "-" (the CSS ellipsis landed
+         right after content punctuation, reading like a different kind of
+         cut). Every current Top-5 title fits 3 lines; a clipped row costs
+         one 21px line. */
+      -webkit-line-clamp: 3;
       -webkit-box-orient: vertical;
       overflow: hidden;
       /* 59-APPLY: keep-all (inherited) stops mid-word breaks; balance evens
-         the two clamped lines without changing the line count. */
+         the clamped lines without changing the line count. */
       text-wrap: balance;
     }
     /* SPREAD-GRAPH-POLISH A5: the 확산 성장 Top5 title is an <a> (the 인기 랭킹 title
@@ -1972,7 +2013,7 @@
     }
     /* divider-list hover, matching .history-row:hover (was a border/box hover). */
     .recent-viewed-strip .recent-viewed-item:hover {
-      background: var(--surface-soft);
+      background: var(--row-hover); /* 60-APPLY (04) */
     }
     @media (max-width: 640px) {
       .recent-viewed-strip .recent-viewed-item { width: 200px; }
@@ -2015,7 +2056,7 @@
     .stat-panel,
     .legend-panel,
     .report-panel {
-      border-top: 1px solid var(--rule-strong);
+      border-top: 1px solid var(--line); /* 60-APPLY (04): section rule */
       padding: 12px 0 2px;
       margin-top: 18px;
     }
@@ -2096,7 +2137,7 @@
       flex: 0 0 auto;
       width: 15px;
       height: 15px;
-      border-radius: 4px;
+      border-radius: 0;
       background: var(--verify-soft);
       color: var(--verify);
       font-size: var(--fs-micro);
@@ -2157,7 +2198,7 @@
       min-height: 36px;
       font-size: var(--fs-meta);
       border: 1px solid var(--line);
-      border-radius: var(--radius-sm);
+      border-radius: 0;
       padding: 8px 12px;
     }
     .report-btn {
@@ -2165,7 +2206,7 @@
       min-height: 36px;
       padding: 8px 14px;
       white-space: nowrap;
-      border-radius: var(--radius-sm);
+      border-radius: 0;
     }
     .report-contact-note {
       margin-top: 8px;
@@ -2210,8 +2251,8 @@
          (#161a21) and companion text — no longer borrowed from the ink token. */
       background: var(--dark-field);
       color: var(--df-text);
-      border-radius: var(--radius);
-      padding: 28px 32px;
+      border-radius: 0;
+      padding: 32px; /* 60-APPLY (04): section-card padding 32 */
       position: relative;
       overflow: hidden;
     }
@@ -2336,7 +2377,7 @@
       margin: 18px 0 24px;
       padding: 30px 30px 24px;
       border: 1px solid var(--line);
-      border-radius: var(--radius);
+      border-radius: 0;
       background: var(--paper);
     }
     .verify-how-head {
@@ -2396,7 +2437,7 @@
     .vhf-node {
       position: relative;
       border: 1px solid var(--line);
-      border-radius: var(--radius-sm);
+      border-radius: 0;
       background: var(--paper);
       padding: 12px 16px;
       text-align: center;
@@ -2823,7 +2864,7 @@
        negative-margin/padding pair lets the tint bleed slightly past the text
        column without shifting the divider or the content. */
     .topic-card:hover {
-      background: var(--surface-soft);
+      background: var(--row-hover); /* 60-APPLY (04): #f0efe9, background only, no lift */
       margin: 0 -12px;
       padding: 16px 12px;
     }
@@ -2838,7 +2879,9 @@
        compensates for the 3px bar so the content does not shift. */
     .topic-card.selected {
       border-left: 3px solid var(--brand);
-      background: #f7faff;
+      /* 60-APPLY (04/01): identity fill is the token tint — "the row that IS
+         this claim" — not an ad-hoc cool blue. */
+      background: var(--tint);
       margin: 0 -12px;
       padding: 16px 12px 16px 9px;
     }
@@ -2861,8 +2904,10 @@
     .topic-card-grid > .topic-card:hover {
       margin: 0;
       padding: 16px 0 0;
-      background: var(--surface-soft);
-      border-top-color: var(--brand);
+      /* 60-APPLY (04): hover is the row tint alone — the accent hairline made
+         the hovered row's EDGE gain a colour no peer edge has; the title's
+         link colour (below) stays as the actionable cue. */
+      background: var(--row-hover);
     }
     /* .selected inside the grid → the divider-list left-bar marker, adapted:
        3px brand bar + brand top rule + faint tint; padding-left clears the bar. */
@@ -3017,8 +3062,14 @@
        back to the stacked flow at <=960px (media block below). */
     .topic-card--hero {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 320px;
-      column-gap: 48px;
+      /* 60-APPLY (B): facts column 320 → 344 and gap 48 → 24 — the freed gap
+         goes to the facts, so the 1fr title keeps its exact width (544 at
+         1440). Cells become (344−32)/3 = 104px: the widest real value at
+         figure-m 20 ("102개 매체", 102px rendered) now fits one line. The
+         next steps stay out of reach without robbing the title: figure-l 28
+         needs 143px cells (461px strip), figure-xl 40 needs 204px (644px). */
+      grid-template-columns: minmax(0, 1fr) 344px;
+      column-gap: 24px;
       align-items: start;
     }
     .topic-card--hero > * {
@@ -3058,11 +3109,11 @@
       flex-direction: column;
     }
     .topic-card--hero .spread-fact-value {
-      /* 59-APPLY: spec puts hero stats at figure-xl 40; at 40 (and at 28,
-         measured) "80개 매체" wraps inside the existing fact slot, splitting
-         the numeral from its unit — the very break Change B removes. The
-         strip's geometry is out of scope this pass, so the hero facts sit at
-         figure-m 20 with the detail facts (peer figures share one size). */
+      /* 59-APPLY set figure-m 20; 60-APPLY (B) re-measured after widening the
+         slot to 104px: figure-m is the largest step that holds "102개 매체"
+         (102px @20) on one line. figure-l 28 needs 143px cells — reachable
+         only by shrinking the 1fr headline, which is off the table; the
+         equal-peer rule bars unequal cells. So the step stays figure-m 20. */
       font-size: var(--fs-figure-m);
       margin-top: auto;
     }
@@ -3150,7 +3201,7 @@
       line-height: 1.5;
       font-variant-numeric: tabular-nums;
       padding: 2px 8px;
-      border-radius: 4px;
+      border-radius: 0;
       white-space: nowrap;
       pointer-events: none;
       z-index: 40;
@@ -3287,7 +3338,7 @@
 
     .topic-card-meta div {
       border: 1px solid var(--line);
-      border-radius: var(--radius-sm);
+      border-radius: 0;
       background: transparent;
       padding: 8px;
     }
@@ -3403,7 +3454,7 @@
       font-weight: 700;
       letter-spacing: 0.01em;
       padding: 2px 8px;
-      border-radius: 999px;
+      border-radius: 0;
       line-height: 1.35;
       white-space: nowrap;
     }
@@ -3436,7 +3487,7 @@
       align-items: center;
       background: var(--surface-soft);
       color: var(--slate);
-      border-radius: 4px;
+      border-radius: 0;
       font-size: var(--fs-micro);
       font-weight: 700;
       letter-spacing: 0.01em;
@@ -3453,7 +3504,7 @@
       font-weight: 600;
       color: var(--brand-ink);
       background: #eff6ff;
-      border-radius: 4px;
+      border-radius: 0;
       padding: 2px 8px;
     }
     .topic-card-verdict {
@@ -3472,7 +3523,7 @@
       display: inline-flex;
       align-items: center;
       gap: 4px;
-      border-radius: 999px;
+      border-radius: 0;
       padding: 2px 8px;
       font-size: var(--fs-micro);
       font-weight: 700;
@@ -3492,7 +3543,7 @@
     .verdict-dot {
       width: 9px;
       height: 9px;
-      border-radius: 50%;
+      border-radius: 0;
       flex: 0 0 auto;
     }
     .verdict-text {
@@ -3519,7 +3570,7 @@
       margin-top: 8px;
       padding: 8px 10px;
       border: 1px solid var(--line);
-      border-radius: var(--radius-sm);
+      border-radius: 0;
       background: var(--paper);
     }
     /* DESIGN-C3h-1d: in the full-width 1-col LIST cards the source box would span
@@ -3541,7 +3592,7 @@
       gap: 4px;
       color: var(--verify);
       background: var(--verify-soft);
-      border-radius: 999px;
+      border-radius: 0;
       padding: 2px 8px;
       font-size: var(--fs-micro);
       font-weight: 700;
@@ -3558,7 +3609,7 @@
       flex: 0 0 auto;
       width: 26px;
       height: 26px;
-      border-radius: 6px;
+      border-radius: 0;
       background: var(--brand);
       color: #fff;
       font-size: var(--fs-micro);
@@ -3640,7 +3691,7 @@
     .source-support-badge {
       display: inline-flex;
       align-items: center;
-      border-radius: 999px;
+      border-radius: 0;
       background: #e0f2fe;
       color: #075985;
       font-size: var(--fs-micro);
@@ -3677,7 +3728,7 @@
     .public-source-warning {
       margin-top: 8px;
       padding: 8px 10px;
-      border-radius: 8px;
+      border-radius: 0;
       background: #fff7ed;
       color: #9a3412;
       font-size: var(--fs-meta);
@@ -3699,7 +3750,7 @@
       margin: 16px 0 8px;
       padding: 10px 14px;
       border: 1px solid #fcd34d;
-      border-radius: 10px;
+      border-radius: 0;
       background: #fffbeb;
       color: #7c2d12;
       font-size: 0.92rem;
@@ -3716,13 +3767,13 @@
     .operator-tools-note code {
       background: #fff7e6;
       padding: 0 4px;
-      border-radius: 3px;
+      border-radius: 0;
       font-size: 0.85em;
     }
     .operator-tools-note button {
       padding: 6px 12px;
       font-size: 12px;
-      border-radius: 6px;
+      border-radius: 0;
       flex: 0 0 auto;
     }
 
@@ -3745,7 +3796,7 @@
     .review-tools-details > summary::after {
       content: "열기";
       margin-left: 8px;
-      border-radius: 999px;
+      border-radius: 0;
       background: #eff6ff;
       color: var(--brand);
       padding: 4px 8px;
@@ -3768,7 +3819,7 @@
 
     .server-review-admin-warning {
       border: 1px solid #f87171;
-      border-radius: 10px;
+      border-radius: 0;
       background: #fef2f2;
       color: #7f1d1d;
       padding: 12px 14px;
@@ -3784,14 +3835,14 @@
     .server-review-admin-warning code {
       background: #fff1f2;
       padding: 0 4px;
-      border-radius: 3px;
+      border-radius: 0;
       font-size: 0.85em;
     }
 
     /* AUTH-2c — account login panel (the only admin auth UI since AUTH-2d). */
     .server-review-login-panel {
       border: 1px solid #fcd34d;
-      border-radius: 10px;
+      border-radius: 0;
       background: #fffbeb;
       padding: 14px;
       margin-bottom: 12px;
@@ -3809,9 +3860,9 @@
       width: 100%;
       min-height: 38px;
       border: 1px solid var(--orange);
-      border-radius: 8px;
+      border-radius: 0;
       padding: 8px 10px;
-      background: #fff;
+      background: var(--paper);
       font-size: 14px;
       margin-bottom: 10px;
     }
@@ -3832,7 +3883,7 @@
     .server-review-login-status {
       margin-top: 10px;
       padding: 8px 10px;
-      border-radius: 8px;
+      border-radius: 0;
       background: #fef3c7;
       color: #78350f;
       font-size: 13px;
@@ -3871,7 +3922,7 @@
     .server-review-status {
       margin-top: 10px;
       padding: 8px 10px;
-      border-radius: 8px;
+      border-radius: 0;
       background: #fef3c7;
       color: #78350f;
       font-size: 13px;
@@ -3899,7 +3950,7 @@
 
     .server-review-register-panel {
       border: 1px solid #c7d2fe;
-      border-radius: 10px;
+      border-radius: 0;
       background: #eef2ff;
       padding: 14px;
     }
@@ -3926,7 +3977,7 @@
 
     .server-review-list-panel {
       border: 1px solid #cbd5e1;
-      border-radius: 10px;
+      border-radius: 0;
       background: var(--surface-soft);
       padding: 14px;
     }
@@ -3942,9 +3993,9 @@
     .server-review-list-header select {
       min-height: 36px;
       border: 1px solid #cbd5e1;
-      border-radius: 8px;
+      border-radius: 0;
       padding: 6px 10px;
-      background: #fff;
+      background: var(--paper);
       font-size: 13px;
     }
 
@@ -3966,8 +4017,8 @@
       gap: 10px;
       padding: 10px 12px;
       border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #fff;
+      border-radius: 0;
+      background: var(--paper);
       cursor: pointer;
       font-size: 13px;
     }
@@ -3997,7 +4048,7 @@
       display: inline-flex;
       align-items: center;
       padding: 3px 8px;
-      border-radius: 999px;
+      border-radius: 0;
       font-size: var(--fs-micro);
       font-weight: 800;
       white-space: nowrap;
@@ -4030,7 +4081,7 @@
 
     .server-review-detail {
       border: 1px solid #cbd5e1;
-      border-radius: 10px;
+      border-radius: 0;
       background: var(--paper);
       padding: 14px;
     }
@@ -4053,7 +4104,7 @@
 
     .server-review-detail-grid > div {
       border: 1px solid var(--line);
-      border-radius: 8px;
+      border-radius: 0;
       background: var(--surface-soft);
       padding: 8px 10px;
       font-size: 12px;
@@ -4071,7 +4122,7 @@
     .server-review-decision-panel {
       margin-top: 12px;
       border: 1px solid #dbeafe;
-      border-radius: 10px;
+      border-radius: 0;
       background: #f8fbff;
       padding: 12px;
     }
@@ -4096,9 +4147,9 @@
     .server-review-decision-panel textarea {
       width: 100%;
       border: 1px solid #cbd5e1;
-      border-radius: 8px;
+      border-radius: 0;
       padding: 6px 10px;
-      background: #fff;
+      background: var(--paper);
       font-size: 13px;
       font-family: inherit;
     }
@@ -4119,15 +4170,15 @@
       margin-top: 14px;
       padding: 12px;
       border: 1px solid var(--line);
-      border-radius: 10px;
+      border-radius: 0;
       background: var(--surface-soft);
     }
 
     .server-review-history-row {
       padding: 8px 10px;
       border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #fff;
+      border-radius: 0;
+      background: var(--paper);
       margin-bottom: 6px;
       font-size: 12px;
       color: #334155;
@@ -4160,14 +4211,14 @@
     .server-review-history-audit span {
       background: #f1f5f9;
       padding: 2px 6px;
-      border-radius: 4px;
+      border-radius: 0;
     }
 
     .server-review-audit-packet {
       margin-top: 14px;
       padding: 12px 14px;
       border: 1px solid #cbd5e1;
-      border-radius: 10px;
+      border-radius: 0;
       background: var(--surface-soft);
     }
     .server-review-audit-packet h4 {
@@ -4191,7 +4242,7 @@
     .server-review-audit-packet-actions button {
       padding: 6px 12px;
       font-size: 12px;
-      border-radius: 6px;
+      border-radius: 0;
     }
     .server-review-audit-packet-actions button[disabled] {
       opacity: 0.55;
@@ -4200,9 +4251,9 @@
     .server-review-audit-packet-summary {
       margin: 6px 0;
       padding: 8px 10px;
-      background: #fff;
+      background: var(--paper);
       border: 1px solid var(--line);
-      border-radius: 8px;
+      border-radius: 0;
       font-size: 12px;
       color: #334155;
     }
@@ -4241,7 +4292,7 @@
       padding: 10px;
       background: var(--ink);
       color: var(--line);
-      border-radius: 8px;
+      border-radius: 0;
       font-family: var(--font-mono);
       font-size: var(--fs-micro);
       line-height: 1.5;
@@ -4252,10 +4303,11 @@
     }
 
     .selected-issue-intro {
-      border: 1px solid #dbeafe;
-      border-radius: 12px;
+      /* 60-APPLY (04): pale-blue border → neutral card border; static shadow
+         removed. */
+      border: 1px solid var(--line);
+      border-radius: 0;
       background: var(--paper);
-      box-shadow: var(--shadow);
       margin: 16px 0;
       padding: 18px;
     }
@@ -4283,7 +4335,7 @@
 
     .selected-issue-meta div {
       border: 1px solid #e5e7eb;
-      border-radius: 9px;
+      border-radius: 0;
       background: var(--surface-soft);
       padding: 10px;
       color: var(--slate);
@@ -4299,7 +4351,7 @@
 
     .detail-box {
       border: 1px solid #e5e7eb;
-      border-radius: 8px;
+      border-radius: 0;
       background: var(--surface-soft);
       padding: 12px;
     }
@@ -4308,7 +4360,7 @@
       display: flex;
       justify-content: space-between;
       gap: 12px;
-      border-top: 1px solid #e5e7eb;
+      border-top: 1px solid var(--line-100); /* 60-APPLY (04): in-card hairline */
       padding: 8px 0;
       font-size: var(--fs-value);
     }
@@ -4446,7 +4498,7 @@
     }
 
     .collapsible-body {
-      border-top: 1px solid #e5e7eb;
+      border-top: 1px solid var(--line-100); /* 60-APPLY (04): in-card hairline */
       padding: 12px;
     }
 
@@ -4484,7 +4536,7 @@
     }
 
     .verification-item {
-      border-top: 1px solid #e5e7eb;
+      border-top: 1px solid var(--line-100); /* 60-APPLY (04): in-card hairline */
       padding-top: 8px;
       font-size: 14px;
       line-height: 1.55;
@@ -4564,7 +4616,7 @@
     /* DESIGN-DETAIL-5d FIX 4: each candidate is one ITEM — a stronger var(--rule-strong)
        rule (the home's section-divider weight) separates it from the next. */
     .vrf-cand {
-      border-top: 1px solid var(--rule-strong);
+      border-top: 1px solid var(--line-100); /* 60-APPLY (04): record separator */
     }
     .vrf-cand-list .vrf-cand:last-child {
       border-bottom: 1px solid var(--rule-strong);
@@ -4649,7 +4701,7 @@
     .vrf-item + .vrf-item {
       margin-top: 16px;
       padding-top: 16px;
-      border-top: 1px solid var(--rule-strong);
+      border-top: 1px solid var(--line-100); /* 60-APPLY (04): record separator */
     }
     .vrf-item-head {
       color: var(--ink);
@@ -4695,7 +4747,7 @@
        a stronger var(--rule-strong) rule separates it from the next claim. */
     .normalized-claim {
       padding: 14px 0 0;
-      border-top: 1px solid var(--rule-strong);
+      border-top: 1px solid var(--line-100); /* 60-APPLY (04): record separator */
     }
 
     .normalized-claim-text {
@@ -4712,8 +4764,8 @@
 
     .source-candidate {
       border: 1px solid #e5e7eb;
-      border-radius: 8px;
-      background: #fff;
+      border-radius: 0;
+      background: var(--paper);
       padding: 10px;
     }
 
@@ -4745,8 +4797,8 @@
 
     .evidence-extraction-tile {
       border: 1px solid #e5e7eb;
-      border-radius: 8px;
-      background: #fff;
+      border-radius: 0;
+      background: var(--paper);
       padding: 8px;
       font-size: 13px;
     }
@@ -4762,7 +4814,7 @@
        (the per-sentence .vrf-item boundaries sit inside, one weight down by spacing). */
     .evidence-snippet {
       padding: 14px 0 0;
-      border-top: 1px solid var(--rule-strong);
+      border-top: 1px solid var(--line-100); /* 60-APPLY (04): record separator */
     }
 
     .evidence-snippet-text {
@@ -4812,7 +4864,7 @@
     }
 
     .debug-status {
-      border-radius: 999px;
+      border-radius: 0;
       display: inline-flex;
       font-weight: 900;
       padding: 3px 8px;
@@ -4875,9 +4927,10 @@
     }
     .detail-action-row button.secondary {
       background: transparent;
-      color: var(--dark);
-      border: 1px solid var(--dark);
-      border-radius: 8px;
+      /* 60-APPLY (04): outline secondary aligns to the spec edge colour. */
+      color: var(--ink);
+      border: 1px solid var(--line-300);
+      border-radius: 0;
       font-size: 13px;
       font-weight: 800;
       padding: 7px 12px;
@@ -4944,7 +4997,7 @@
       display: inline-flex;
       align-items: center;
       border: 1px solid #bfdbfe;
-      border-radius: 8px;
+      border-radius: 0;
       background: #eff6ff;
       color: var(--brand);
       padding: 8px 12px;
@@ -4966,7 +5019,7 @@
     .site-footer {
       margin-top: 28px;
       padding: 18px 0 4px;
-      border-top: 1px solid #e5e7eb;
+      border-top: 2px solid var(--rule-strong); /* 60-APPLY (04): footer-top — the second 2px ink bookend */
       text-align: center;
       color: var(--muted);
       font-size: 1rem;
@@ -5131,7 +5184,7 @@
     }
 
     .history-row:hover {
-      background: var(--surface-soft);
+      background: var(--row-hover); /* 60-APPLY (04) */
     }
 
     /* MOBILE-POLISH K — renderSearchHitsView injects its .empty-state header as
@@ -5206,7 +5259,7 @@
     .review-action,
     .review-filter {
       min-height: 32px;
-      border-radius: 7px;
+      border-radius: 0;
       padding: 8px 10px;
       font-size: 12px;
       font-weight: 900;
@@ -5234,14 +5287,14 @@
 
     .review-filter {
       border: 1px solid #cbd5e1;
-      background: #fff;
+      background: var(--paper);
       color: #334155;
     }
 
     .review-status {
       display: inline-flex;
       align-items: center;
-      border-radius: 999px;
+      border-radius: 0;
       padding: 4px 8px;
       font-size: var(--fs-micro);
       font-weight: 900;
@@ -5258,7 +5311,7 @@
       color: #166534;
       /* LABEL-1: unify to the severity pill base geometry (was 0.846rem/900/4px 8px
          via .review-status). Green fill/text preserved. */
-      border-radius: 999px;
+      border-radius: 0;
       padding: 2px 8px;
       font-size: var(--fs-micro);
       font-weight: 700;
@@ -5291,7 +5344,7 @@
     .current-badge {
       display: inline-flex;
       align-items: center;
-      border-radius: 999px;
+      border-radius: 0;
       background: #dbeafe;
       color: var(--brand);
       padding: 4px 8px;
