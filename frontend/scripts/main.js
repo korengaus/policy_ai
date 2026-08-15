@@ -540,9 +540,12 @@
       education: "#4c51bf",
       scitech: "#0e7490",
       trade: "#9d174d",
-      "기타-미분류": "#98a2b3",
+      // 66-APPLY: uncategorised is a NEUTRAL — and #98a2b3 measured 2.49:1
+      // on the card surface (under the 3:1 non-text floor). The system's own
+      // neutral-glyph grey (--ink-400) clears it and says "no category".
+      "기타-미분류": "#8a8a80",
     };
-    const DOMAIN_ICON_FALLBACK_COLOR = "#98a2b3";
+    const DOMAIN_ICON_FALLBACK_COLOR = "#8a8a80";
     // CARD-ICONS: domain key → ascii <symbol> id (avoids unicode in the href).
     // Unknown / "기타-미분류" → dom-etc so a card is NEVER icon-less.
     const DOMAIN_ICON_IDS = {
@@ -565,11 +568,13 @@
     // INSIDE .card-domain so hero cards (which hide .card-domain) auto-hide it.
     function domainIconMarkup(domainKey) {
       const symbolId = DOMAIN_ICON_IDS[domainKey] || "dom-etc";
-      // 64-APPLY (09 folded-in): the feed glyph is ONE uniform neutral — the
-      // text names the category; per-domain hues were decoration. Shapes stay
-      // distinct; DOMAIN_COLORS itself is untouched (the brain-map still
-      // reads it for its nodes).
-      return `<svg class="domain-icon" style="color:var(--ink-400)" aria-hidden="true" focusable="false"><use href="#${symbolId}"/></svg>`;
+      // 66-APPLY: per-domain colour RESTORED (reverting 64's neutralisation).
+      // A domain is a taxonomy, not a judgement — colour here ranks nothing —
+      // and the brain-map already colours by domain, so a flat glyph split
+      // one scheme across two screens. One hue family per domain, two
+      // lightness levels per ground (this light set / the map's dark set).
+      const color = DOMAIN_COLORS[domainKey] || DOMAIN_ICON_FALLBACK_COLOR;
+      return `<svg class="domain-icon" style="color:${color}" aria-hidden="true" focusable="false"><use href="#${symbolId}"/></svg>`;
     }
     // ===== end DISPLAY-CATEGORY B-1 =====
     // Deferred from M29-A1 (pin-sensitive): values contain regression-pinned

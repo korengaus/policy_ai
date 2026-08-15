@@ -41,17 +41,22 @@
      Encodings are unchanged: x/y = embedding location, size = outlet count,
      colour = domain. Only the atmosphere changes. */
   :root {
+    /* 66-APPLY: synced to the design system's DARK-FIELD companions
+       (main.css --dark-field / --df-*) — the map stays dark, but on the
+       system's warm dark field instead of the cool navy. --paper and --line
+       have no dark tokens in the system: they are derived one tone off the
+       field (04's elevation-by-tone rule) and disclosed here. */
     color-scheme: dark;      /* native form controls (select) match the page */
-    --ink: #e8eef9;          /* headings / strong text */
-    --slate: #b6c2d6;        /* body text */
-    --muted: #8ea0ba;        /* captions / secondary */
-    --line: #24334e;         /* borders */
-    --paper: #101a2e;        /* header / card surface */
-    --canvas: #0b1220;       /* page background — the night canvas */
-    --brand: #4d86e8;        /* tickedin blue, lifted for dark */
-    --brand-ink: #9ec1ff;    /* light blue: hover / links / active text */
+    --ink: #eceae4;          /* df-text (12.9:1 on the field) */
+    --slate: #b9beb8;        /* df-meta (7.6:1) */
+    --muted: #b9beb8;        /* collapsed into df-meta — no third dark step exists */
+    --line: #2e333b;         /* derived dark hairline (one tone above the field) */
+    --paper: #1e232b;        /* derived L1 surface (one tone above the field) */
+    --canvas: #161a21;       /* the system's dark field */
+    --brand: #a9c0ec;        /* df-link */
+    --brand-ink: #8fa5d4;    /* df-node — hover / active */
     --shadow: 0 8px 24px rgba(2, 6, 16, 0.55);
-    --radius-sm: 9px;
+    --radius-sm: 0;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
@@ -60,7 +65,7 @@
     color: var(--ink);
     /* Site body font stack (Pretendard on the main site; graceful Korean
        system fallbacks here — no CDN font load on this standalone page). */
-    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+    font-family: system-ui, -apple-system, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif;
     display: flex; flex-direction: column;
   }
   header.map-head {
@@ -155,7 +160,7 @@
   .map-title {
     font-size: 22px; font-weight: 500; letter-spacing: -0.02em; color: var(--ink);
     /* FONT-SWITCH: page title joins the body sans stack; only .brand stays serif. */
-    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+    font-family: system-ui, -apple-system, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif;
   }
   /* HONESTY (fixed, always visible): this map is spread/connection, NOT verification. */
   .map-subtitle { margin-top: 6px; font-size: 13.5px; line-height: 1.55; color: var(--slate); }
@@ -198,7 +203,7 @@
      read as bigger. */
   .legend .key .tick {
     display: inline-block; width: 9px; text-align: center;
-    font-size: 11px; font-weight: 700; line-height: 1; color: var(--brand-ink);
+    font-size: 11.5px; font-weight: 700; line-height: 1; color: var(--brand-ink);
   }
   /* The chip order is corpus volume, stated so a multi-selection row cannot be
      read as a priority list. Same disclosure the search stepper makes. */
