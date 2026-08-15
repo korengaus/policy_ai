@@ -2430,13 +2430,20 @@
        the publish card (60% wide, centered, spanning 20%..80%) begins — both
        rails land on its top edge SEPARATELY; no merge point and no
        cross-lane line is ever drawn between split and publish. */
+    /* 62-APPLY (06): "zero connectors anywhere" — the tee, drops and lane
+       rails are gone (reading order carries sequence, symmetry carries the
+       fork, the 72px gutter is the wall between circulation and evidence).
+       Every stage box is identical: 320px, 1px #8a8a80 border ("clears 3:1
+       as meaningful graphics"), 15/600 centered — no numbers, no size steps,
+       no rising certainty. */
     .vhf-flow {
       margin-top: 26px;
-      --vhf-line: #d9e5f9;
     }
     .vhf-node {
       position: relative;
-      border: 1px solid var(--line);
+      width: 320px;
+      max-width: 100%;
+      border: 1px solid var(--ink-400);
       border-radius: 0;
       background: var(--paper);
       padding: 12px 16px;
@@ -2444,9 +2451,21 @@
     }
     .vhf-node-title {
       color: var(--ink);
-      font-size: var(--fs-meta);
-      font-weight: 700;
+      font-size: var(--fs-value);
+      font-weight: 600;
       line-height: 1.4;
+    }
+    .vhf-lane-glyph {
+      width: 14px;
+      height: 14px;
+      flex: none;
+      vertical-align: -2px;
+      margin-right: 6px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
     }
     /* NODE-LEGEND (54-APPLY): replaces the in-node .vhf-node-desc — every
        node is label-only now (uniform height across both lanes); the three
@@ -2478,61 +2497,19 @@
       text-align: left;
     }
     .vhf-entry {
-      max-width: 420px;
-      margin: 0 auto;
+      margin: 0 auto 26px;
     }
-    /* the split tee: stub down from the entry card, rail, two drops. */
-    .vhf-split {
-      position: relative;
-      height: 26px;
-    }
-    .vhf-split::before {
-      content: "";
-      position: absolute;
-      left: 50%;
-      top: 0;
-      width: 2px;
-      height: 12px;
-      margin-left: -1px;
-      background: var(--vhf-line);
-    }
-    .vhf-split::after {
-      content: "";
-      position: absolute;
-      left: 25%;
-      right: 25%;
-      top: 12px;
-      height: 2px;
-      background: var(--vhf-line);
-    }
-    .vhf-split-drop {
-      position: absolute;
-      top: 12px;
-      bottom: 0;
-      width: 2px;
-      margin-left: -1px;
-      background: var(--vhf-line);
-    }
-    .vhf-split-drop--a { left: 25%; }
-    .vhf-split-drop--b { left: 75%; }
     .vhf-lanes {
       display: grid;
       grid-template-columns: 1fr 1fr;
+      /* 62-APPLY (06): "a 72px empty gutter is the wall between circulation
+         and evidence". */
+      column-gap: 72px;
     }
     .vhf-lane {
       position: relative;
-      padding: 0 18px 18px;
+      padding: 0 0 18px;
       min-width: 0;
-    }
-    .vhf-lane::before {
-      content: "";
-      position: absolute;
-      left: 50%;
-      top: 0;
-      bottom: 0;
-      width: 2px;
-      margin-left: -1px;
-      background: var(--vhf-line);
     }
     .vhf-lane-name {
       position: relative;
@@ -2556,11 +2533,11 @@
     }
     .vhf-lane > .vhf-node {
       margin: 14px auto 0;
-      max-width: 380px;
     }
     .vhf-publish {
-      width: 60%;
-      margin: 0 auto;
+      /* 62-APPLY (06): identical box, centered, full-stop alone — it follows
+         both lanes without a line granting either lane the other's output. */
+      margin: 8px auto 0;
     }
 
     /* VERIFY-FORK (51-APPLY): the numbers row under the section sub — filled
@@ -3088,11 +3065,34 @@
       /* 61-APPLY (C): the rail is gone — the cells are a full-width row
          between the summary and the strip. auto-flow column still makes
          exactly N EQUAL columns for the 1–3 cells the JS emits: the cells
-         stay peers, none wider or louder than another. */
+         stay peers, none wider or louder than another.
+         62-APPLY (C, per 07's home rendering): the row is divided by
+         hairline rules, not gaps — equal 1fr cells at gap 0, each cell
+         after the first carrying a 1px line-200 left rule + 24px inset;
+         the row itself opens with a line-100 hairline, 16px above the
+         labels, 24px under the summary. */
       grid-column: 1 / -1;
       grid-template-columns: none;
       grid-auto-flow: column;
       grid-auto-columns: minmax(0, 1fr);
+      gap: 0;
+      margin-top: 24px;
+      border-top: 1px solid var(--line-100);
+      border-bottom: none;
+      padding: 16px 0 0;
+    }
+    .topic-card--hero .hero-spread-cells .spread-fact + .spread-fact {
+      border-left: 1px solid var(--line);
+      padding-left: 24px;
+    }
+    /* 62-APPLY (03/07): the unit sits 4px off the numeral at the value step —
+       the figure carries the magnitude, the unit reads quiet. One rule for
+       every fact cell (hero and detail alike). */
+    .spread-fact-value .fact-unit {
+      font-size: var(--fs-value);
+      font-weight: 600;
+      color: var(--slate);
+      margin-left: 4px;
     }
     /* HERO-CELLS-ROW: with labels of different line counts side by side
        (전체 확산 매체 수 wraps, 보도 건수 does not), pin the VALUES to a
@@ -5420,20 +5420,11 @@
          consecutive labeled groups (each keeps its own rail threading its
          nodes), then the publish card. The split tee is desktop geometry;
          hidden here exactly like the retired stepper's arrows were. */
-      .vhf-split {
-        display: none;
-      }
       .vhf-lanes {
         grid-template-columns: 1fr;
       }
       .vhf-lane {
         padding: 14px 0;
-      }
-      .vhf-entry {
-        max-width: none;
-      }
-      .vhf-publish {
-        width: auto;
       }
       /* NODE-LEGEND (54-APPLY): stacked — label above its sentence. */
       .vhf-legend-row {
@@ -6536,23 +6527,24 @@
           <div class="vhf-node vhf-entry">
             <div class="vhf-node-title">주장 수집·분류</div>
           </div>
-          <!-- the split tee, drawn in CSS (stub ::before, rail ::after, two
-               drops) so the branch geometry needs no stretched replaced
-               element; drops sit at the exact lane-rail centers (25% / 75%). -->
-          <div class="vhf-split" aria-hidden="true">
-            <span class="vhf-split-drop vhf-split-drop--a"></span>
-            <span class="vhf-split-drop vhf-split-drop--b"></span>
-          </div>
+          <!-- 62-APPLY (06): the split tee is GONE — "zero connectors
+               anywhere. Reading order carries sequence; symmetry carries the
+               fork" — any drawn path through the shared box would visually
+               bridge the lanes. The 72px gutter (CSS) is the wall. -->
           <div class="vhf-lanes">
             <div class="vhf-lane">
-              <div class="vhf-lane-name">확산 기록</div>
+              <!-- 62-APPLY (06): lane identity by SHAPE — two 14px neutral
+                   glyphs (bars = circulation, document = evidence), both
+                   already shipped symbols (dom-statistics / ic-file-text).
+                   No new label, no colour. -->
+              <div class="vhf-lane-name"><svg class="vhf-lane-glyph" aria-hidden="true"><use href="#dom-statistics"/></svg>확산 기록</div>
               <div class="vhf-lane-note">주간 스냅샷 기준</div>
               <div class="vhf-node"><div class="vhf-node-title">여러 매체로 퍼진 주장</div></div>
               <div class="vhf-node"><div class="vhf-node-title">얼마나 퍼졌나 · 문구 거의 동일</div></div>
               <div class="vhf-node"><div class="vhf-node-title">확산 성장</div></div>
             </div>
             <div class="vhf-lane">
-              <div class="vhf-lane-name">공식 근거 확인</div>
+              <div class="vhf-lane-name"><svg class="vhf-lane-glyph" aria-hidden="true"><use href="#ic-file-text"/></svg>공식 근거 확인</div>
               <div class="vhf-node">
                 <div class="vhf-node-title">1차·공식 출처 대조</div>
               </div>
@@ -10106,17 +10098,20 @@
         if (!info) return "";
         const cell = (label, value) => `<div class="spread-fact"><span class="spread-fact-label">${label}</span><span class="spread-fact-value">${value}</span></div>`;
         const cells = [];
+        // 62-APPLY (03/07): "Units sit 4px off the numeral" — the unit half
+        // of each shipped value form is wrapped (markup only, byte-identical
+        // text) so CSS can set it at value-step weight beside the figure.
         const outletCount = Number(clusterSizeMap.get(Number(card.recordId)));
         if (Number.isFinite(outletCount) && outletCount >= 2) {
-          cells.push(cell("전체 확산 매체 수", `${escapeHtml(String(outletCount))}개 매체`));
+          cells.push(cell("전체 확산 매체 수", `${escapeHtml(String(outletCount))}<span class="fact-unit">개 매체</span>`));
         }
         const articleTotal = Number(info.size);
         if (Number.isFinite(articleTotal) && articleTotal > 0) {
-          cells.push(cell("보도 건수", `${escapeHtml(String(articleTotal))}건`));
+          cells.push(cell("보도 건수", `${escapeHtml(String(articleTotal))}<span class="fact-unit">건</span>`));
         }
         const spanDays = Number(info.span_days);
         if (Number.isFinite(spanDays) && spanDays > 0) {
-          cells.push(cell("확산 기간", `${escapeHtml(String(spanDays))}일`));
+          cells.push(cell("확산 기간", `${escapeHtml(String(spanDays))}<span class="fact-unit">일</span>`));
         }
         const factCells = cells.length
           ? `<div class="spread-facts hero-spread-cells">${cells.join("")}</div>`

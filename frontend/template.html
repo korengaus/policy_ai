@@ -908,23 +908,24 @@
           <div class="vhf-node vhf-entry">
             <div class="vhf-node-title">주장 수집·분류</div>
           </div>
-          <!-- the split tee, drawn in CSS (stub ::before, rail ::after, two
-               drops) so the branch geometry needs no stretched replaced
-               element; drops sit at the exact lane-rail centers (25% / 75%). -->
-          <div class="vhf-split" aria-hidden="true">
-            <span class="vhf-split-drop vhf-split-drop--a"></span>
-            <span class="vhf-split-drop vhf-split-drop--b"></span>
-          </div>
+          <!-- 62-APPLY (06): the split tee is GONE — "zero connectors
+               anywhere. Reading order carries sequence; symmetry carries the
+               fork" — any drawn path through the shared box would visually
+               bridge the lanes. The 72px gutter (CSS) is the wall. -->
           <div class="vhf-lanes">
             <div class="vhf-lane">
-              <div class="vhf-lane-name">확산 기록</div>
+              <!-- 62-APPLY (06): lane identity by SHAPE — two 14px neutral
+                   glyphs (bars = circulation, document = evidence), both
+                   already shipped symbols (dom-statistics / ic-file-text).
+                   No new label, no colour. -->
+              <div class="vhf-lane-name"><svg class="vhf-lane-glyph" aria-hidden="true"><use href="#dom-statistics"/></svg>확산 기록</div>
               <div class="vhf-lane-note">주간 스냅샷 기준</div>
               <div class="vhf-node"><div class="vhf-node-title">여러 매체로 퍼진 주장</div></div>
               <div class="vhf-node"><div class="vhf-node-title">얼마나 퍼졌나 · 문구 거의 동일</div></div>
               <div class="vhf-node"><div class="vhf-node-title">확산 성장</div></div>
             </div>
             <div class="vhf-lane">
-              <div class="vhf-lane-name">공식 근거 확인</div>
+              <div class="vhf-lane-name"><svg class="vhf-lane-glyph" aria-hidden="true"><use href="#ic-file-text"/></svg>공식 근거 확인</div>
               <div class="vhf-node">
                 <div class="vhf-node-title">1차·공식 출처 대조</div>
               </div>

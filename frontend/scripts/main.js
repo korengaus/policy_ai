@@ -3145,17 +3145,20 @@
         if (!info) return "";
         const cell = (label, value) => `<div class="spread-fact"><span class="spread-fact-label">${label}</span><span class="spread-fact-value">${value}</span></div>`;
         const cells = [];
+        // 62-APPLY (03/07): "Units sit 4px off the numeral" — the unit half
+        // of each shipped value form is wrapped (markup only, byte-identical
+        // text) so CSS can set it at value-step weight beside the figure.
         const outletCount = Number(clusterSizeMap.get(Number(card.recordId)));
         if (Number.isFinite(outletCount) && outletCount >= 2) {
-          cells.push(cell("전체 확산 매체 수", `${escapeHtml(String(outletCount))}개 매체`));
+          cells.push(cell("전체 확산 매체 수", `${escapeHtml(String(outletCount))}<span class="fact-unit">개 매체</span>`));
         }
         const articleTotal = Number(info.size);
         if (Number.isFinite(articleTotal) && articleTotal > 0) {
-          cells.push(cell("보도 건수", `${escapeHtml(String(articleTotal))}건`));
+          cells.push(cell("보도 건수", `${escapeHtml(String(articleTotal))}<span class="fact-unit">건</span>`));
         }
         const spanDays = Number(info.span_days);
         if (Number.isFinite(spanDays) && spanDays > 0) {
-          cells.push(cell("확산 기간", `${escapeHtml(String(spanDays))}일`));
+          cells.push(cell("확산 기간", `${escapeHtml(String(spanDays))}<span class="fact-unit">일</span>`));
         }
         const factCells = cells.length
           ? `<div class="spread-facts hero-spread-cells">${cells.join("")}</div>`
