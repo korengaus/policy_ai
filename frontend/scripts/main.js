@@ -7035,7 +7035,7 @@
         // (the readable one); the label column widens 58px → 64px for the
         // larger glyphs. Label TEXT, buckets, bars, chip and the caption line
         // are unchanged.
-        return `<div title="${escapeHtml(label)} 매체 · ${escapeHtml(count)}건" style="display:flex;align-items:center;gap:6px;min-width:0;">
+        return `<div title="${escapeHtml(label)} 매체 · ${escapeHtml(count)}건" style="display:flex;align-items:center;gap:6px;min-width:0;${isHere ? "background:var(--tint);" : ""}">
               <span style="flex:0 0 64px;text-align:right;font-size:12.5px;color:var(--slate);${isHere ? "font-weight:700;color:var(--ink);" : ""}">${escapeHtml(label)}</span>
               <span style="flex:1 1 auto;min-width:0;"><span style="display:block;height:12px;width:${widthPct}%;min-width:2px;background:var(--brand);"></span></span>
               <span style="flex:0 0 64px;">${chip}</span>
@@ -7128,7 +7128,7 @@
           // it qualifies all four cells. The share-image canvas keeps its own
           // copy of the full sentence — wording unchanged there.
           const timelineCell = Number(timeline.dated_members) > 0 && firstAt && lastAt
-            ? spreadFactCell("확산 기간", `${escapeHtml(firstAt)} → ${escapeHtml(lastAt)}`)
+            ? spreadFactCell("확산 기간", `<span class="fact-date">${escapeHtml(firstAt)} → ${escapeHtml(lastAt)}</span>`)
             : "";
           // SYNDICATION-STAT B5d 2b + NEAR-ANCHOR-LABEL-HONESTY: spread-structure
           // line (circulation only, never a verdict/color). The STORED
@@ -7160,7 +7160,7 @@
           // null (pre-2a graph rows) omits the cell.
           const nearCell = nearShown === null
             ? ""
-            : spreadFactCell("문구 거의 동일", `${escapeHtml(nearShown)}개 매체`);
+            : spreadFactCell("문구 거의 동일", `${escapeHtml(nearShown)}<span class="fact-unit">개 매체</span>`);
           // 4b: the ARTICLE count beside the OUTLET count. The block stated only
           // "{N}개 매체", so 40 outlets / 158 articles and 40 / 40 read identically
           // to a reader. api_server.py:1566 records the two as deliberately
@@ -7177,7 +7177,7 @@
           // guessing which of the two is right would not be.
           const memberSize = Number(data?.cluster?.size);
           const sizeCell = Number.isFinite(memberSize) && memberSize >= outletCount
-            ? spreadFactCell("보도 건수", `${escapeHtml(memberSize)}건`)
+            ? spreadFactCell("보도 건수", `${escapeHtml(memberSize)}<span class="fact-unit">건</span>`)
             : "";
           // 5b: cells in fixed order — 매체 / 건수 / 기간 / 문구. The outlet cell
           // is unconditional inside this block (the >=2 gate above is its
@@ -7185,7 +7185,7 @@
           // absent, and auto-fit re-flows the remaining cells across the row so
           // a 2-cell or 1-cell grid reads as fewer facts, never as zeros.
           const factsGrid = `<div class="spread-facts">${
-            spreadFactCell("전체 확산 매체 수", `${escapeHtml(outletCount)}개 매체`)
+            spreadFactCell("전체 확산 매체 수", `${escapeHtml(outletCount)}<span class="fact-unit">개 매체</span>`)
           }${sizeCell}${timelineCell}${nearCell}</div>
             <div class="spread-facts-note">(수집 기사 기준)</div>`;
           // DETAIL-IA MERGE: this div is a CHILD of the 얼마나 퍼졌나 wrapper —

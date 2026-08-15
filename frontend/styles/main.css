@@ -483,7 +483,7 @@
       min-height: 0;
       border-radius: 0;
       padding: 0 16px;
-      font-weight: 700;
+      font-weight: 600; /* 63-APPLY (07): header buttons 15/600 */
       color: #fff;
       letter-spacing: 0;
       white-space: nowrap;
@@ -492,7 +492,7 @@
        only, so the analyze button elsewhere keeps its brand-blue. */
     /* DESIGN-3A5: 분석하기 = brand blue + white; hover darker blue. */
     .topbar .panel #analyzeBtn {
-      font-size: 1.0rem;
+      font-size: var(--fs-value); /* 63-APPLY (07): 15/600 */
       background: var(--brand);
       color: #fff;
     }
@@ -504,7 +504,7 @@
        분석하기. It drops to the quiet segment: surface + ink text, separated
        by the bar's own internal edge. */
     .topbar .panel #historyBtn {
-      font-size: var(--fs-meta);
+      font-size: var(--fs-value); /* 63-APPLY (07): 15/600 */
       padding: 0 12px;
       background: var(--paper);
       color: var(--ink);
@@ -512,6 +512,17 @@
     }
     .topbar .panel #historyBtn:hover:not(:disabled) {
       background: var(--well);
+    }
+    /* 63-APPLY: the 15px header buttons made the segmented bar's min-content
+       393px at the 390 viewport (3px horizontal overflow). Trim the buttons'
+       horizontal padding on narrow screens — spacing only, type untouched. */
+    @media (max-width: 480px) {
+      .topbar .panel button {
+        padding: 0 8px;
+      }
+      .topbar .panel #historyBtn {
+        padding: 0 8px;
+      }
     }
 
     /* DESIGN-PROGRESS-3: nudge the brand down a touch to balance the lowered
@@ -724,9 +735,11 @@
          margin-top = (G - H)/2 = (33 - 15.6)/2 ≈ 8px (was 14px = too low). */
       margin-top: 8px;
       display: none;
-      color: #334155;
-      font-size: 13px;
-      font-weight: 700;
+      /* 63-APPLY (07 detail rendering): the load notice is quiet micro muted
+         (저장된 검증 결과를 불러왔습니다 at 11.5 #6b6b62), not 13/700 near-ink. */
+      color: var(--muted);
+      font-size: var(--fs-micro);
+      font-weight: 500;
       pointer-events: none;
     }
 
@@ -1102,7 +1115,10 @@
     .spread-fact-value {
       display: block;
       color: var(--ink);
-      font-size: var(--fs-figure-m);
+      /* 63-APPLY (07 detail rendering): detail fact figures at figure-l 28
+         (the hero overrides to 40/20 by width); the date-range cell keeps a
+         quieter 16/600 via .fact-date below. */
+      font-size: var(--fs-figure-l);
       font-weight: 700;
       line-height: 1.35;
       font-variant-numeric: tabular-nums;
@@ -1896,7 +1912,7 @@
     /* title clamped to 2 lines, mirroring .topic-card-title. */
     .rank-title {
       color: var(--ink);
-      font-size: var(--fs-value);
+      font-size: var(--fs-meta); /* 63-APPLY (07 rail): rank titles 13/600 */
       line-height: 1.4;
       font-weight: 600;
       display: -webkit-box;
@@ -2450,13 +2466,13 @@
     }
     .vhf-legend-label {
       color: var(--ink);
-      font-size: var(--fs-micro);
+      font-size: var(--fs-meta); /* 63-APPLY (07 method): legend at 13 */
       font-weight: 700;
       text-align: right;
     }
     .vhf-legend-desc {
       color: var(--slate);
-      font-size: var(--fs-micro);
+      font-size: var(--fs-meta); /* 63-APPLY (07 method) */
       line-height: 1.55;
       text-align: left;
     }
@@ -2699,7 +2715,7 @@
     }
 
     .methodology-card h2 {
-      font-size: 2rem;
+      font-size: var(--fs-title-xl); /* 63-APPLY (07 method): page title 32/600 */
     }
 
     .methodology-card h3 {
@@ -2964,8 +2980,13 @@
       /* DESIGN-C2b → DESIGN-C3g: hero headline 2.4rem → 3.0rem so it clearly
          dominates the column like the mockup. Hero-scoped; normal card titles stay
          1.077rem. */
-      font-size: 3.0rem;
-      line-height: 1.2;
+      /* 63-APPLY (07 home rendering): the hero headline is the spec's
+         title-xl — 32/600/44, -0.01em — replacing the pre-system 3.0rem/400
+         (DESIGN-C3g). */
+      font-size: var(--fs-title-xl);
+      font-weight: 600;
+      line-height: 44px;
+      letter-spacing: -0.01em;
       -webkit-line-clamp: 3;
       /* 59-APPLY: hero headlines fit their 3-line clamp; balance evens the
          lines so a short trailing fragment never sits alone. */
@@ -2979,8 +3000,8 @@
     .topic-card--hero .topic-card-summary {
       /* DESIGN-C2b → DESIGN-C3g: 1.2rem → 1.28rem small bump to match the larger
          headline. */
-      font-size: 1.28rem;
-      line-height: 1.6;
+      font-size: var(--fs-body); /* 63-APPLY (07): summary at body 15/26 */
+      line-height: 26px;
       -webkit-line-clamp: 4;
     }
     .topic-card--hero .card-source-box {
@@ -3057,6 +3078,13 @@
       font-weight: 600;
       color: var(--slate);
       margin-left: 4px;
+    }
+    /* 63-APPLY (07 detail rendering): the 확산 기간 cell holds a date RANGE,
+       not a numeral — it sits at the rendering's 16/600 so a date never
+       competes with the figures. */
+    .spread-fact-value .fact-date {
+      font-size: 16px;
+      font-weight: 600;
     }
     /* HERO-CELLS-ROW: with labels of different line counts side by side
        (전체 확산 매체 수 wraps, 보도 건수 does not), pin the VALUES to a
@@ -5042,7 +5070,7 @@
     .footer-col-head {
       color: var(--ink);
       font-size: var(--fs-micro);
-      font-weight: 800;
+      font-weight: 600; /* 63-APPLY (07): 11.5/600 ink, was 800 */
       letter-spacing: 0.02em;
       margin-bottom: 2px;
     }
