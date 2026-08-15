@@ -565,8 +565,11 @@
     // INSIDE .card-domain so hero cards (which hide .card-domain) auto-hide it.
     function domainIconMarkup(domainKey) {
       const symbolId = DOMAIN_ICON_IDS[domainKey] || "dom-etc";
-      const color = DOMAIN_COLORS[domainKey] || DOMAIN_ICON_FALLBACK_COLOR;
-      return `<svg class="domain-icon" style="color:${color}" aria-hidden="true" focusable="false"><use href="#${symbolId}"/></svg>`;
+      // 64-APPLY (09 folded-in): the feed glyph is ONE uniform neutral — the
+      // text names the category; per-domain hues were decoration. Shapes stay
+      // distinct; DOMAIN_COLORS itself is untouched (the brain-map still
+      // reads it for its nodes).
+      return `<svg class="domain-icon" style="color:var(--ink-400)" aria-hidden="true" focusable="false"><use href="#${symbolId}"/></svg>`;
     }
     // ===== end DISPLAY-CATEGORY B-1 =====
     // Deferred from M29-A1 (pin-sensitive): values contain regression-pinned
@@ -6838,9 +6841,11 @@
     // shapes only (same-origin, canvas stays untainted). Download-only this
     // slice; navigator.share + sparkline bars are Slice 2.
     const SHARE_IMAGE_FONTS = 'Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
+    // 64-APPLY (09 P4): the exported card wears the system — ivory ground,
+    // warm ink ramp, the one recalibrated accent. Values mirror :root.
     const SHARE_IMAGE_COLORS = {
-      canvas: "#f6f8fb", ink: "#0f172a", slate: "#475569",
-      muted: "#94a3b8", line: "#e2e8f0", brand: "#1e5fd8", brandInk: "#1542a0",
+      canvas: "#f5f5f2", ink: "#1e1e1b", slate: "#45453e",
+      muted: "#6b6b62", line: "#d9d8cf", brand: "#1f4fa8", brandInk: "#173e88",
     };
 
     // Canvas has no auto-wrap; per-character wrapping is correct for Korean

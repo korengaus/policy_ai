@@ -14,21 +14,29 @@
 -->
 <style>
   :root {
-    --ink: #0f172a;
-    --slate: #475569;
-    --muted: #94a3b8;
-    --line: #e2e8f0;
-    --paper: #ffffff;
-    --canvas: #f6f8fb;
-    --brand: #1e5fd8;
-    --brand-ink: #1542a0;
-    --radius-sm: 9px;
+    /* 64-APPLY: token block synced to frontend/styles/main.css (the design
+       system's values) — the last pages still carrying the retired cool
+       palette (#f6f8fb canvas predates even CANVAS-IVORY). */
+    --ink: #1e1e1b;
+    --slate: #45453e;
+    --muted: #6b6b62;
+    --ink-400: #8a8a80;
+    --line: #d9d8cf;
+    --line-100: #e8e7e0;
+    --line-300: #c0bfb4;
+    --paper: #fbfbf9;
+    --canvas: #f5f5f2;
+    --well: #edece6;
+    --brand: #1f4fa8;
+    --brand-ink: #173e88;
+    --radius-sm: 0;
+    --font-sans: system-ui, -apple-system, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     background: var(--canvas);
     color: var(--ink);
-    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+    font-family: var(--font-sans);
     min-height: 100vh;
   }
   header.doc-head {
@@ -59,7 +67,7 @@
   .doc-title {
     font-size: 22px; font-weight: 500; letter-spacing: -0.02em; color: var(--ink);
     /* FONT-SWITCH: page title joins the body sans stack; only .brand stays serif. */
-    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+    font-family: var(--font-sans);
   }
   .doc-date { margin-top: 4px; font-size: 13.5px; color: var(--slate); font-weight: 600; }
   main.doc-body { max-width: 760px; margin: 0 auto; padding: 22px 20px 40px; }

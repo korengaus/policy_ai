@@ -1889,10 +1889,11 @@
     }
     .rank-num {
       flex: 0 0 24px;
-      color: var(--brand);
-      /* DESIGN-C3g: 1.077rem → 1.18rem (rank list nudged up toward the mockup). */
+      /* 64-APPLY (09 folded-in): rank numerals leave the accent — position
+         is the ranking; a blue numeral read as an actionable mark. */
+      color: var(--muted);
       font-size: 1.154rem;
-      font-weight: 800;
+      font-weight: 600;
       line-height: 1.4;
       text-align: center;
     }
@@ -3487,8 +3488,10 @@
     .topic-card-tag {
       font-size: var(--fs-micro);
       font-weight: 600;
-      color: var(--brand-ink);
-      background: #eff6ff;
+      /* 64-APPLY (09 folded-in): hashtags leave the accent — recorded-state
+         dress (well fill, slate text), not a blue that competes with links. */
+      color: var(--slate);
+      background: var(--well);
       border-radius: 0;
       padding: 2px 8px;
     }
