@@ -66,8 +66,9 @@
     color: var(--brand-ink); text-decoration: none;
   }
   .doc-home:hover { text-decoration: underline; }
+  /* 65-APPLY (03): document title at title-l 24/600 (was 22/500). */
   .doc-title {
-    font-size: 22px; font-weight: 500; letter-spacing: -0.02em; color: var(--ink);
+    font-size: 24px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink);
     /* FONT-SWITCH: page title joins the body sans stack; only .brand stays serif. */
     font-family: var(--font-sans);
   }
@@ -77,20 +78,21 @@
     background: var(--paper); border: 1px solid var(--line);
     border-radius: var(--radius-sm); padding: 18px 20px; margin-bottom: 12px;
   }
+  /* 65-APPLY (03): section heads at head 18/700 (was 15.5/800). */
   h2 {
-    font-size: 15.5px; font-weight: 800; color: var(--ink);
+    font-size: 18px; font-weight: 700; color: var(--ink);
     letter-spacing: -0.01em; margin-bottom: 8px;
   }
-  p { font-size: 14px; line-height: 1.75; color: var(--slate); }
+  p { font-size: 15px; line-height: 1.75; color: var(--slate); } /* 65-APPLY (03): body 15 */
   p + p { margin-top: 8px; }
   ul { margin: 8px 0 0 18px; }
-  li { font-size: 14px; line-height: 1.75; color: var(--slate); }
+  li { font-size: 15px; line-height: 1.75; color: var(--slate); } /* 65-APPLY (03): body 15 */
   strong { color: var(--ink); font-weight: 700; }
   a { color: var(--brand-ink); text-decoration: none; font-weight: 600; }
   a:hover { text-decoration: underline; }
   footer.doc-foot {
     max-width: 760px; margin: 0 auto; padding: 0 20px 46px;
-    font-size: 12.5px; color: var(--muted); line-height: 1.7;
+    font-size: 13px; color: var(--muted); line-height: 1.7; /* 65-APPLY (03): meta 13 */
   }
 </style>
 </head>
@@ -109,8 +111,8 @@
   <section class="doc-section">
     <h2>1. 기본 방침</h2>
     <p>
-      tickedin(이하 "서비스")은 공개된 1차 자료와 공식 출처를 기준으로 정책 뉴스 속 주장을
-      검증하는 사이트입니다. 서비스는 <strong>회원가입과 로그인 기능을 제공하지 않으며</strong>,
+      tickedin(이하 "서비스")은 공개된 1차 자료와 공식 출처를 기준으로 정책 뉴스 속 주장의
+      확산과 공식 근거 유무를 기록하는 독립 인프라입니다. 서비스는 <strong>회원가입과 로그인 기능을 제공하지 않으며</strong>,
       이용자를 식별하기 위한 개인정보를 수집하지 않습니다. 검증 결과 열람에는 어떠한
       개인정보도 필요하지 않습니다.
     </p>
