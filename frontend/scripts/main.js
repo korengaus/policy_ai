@@ -6826,8 +6826,17 @@
       // brand, no bold, no words. Skipped when the quarter is not a distinct
       // count (peak < 4). Derivation, scale, gates, tooltips all untouched.
       const quarter = Math.round(peak / 4);
+      // 67-APPLY (B): on short spans the plot (days × slot) is narrower than
+      // the right-anchored label, so the label painted under its own bars.
+      // Below 60px of plot the label steps OUTSIDE the plot's right edge
+      // (short strips end far from the panel edge, so nothing clips); long
+      // plots keep the inside-right anchor. The dashed line — the disclosure
+      // that heights are not proportional to counts — renders at every span.
+      const labelPos = (totalDays * slotPx < 60)
+        ? "left:100%;margin-left:6px;bottom:-4px;white-space:nowrap;"
+        : "right:0;bottom:2px;";
       const gridline = (hero && peak >= 4 && quarter >= 1 && quarter < peak)
-        ? `<div class="spread-strip-gridline" aria-hidden="true" style="position:absolute;left:0;right:0;bottom:${Math.round(Math.sqrt(quarter / peak) * plotH)}px;height:0;border-top:1px dashed var(--line);"><span style="position:absolute;right:0;bottom:2px;font-size:var(--fs-micro);color:var(--muted);line-height:1;">${escapeHtml(quarter)}건</span></div>`
+        ? `<div class="spread-strip-gridline" aria-hidden="true" style="position:absolute;left:0;right:0;bottom:${Math.round(Math.sqrt(quarter / peak) * plotH)}px;height:0;border-top:1px dashed var(--line);"><span style="position:absolute;${labelPos}font-size:var(--fs-micro);color:var(--muted);line-height:1;">${escapeHtml(quarter)}건</span></div>`
         : "";
       return `<div class="feed-spread-strip" role="img" aria-label="일별 보도량, 최다 ${escapeHtml(peak)}건" style="position:relative;display:flex;align-items:flex-end;gap:${gap}px;height:${stripH}px;max-width:100%;${stripW}">${gridline}${bars.join("")}</div>`;
     }
@@ -7052,7 +7061,7 @@
             </div>`;
       }).join("");
       return `
-            <div style="margin:10px 0 4px;max-width:440px;">
+            <div style="margin:10px 0 4px;max-width:640px;">
               <div role="img" aria-label="수집된 주장의 확산 규모 분포" style="display:flex;flex-direction:column;gap:3px;">${rows}</div>
               <div style="font-size:var(--fs-micro);color:var(--muted);margin-top:4px;">수집된 주장의 확산 규모 분포 — 우리가 수집한 범위 기준입니다.</div>
             </div>`;
@@ -7762,19 +7771,13 @@
                   <span class="verdict-value">${escapeHtml(officialStatusLabel(result))}</span>
                 </div>
               </div>
-              <!-- STATUS-WHY-PROMOTED (55-APPLY) / 55-FIX: the dual-axis
-                   reader-note MOVED to the header for good (the page's only
-                   alert-is-not-a-verdict sentence). The 왜 이렇게 판단했나요?
-                   bullets were promoted with it and RETURNED here in 55-FIX:
-                   the two moves together grew the 390 header to 75% of the
-                   viewport, and the bullets answer a follow-up question, not
-                   the misreading the note prevents. Byte-identical round
-                   trip; the two tiles and everything else in this block are
-                   untouched. -->
-              <div class="verdict-reasoning">
-                <h3>왜 이렇게 판단했나요?</h3>
-                ${renderBulletList(decisionReasonBullets(userContext, 3))}
-              </div>
+              <!-- STATUS-WHY-PROMOTED (55-APPLY) / 55-FIX / 67-APPLY (D): the
+                   왜 이렇게 판단했나요? rationale MOVED — byte-identical — to
+                   sit under the 핵심 주장 block in layer 1. NOT the header:
+                   55-FIX reverted a header promotion that hit 75% of the 390
+                   viewport; this placement is below the header, which does
+                   not change. The two tiles and everything else in this
+                   block are untouched. -->
             </section>
             <div class="verification-intro">
               <div class="summary-tile">
@@ -7912,6 +7915,15 @@
             <div class="verification-item full">
               <span class="label">핵심 주장</span><br>
               ${escapeHtml(exportClaimText(result))}
+            </div>
+
+            <!-- 67-APPLY (D): the judgement rationale, moved whole (byte-
+                 identical markup) from the 우리가 어떻게 판단했나 block — the
+                 one thing a reader needed that existed nowhere above the
+                 fold. It sits under 핵심 주장, never in the header. -->
+            <div class="verdict-reasoning">
+              <h3>왜 이렇게 판단했나요?</h3>
+              ${renderBulletList(decisionReasonBullets(userContext, 3))}
             </div>
 
             <!-- DETAIL-IA: the honesty reader-note is the ONE always-visible

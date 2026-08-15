@@ -268,11 +268,14 @@
          the search box for the absolute progress overlay (thin bar + status text),
          so the text sits above this rule instead of crossing into the tabs. */
       top: 8px;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 100vw;
+      /* 67-APPLY (A): full-bleed 100vw → content width, so the masthead
+         bookend spans exactly what the footer's does — one device, twice.
+         Thinned 2px → 1px: at ink weight the TONE carries the hierarchy
+         (15.3:1 vs the 1.4:1 section rules), so these still read heaviest. */
+      left: 0;
+      right: 0;
       height: 0;
-      border-top: 2px solid var(--rule-strong); /* 60-APPLY (04): masthead base — one of the page's two 2px ink bookends */
+      border-top: 1px solid var(--rule-strong);
     }
     .domain-tabs-row::after {
       content: '';
@@ -1135,7 +1138,13 @@
        the pair reads as a single chart band; <=960 stacks (media block). */
     .spread-chart-row {
       display: grid;
-      grid-template-columns: minmax(0, 440px) minmax(0, 1fr);
+      /* 67-APPLY (C): the distribution was hard-capped at 440px while the
+         strip sat at its 140px caption floor — 59% of a 992px section. The
+         strip CANNOT absorb the space (a day is a fixed 12px slot; the
+         baseline never stretches), so the distribution does: its track takes
+         the remainder (its own inline cap rises 440 → 640) and the strip's
+         track sizes to the strip's data width. */
+      grid-template-columns: minmax(0, 1fr) auto;
       gap: 16px 32px;
       align-items: end;
       margin: 2px 0 4px;
@@ -5007,7 +5016,7 @@
     .site-footer {
       margin-top: 28px;
       padding: 18px 0 4px;
-      border-top: 2px solid var(--rule-strong); /* 60-APPLY (04): footer-top — the second 2px ink bookend */
+      border-top: 1px solid var(--rule-strong); /* 67-APPLY (A): the footer bookend, thinned with the masthead's — ink tone keeps them heaviest */
       text-align: center;
       color: var(--muted);
       font-size: 1rem;
