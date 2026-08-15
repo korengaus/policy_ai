@@ -3026,14 +3026,13 @@
        back to the stacked flow at <=960px (media block below). */
     .topic-card--hero {
       display: grid;
-      /* 60-APPLY (B): facts column 320 → 344 and gap 48 → 24 — the freed gap
-         goes to the facts, so the 1fr title keeps its exact width (544 at
-         1440). Cells become (344−32)/3 = 104px: the widest real value at
-         figure-m 20 ("102개 매체", 102px rendered) now fits one line. The
-         next steps stay out of reach without robbing the title: figure-l 28
-         needs 143px cells (461px strip), figure-xl 40 needs 204px (644px). */
-      grid-template-columns: minmax(0, 1fr) 344px;
-      column-gap: 24px;
+      /* 60-APPLY (B) widened the side rail to 344px, which capped the fact
+         cells at 104px — figure-m 20 max. 61-APPLY (C): the cells move BELOW
+         the title into a full-width row (DOM order already title → summary →
+         cells → strip), so the rail is gone: the headline gains the full
+         912px measure and each of three equal cells gets (912−32)/3 ≈ 293px
+         — room for the spec's figure-xl 40 ("102개 매체" = 204px rendered). */
+      grid-template-columns: minmax(0, 1fr);
       align-items: start;
     }
     .topic-card--hero > * {
@@ -3050,17 +3049,11 @@
        the widest shipped value ("NN개 매체") without clipping (labels wrap at
        their own spaces; values stay on one line). */
     .topic-card--hero > .hero-spread-cells {
-      grid-column: 2;
-      /* HERO-DEAD-SPACE (44-APPLY): span 5 → span 3. The span-5 dates from
-         33-APPLY when column 1 held five rows (strip + range included);
-         38 moved those to full-width rows BELOW, so rows 4-5 had become
-         phantom rows whose only rendered effect was three extra 14px row
-         gaps of dead space between the summary and the strip. Span 3 =
-         the actual column-1 rows beside the rail (chip / title / summary).
-         align-self start → center: the 71px cells row sits centred in the
-         ~165px title-block rail instead of top-stacked above a void. */
-      grid-row: 1 / span 3;
-      align-self: center;
+      /* 61-APPLY (C): the rail is gone — the cells are a full-width row
+         between the summary and the strip. auto-flow column still makes
+         exactly N EQUAL columns for the 1–3 cells the JS emits: the cells
+         stay peers, none wider or louder than another. */
+      grid-column: 1 / -1;
       grid-template-columns: none;
       grid-auto-flow: column;
       grid-auto-columns: minmax(0, 1fr);
@@ -3073,12 +3066,13 @@
       flex-direction: column;
     }
     .topic-card--hero .spread-fact-value {
-      /* 59-APPLY set figure-m 20; 60-APPLY (B) re-measured after widening the
-         slot to 104px: figure-m is the largest step that holds "102개 매체"
-         (102px @20) on one line. figure-l 28 needs 143px cells — reachable
-         only by shrinking the 1fr headline, which is off the table; the
-         equal-peer rule bars unequal cells. So the step stays figure-m 20. */
-      font-size: var(--fs-figure-m);
+      /* 59/60 capped these at figure-m 20 because the 104px side-rail cells
+         could hold no more. 61-APPLY (C): in the full-width row each cell is
+         ~293px, so the hero stats reach their specified figure-xl 40
+         ("80개 매체 159건 43일" is the spec's own figure-xl specimen). The
+         ≤960px override below returns to figure-m — a stacked mobile cell is
+         ~104px again. */
+      font-size: var(--fs-figure-xl);
       margin-top: auto;
     }
     .hero-spread-range {
@@ -3108,13 +3102,9 @@
       left: -1px;
       right: -1px;
       bottom: 0;
-      height: 18px;
-    }
-    /* STRIP-HERO-SCALE (37-APPLY): the hero strip is 36px tall (see
-       feedSpreadStripHtml's hero opt); its hover hit target covers the
-       taller strip. */
-    .topic-card--hero .spread-strip-bar::before {
-      height: 36px;
+      /* 61-APPLY (05): the titled element is now the full-height day slot,
+         so one 100% hit target serves every strip height (14/64/88). */
+      height: 100%;
     }
     /* STRIP-EMPTY-AS-ABSENCE (39-APPLY) → AXIS-TICKS (41-APPLY): the
        strip's empty-day SLOT. The div is transparent and keeps the full
@@ -3131,9 +3121,12 @@
       left: 50%;
       bottom: 0;
       transform: translateX(-50%);
-      width: 1px;
+      /* 61-APPLY (05): the spec's empty-day mark — a 2×2 ink-400 mark ON the
+         baseline, "grey because 'observed, zero' must not read as a small
+         blue count". Was a 1×2 tick in --muted. */
+      width: 2px;
       height: 2px;
-      background: var(--muted);
+      background: var(--ink-400);
     }
     /* ONE-CHART-LANGUAGE (40-APPLY): the baseline rule is shared by BOTH
        strip sizes (it was hero-only, so the same data type was drawn two
@@ -5375,6 +5368,12 @@
          container default (start) so the 390 layout is unchanged. */
       .topic-card--hero > .hero-spread-cells {
         align-self: auto;
+      }
+      /* 61-APPLY (C): a stacked mobile cell is ~104px — figure-xl (204px)
+         cannot hold "102개 매체" there, so the mobile hero stats stay at
+         figure-m 20, still one shared size for all three peers. */
+      .topic-card--hero .spread-fact-value {
+        font-size: var(--fs-figure-m);
       }
       /* VERIFY-STEPS-REDESIGN: the how-we-verify steps stack to one column here, so
          hide the horizontal flow arrows (a sideways arrow between stacked steps reads

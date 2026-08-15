@@ -6639,7 +6639,9 @@
     // ever renders. spreadSparklineHtml itself stays defined (same
     // retained-renderer pattern as renderBiasFramingSummary).
     function detailDailyStripHtml(daily) {
-      const strip = feedSpreadStripHtml(daily, { hero: true });
+      // 61-APPLY (05): the spec's floor-check table puts the detail plot at
+      // H 88 (home hero 64) — same language, one taller context.
+      const strip = feedSpreadStripHtml(daily, { hero: true, plotH: 88 });
       if (!strip) return "";
       const counts = new Map();
       for (const entry of (Array.isArray(daily) ? daily : [])) {
@@ -6652,8 +6654,8 @@
       let peak = 0;
       counts.forEach((count) => { peak = Math.max(peak, count); });
       const labelRow = counts.size === 1
-        ? `<div style="text-align:center;font-size:0.78rem;color:var(--muted);">${escapeHtml(days[0])} · ${escapeHtml(counts.get(days[0]))}건</div>`
-        : `<div style="display:flex;justify-content:space-between;gap:12px;font-size:0.78rem;color:var(--muted);">
+        ? `<div style="text-align:center;font-size:var(--fs-micro);color:var(--muted);">${escapeHtml(days[0])} · ${escapeHtml(counts.get(days[0]))}건</div>`
+        : `<div style="display:flex;justify-content:space-between;gap:12px;font-size:var(--fs-micro);color:var(--muted);">
               <span>${escapeHtml(days[0])}</span>
               <span>최다 ${escapeHtml(peak)}건/일</span>
               <span>${escapeHtml(days[days.length - 1])}</span>
@@ -6671,7 +6673,9 @@
       const spanDays = (Number.isFinite(spanStartMs) && Number.isFinite(spanEndMs))
         ? Math.round((spanEndMs - spanStartMs) / 86400000) + 1
         : 60;
-      const ownWidth = Math.max(140, spanDays * 24);
+      // 61-APPLY (05): 24px/day pitch → the spec's 12px slot (the strip
+      // itself now renders days × 12); the 140px caption floor stays.
+      const ownWidth = Math.max(140, spanDays * 12);
       return `<div class="spread-daily-strip" style="max-width:${ownWidth}px;">${strip}${labelRow}</div>`;
     }
 
@@ -6702,26 +6706,19 @@
       // 1px CSS baseline rule inside the border-box. The hero bars' 2px top
       // rounding is shape polish only — same token, same scale, no gradient,
       // no interpolation, no colour split.
-      const stripH = hero ? 37 : 18;
-      // SQRT-SCALE (41-APPLY): plot height the bars scale against (the box
-      // minus the 1px baseline border inside the border-box).
-      const plotH = hero ? 36 : 17;
-      // ONE-CHART-LANGUAGE (40-APPLY): region bars keep an explicit basis so
-      // the explicit strip width below equals the rendered bars; long series
-      // still compress via flex-shrink under the inline max-width:100%.
-      // BAR-PITCH (41-APPLY): equal per-day pitch is the time axis; only
-      // aggregation could widen a bar past its day slot, and that changes
-      // the unit.
-      // BAR-GAP (46-APPLY): 41's gap 0 made adjacent article days fuse into
-      // one block — the 1px gap is restored WITHOUT moving the axis pitch:
-      // region bars give the gap its pixel (10px slot → 9px bar + 1px gap,
-      // pitch still 10px/day), and hero bars flex inside the fixed card
-      // width, so the gap comes out of the bar there too (44 days ≈ 20.7px
-      // pitch either way); the short-series cap drops 24px → 23px for the
-      // same reason (23px bar + 1px gap = the old 24px capped pitch).
-      // Empty-day ticks are 1px marks in their slot, unchanged.
-      const barBasis = hero ? "flex:1 1 12px;max-width:23px" : "flex:1 1 9px;max-width:9px";
-      const gap = 1;
+      // 61-APPLY (05): spec slot geometry — "one day = one 12px slot (5px in
+      // row sparklines)", hero H 64, row spark H 14, detail H 88 (via
+      // opts.plotH). The bar occupies a fixed share of its slot (7/12 and
+      // 3/5 per spec), so the visual gap is the slot's own remainder and the
+      // whole strip compresses proportionally on narrow screens without
+      // distorting the day pitch. The baseline spans exactly the observed
+      // window (inline width below) — it never stretches to fill the panel.
+      const plotH = (opts && opts.plotH) || (hero ? 64 : 14);
+      const stripH = plotH + 1; // + the 1px baseline border inside the border-box
+      const slotPx = hero ? 12 : 5;
+      const barShare = hero ? "58%" : "60%"; // 7 of 12 / 3 of 5
+      const slotBasis = `flex:0 1 ${slotPx}px;max-width:${slotPx}px;min-width:0`;
+      const gap = 0; // the slot owns its spacing; adjacent bars read a 5px/2px gap
       if (!Array.isArray(daily) || !daily.length) return "";
       const counts = new Map();
       for (const entry of daily) {
@@ -6756,6 +6753,8 @@
         // shipped Korean names the scale itself, so nothing more is drawn.
         // Calendar-day iteration, the 60-day bail-out and the truncation
         // rule are untouched.
+        // 61-APPLY (05): spec floor is 3px; ours stays 4px — a deliberately
+        // raised visibility floor (41-APPLY) and sizes never shrink.
         const barPx = count > 0 ? Math.max(4, Math.round(Math.sqrt(count / peak) * plotH)) : 0;
         // STRIP-TOOLTIP (35-APPLY): .spread-strip-bar carries an instant
         // styled tooltip (CSS ::after reads THIS title attribute verbatim) on
@@ -6780,13 +6779,15 @@
         // dots read as an underline with dust.
         if (count === 0) {
           bars.push(
-            `<div class="spread-strip-slot" title="${escapeHtml(day)} · 0건" style="${barBasis};min-width:0;align-self:flex-end;height:2px;position:relative;"></div>`
+            `<div class="spread-strip-slot" title="${escapeHtml(day)} · 0건" style="${slotBasis};align-self:flex-end;height:2px;position:relative;"></div>`
           );
         } else {
-          // SQUARE-TOPS (41-APPLY): border-radius removed (was 2px hero /
-          // 1px region) — the target's bars are square.
+          // SQUARE-TOPS (41-APPLY): square bars, no radius. 61-APPLY (05):
+          // the titled/tabbable element is now the day SLOT (tooltip and
+          // focus unchanged — same class, same title source); the painted
+          // bar is a centred child at the spec's bar-to-slot share.
           bars.push(
-            `<div class="spread-strip-bar" title="${escapeHtml(day)} · ${escapeHtml(count)}건" tabindex="0" style="${barBasis};min-width:0;align-self:flex-end;height:${barPx}px;background:var(--brand);"></div>`
+            `<div class="spread-strip-bar" title="${escapeHtml(day)} · ${escapeHtml(count)}건" tabindex="0" style="${slotBasis};align-self:stretch;display:flex;align-items:flex-end;justify-content:center;"><div style="width:${barShare};height:${barPx}px;background:var(--brand);"></div></div>`
           );
         }
       }
@@ -6796,7 +6797,11 @@
       // still caps long series, whose bars then compress via flex-shrink
       // exactly as before). The hero strip keeps no width: the grid
       // stretches it across the full card.
-      const stripW = hero ? "" : `width:${totalDays * 9 + (totalDays - 1) * gap}px;`;
+      // 61-APPLY (05): BOTH strip sizes now take an explicit width of
+      // days × slot — "the baseline spans exactly the observed window and
+      // nothing more" (the hero previously stretched across the card).
+      // max-width:100% still lets narrow screens compress proportionally.
+      const stripW = `width:${totalDays * slotPx}px;`;
       // SCALE-GRIDLINE (55-APPLY): the bars are sqrt-scaled (SQRT-SCALE above)
       // and nothing on screen said so. HERO-SIZE STRIPS ONLY (the 17px region
       // strips have no room — unchanged): one faint dashed reference line at
@@ -6811,7 +6816,7 @@
       // count (peak < 4). Derivation, scale, gates, tooltips all untouched.
       const quarter = Math.round(peak / 4);
       const gridline = (hero && peak >= 4 && quarter >= 1 && quarter < peak)
-        ? `<div class="spread-strip-gridline" aria-hidden="true" style="position:absolute;left:0;right:0;bottom:${Math.round(Math.sqrt(quarter / peak) * plotH)}px;height:0;border-top:1px dashed var(--line);"><span style="position:absolute;right:0;bottom:2px;font-size:9px;color:var(--muted);line-height:1;">${escapeHtml(quarter)}건</span></div>`
+        ? `<div class="spread-strip-gridline" aria-hidden="true" style="position:absolute;left:0;right:0;bottom:${Math.round(Math.sqrt(quarter / peak) * plotH)}px;height:0;border-top:1px dashed var(--line);"><span style="position:absolute;right:0;bottom:2px;font-size:var(--fs-micro);color:var(--muted);line-height:1;">${escapeHtml(quarter)}건</span></div>`
         : "";
       return `<div class="feed-spread-strip" role="img" aria-label="일별 보도량, 최다 ${escapeHtml(peak)}건" style="position:relative;display:flex;align-items:flex-end;gap:${gap}px;height:${stripH}px;max-width:100%;${stripW}">${gridline}${bars.join("")}</div>`;
     }
@@ -7013,9 +7018,12 @@
         const label = hi === null ? `${lo}개 이상` : (lo === hi ? `${lo}개` : `${lo}-${hi}개`);
         const isHere = outletCount >= lo && (hi === null || outletCount <= hi);
         const count = Number(bucket?.count) || 0;
-        const widthPct = Math.max(1.5, Math.round((count / maxCount) * 1000) / 10);
+        // 61-APPLY (05): "DISTRIBUTION — SAME LAW, √ WIDTHS" — the widths
+        // were linear while every other chart on the page was √-scaled; one
+        // scale law per page. Floor 1.5% ≈ the spec's 3px on this track.
+        const widthPct = Math.max(1.5, Math.round(Math.sqrt(count / maxCount) * 1000) / 10);
         const chip = isHere
-          ? `<span style="font-size:0.72rem;font-weight:700;color:var(--brand);border:1px solid currentColor;border-radius:999px;padding:0 6px;white-space:nowrap;">이 주장</span>`
+          ? `<span style="font-size:var(--fs-micro);font-weight:700;color:var(--brand);border:1px solid currentColor;border-radius:0;padding:0 6px;white-space:nowrap;">이 주장</span>`
           : "";
         // DIST-LABELS (50-APPLY): the bucket labels rendered 0.75rem (9.75px)
         // var(--muted) — measured ~2.6:1 on white — while claim.html's SAME
@@ -7026,14 +7034,14 @@
         // are unchanged.
         return `<div title="${escapeHtml(label)} 매체 · ${escapeHtml(count)}건" style="display:flex;align-items:center;gap:6px;min-width:0;">
               <span style="flex:0 0 64px;text-align:right;font-size:12.5px;color:var(--slate);${isHere ? "font-weight:700;color:var(--ink);" : ""}">${escapeHtml(label)}</span>
-              <span style="flex:1 1 auto;min-width:0;"><span style="display:block;height:8px;width:${widthPct}%;min-width:2px;background:var(--brand);border-radius:2px;"></span></span>
-              <span style="flex:0 0 52px;">${chip}</span>
+              <span style="flex:1 1 auto;min-width:0;"><span style="display:block;height:12px;width:${widthPct}%;min-width:2px;background:var(--brand);"></span></span>
+              <span style="flex:0 0 64px;">${chip}</span>
             </div>`;
       }).join("");
       return `
             <div style="margin:10px 0 4px;max-width:440px;">
               <div role="img" aria-label="수집된 주장의 확산 규모 분포" style="display:flex;flex-direction:column;gap:3px;">${rows}</div>
-              <div style="font-size:0.75rem;color:var(--muted);margin-top:4px;">수집된 주장의 확산 규모 분포 — 우리가 수집한 범위 기준입니다.</div>
+              <div style="font-size:var(--fs-micro);color:var(--muted);margin-top:4px;">수집된 주장의 확산 규모 분포 — 우리가 수집한 범위 기준입니다.</div>
             </div>`;
     }
 
@@ -7226,11 +7234,21 @@
       let peak = 0;
       for (const point of points) peak = Math.max(peak, Number(point?.outlets) || 0);
       if (peak <= 0) return "";
+      // 61-APPLY (05): the last chart speaking the old language joins the
+      // strip vocabulary — √ heights (H 48 per the spec's 확산 추이 panel,
+      // our 4px visibility floor), square unstroked tops, one 12px slot per
+      // snapshot (no daily interpolation is invented between them), a
+      // zero snapshot renders the strip's own slot mark, and the same
+      // ticked baseline the other strips carry. Same bar colour on every
+      // bar: growth is not "better", it is just later.
       const bars = points.map((point) => {
         const outlets = Number(point?.outlets) || 0;
         const day = typeof point?.date === "string" ? point.date.slice(5, 10) : "";
-        const heightPct = outlets > 0 ? Math.max(6, Math.round((outlets / peak) * 100)) : 0;
-        return `<div title="${escapeHtml(day)} · ${escapeHtml(outlets)}개 매체" style="flex:1 1 14px;max-width:18px;min-width:0;align-self:flex-end;height:${outlets > 0 ? heightPct + "%" : "2px"};background:${outlets > 0 ? "var(--brand)" : "var(--line)"};border-radius:2px 2px 0 0;"></div>`;
+        if (outlets <= 0) {
+          return `<div class="spread-strip-slot" title="${escapeHtml(day)} · 0개 매체" style="flex:0 1 12px;max-width:12px;min-width:0;align-self:flex-end;height:2px;position:relative;"></div>`;
+        }
+        const barPx = Math.max(4, Math.round(Math.sqrt(outlets / peak) * 48));
+        return `<div class="spread-strip-bar" title="${escapeHtml(day)} · ${escapeHtml(outlets)}개 매체" style="flex:0 1 12px;max-width:12px;min-width:0;align-self:stretch;display:flex;align-items:flex-end;justify-content:center;"><div style="width:58%;height:${barPx}px;background:var(--brand);"></div></div>`;
       });
       // TEMPORAL-MAP Phase 4 FIX 2: structure mirrors spreadSparklineHtml so the
       // two charts read as sibling plots — a centered, shrink-wrapped inline-flex
@@ -7243,8 +7261,8 @@
       return `
             <div style="text-align:center;margin:10px 0 4px;">
               <div class="topic-timeline-sparkline" role="img" aria-label="주간 스냅샷별 매체 수, 최다 ${escapeHtml(peak)}개 매체" style="display:inline-flex;flex-direction:column;gap:2px;max-width:100%;vertical-align:bottom;">
-                <div style="display:flex;align-items:flex-end;justify-content:center;gap:2px;height:48px;">${bars.join("")}</div>
-                <div style="display:flex;justify-content:space-between;gap:12px;min-width:max-content;align-self:center;font-size:0.78rem;color:var(--muted);">
+                <div style="display:flex;align-items:flex-end;justify-content:center;gap:0;height:49px;width:${points.length * 12}px;max-width:100%;border-bottom:1px solid var(--muted);">${bars.join("")}</div>
+                <div style="display:flex;justify-content:space-between;gap:12px;min-width:max-content;align-self:center;font-size:var(--fs-micro);color:var(--muted);">
                   <span>${escapeHtml(firstDay)}</span>
                   <span>최다 ${escapeHtml(peak)}개 매체</span>
                   <span>${escapeHtml(lastDay)}</span>
