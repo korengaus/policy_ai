@@ -628,6 +628,13 @@
     // DESIGN-3B-1: DISPLAY-ONLY verdict_label → color map for the card-face
     // verdict dot. Pure presentation — does NOT change verdict_label, the verdict
     // path, or any score. Unknown labels fall back to grey.
+    // 73-APPLY (B): RETAINED DELIBERATELY WITH NO LIVE CONSUMER. The card face
+    // no longer reads this map (its uncalled lookup verdictDotColor was removed
+    // in the same pass), but scripts/card_render_audit.js STYLE_MAPS parses the
+    // literal by name (styleMapKeys("VERDICT_DOT_COLORS")) for the
+    // VERDICT-STYLE-COVERAGE / UNSTYLED-VERDICT-LABEL gate - deleting it fails
+    // the render scan. Retiring it means rewriting STYLE_MAPS down to
+    // VERDICT_TIER_CLASSES alone: a gate edit, the gate owner's call.
     const VERDICT_DOT_COLORS = {
       // 2c: every tier resolves to ONE neutral. Colour carries no signal on this
       // axis — the label says how far checking got, not whether a claim is true.
@@ -643,9 +650,6 @@
       draft_disputed: "var(--slate)",
       draft_unverified: "var(--slate)",
     };
-    function verdictDotColor(label) {
-      return VERDICT_DOT_COLORS[String(label || "")] || "var(--slate)";
-    }
     // LABEL-1 STEP 3: verdict-pill tier class, mirroring VERDICT_DOT_COLORS above
     // (same label keys). Returns vt-green / vt-orange / vt-red / vt-muted; default
     // vt-muted. Display-only — does NOT change verdict_label or any score.
@@ -3202,7 +3206,7 @@
         const firstAt = typeof info.first_at === "string" ? info.first_at.slice(0, 10) : "";
         const lastAt = typeof info.last_at === "string" ? info.last_at.slice(0, 10) : "";
         // STRIP-CAPTION (41-APPLY): the peak, in the sparkline's own shipped
-        // form "최다 N건/일" (spreadSparklineHtml's visible label row),
+        // form "최다 N건/일" (the strip caption's visible label row),
         // joined with the shipped interpunct. The target's "눈금 하나가
         // 보도 1건" half composes from NO shipped string (and would be false
         // under the sqrt scale anyway), so it is not drawn.
@@ -3302,6 +3306,14 @@
     // heroRankNote fragment in heroBandHtml) as their source anchors —
     // deleting it fails the render scan. Removing picker + gates together
     // needs its own ruling.
+    // 73-APPLY (B): audited again — still no caller; the exact anchors are
+    // card_render_audit.js heroSkipRulesFromJs (indexOf "async function
+    // resolveTrendingHeroPick(") and heroRankNoteFromJs (indexOf "const
+    // heroRankNote =") feeding the HERO-RANK-DISCLOSURE simulation; without
+    // them the scan FAILS ("the rank disclosure check is blind"). Retirement
+    // = the gate owner rewrites/retires that simulation together with this
+    // picker, the dailyPick branch in heroBandHtml, and the
+    // trendingHeroPick/trendingHeroPickRow/trendingHeroRows state.
     async function resolveTrendingHeroPick() {
       const rows = Array.isArray(trendingHeroRows) ? trendingHeroRows : [];
       for (const row of rows) {
@@ -6597,81 +6609,22 @@
     // (POLISH-LABELS 4 retired spreadSpanPhrase — the 확산 기간 from → to
     // form shows the window directly, in both the DOM line and the canvas.)
 
-    // SPREAD-TIMELINE Slice 3 — tiny CSS-bar sparkline of timeline.daily so
-    // the SHAPE of circulation is visible (tall first bar = everyone published
-    // at once). Pure inline-styled divs — no chart lib, no canvas, no new CSS
-    // class rules. Neutral brand color only (never red/green verdict
-    // semantics). Zero-fills missing days between first and last so a gap
-    // renders as an empty slot, not a hidden jump. Returns "" (text-only
-    // section stays) only for truly bad data: no dated days, unparseable
-    // dates, an implausibly long span (>60 days), or peak<=0.
-    function spreadSparklineHtml(daily) {
-      if (!Array.isArray(daily) || !daily.length) return "";
-      const counts = new Map();
-      for (const entry of daily) {
-        const day = typeof entry?.date === "string" ? entry.date.slice(0, 10) : "";
-        const count = Number(entry?.count);
-        if (day && Number.isFinite(count) && count > 0) counts.set(day, count);
-      }
-      // SPARKLINE-PRESENT A6b: the hide-when-small guards (<3 distinct days, <2-day
-      // span) are GONE — the centered shrink-wrapped plot below looks balanced at
-      // any size, so every dated cluster (>=1 day) renders. Fail-silent stays for
-      // truly bad data only: no dated days, unparseable dates, >60-day span, peak<=0.
-      if (!counts.size) return "";
-      const days = [...counts.keys()].sort();
-      const startMs = Date.parse(`${days[0]}T00:00:00Z`);
-      const endMs = Date.parse(`${days[days.length - 1]}T00:00:00Z`);
-      if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return "";
-      const totalDays = Math.round((endMs - startMs) / 86400000) + 1;
-      if (totalDays < 1 || totalDays > 60) return "";
-      let peak = 0;
-      counts.forEach((count) => { peak = Math.max(peak, count); });
-      if (peak <= 0) return "";
-      const bars = [];
-      for (let i = 0; i < totalDays; i += 1) {
-        const day = new Date(startMs + i * 86400000).toISOString().slice(0, 10);
-        const count = counts.get(day) || 0;
-        const heightPct = count > 0 ? Math.max(6, Math.round((count / peak) * 100)) : 0;
-        // flex-basis 12px gives each bar real intrinsic width (so the shrink-wrapped
-        // plot's width = bar count × ~14px incl. gap); min-width:0 lets 60 bars still
-        // compress into a narrow container instead of overflowing.
-        bars.push(
-          `<div title="${escapeHtml(day)} · ${escapeHtml(count)}건" style="flex:1 1 12px;max-width:14px;min-width:0;align-self:flex-end;height:${count > 0 ? heightPct + "%" : "2px"};background:${count > 0 ? "var(--brand)" : "var(--line)"};border-radius:2px 2px 0 0;"></div>`
-        );
-      }
-      // Adaptive labels: 1 dated day = a point, shown honestly as ONE centered bar
-      // with a single "{date} · {N}건" label; 2+ days keep first / 최다 / last, but
-      // the row now spans the PLOT (min-width:max-content, centered), so the dates
-      // sit under the actual first/last bars instead of the container edges.
-      const labelRow = counts.size === 1
-        ? `<div style="text-align:center;font-size:0.78rem;color:var(--muted);">${escapeHtml(days[0])} · ${escapeHtml(counts.get(days[0]))}건</div>`
-        : `<div style="display:flex;justify-content:space-between;gap:12px;min-width:max-content;align-self:center;font-size:0.78rem;color:var(--muted);">
-              <span>${escapeHtml(days[0])}</span>
-              <span>최다 ${escapeHtml(peak)}건/일</span>
-              <span>${escapeHtml(days[days.length - 1])}</span>
-            </div>`;
-      // One shrink-wrapped plot (bars + labels), centered in the section: its width
-      // = bar count × ≤16px capped at 100%, so 2–5 days form a compact centered
-      // cluster and 30–60 days fill the width exactly as before.
-      return `
-            <div style="text-align:center;margin:8px 0 4px;">
-              <div class="spread-sparkline" role="img" aria-label="일별 보도량, 최다 ${escapeHtml(peak)}건" style="display:inline-flex;flex-direction:column;gap:2px;max-width:100%;vertical-align:bottom;">
-                <div style="display:flex;align-items:flex-end;justify-content:center;gap:2px;height:48px;">${bars.join("")}</div>
-                ${labelRow}
-              </div>
-            </div>`;
-    }
+    // 73-APPLY (B): spreadSparklineHtml (SPREAD-TIMELINE Slice 3, the old
+    // rounded/linear sparkline) was retained-but-uncalled since DETAIL-STRIP
+    // (51-APPLY) replaced it. Nothing referenced it - no caller, no test, no
+    // card_render_audit anchor - so it is REMOVED. Its caption vocabulary
+    // ({date} · {N}건 / 최다 {N}건/일) lives on in detailDailyStripHtml below.
 
     // DETAIL-STRIP (51-APPLY): the detail page's daily chart, rendered through
     // the SAME strip language every other strip on the site uses
     // (feedSpreadStripHtml: square tops, ticked baseline, empty-day ticks,
     // sqrt scale, the 60-day bail-out) — the old rounded linear sparkline was
     // the last chart speaking a different language. The caption reuses
-    // spreadSparklineHtml's own shipped label forms VERBATIM ({date} · {N}건
+    // the retired spreadSparklineHtml's shipped label forms VERBATIM ({date} · {N}건
     // for a single dated day; first / 최다 N건/일 / last otherwise). Gates are
     // the strip helper's own: unusable/empty daily → "" and no orphan caption
-    // ever renders. spreadSparklineHtml itself stays defined (same
-    // retained-renderer pattern as renderBiasFramingSummary).
+    // ever renders. (spreadSparklineHtml itself was REMOVED in 73-APPLY (B) -
+    // nothing referenced it; this caption is the vocabulary's home now.)
     function detailDailyStripHtml(daily) {
       // 61-APPLY (05): the spec's floor-check table puts the detail plot at
       // H 88 (home hero 64) — same language, one taller context.
@@ -6713,7 +6666,7 @@
       return `<div class="spread-daily-strip" style="width:max-content;max-width:100%;">${strip}${labelRow}</div>`;
     }
 
-    // FEED-SPREAD-STRIP (13-APPLY): bars-only variant of spreadSparklineHtml
+    // FEED-SPREAD-STRIP (13-APPLY): bars-only variant of the (since-removed) spreadSparklineHtml
     // for region-1 rows. The full sparkline is too heavy for a feed row (48px
     // bars + a date/peak label line ≈ 80px); this keeps the SAME derivation —
     // zero-filled days between first and last, peak-scaled heights, the >60-day
@@ -7298,7 +7251,7 @@
         const barPx = Math.max(4, Math.round(Math.sqrt(outlets / peak) * 48));
         return `<div class="spread-strip-bar" title="${escapeHtml(day)} · ${escapeHtml(formatCount(outlets))}개 매체" style="flex:0 1 12px;max-width:12px;min-width:0;align-self:stretch;display:flex;align-items:flex-end;justify-content:center;"><div style="width:58%;height:${barPx}px;background:var(--brand);"></div></div>`;
       });
-      // TEMPORAL-MAP Phase 4 FIX 2: structure mirrors spreadSparklineHtml so the
+      // TEMPORAL-MAP Phase 4 FIX 2: structure mirrors the old spreadSparklineHtml (removed 73-APPLY) so the
       // two charts read as sibling plots — a centered, shrink-wrapped inline-flex
       // column (bars + label row), 48px bar row, and a min-width:max-content
       // label row so the dates sit under the actual first/last bars. Both charts

@@ -1311,58 +1311,11 @@
       margin-left: 4px;
     }
 
-    .verification-summary-card {
-      border: 1px solid #bfdbfe;
-      border-radius: 0;
-      background: #eff6ff;
-      margin: 16px 0;
-      padding: 16px;
-    }
-
-    .verification-summary-card h3 {
-      margin: 0 0 4px;
-      color: #1e3a8a;
-      font-size: 18px;
-    }
-
-    .verification-summary-grid {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 8px;
-      margin-top: 12px;
-    }
-
-    .verification-summary-item {
-      border: 1px solid #dbeafe;
-      border-radius: 0;
-      background: var(--paper);
-      padding: 8px;
-      min-width: 0;
-    }
-
-    .verification-summary-item strong {
-      display: block;
-      margin-top: 4px;
-      color: var(--ink);
-      font-size: 14px;
-      line-height: 1.35;
-      overflow-wrap: anywhere;
-    }
-
-    .verification-summary-item.positive {
-      border-color: #86efac;
-      background: #f0fdf4;
-    }
-
-    .verification-summary-item.warning {
-      border-color: #fdba74;
-      background: #fff7ed;
-    }
-
-    .verification-summary-item.neutral {
-      border-color: #cbd5e1;
-      background: var(--surface-soft);
-    }
+    /* 73-APPLY (B): removed dead rules with no emit site anywhere
+       (.verification-summary-*, .takeaway-panel/.takeaway-title,
+       .reading-guide-header/.reading-guide-title, .detail-box,
+       .evidence-extraction-tile) - nothing in main.js, template.html,
+       tests or card_render_audit references them. */
 
     .reviewer-dashboard-grid {
       display: grid;
@@ -1411,47 +1364,10 @@
       line-height: 1.45;
     }
 
-    .takeaway-panel {
-      border: 1px solid #bfdbfe;
-      border-radius: 0;
-      background: #eff6ff;
-      margin: 12px 0;
-      padding: 16px 16px;
-    }
-
-    .takeaway-title {
-      color: #1e3a8a;
-      font-size: var(--fs-title-s);
-      font-weight: 900;
-      margin-bottom: 8px;
-    }
-
-    .takeaway-list {
-      margin: 0;
-      padding-left: 20px;
-      color: var(--text);
-      font-size: var(--fs-value);
-      line-height: 1.65;
-    }
-
     /* DESIGN-DETAIL-4 STEP 4: reading guide un-boxed (was a green #f0fdf4 box). */
     .reading-guide {
       margin: 4px 0 0;
       padding: 0;
-    }
-
-    .reading-guide-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      margin-bottom: 8px;
-    }
-
-    .reading-guide-title {
-      color: #065f46;
-      font-size: var(--fs-title-s);
-      font-weight: 900;
     }
 
     .reading-guide-grid {
@@ -4293,13 +4209,6 @@
       font-size: 15px;
     }
 
-    .detail-box {
-      border: 1px solid #e5e7eb;
-      border-radius: 0;
-      background: var(--surface-soft);
-      padding: 12px;
-    }
-
     .detail-row {
       display: flex;
       justify-content: space-between;
@@ -4737,14 +4646,6 @@
       grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 8px;
       margin: 8px 0 12px;
-    }
-
-    .evidence-extraction-tile {
-      border: 1px solid #e5e7eb;
-      border-radius: 0;
-      background: var(--paper);
-      padding: 8px;
-      font-size: 13px;
     }
 
     .evidence-snippet-list {
@@ -5324,7 +5225,6 @@
       .detail-grid,
       .result-summary-grid,
       .core-indicator-strip,
-      .verification-summary-grid,
       .reviewer-dashboard-grid,
       .reviewer-action-controls,
       .plain-section-grid,
@@ -5612,3 +5512,43 @@
       }
     }
   
+    /* ======================================================================
+       MID-WIDTH PASS (73-APPLY) - the band between the phone layout (<=640)
+       and the stacked-rail desktop (961-1120) was never designed; every
+       layer was tuned at 1440 and 390. Measured at 1024/900/768/600 on all
+       eight screens: NO horizontal overflow anywhere, but 641-960 rendered
+       the phone layout at tablet widths (one full-width card column - a
+       744px card and a 5,325px page at 768 - and the detail facts row
+       auto-fit into four ~180px cells so the 확산 기간 date range wrapped
+       mid-range), and 961-1120 stacked the rail's four panels full-width (a
+       980px-wide Top-5 row at 1024). Layout-only rules, placed LAST so they
+       win the <=960 single-column cascade: no chart slot geometry, no type
+       size, no visibility change - the four invariants (fixed day slots,
+       gridline disclosure, nothing hidden, no sub-floor type) are untouched
+       by construction. */
+    @media (min-width: 641px) and (max-width: 960px) {
+      /* Two card columns: cards run ~305-430px here - wider than the 390
+         phone card that already renders this same markup one-up. Region
+         rows/headings live outside .topic-card-grid and keep full width. */
+      .topic-card-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      /* Detail facts: two fixed columns instead of four squeezed auto-fit
+         cells, so 확산 기간 keeps its range on one line. Scoped OFF the
+         hero's compact 3-cell mobile row (61-APPLY geometry, untouched). */
+      .spread-facts:not(.hero-spread-cells) {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+    @media (min-width: 961px) and (max-width: 1120px) {
+      /* The stacked rail tiles its panels two-up instead of stretching each
+         to the full 900-1080px content width. display:contents does not
+         apply here (that is the <=960 reorder), so .home-aside is a real box
+         and can lay its own children out. */
+      .home-aside {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px 32px;
+        align-items: start;
+      }
+    }
