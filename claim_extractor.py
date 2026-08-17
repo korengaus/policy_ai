@@ -82,6 +82,84 @@ def _normalize_text(text: str) -> str:
     return text.strip()
 
 
+# ARTICLE-CHROME (71-APPLY) \u2014 bylines, datelines, edit/input timestamps, wire
+# footers and photo captions were entering the stored claim field. Measured
+# over 1,300 real rows (ids 12059-15795): 63 rows (4.8%) / 111 claim texts
+# carried chrome; the shapes are (a) wire dateline+byline runs
+# "(\ub300\uc804=\ub274\uc2a4\ucda9\uccad\uc778) \uae40\uc218\ud658 \uae30\uc790 =", (b) bare bylines "\ubc15\uc7ac\ucc2c \ubcf4\ud5d8\uc804\ubb38\uae30\uc790 =",
+# (c) edit/input stamps "\ud3b8\uc9d1 2026.08.10 [23:13]" / "\uae30\uc0ac\uc785\ub825 2026/08/10
+# [21:14]" / "\uc785\ub825 : 2026-08-12 17:19:44", (d) \uc5f0\ud569\ub274\uc2a4 footers "\uc81c\ubcf4\ub294
+# \uce74\uce74\uc624\ud1a1 okjebo <\uc800\uc791\uad8c\uc790(c) \u2026 \uae08\uc9c0> 2026\ub14408\uc6d417\uc77c 06\uc2dc04\ubd84 \uc1a1\uace0", and
+# (e) leading photo captions "\uc0ac\uc9c4=\uc0bc\uc131\uc0dd\uba85". The pipeline had NO detector \u2014
+# only the display layer carried one (main.js ARTICLE_NOISE_SENTENCE_PATTERNS)
+# and its five patterns sentence-reject just 27 of the 111 stored texts.
+#
+# EVERY rule below STRIPS the matched chrome and keeps the remainder \u2014 none
+# rejects a whole sentence. False positives are worse than misses: a glued
+# wire run (id 15721) carries a REAL claim after its footer, so rejection
+# would destroy data that stripping recovers; a sentence that was pure chrome
+# strips to nothing and the existing >=18-char floor drops it. Each pattern
+# was run against all 3,927 sampled claim texts: zero legitimate claims
+# matched (tests/test_claim_extractor_noise.py pins specimens + look-alike
+# legitimate claims). Chrome only \u2014 no verdict field, score, label or
+# threshold is read or written here.
+_CHROME_DATE = r"\d{4}\s*[년./\-]\s*\d{1,2}\s*[월./\-]\s*\d{1,2}\s*일?\.?"
+_CHROME_TIME = r"(?:\s*\[?\d{1,2}\s*[:시]\s*\d{2}(?:\s*:\s*\d{2})?\s*분?\]?)?"
+_CHROME_CLOCK = r"\d{1,2}\s*[:시]\s*\d{2}(?:\s*:\s*\d{2})?\s*분?"
+_CHROME_PATTERNS = [
+    # (a) wire dateline "(지역=매체)" / "[세종=뉴시스]" — paren or square
+    # bracket, optionally followed by the inline byline "이름 기자 =".
+    re.compile(
+        r"[(\[]\s*[가-힣A-Za-z][가-힣A-Za-z0-9·\s]{0,14}=\s*[가-힣A-Za-z][가-힣A-Za-z0-9·\s]{0,18}[)\]]\s*"
+        r"(?:[가-힣]{2,4}\s*[가-힣]{0,8}(?:기자|특파원)\s*=\s*)?"),
+    # (b) inline byline "이름 [전문]기자 = " anywhere ("박재찬 보험전문기자 =",
+    # "…뉴스임창용 기자=") — the trailing "=" is what makes it a byline.
+    re.compile(r"[가-힣]{2,4}\s*[가-힣]{0,8}\s*(?:기자|특파원)\s*=\s*"),
+    # (b2) byline glued to a mangled e-mail/domain: "이정민기자 ljm7damdilbo.com".
+    re.compile(r"[가-힣]{2,6}\s*기자\s*[A-Za-z0-9._%-]{2,30}\.(?:com|co\.kr|kr|net)"),
+    # (b3) pipe-terminated outlet byline: "매일일보 = 서정욱 기자 |".
+    re.compile(r"[가-힣A-Za-z0-9]{2,14}\s*=\s*[가-힣]{2,4}\s*기자\s*[|｜]"),
+    # (b4) trailing byline after a finished sentence: "…지원하고 있다. 정근산 기자".
+    re.compile(r"(?<=[.!?])\s*[가-힣]{2,4}\s*(?:기자|특파원)\s*$"),
+    # (c1) strong stamp words + full date anywhere (편집/기사입력/기사수정) —
+    # 승인/업데이트 deliberately NOT shipped (unmeasured; "국무회의 승인
+    # 2026년 1월 5일…" is plausible prose).
+    re.compile(r"(?:편집|기사\s*입력|기사\s*수정)\s*[:：]?\s*" + _CHROME_DATE + _CHROME_TIME),
+    # (c2) 등록 needs date AND clock ("등록 2026.07.31 09:13:55") so registry
+    # prose ("법인 등록 2026년…") can never match.
+    re.compile(r"등록\s*[:：]?\s*" + _CHROME_DATE + r"\s*" + _CHROME_CLOCK),
+    # (c3) bare 입력/수정 stamps need a colon anywhere ("입력 : 2026-08-12
+    # 17:19:44") — colonless only at claim start (c4), so prose like
+    # "…개정안 수정 2026년 3월 12일 공포" can never match.
+    re.compile(r"[|｜]?\s*(?:입력|수정)\s*[:：]\s*" + _CHROME_DATE + _CHROME_TIME),
+    re.compile(r"^(?:입력|수정)\s*" + _CHROME_DATE + _CHROME_TIME),
+    # (d) wire footers: 카카오톡 handle, 기사문의 제보 line, angle-bracketed
+    # copyright block, the copyright phrases, and "<date> <clock> 송고".
+    re.compile(r"제보는\s*카카오톡\s*[A-Za-z0-9_]{0,20}"),
+    re.compile(r"기사문의\s*및\s*제보\s*[:：]?\s*(?:카톡|카카오톡|라인)[/A-Za-z0-9\s]{0,24}"),
+    re.compile(r"[<〈][^<>〈〉]{0,80}(?:저작권자|무단\s*전재|재배포)[^<>〈〉]{0,80}[>〉]"),
+    re.compile(r"무단\s*전재\s*[-·,와및\s]*재배포(?:\s*금지)?"),
+    re.compile(r"AI\s*학습\s*및\s*활용\s*금지"),
+    re.compile(_CHROME_DATE + r"\s*" + _CHROME_CLOCK + r"\s*송고"),
+    # (e) photo captions: paren-bounded anywhere; bare "사진=…" bounded to one
+    # token unless it ends in caption vocabulary (제공/캡처/무관).
+    re.compile(r"[(（]\s*(?:자료)?사진\s*=[^()（）]{1,30}[)）]"),
+    re.compile(r"/?\s*(?:자료)?사진\s*=\s*(?:\S{1,24}(?:\s+\S{1,16}){0,2}\s*(?:제공|캡처|무관)|\S{1,24})"),
+]
+
+
+def _strip_article_chrome(text: str) -> str:
+    """Remove article chrome, keep everything else. Iterates to a fixpoint so
+    glued repeats ("\u202605:49 \uc1a1\uace02026\ub14408\uc6d416\uc77c 05\uc2dc49\ubd84 \uc1a1\uace0") fully clear."""
+    previous = None
+    while previous != text:
+        previous = text
+        for pattern in _CHROME_PATTERNS:
+            text = pattern.sub(" ", text)
+        text = _normalize_text(text)
+    return text
+
+
 # CLAIM-DISPLAY-2 FIX B: the old pattern split on a BARE Korean ender
 # (다|요|죠|음|임|됨|함) + whitespace, with no punctuation required. Ordinary
 # mid-sentence words end in those syllables — 보다, 부터, 이다, 마다 — so a
@@ -114,6 +192,11 @@ def _collect_sentences(parts: list[str]) -> list[str]:
     for part in parts:
         sentence = part.strip(" -•·\t\r\n")
         sentence = re.sub(r"\s+", " ", sentence)
+        # ARTICLE-CHROME (71-APPLY): strip bylines/datelines/stamps/footers
+        # BEFORE the length filter, so a pure-chrome sentence shrinks below
+        # the 18-char floor and drops, while a chrome-prefixed real claim
+        # keeps its claim text (and is scored on the clean text).
+        sentence = _strip_article_chrome(sentence)
         # CLAIM-QUALITY FIX 1: the old 260 ceiling silently DROPPED well-formed
         # long policy sentences at extraction, so a shorter fragment won the
         # ranking and rendered as a stub 핵심 주장. The ceiling is raised to 400
@@ -209,6 +292,10 @@ def _truncate_on_boundary(sentence: str, limit: int) -> str:
 
 def _clean_claim(sentence: str) -> str:
     sentence = _normalize_text(sentence)
+    # ARTICLE-CHROME (71-APPLY): also covers the summary/title FALLBACK path,
+    # which never goes through _collect_sentences (RSS summaries carry the
+    # same chrome). Idempotent for ranked sentences already stripped there.
+    sentence = _strip_article_chrome(sentence)
     sentence = re.sub(r"[^\w\s가-힣.,!?%·…~()\[\]{}<>:;\"'“”‘’/\-+_=|]", "", sentence)
     sentence = _normalize_text(sentence)
     sentence = re.sub(r"^[\"'“”‘’]+|[\"'“”‘’]+$", "", sentence)
