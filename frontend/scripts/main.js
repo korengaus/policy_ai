@@ -6674,20 +6674,20 @@
       // SHORT-SPAN-WIDTH (52-APPLY): measured live, 64.4% of clustered claims
       // span a SINGLE day (683/1060; 90.9% span <=2 days), and the hero-form
       // strip stretches those to the full column — one bar in ~520px of empty
-      // plot. The strip now takes its OWN width: calendar days × 24px (the
-      // hero bar cap 23px + 1px gap = one day's full pitch), floored at 140px
-      // so the caption line fits, capped by the column via the wrapper's
-      // natural max width. Width only — derivation, sqrt scale, gates and the
-      // caption forms are untouched; long series fill the column as before.
-      const spanStartMs = Date.parse(`${days[0]}T00:00:00Z`);
-      const spanEndMs = Date.parse(`${days[days.length - 1]}T00:00:00Z`);
-      const spanDays = (Number.isFinite(spanStartMs) && Number.isFinite(spanEndMs))
-        ? Math.round((spanEndMs - spanStartMs) / 86400000) + 1
-        : 60;
-      // 61-APPLY (05): 24px/day pitch → the spec's 12px slot (the strip
-      // itself now renders days × 12); the 140px caption floor stays.
-      const ownWidth = Math.max(140, spanDays * 12);
-      return `<div class="spread-daily-strip" style="max-width:${ownWidth}px;">${strip}${labelRow}</div>`;
+      // plot. The strip takes its OWN width (the strip element renders an
+      // explicit days × 12px, 61-APPLY).
+      // 68-APPLY (B): the 140px literal is gone. It was sized for the 3-part
+      // caption, but as a max-width it CLAMPED that caption on 2–11-day spans
+      // — the non-redundant date parts broke at their hyphens into 39px
+      // two-line columns (measured; a date needs ~60px at micro size). The
+      // box now sizes to its own content: width max-content = the wider of
+      // the plot (days × 12) and the caption's single unwrapped line, capped
+      // at 100% of the track. No caption part is dropped — the single-day
+      // form already collapsed first/peak/last into one "{date} · {N}건"
+      // label (52-APPLY), and on 2+ days first date, 최다 peak and last date
+      // each carry information nothing else in this box renders. Derivation,
+      // sqrt scale, gates and the caption forms are untouched.
+      return `<div class="spread-daily-strip" style="width:max-content;max-width:100%;">${strip}${labelRow}</div>`;
     }
 
     // FEED-SPREAD-STRIP (13-APPLY): bars-only variant of spreadSparklineHtml

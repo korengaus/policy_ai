@@ -662,7 +662,7 @@
       padding: 10px 12px;
       background: var(--paper);
       color: var(--text);
-      font-size: 1.154rem;
+      font-size: var(--fs-value);
     }
 
     input:focus {
@@ -845,7 +845,7 @@
 
     .metric-label {
       color: var(--muted);
-      font-size: 12px;
+      font-size: var(--fs-micro);
       font-weight: 700;
       text-transform: uppercase;
     }
@@ -858,7 +858,7 @@
     }
 
     .empty-state {
-      border: 1px dashed #cbd5e1;
+      border: 1px dashed var(--line-300);
       border-radius: 0;
       background: var(--surface-soft);
       color: var(--muted);
@@ -960,10 +960,10 @@
        neutralised anyway so a revived renderer cannot bring the colour back.
        color overrides the .badge base white, which would vanish on this
        light neutral.) */
-    .alert-watch { background: #f1f5f9; color: var(--slate); }
-    .alert-low { background: #f1f5f9; color: var(--slate); }
-    .alert-medium { background: #f1f5f9; color: var(--slate); }
-    .alert-high { background: #f1f5f9; color: var(--slate); }
+    .alert-watch { background: var(--well); color: var(--slate); }
+    .alert-low { background: var(--well); color: var(--slate); }
+    .alert-medium { background: var(--well); color: var(--slate); }
+    .alert-high { background: var(--well); color: var(--slate); }
     .ai-status-active { background: #15803d; }
     .ai-status-inactive { background: var(--slate); }
     .ai-status-error { background: #b45309; }
@@ -1528,7 +1528,7 @@
     }
 
     .headline-card {
-      border-bottom: 1px solid #e5e7eb;
+      border-bottom: 1px solid var(--line-100);
       margin-bottom: 14px;
       padding-bottom: 14px;
     }
@@ -1537,7 +1537,7 @@
       display: flex;
       flex-wrap: wrap;
       gap: 10px;
-      color: #64748b;
+      color: var(--muted);
       font-size: 13px;
       font-weight: 700;
       margin-top: 8px;
@@ -1631,7 +1631,7 @@
     .hot-topics-sort-label {
       font-size: 1rem;
       font-weight: 900;
-      color: #334155;
+      color: var(--slate);
     }
 
     /* DESIGN-C3g: restyled to match the unified 더 보기 button (.hot-topics-load-more)
@@ -1901,7 +1901,7 @@
       /* 64-APPLY (09 folded-in): rank numerals leave the accent — position
          is the ranking; a blue numeral read as an actionable mark. */
       color: var(--muted);
-      font-size: 1.154rem;
+      font-size: var(--fs-value);
       font-weight: 600;
       line-height: 1.4;
       text-align: center;
@@ -2019,7 +2019,7 @@
       border: none;
       background: none;
       color: var(--muted);
-      font-size: 0.9rem;
+      font-size: var(--fs-micro);
       font-weight: 700;
       text-align: center;
       cursor: pointer;
@@ -2245,97 +2245,44 @@
       padding: 32px; /* 60-APPLY (04): section-card padding 32 */
       position: relative;
       overflow: hidden;
+      /* 68-APPLY (A): the design's own card layout — text left (max 620),
+         constellation right, vertically centred. */
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 48px;
     }
-    /* MAP-CARD-DOTS (34-APPLY, reworked 35-APPLY): decorative CONNECTED-field
-       on the card's right — the card is about a connection graph, so the
-       ornament now shows connection: three small clusters of varied-size dots,
-       a few loose dots, and faint hairlines between near neighbours. PURE
-       CSS — ::before carries the dots (radial-gradients), ::after carries the
-       lines (each a corner-to-corner 2px linear-gradient stripe inside its
-       own positioned background box, so the segment runs exactly between two
-       dot centres): zero requests, zero assets, no DOM node, no new Korean.
-       Deliberately NOT data: every coordinate, size and line is a fixed CSS
-       literal chosen by hand — no JS, no randomness, identical bytes on every
-       load — and the counts (14 dots, 8 lines) match nothing in the real
-       graph (14k+ nodes, 1k+ clusters); low opacity, pointer-events none,
-       invisible to assistive tech — nothing a reader could count or read as
-       a measurement. 58-APPLY (01): nodes are the flat dark-field companion
-       --df-node and the hairlines --df-node at 38% (spec rgba(143,165,212,.38))
-       — desaturated so the one decoration stays quiet; still token-derived.
-       Hidden at <=960px so the text is never overlapped or squeezed. */
-    .brainmap-home-card::before {
-      content: "";
-      position: absolute;
-      top: 0;
-      right: 0;
-      bottom: 0;
-      width: 360px;
-      pointer-events: none;
-      background-image:
-        /* cluster 1 (left) */
-        radial-gradient(circle 4px at 40px 36px, var(--df-node) 97%, transparent),
-        radial-gradient(circle 2.5px at 66px 54px, var(--df-node) 97%, transparent),
-        radial-gradient(circle 2px at 52px 72px, var(--df-node) 97%, transparent),
-        /* cluster 2 (centre, brand hub) */
-        radial-gradient(circle 3px at 186px 62px, var(--df-node) 97%, transparent),
-        radial-gradient(circle 5px at 214px 84px, var(--df-node) 97%, transparent),
-        radial-gradient(circle 2.5px at 240px 102px, var(--df-node) 97%, transparent),
-        radial-gradient(circle 2px at 196px 110px, var(--df-node) 97%, transparent),
-        /* cluster 3 (upper right) */
-        radial-gradient(circle 2px at 288px 26px, var(--df-node) 97%, transparent),
-        radial-gradient(circle 3px at 306px 44px, var(--df-node) 97%, transparent),
-        radial-gradient(circle 2px at 330px 60px, var(--df-node) 97%, transparent),
-        /* loose dots */
-        radial-gradient(circle 4px at 130px 118px, var(--df-node) 97%, transparent),
-        radial-gradient(circle 2px at 96px 140px, var(--df-node) 97%, transparent),
-        radial-gradient(circle 2.5px at 158px 30px, var(--df-node) 97%, transparent),
-        radial-gradient(circle 2px at 26px 96px, var(--df-node) 97%, transparent);
-      background-repeat: no-repeat;
+    .brainmap-home-text {
+      max-width: 620px;
     }
-    /* The hairlines. Each background box's corners ARE two dot centres; the
-       gradient's centre stripe (2px) is the segment between them. Direction
-       rule: "to top right" draws the top-left↔bottom-right diagonal,
-       "to bottom right" the bottom-left↔top-right one. */
-    .brainmap-home-card::after {
-      content: "";
-      position: absolute;
-      top: 0;
-      right: 0;
-      bottom: 0;
-      width: 360px;
+    /* 68-APPLY (A): the design system's constellation — an inline SVG in
+       template.html (.brainmap-home-art), replacing the hand-placed CSS
+       radial/linear-gradient dot field (MAP-CARD-DOTS, 34/35-APPLY). Fixed
+       340x140, flex-shrink 0 — it never scales; the text column flexes.
+       Tones: nodes var(--df-node) (#8fa5d4), the three hubs the design's own
+       brighter #cdd9f0 (decorative literal, dark-field family), edges
+       --df-node at 38% (design: rgba(143,165,212,.38)). DECORATION: fixed
+       markup, aria-hidden, unfocusable, pointer-events none — nothing a
+       reader could count or read as a measurement of the real graph.
+       Hidden at <=960px (the design draws it only on the 1200px rendering;
+       a fixed 340px block would squeeze the text on narrow screens). */
+    .brainmap-home-art {
+      flex-shrink: 0;
       pointer-events: none;
-      background-image:
-        linear-gradient(to top right,    transparent calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% + 1px), transparent calc(50% + 1px)),
-        linear-gradient(to bottom right, transparent calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% + 1px), transparent calc(50% + 1px)),
-        linear-gradient(to top right,    transparent calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% + 1px), transparent calc(50% + 1px)),
-        linear-gradient(to top right,    transparent calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% + 1px), transparent calc(50% + 1px)),
-        linear-gradient(to bottom right, transparent calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% + 1px), transparent calc(50% + 1px)),
-        linear-gradient(to top right,    transparent calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% + 1px), transparent calc(50% + 1px)),
-        linear-gradient(to top right,    transparent calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% + 1px), transparent calc(50% + 1px)),
-        linear-gradient(to bottom right, transparent calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% - 1px), color-mix(in srgb, var(--df-node) 38%, transparent) calc(50% + 1px), transparent calc(50% + 1px));
-      background-position:
-        40px 36px,   /* (40,36)-(66,54) */
-        52px 54px,   /* (52,72)-(66,54) */
-        186px 62px,  /* (186,62)-(214,84) */
-        214px 84px,  /* (214,84)-(240,102) */
-        196px 84px,  /* (196,110)-(214,84) */
-        288px 26px,  /* (288,26)-(306,44) */
-        306px 44px,  /* (306,44)-(330,60) */
-        130px 62px;  /* (130,118)-(186,62) bridge */
-      background-size:
-        26px 18px,
-        14px 18px,
-        28px 22px,
-        26px 18px,
-        18px 26px,
-        18px 18px,
-        24px 16px,
-        56px 56px;
-      background-repeat: no-repeat;
+    }
+    .brainmap-home-art circle {
+      fill: var(--df-node);
+    }
+    .brainmap-home-art circle.bh-hub {
+      fill: #cdd9f0;
+    }
+    .brainmap-home-art path {
+      stroke: color-mix(in srgb, var(--df-node) 38%, transparent);
+      stroke-width: 1;
+      fill: none;
     }
     @media (max-width: 960px) {
-      .brainmap-home-card::before,
-      .brainmap-home-card::after {
+      .brainmap-home-art {
         display: none;
       }
     }
@@ -2884,7 +2831,7 @@
       border: none;
       border-top: 1px solid var(--brand);
       border-left: 3px solid var(--brand);
-      background: #f7faff;
+      background: var(--tint);
     }
     /* CARD-FOOT-ALIGN: grid stretch already equalises the three card BOXES in a
        row (measured equal); the ragged look is the content ending at different
@@ -3020,7 +2967,7 @@
     .topic-card--hero .card-source-avatar {
       width: 32px;
       height: 32px;
-      font-size: 0.9rem;
+      font-size: var(--fs-micro);
     }
     .topic-card--hero .card-source-label {
       font-size: var(--fs-meta);
@@ -3461,10 +3408,10 @@
        tier is still stated in words (낮음/관찰/높음) — classes, labels and
        ordering untouched. The evidence axis (✓ 공식 근거 확인, --brand) is a
        different axis and keeps its colour. */
-    .card-watch.alert-watch  { background: #f1f5f9; color: var(--slate); }
-    .card-watch.alert-high   { background: #f1f5f9; color: var(--slate); }
-    .card-watch.alert-medium { background: #f1f5f9; color: var(--slate); }
-    .card-watch.alert-low    { background: #f1f5f9; color: var(--slate); }
+    .card-watch.alert-watch  { background: var(--well); color: var(--slate); }
+    .card-watch.alert-high   { background: var(--well); color: var(--slate); }
+    .card-watch.alert-medium { background: var(--well); color: var(--slate); }
+    .card-watch.alert-low    { background: var(--well); color: var(--slate); }
     .card-fresh {
       font-size: var(--fs-micro);
       font-weight: 700;
@@ -3533,10 +3480,10 @@
        read as true/false. Status is carried by the adjacent text only. NOT shades
        of grey per tier — density would read as a gauge. Values only; the class
        names and the map keys behind them are unchanged. */
-    .verdict-pill.vt-green  { background: #f1f5f9; color: var(--slate); }
-    .verdict-pill.vt-orange { background: #f1f5f9; color: var(--slate); }
-    .verdict-pill.vt-red    { background: #f1f5f9; color: var(--slate); }
-    .verdict-pill.vt-muted  { background: #f1f5f9; color: var(--slate); }
+    .verdict-pill.vt-green  { background: var(--well); color: var(--slate); }
+    .verdict-pill.vt-orange { background: var(--well); color: var(--slate); }
+    .verdict-pill.vt-red    { background: var(--well); color: var(--slate); }
+    .verdict-pill.vt-muted  { background: var(--well); color: var(--slate); }
     .verdict-dot {
       width: 9px;
       height: 9px;
@@ -3698,8 +3645,8 @@
     }
 
     .source-support-badge.trace-news {
-      background: #f1f5f9;
-      color: #334155;
+      background: var(--well);
+      color: var(--slate);
     }
 
     .source-support-badge.trace-direct {
@@ -4312,14 +4259,14 @@
     .selected-issue-intro h2 {
       margin: 0;
       color: var(--ink);
-      font-size: 21px;
+      font-size: var(--fs-head);
       line-height: 1.3;
     }
 
     .selected-issue-intro p {
       margin: 8px 0 0;
       color: var(--slate);
-      font-size: 14px;
+      font-size: var(--fs-body);
       line-height: 1.6;
     }
 
@@ -4331,12 +4278,12 @@
     }
 
     .selected-issue-meta div {
-      border: 1px solid #e5e7eb;
+      border: 1px solid var(--line-100);
       border-radius: 0;
       background: var(--surface-soft);
       padding: 10px;
       color: var(--slate);
-      font-size: 12px;
+      font-size: var(--fs-meta);
     }
 
     .selected-issue-meta strong {
@@ -4491,7 +4438,7 @@
     }
 
     .collapsible-section summary:hover {
-      background: #eff6ff;
+      background: var(--row-hover);
     }
 
     .collapsible-body {
@@ -4535,7 +4482,7 @@
     .verification-item {
       border-top: 1px solid var(--line-100); /* 60-APPLY (04): in-card hairline */
       padding-top: 8px;
-      font-size: 14px;
+      font-size: var(--fs-body);
       line-height: 1.55;
     }
 
@@ -4667,7 +4614,7 @@
       gap: 6px 10px;
     }
     .vrf-cand-summary:hover { color: var(--brand-ink); }
-    .vrf-cand-trace { font-weight: 700; font-size: 0.8rem; }
+    .vrf-cand-trace { font-weight: 700; font-size: var(--fs-micro); }
     .vrf-cand-trace.trace-direct { color: #166534; }
     .vrf-cand-trace.trace-context { color: var(--brand-ink); }
     .vrf-cand-trace.trace-news { color: var(--slate); }
@@ -4760,7 +4707,7 @@
     }
 
     .source-candidate {
-      border: 1px solid #e5e7eb;
+      border: 1px solid var(--line-100);
       border-radius: 0;
       background: var(--paper);
       padding: 10px;
@@ -4993,9 +4940,9 @@
     .source-button {
       display: inline-flex;
       align-items: center;
-      border: 1px solid #bfdbfe;
+      border: 1px solid var(--line-300);
       border-radius: 0;
-      background: #eff6ff;
+      background: var(--paper);
       color: var(--brand);
       padding: 8px 12px;
       font-size: 13px;
@@ -5004,7 +4951,7 @@
     }
 
     .source-button:hover {
-      background: #dbeafe;
+      background: var(--row-hover);
       text-decoration: none;
     }
 
@@ -5198,7 +5145,7 @@
     }
 
     .history-row.selected {
-      background: #eff6ff;
+      background: var(--tint);
     }
 
     /* LABEL-1c STEP 1: the #N index — quiet muted (was #334155/900). */
@@ -5342,7 +5289,7 @@
       display: inline-flex;
       align-items: center;
       border-radius: 0;
-      background: #dbeafe;
+      background: var(--tint);
       color: var(--brand);
       padding: 4px 8px;
       font-size: var(--fs-micro);

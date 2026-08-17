@@ -468,10 +468,28 @@
          (--ink ground, --paper text). -->
     <div class="brainmap-home-full">
       <section class="brainmap-home-card" aria-label="뉴스 연결지도">
-        <div class="brainmap-home-title">뉴스 연결지도</div>
-        <p class="brainmap-home-desc">이 지도는 뉴스의 유통·연결을 보여줍니다. 검증이 아닙니다.
-          가까이 모인 점은 비슷한 내용이 여러 매체에 보도되었다는 뜻일 뿐, 사실 여부와는 무관합니다.</p>
-        <a class="brainmap-home-link" href="/web/brainmap.html"><svg class="utility-icon" aria-hidden="true"><use href="#ic-network"/></svg>연결지도 →</a>
+        <div class="brainmap-home-text">
+          <div class="brainmap-home-title">뉴스 연결지도</div>
+          <p class="brainmap-home-desc">이 지도는 뉴스의 유통·연결을 보여줍니다. 검증이 아닙니다.
+            가까이 모인 점은 비슷한 내용이 여러 매체에 보도되었다는 뜻일 뿐, 사실 여부와는 무관합니다.</p>
+          <a class="brainmap-home-link" href="/web/brainmap.html"><svg class="utility-icon" aria-hidden="true"><use href="#ic-network"/></svg>연결지도 →</a>
+        </div>
+        <!-- 68-APPLY (A): the design system's own constellation, copied verbatim
+             (19 nodes: 16 dim + 3 brighter hubs; 3 stroke paths / 16 segments,
+             fixed 340x140). DECORATION ONLY: static markup — identical bytes on
+             every load, no JS, no data source; counts/positions match nothing in
+             the real graph (14k+ nodes, 1k+ clusters); aria-hidden + focusable
+             false + pointer-events none (CSS), no caption. Replaces the
+             hand-placed CSS dot field (::before/::after, MAP-CARD-DOTS). -->
+        <svg class="brainmap-home-art" width="340" height="140" viewBox="0 0 340 140" aria-hidden="true" focusable="false">
+          <path d="M48 32 L72 40 L80 62 L56 58 L48 32 M72 40 L64 20"/>
+          <path d="M156 86 L180 84 L190 100 L168 106 L156 86"/>
+          <path d="M246 30 L268 26 L280 44 L272 60 L258 52 L240 48 L246 30 M258 52 L280 44"/>
+          <circle cx="48" cy="32" r="2.2"/><circle cx="72" cy="40" r="2.8" class="bh-hub"/><circle cx="80" cy="62" r="2.2"/><circle cx="56" cy="58" r="2.2"/><circle cx="64" cy="20" r="2.2"/>
+          <circle cx="156" cy="86" r="2.2"/><circle cx="180" cy="84" r="2.8" class="bh-hub"/><circle cx="190" cy="100" r="2.2"/><circle cx="168" cy="106" r="2.2"/>
+          <circle cx="246" cy="30" r="2.2"/><circle cx="268" cy="26" r="2.8" class="bh-hub"/><circle cx="280" cy="44" r="2.2"/><circle cx="272" cy="60" r="2.2"/><circle cx="258" cy="52" r="2.2"/><circle cx="240" cy="48" r="2.2"/>
+          <circle cx="28" cy="112" r="2.2"/><circle cx="130" cy="24" r="2.2"/><circle cx="305" cy="118" r="2.2"/><circle cx="215" cy="130" r="2.2"/>
+        </svg>
       </section>
     </div>
 
