@@ -71,14 +71,14 @@
   header.map-head {
     background: var(--paper);
     border-bottom: 1px solid var(--line);
-    padding: 16px 24px 14px;
+    padding: 16px 24px 12px;
     flex: 0 0 auto;
   }
   /* tickedin identity row — mirrors the site's .brand treatment (favicon mark +
      serif wordmark). The wordmark links home. */
   .brand-row {
-    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-    margin-bottom: 10px;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    margin-bottom: 8px;
   }
   .brand {
     display: inline-flex; align-items: center; gap: 8px;
@@ -99,7 +99,7 @@
   .map-reset {
     /* BRAINMAP-FEATURES: margin-left:auto moved to .map-search so the whole
        search+count+spread+리셋 group right-aligns together. */
-    font-size: 12.5px; font-weight: 600; padding: 5px 13px;
+    font-size: 12.5px; font-weight: 600; padding: 4px 12px;
     border: 1px solid var(--line); border-radius: var(--radius-sm);
     background: var(--paper); color: var(--slate); cursor: pointer;
     font-family: inherit;
@@ -114,7 +114,7 @@
      calm chrome (site tokens). The count is a muted live annotation. */
   .map-search {
     margin-left: auto;
-    font-size: 12.5px; padding: 5px 11px; width: 170px;
+    font-size: 12.5px; padding: 4px 12px; width: 170px;
     border: 1px solid var(--line); border-radius: var(--radius-sm);
     background: var(--paper); color: var(--ink); font-family: inherit;
   }
@@ -127,10 +127,10 @@
      BOTH axes (comfortably over the 24px CSS-px tap floor) because a phone has
      neither an Enter key in view nor arrow keys — the visible control is the
      ONLY route there. */
-  .search-nav { display: none; align-items: center; align-self: center; gap: 6px; }
+  .search-nav { display: none; align-items: center; align-self: center; gap: 4px; }
   .nav-step {
     font-size: 16px; line-height: 1; font-weight: 700;
-    min-width: 34px; min-height: 34px; padding: 0 10px;
+    min-width: 34px; min-height: 34px; padding: 0 8px;
     border: 1px solid var(--line); border-radius: var(--radius-sm);
     background: var(--paper); color: var(--slate); cursor: pointer;
     font-family: inherit;
@@ -149,34 +149,34 @@
      the position, so "1 / 123" cannot be read as "the most relevant". */
   .nav-note { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
   .map-spread {
-    font-size: 12.5px; font-weight: 600; padding: 5px 9px;
+    font-size: 12.5px; font-weight: 600; padding: 4px 8px;
     border: 1px solid var(--line); border-radius: var(--radius-sm);
     background: var(--paper); color: var(--slate); cursor: pointer;
     font-family: inherit;
   }
   .map-spread:hover { color: var(--ink); border-color: var(--muted); }
   .map-stats { margin-top: 8px; font-size: 12px; color: var(--muted); }
-  .head-row { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  .head-row { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
   .map-title {
     font-size: 22px; font-weight: 500; letter-spacing: -0.02em; color: var(--ink);
     /* FONT-SWITCH: page title joins the body sans stack; only .brand stays serif. */
     font-family: system-ui, -apple-system, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif;
   }
   /* HONESTY (fixed, always visible): this map is spread/connection, NOT verification. */
-  .map-subtitle { margin-top: 6px; font-size: 13.5px; line-height: 1.55; color: var(--slate); }
+  .map-subtitle { margin-top: 4px; font-size: 13.5px; line-height: 1.55; color: var(--slate); }
   .map-subtitle strong { color: var(--ink); font-weight: 700; }
   .legend {
-    margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px 16px;
+    margin-top: 8px; display: flex; flex-wrap: wrap; gap: 8px 16px;
     font-size: 12.5px; color: var(--slate); align-items: center;
   }
   /* BRAINMAP-FILTER: legend keys are interactive filter toggles. They read as
      calm tappable chips (site tokens), with a clear active state. Clicking a
      domain isolates its constellation; "전체 보기" restores all. */
   .legend .key {
-    display: inline-flex; align-items: center; gap: 6px;
+    display: inline-flex; align-items: center; gap: 4px;
     font-family: inherit; font-size: 12.5px; color: var(--slate);
     background: transparent; border: 1px solid transparent; border-radius: 999px;
-    padding: 3px 10px; cursor: pointer; line-height: 1.15;
+    padding: 4px 8px; cursor: pointer; line-height: 1.15;
     transition: background .12s, border-color .12s, color .12s;
   }
   /* BRAINMAP-MULTI-DOMAIN: on TOUCH pointers only, the chips grow to a real tap
@@ -188,7 +188,7 @@
      is involved, and the twelve chips still wrap in the same order. */
   @media (pointer: coarse) {
     .legend .key { padding: 8px 12px; }
-    .legend { gap: 10px 14px; }
+    .legend { gap: 8px 12px; }
   }
   .legend .key:hover { background: #17233a; border-color: var(--line); color: var(--ink); }
   .legend .key:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
@@ -221,7 +221,7 @@
   /* Tooltip as a light site-style card (paper surface, line border, soft shadow). */
   #tooltip {
     position: absolute; pointer-events: none; display: none;
-    max-width: 320px; padding: 9px 12px;
+    max-width: 320px; padding: 8px 12px;
     background: var(--paper); color: var(--ink);
     border: 1px solid var(--line); border-radius: var(--radius-sm);
     font-size: 12.5px; line-height: 1.5;
@@ -1727,7 +1727,7 @@
     }
     if (el) {
       el.textContent = searchQuery
-        ? (total + "건 일치 · 그중 " + connected + "건 연결됨") : "";
+        ? (total.toLocaleString("ko-KR") + "건 일치 · 그중 " + connected.toLocaleString("ko-KR") + "건 연결됨") : "";
     }
     updateSearchNav();
   }
@@ -1977,7 +1977,7 @@
     el.textContent = "노드 " + graph.nodes.length + "개 · 연결 " + graph.edges.length
       + "개 · 클러스터 " + (graph.clusters || []).length
       + "개 · 연결된 노드 " + connected + "개 · 미연결 " + isolated + "개"
-      + (maxOutlets > 0 ? " · 최대 확산 " + maxOutlets + "개 매체" : "");
+      + (maxOutlets > 0 ? " · 최대 확산 " + maxOutlets.toLocaleString("ko-KR") + "개 매체" : "");
   }
 
   function onClick(ev) {

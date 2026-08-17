@@ -1192,6 +1192,16 @@
       return text;
     }
 
+    // NUMERAL-RULE (72-APPLY, 09 P1): every COUNT figure formats with the
+    // SAME call claim.html's distribution already ships -
+    // toLocaleString("ko-KR") - applied AT RENDER, never by editing a stored
+    // string. Years, identifiers and ratios are not counts and never pass
+    // through this. Non-finite input falls back to the raw string.
+    function formatCount(value) {
+      const n = Number(value);
+      return Number.isFinite(n) ? n.toLocaleString("ko-KR") : String(value ?? "");
+    }
+
     function escapeHtml(value) {
       return sanitizeDisplayText(value)
         .replaceAll("&", "&amp;")
@@ -1950,7 +1960,7 @@
         }
         if (excludedEntries > 0) {
           const matched = Number(data.contradiction_candidates_matched ?? 0);
-          reconcile = `<div class="evidence-source-meta">매칭 ${matched}건 중 ${excludedEntries}건 직접 근거에서 제외됨</div>`;
+          reconcile = `<div class="evidence-source-meta">매칭 ${formatCount(matched)}건 중 ${formatCount(excludedEntries)}건 직접 근거에서 제외됨</div>`;
         }
       }
       // DESIGN-DETAIL-5a: counts (incl. 0) are values and stay; only an empty
@@ -2542,7 +2552,7 @@
 
     function renderMetrics(results) {
       const metrics = computeMetrics(results);
-      metricResults.textContent = metrics.count;
+      metricResults.textContent = formatCount(metrics.count);
       metricAlert.textContent = metrics.highest === "-" ? "-" : formatAlert(metrics.highest);
       // CARD-SIMPLIFY: the 평균 신뢰도 tile is OFF the public strip. Display only —
       // computeMetrics still returns averageConfidence (the reviewer queue and the
@@ -2551,7 +2561,7 @@
       // narrowed to 3 inline. closest() is null in the test DOM stubs → guarded.
       const confidenceTile = metricConfidence && metricConfidence.closest ? metricConfidence.closest(".metric") : null;
       if (confidenceTile) confidenceTile.hidden = true;
-      metricImpact.textContent = metrics.highImpactCount;
+      metricImpact.textContent = formatCount(metrics.highImpactCount);
       metricsEl.style.display = "grid";
       metricsEl.style.gridTemplateColumns = "repeat(3, minmax(0, 1fr))";
     }
@@ -3100,7 +3110,7 @@
           const factParts = [];
           const articleCount = Number(spreadInfo?.size);
           if (Number.isFinite(articleCount) && articleCount > 0) {
-            factParts.push(`기사 ${articleCount}건`);
+            factParts.push(`기사 ${formatCount(articleCount)}건`);
           }
           const rowSpanDays = Number(spreadInfo?.span_days);
           if (Number.isFinite(rowSpanDays) && rowSpanDays > 0) {
@@ -3115,7 +3125,7 @@
           return `
         <article class="topic-card feed-spread-row ${selected ? "selected" : ""}" data-topic-key="${escapeHtml(card.key)}" data-topic-source="${escapeHtml(card.source)}" data-topic-index="${escapeHtml(card.index)}" data-topic-record-id="${escapeHtml(card.recordId)}">
           <div class="feed-spread-left">
-            <span class="card-domain card-outlet-chip">${escapeHtml(String(rowCount))}개 매체</span>
+            <span class="card-domain card-outlet-chip">${escapeHtml(formatCount(rowCount))}개 매체</span>
             ${factsLine}
           </div>
           <div class="feed-spread-body">
@@ -3173,11 +3183,11 @@
         // text) so CSS can set it at value-step weight beside the figure.
         const outletCount = Number(clusterSizeMap.get(Number(card.recordId)));
         if (Number.isFinite(outletCount) && outletCount >= 2) {
-          cells.push(cell("전체 확산 매체 수", `${escapeHtml(String(outletCount))}<span class="fact-unit">개 매체</span>`));
+          cells.push(cell("전체 확산 매체 수", `${escapeHtml(formatCount(outletCount))}<span class="fact-unit">개 매체</span>`));
         }
         const articleTotal = Number(info.size);
         if (Number.isFinite(articleTotal) && articleTotal > 0) {
-          cells.push(cell("보도 건수", `${escapeHtml(String(articleTotal))}<span class="fact-unit">건</span>`));
+          cells.push(cell("보도 건수", `${escapeHtml(formatCount(articleTotal))}<span class="fact-unit">건</span>`));
         }
         const spanDays = Number(info.span_days);
         if (Number.isFinite(spanDays) && spanDays > 0) {
@@ -3199,7 +3209,7 @@
         const dailyPeak = Array.isArray(info.daily)
           ? info.daily.reduce((m, d) => Math.max(m, Number(d?.count) || 0), 0)
           : 0;
-        const peakNote = dailyPeak > 0 ? ` · 최다 ${escapeHtml(dailyPeak)}건/일` : "";
+        const peakNote = dailyPeak > 0 ? ` · 최다 ${escapeHtml(formatCount(dailyPeak))}건/일` : "";
         const range = (strip && firstAt && lastAt)
           ? `<div class="hero-spread-range">${escapeHtml(firstAt)} → ${escapeHtml(lastAt)}${peakNote} <span class="spread-facts-note">(수집 기사 기준)</span></div>`
           : "";
@@ -3434,9 +3444,9 @@
         const heroOutlets = Number(trendingHeroPickRow?.current_outlet_count);
         const heroGrowth = Number(trendingHeroPickRow?.growth);
         const heroBadge = trendingHeroPickRow?.is_new ? " · NEW"
-          : (Number.isFinite(heroGrowth) && heroGrowth > 0 ? ` · ↑${heroGrowth}` : "");
+          : (Number.isFinite(heroGrowth) && heroGrowth > 0 ? ` · ↑${formatCount(heroGrowth)}` : "");
         const heroStat = Number.isFinite(heroOutlets) && heroOutlets > 0
-          ? `${heroOutlets}개 매체${heroBadge}`
+          ? `${formatCount(heroOutlets)}개 매체${heroBadge}`
           : heroBadge.replace(" · ", "");
         // HERO-FALLTHROUGH-DISCLOSURE: the hero is the first USABLE growth row,
         // not the growth leader — resolveTrendingHeroPick walks the same five
@@ -4003,9 +4013,9 @@
           // no growth marker (growth <= 0, not new) keeps the count alone,
           // and a row with no count keeps the marker alone — as before.
           const growthLead = row?.is_new ? "NEW"
-            : (Number.isFinite(growth) && growth > 0 ? `↑${growth}` : "");
+            : (Number.isFinite(growth) && growth > 0 ? `↑${formatCount(growth)}` : "");
           const countTail = Number.isFinite(outlets) && outlets > 0
-            ? `${outlets}개 매체`
+            ? `${formatCount(outlets)}개 매체`
             : "";
           const meta = growthLead && countTail
             ? `${growthLead} · ${countTail}`
@@ -4038,9 +4048,9 @@
         if (!response.ok) return;
         const body = await response.json();
         if (!body || body.status !== "ok") return;
-        if (statTotalEl) statTotalEl.textContent = String(body.total ?? "–");
-        if (statOfficialEl) statOfficialEl.textContent = String(body.official ?? "–");
-        if (statDraftEl) statDraftEl.textContent = String(body.draft ?? "–");
+        if (statTotalEl) statTotalEl.textContent = Number.isFinite(Number(body.total)) ? formatCount(body.total) : "–";
+        if (statOfficialEl) statOfficialEl.textContent = Number.isFinite(Number(body.official)) ? formatCount(body.official) : "–";
+        if (statDraftEl) statDraftEl.textContent = Number.isFinite(Number(body.draft)) ? formatCount(body.draft) : "–";
         // HOME-SECTION-FIX A1 / MOBILE-POLISH B: wire the top utility-bar counts
         // from the same payload — 이번 주 = total (the 7-day window), 누적 검증 =
         // cumulative_total (the unbounded corpus count). Fail-quiet leaves the "—"
@@ -4048,12 +4058,12 @@
         // number arrives, so an older payload without the field shows 이번 주 only
         // rather than a fabricated or dashed-out total.
         if (utilityUpdateCountEl && Number.isFinite(Number(body.total))) {
-          utilityUpdateCountEl.textContent = String(body.total);
+          utilityUpdateCountEl.textContent = formatCount(body.total);
         }
         if (utilityTotalCountEl && utilityCumulativeClauseEl
             && body.cumulative_total !== null && body.cumulative_total !== undefined
             && Number.isFinite(Number(body.cumulative_total))) {
-          utilityTotalCountEl.textContent = String(body.cumulative_total);
+          utilityTotalCountEl.textContent = formatCount(body.cumulative_total);
           utilityCumulativeClauseEl.hidden = false;
         }
         // VERIFY-FORK (51-APPLY): the method-page diagram's numbers row — the
@@ -4072,9 +4082,9 @@
           const vhWeek = document.getElementById("verifyHowStatWeekly");
           const vhOfficial = document.getElementById("verifyHowStatOfficial");
           if (vhCum && vhWeek && vhOfficial) {
-            vhCum.textContent = String(body.cumulative_total);
-            vhWeek.textContent = String(body.total);
-            vhOfficial.textContent = String(body.official);
+            vhCum.textContent = formatCount(body.cumulative_total);
+            vhWeek.textContent = formatCount(body.total);
+            vhOfficial.textContent = formatCount(body.official);
             verifyHowStatsEl.hidden = false;
           }
         }
@@ -6644,7 +6654,7 @@
       // = bar count × ≤16px capped at 100%, so 2–5 days form a compact centered
       // cluster and 30–60 days fill the width exactly as before.
       return `
-            <div style="text-align:center;margin:10px 0 4px;">
+            <div style="text-align:center;margin:8px 0 4px;">
               <div class="spread-sparkline" role="img" aria-label="일별 보도량, 최다 ${escapeHtml(peak)}건" style="display:inline-flex;flex-direction:column;gap:2px;max-width:100%;vertical-align:bottom;">
                 <div style="display:flex;align-items:flex-end;justify-content:center;gap:2px;height:48px;">${bars.join("")}</div>
                 ${labelRow}
@@ -6678,10 +6688,10 @@
       let peak = 0;
       counts.forEach((count) => { peak = Math.max(peak, count); });
       const labelRow = counts.size === 1
-        ? `<div style="text-align:center;font-size:var(--fs-micro);color:var(--muted);">${escapeHtml(days[0])} · ${escapeHtml(counts.get(days[0]))}건</div>`
+        ? `<div style="text-align:center;font-size:var(--fs-micro);color:var(--muted);">${escapeHtml(days[0])} · ${escapeHtml(formatCount(counts.get(days[0])))}건</div>`
         : `<div style="display:flex;justify-content:space-between;gap:12px;font-size:var(--fs-micro);color:var(--muted);">
               <span>${escapeHtml(days[0])}</span>
-              <span>최다 ${escapeHtml(peak)}건/일</span>
+              <span>최다 ${escapeHtml(formatCount(peak))}건/일</span>
               <span>${escapeHtml(days[days.length - 1])}</span>
             </div>`;
       // SHORT-SPAN-WIDTH (52-APPLY): measured live, 64.4% of clustered claims
@@ -6811,7 +6821,7 @@
           // focus unchanged — same class, same title source); the painted
           // bar is a centred child at the spec's bar-to-slot share.
           bars.push(
-            `<div class="spread-strip-bar" title="${escapeHtml(day)} · ${escapeHtml(count)}건" tabindex="0" style="${slotBasis};align-self:stretch;display:flex;align-items:flex-end;justify-content:center;"><div style="width:${barShare};height:${barPx}px;background:var(--brand);"></div></div>`
+            `<div class="spread-strip-bar" title="${escapeHtml(day)} · ${escapeHtml(formatCount(count))}건" tabindex="0" style="${slotBasis};align-self:stretch;display:flex;align-items:flex-end;justify-content:center;"><div style="width:${barShare};height:${barPx}px;background:var(--brand);"></div></div>`
           );
         }
       }
@@ -6849,9 +6859,9 @@
         ? "left:100%;margin-left:6px;bottom:-4px;white-space:nowrap;"
         : "right:0;bottom:2px;";
       const gridline = (hero && peak >= 4 && quarter >= 1 && quarter < peak)
-        ? `<div class="spread-strip-gridline" aria-hidden="true" style="position:absolute;left:0;right:0;bottom:${Math.round(Math.sqrt(quarter / peak) * plotH)}px;height:0;border-top:1px dashed var(--line);"><span style="position:absolute;${labelPos}font-size:var(--fs-micro);color:var(--muted);line-height:1;">${escapeHtml(quarter)}건</span></div>`
+        ? `<div class="spread-strip-gridline" aria-hidden="true" style="position:absolute;left:0;right:0;bottom:${Math.round(Math.sqrt(quarter / peak) * plotH)}px;height:0;border-top:1px dashed var(--line);"><span style="position:absolute;${labelPos}font-size:var(--fs-micro);color:var(--muted);line-height:1;">${escapeHtml(formatCount(quarter))}건</span></div>`
         : "";
-      return `<div class="feed-spread-strip" role="img" aria-label="일별 보도량, 최다 ${escapeHtml(peak)}건" style="position:relative;display:flex;align-items:flex-end;gap:${gap}px;height:${stripH}px;max-width:100%;${stripW}">${gridline}${bars.join("")}</div>`;
+      return `<div class="feed-spread-strip" role="img" aria-label="일별 보도량, 최다 ${escapeHtml(formatCount(peak))}건" style="position:relative;display:flex;align-items:flex-end;gap:${gap}px;height:${stripH}px;max-width:100%;${stripW}">${gridline}${bars.join("")}</div>`;
     }
 
     // SHARE-IMAGE Slice 1: the spread payload each card fetched, kept for the
@@ -6957,7 +6967,7 @@
       if (hasSpread) {
         ctx.fillStyle = palette.brandInk;
         ctx.font = `800 40px ${SHARE_IMAGE_FONTS}`;
-        ctx.fillText(`${outletCount}개 매체에서 보도`, margin, y);
+        ctx.fillText(`${formatCount(outletCount)}개 매체에서 보도`, margin, y);
         y += 54;
         const timeline = spreadData.timeline || {};
         const firstAt = typeof timeline.first_at === "string" ? timeline.first_at.slice(0, 10) : "";
@@ -7058,7 +7068,7 @@
         // scale law per page. Floor 1.5% ≈ the spec's 3px on this track.
         const widthPct = Math.max(1.5, Math.round(Math.sqrt(count / maxCount) * 1000) / 10);
         const chip = isHere
-          ? `<span style="font-size:var(--fs-micro);font-weight:700;color:var(--brand);border:1px solid currentColor;border-radius:0;padding:0 6px;white-space:nowrap;">이 주장</span>`
+          ? `<span style="font-size:var(--fs-micro);font-weight:700;color:var(--brand);border:1px solid currentColor;border-radius:0;padding:0 4px;white-space:nowrap;">이 주장</span>`
           : "";
         // DIST-LABELS (50-APPLY): the bucket labels rendered 0.75rem (9.75px)
         // var(--muted) — measured ~2.6:1 on white — while claim.html's SAME
@@ -7067,15 +7077,15 @@
         // (the readable one); the label column widens 58px → 64px for the
         // larger glyphs. Label TEXT, buckets, bars, chip and the caption line
         // are unchanged.
-        return `<div title="${escapeHtml(label)} 매체 · ${escapeHtml(count)}건" style="display:flex;align-items:center;gap:6px;min-width:0;${isHere ? "background:var(--tint);" : ""}">
+        return `<div title="${escapeHtml(label)} 매체 · ${escapeHtml(formatCount(count))}건" style="display:flex;align-items:center;gap:4px;min-width:0;${isHere ? "background:var(--tint);" : ""}">
               <span style="flex:0 0 64px;text-align:right;font-size:12.5px;color:var(--slate);${isHere ? "font-weight:700;color:var(--ink);" : ""}">${escapeHtml(label)}</span>
               <span style="flex:1 1 auto;min-width:0;"><span style="display:block;height:12px;width:${widthPct}%;min-width:2px;background:var(--brand);"></span></span>
               <span style="flex:0 0 64px;">${chip}</span>
             </div>`;
       }).join("");
       return `
-            <div style="margin:10px 0 4px;max-width:640px;">
-              <div role="img" aria-label="수집된 주장의 확산 규모 분포" style="display:flex;flex-direction:column;gap:3px;">${rows}</div>
+            <div style="margin:8px 0 4px;max-width:640px;">
+              <div role="img" aria-label="수집된 주장의 확산 규모 분포" style="display:flex;flex-direction:column;gap:4px;">${rows}</div>
               <div style="font-size:var(--fs-micro);color:var(--muted);margin-top:4px;">수집된 주장의 확산 규모 분포 — 우리가 수집한 범위 기준입니다.</div>
             </div>`;
     }
@@ -7107,7 +7117,10 @@
             if (data?.found === true && Number.isFinite(outletCount) && outletCount > 0) {
               const spanDays = Number(data?.timeline?.span_days);
               const duration = Number.isFinite(spanDays) && spanDays > 0 ? `${spanDays}일에 걸쳐 ` : "";
-              spreadStem = `이 주장은 ${outletCount}개 매체에서 ${duration}보도됐`;
+              // NUMERAL-RULE exception (72-APPLY): the answer sentence's
+            // grammar is gate-pinned (card_render_audit ANSWER GRID matches
+            // \d+개 매체 verbatim), so this ONE figure stays unseparated.
+            spreadStem = `이 주장은 ${outletCount}개 매체에서 ${duration}보도됐`;
             }
           }
           const officialClause = officialMode === "found"
@@ -7177,12 +7190,12 @@
             : null;
           const exactCount = Number(data?.cluster?.exact_same_text_outlet_count);
           const exactNote = Number.isFinite(exactCount) && exactCount >= 2
-            ? ` (이 중 ${escapeHtml(exactCount)}개 매체는 문구가 완전히 같습니다.)`
+            ? ` (이 중 ${escapeHtml(formatCount(exactCount))}개 매체는 문구가 완전히 같습니다.)`
             : "";
           const syndicationLine = nearShown === null
             ? ""
             : nearShown >= 1
-              ? `<div class="spread-syndication-line">이 중 ${escapeHtml(nearShown)}개 매체는 첫 보도와 제목·주장 문구가 거의 동일합니다.${exactNote}</div>`
+              ? `<div class="spread-syndication-line">이 중 ${escapeHtml(formatCount(nearShown))}개 매체는 첫 보도와 제목·주장 문구가 거의 동일합니다.${exactNote}</div>`
               : `<div class="spread-syndication-line">첫 보도와 제목·주장 문구가 거의 동일한 매체는 없습니다.</div>`;
           // 5b: the number ALSO renders as a grid cell (label 문구 거의 동일,
           // value {n}개 매체 — both shipped on claim:465). The sentence above
@@ -7192,7 +7205,7 @@
           // null (pre-2a graph rows) omits the cell.
           const nearCell = nearShown === null
             ? ""
-            : spreadFactCell("문구 거의 동일", `${escapeHtml(nearShown)}<span class="fact-unit">개 매체</span>`);
+            : spreadFactCell("문구 거의 동일", `${escapeHtml(formatCount(nearShown))}<span class="fact-unit">개 매체</span>`);
           // 4b: the ARTICLE count beside the OUTLET count. The block stated only
           // "{N}개 매체", so 40 outlets / 158 articles and 40 / 40 read identically
           // to a reader. api_server.py:1566 records the two as deliberately
@@ -7209,7 +7222,7 @@
           // guessing which of the two is right would not be.
           const memberSize = Number(data?.cluster?.size);
           const sizeCell = Number.isFinite(memberSize) && memberSize >= outletCount
-            ? spreadFactCell("보도 건수", `${escapeHtml(memberSize)}<span class="fact-unit">건</span>`)
+            ? spreadFactCell("보도 건수", `${escapeHtml(formatCount(memberSize))}<span class="fact-unit">건</span>`)
             : "";
           // 5b: cells in fixed order — 매체 / 건수 / 기간 / 문구. The outlet cell
           // is unconditional inside this block (the >=2 gate above is its
@@ -7217,7 +7230,7 @@
           // absent, and auto-fit re-flows the remaining cells across the row so
           // a 2-cell or 1-cell grid reads as fewer facts, never as zeros.
           const factsGrid = `<div class="spread-facts">${
-            spreadFactCell("전체 확산 매체 수", `${escapeHtml(outletCount)}<span class="fact-unit">개 매체</span>`)
+            spreadFactCell("전체 확산 매체 수", `${escapeHtml(formatCount(outletCount))}<span class="fact-unit">개 매체</span>`)
           }${sizeCell}${timelineCell}${nearCell}</div>
             <div class="spread-facts-note">(수집 기사 기준)</div>`;
           // DETAIL-IA MERGE: this div is a CHILD of the 얼마나 퍼졌나 wrapper —
@@ -7283,7 +7296,7 @@
           return `<div class="spread-strip-slot" title="${escapeHtml(day)} · 0개 매체" style="flex:0 1 12px;max-width:12px;min-width:0;align-self:flex-end;height:2px;position:relative;"></div>`;
         }
         const barPx = Math.max(4, Math.round(Math.sqrt(outlets / peak) * 48));
-        return `<div class="spread-strip-bar" title="${escapeHtml(day)} · ${escapeHtml(outlets)}개 매체" style="flex:0 1 12px;max-width:12px;min-width:0;align-self:stretch;display:flex;align-items:flex-end;justify-content:center;"><div style="width:58%;height:${barPx}px;background:var(--brand);"></div></div>`;
+        return `<div class="spread-strip-bar" title="${escapeHtml(day)} · ${escapeHtml(formatCount(outlets))}개 매체" style="flex:0 1 12px;max-width:12px;min-width:0;align-self:stretch;display:flex;align-items:flex-end;justify-content:center;"><div style="width:58%;height:${barPx}px;background:var(--brand);"></div></div>`;
       });
       // TEMPORAL-MAP Phase 4 FIX 2: structure mirrors spreadSparklineHtml so the
       // two charts read as sibling plots — a centered, shrink-wrapped inline-flex
@@ -7294,12 +7307,12 @@
       const firstDay = timelineDateLabel(points[0]?.date);
       const lastDay = timelineDateLabel(points[points.length - 1]?.date);
       return `
-            <div style="text-align:center;margin:10px 0 4px;">
-              <div class="topic-timeline-sparkline" role="img" aria-label="주간 스냅샷별 매체 수, 최다 ${escapeHtml(peak)}개 매체" style="display:inline-flex;flex-direction:column;gap:2px;max-width:100%;vertical-align:bottom;">
+            <div style="text-align:center;margin:8px 0 4px;">
+              <div class="topic-timeline-sparkline" role="img" aria-label="주간 스냅샷별 매체 수, 최다 ${escapeHtml(formatCount(peak))}개 매체" style="display:inline-flex;flex-direction:column;gap:2px;max-width:100%;vertical-align:bottom;">
                 <div style="display:flex;align-items:flex-end;justify-content:center;gap:0;height:49px;width:${points.length * 12}px;max-width:100%;border-bottom:1px solid var(--muted);">${bars.join("")}</div>
                 <div style="display:flex;justify-content:space-between;gap:12px;min-width:max-content;align-self:center;font-size:var(--fs-micro);color:var(--muted);">
                   <span>${escapeHtml(firstDay)}</span>
-                  <span>최다 ${escapeHtml(peak)}개 매체</span>
+                  <span>최다 ${escapeHtml(formatCount(peak))}개 매체</span>
                   <span>${escapeHtml(lastDay)}</span>
                 </div>
               </div>
@@ -7366,7 +7379,7 @@
           // 여론/국민정서, and sequence is never framed as 반박.
           const delta = Number(data?.latest_delta) || 0;
           const deltaLine = delta > 0
-            ? `<div class="spread-timeline-line">최근 스냅샷에서 ${escapeHtml(delta)}개 매체 증가</div>`
+            ? `<div class="spread-timeline-line">최근 스냅샷에서 ${escapeHtml(formatCount(delta))}개 매체 증가</div>`
             : (delta < 0
               ? `<div class="spread-timeline-line">최근 스냅샷에서 ${escapeHtml(Math.abs(delta))}개 매체 감소</div>`
               : "");
@@ -7483,7 +7496,7 @@
             // Reuse the quiet .card-domain chip styling; the marker class only
             // guards against double-patching on overlapping hydrations.
             chip.className = "card-domain card-outlet-chip";
-            chip.textContent = `${count}개 매체`;
+            chip.textContent = `${formatCount(count)}개 매체`;
             // CARD-CIRC-SLOT (26-APPLY): on GRID cards the circulation figure
             // gets its OWN slot — the card's first child, before the badge
             // row — so the remaining badges read as one group and the figure

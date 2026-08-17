@@ -132,6 +132,10 @@ const PINNED_DEPS = [
   "formatReliabilityLevel", "formatVerificationRole", "formatEvidenceType",
   "formatSupportsClaim", "formatExtractionConfidence",
   "formatContradictionStatus", "formatContradictionRisk",
+  // NUMERAL-RULE (72-APPLY): count-figure separator (toLocaleString ko-KR),
+  // pinned in the same commit that introduced it. The ANSWER GRID grammar
+  // deliberately does NOT use it — the answer sentence stays \d+ verbatim.
+  "formatCount",
   // section renderers (the surfaces under audit)
   "advDefList", "renderCollapsibleSection", "renderClaimList",
   "renderNormalizedClaims", "renderEvidenceSnippets", "renderEvidenceSources",

@@ -70,11 +70,11 @@
   header.report-head {
     background: var(--paper);
     border-bottom: 1px solid var(--line);
-    padding: 16px 24px 18px;
+    padding: 16px 24px 20px;
   }
   .brand-row {
-    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-    margin-bottom: 10px;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    margin-bottom: 8px;
   }
   .brand {
     display: inline-flex; align-items: center; gap: 8px;
@@ -104,22 +104,22 @@
      system's .reader-note treatment exactly (slate, 13px/1.55, no box);
      text verbatim, still a permanent always-visible block. */
   .report-framing {
-    margin-top: 10px; display: block;
+    margin-top: 8px; display: block;
     color: var(--slate); font-size: 13px; line-height: 1.55;
   }
   .report-subtitle { margin-top: 8px; font-size: 13.5px; line-height: 1.55; color: var(--slate); }
   .report-subtitle strong { color: var(--ink); font-weight: 700; }
-  main.report-body { max-width: 860px; margin: 0 auto; padding: 22px 20px 40px; }
+  main.report-body { max-width: 860px; margin: 0 auto; padding: 24px 20px 40px; }
   #status { color: var(--slate); font-size: 15px; text-align: center; padding: 48px 24px; }
-  ol.top-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+  ol.top-list { list-style: none; display: flex; flex-direction: column; gap: 8px; }
   /* ONE-SITE (44-APPLY): the home page's primary surfaces are hairline
      cards (1px --line, no shadow, 12px radius); the ranked items join
      that family — shadow dropped, radius-sm → --radius. */
   .top-item {
-    display: flex; align-items: flex-start; gap: 14px;
+    display: flex; align-items: flex-start; gap: 12px;
     background: var(--paper); border: 1px solid var(--line);
     border-radius: var(--radius);
-    padding: 14px 16px;
+    padding: 12px 16px;
   }
   .top-rank {
     flex: 0 0 auto; width: 34px; height: 34px; border-radius: 50%;
@@ -137,26 +137,26 @@
   }
   .top-title:hover { color: var(--brand-ink); text-decoration: underline; }
   .top-meta {
-    margin-top: 6px; display: flex; flex-wrap: wrap; gap: 8px 14px;
+    margin-top: 4px; display: flex; flex-wrap: wrap; gap: 8px 12px;
     align-items: center; font-size: 12.5px; color: var(--slate);
   }
   .outlet-badge {
     display: inline-flex; align-items: center;
     background: #eff6ff; color: var(--brand-ink);
-    border-radius: 999px; padding: 2px 10px;
+    border-radius: 999px; padding: 2px 8px;
     font-weight: 700; font-size: 12px;
   }
   /* CLAIM-LINK: sits in the meta row like the other spans; brand-ink link. */
   .claim-link { color: var(--brand-ink); text-decoration: none; font-weight: 700; }
   .claim-link:hover { text-decoration: underline; }
   /* WEEKLY-ARCHIVE: 지난 리포트 list — deliberately unnumbered plain links. */
-  .archive-section { max-width: 860px; margin: 0 auto; padding: 4px 20px 26px; }
+  .archive-section { max-width: 860px; margin: 0 auto; padding: 4px 20px 28px; }
   .archive-title { font-size: 13.5px; font-weight: 700; color: var(--slate); margin-bottom: 8px; }
-  .archive-list { list-style: none; display: flex; flex-direction: column; gap: 5px; }
+  .archive-list { list-style: none; display: flex; flex-direction: column; gap: 4px; }
   .archive-list a { color: var(--brand-ink); text-decoration: none; font-size: 13px; font-weight: 600; }
   .archive-list a:hover { text-decoration: underline; }
   footer.report-foot {
-    max-width: 860px; margin: 0 auto; padding: 0 20px 46px;
+    max-width: 860px; margin: 0 auto; padding: 0 20px 48px;
     font-size: 12.5px; color: var(--muted); line-height: 1.7;
   }
   footer.report-foot a { color: var(--brand-ink); text-decoration: none; font-weight: 600; }
@@ -369,7 +369,7 @@
       // the window prefix reuses the EXISTING 이번 주/해당 주간 strings the
       // 보도 count line already renders.
       var outlets = Number(item.outlet_count);
-      if (outlets > 0) meta.appendChild(el("span", "outlet-badge", outlets + "개 매체 (전체 기간)"));
+      if (outlets > 0) meta.appendChild(el("span", "outlet-badge", outlets.toLocaleString("ko-KR") + "개 매체 (전체 기간)"));
       var winFrom = day(item.window_first_at), winTo = day(item.window_last_at);
       var from = winFrom || day(item.first_at);
       var to = winTo || day(item.last_at);
@@ -383,7 +383,7 @@
         // ARCHIVE-LABEL: on a past-week permalink (?week=...) "이번 주" is wrong —
         // reuse the "해당 주간" vocabulary already used by showEmpty above. The
         // latest view (no ?week) renders the exact same string as before.
-        meta.appendChild(el("span", null, (weekParam ? "해당 주간 보도 " : "이번 주 보도 ") + Number(item.window_member_count) + "건"));
+        meta.appendChild(el("span", null, (weekParam ? "해당 주간 보도 " : "이번 주 보도 ") + Number(item.window_member_count).toLocaleString("ko-KR") + "건"));
       }
       // WEEKLY-ALLTIME-COUNT: member_count is the cluster's ALL-TIME article
       // count and was stored-but-unrendered (generate_weekly_report.py:194).
@@ -399,7 +399,7 @@
       // honest reading, and a conditional would leave gaps down the column.
       // Stored value untouched; no existing number is read differently.
       if (Number(item.member_count) > 0) {
-        meta.appendChild(el("span", null, "전체 기간 보도 " + Number(item.member_count) + "건"));
+        meta.appendChild(el("span", null, "전체 기간 보도 " + Number(item.member_count).toLocaleString("ko-KR") + "건"));
       }
       // WEEKLY-PAGE-ENRICH: spread-speed span (first->last duration). Omitted when
       // the timestamps are missing/equal (spreadSpeed returns "").
@@ -415,7 +415,7 @@
       var nearSame = item.near_anchor_outlet_count;
       if (typeof nearSame === "number" && isFinite(nearSame) && nearSame >= 0) {
         var nearShown = Math.max(0, nearSame - 1);
-        meta.appendChild(el("span", null, "문구 거의 동일: " + nearShown + "개 매체"));
+        meta.appendChild(el("span", null, "문구 거의 동일: " + nearShown.toLocaleString("ko-KR") + "개 매체"));
       }
       // CLAIM-LINK: appended lazily once a lineage id is in hand (see helper).
       appendClaimLink(meta, item);

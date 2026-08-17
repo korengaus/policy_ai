@@ -44,8 +44,8 @@
     background: var(--canvas); color: var(--ink); min-height: 100vh;
     font-family: var(--font-sans);
   }
-  header.faded-head { background: var(--paper); border-bottom: 1px solid var(--line); padding: 16px 24px 18px; }
-  .brand-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 10px; }
+  header.faded-head { background: var(--paper); border-bottom: 1px solid var(--line); padding: 16px 24px 20px; }
+  .brand-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
   .brand {
     display: inline-flex; align-items: center; gap: 8px; color: var(--ink); text-decoration: none;
     font-family: 'Noto Serif KR', 'Nanum Myeongjo', 'Apple SD Gothic Neo', serif;
@@ -66,28 +66,28 @@
      system's .reader-note treatment exactly (slate, 13px/1.55, no box);
      text verbatim, still a permanent always-visible block. */
   .faded-framing {
-    margin-top: 10px; color: var(--slate);
+    margin-top: 8px; color: var(--slate);
     font-size: 13px; line-height: 1.55; max-width: 760px;
   }
   .faded-subtitle { margin-top: 8px; font-size: 13.5px; line-height: 1.55; color: var(--slate); }
   .faded-subtitle strong { color: var(--ink); font-weight: 700; }
-  main.faded-body { max-width: 860px; margin: 0 auto; padding: 22px 20px 40px; }
+  main.faded-body { max-width: 860px; margin: 0 auto; padding: 24px 20px 40px; }
   #status { color: var(--slate); font-size: 15px; text-align: center; padding: 48px 24px; }
-  ol.faded-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+  ol.faded-list { list-style: none; display: flex; flex-direction: column; gap: 8px; }
   .faded-item {
     /* ONE-SITE (57-APPLY): hairline card — shadow dropped, radius-sm → 12px
        (the aligned claim/weekly card standard). */
     background: var(--paper); border: 1px solid var(--line);
     border-radius: var(--radius);
-    padding: 14px 16px;
+    padding: 12px 16px;
   }
   .item-title { color: var(--ink); text-decoration: none; font-size: 15.5px; font-weight: 700; line-height: 1.45; display: inline-block; }
   .item-title:hover { color: var(--brand-ink); text-decoration: underline; }
-  .item-meta { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 12.5px; color: var(--slate); }
+  .item-meta { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; font-size: 12.5px; color: var(--slate); }
   /* ONE-SITE (57-APPLY): chip tint #eef4ff → #eff6ff, the tint the main
      system's live badge/chip surfaces actually use. */
-  .outlet-badge { display: inline-flex; align-items: center; background: #eff6ff; color: var(--brand-ink); border-radius: 999px; padding: 2px 10px; font-weight: 700; font-size: 12px; }
-  footer.faded-foot { max-width: 860px; margin: 0 auto; padding: 0 20px 46px; font-size: 12.5px; color: var(--muted); line-height: 1.7; }
+  .outlet-badge { display: inline-flex; align-items: center; background: #eff6ff; color: var(--brand-ink); border-radius: 999px; padding: 2px 8px; font-weight: 700; font-size: 12px; }
+  footer.faded-foot { max-width: 860px; margin: 0 auto; padding: 0 20px 48px; font-size: 12.5px; color: var(--muted); line-height: 1.7; }
   footer.faded-foot a { color: var(--brand-ink); text-decoration: none; font-weight: 600; }
   footer.faded-foot a:hover { text-decoration: underline; }
 </style>
@@ -143,9 +143,9 @@
       var outlets = Number(claim.outlet_count);
       var silence = Number(claim.silence_days);
       if (outlets > 0 && silence > 0) {
-        meta.appendChild(el("span", "outlet-badge", outlets + "개 매체"));
+        meta.appendChild(el("span", "outlet-badge", outlets.toLocaleString("ko-KR") + "개 매체"));
         meta.appendChild(el("span", null,
-          outlets + "개 매체가 보도한 뒤 " + silence + "일째 후속 보도 없음"));
+          outlets.toLocaleString("ko-KR") + "개 매체가 보도한 뒤 " + silence + "일째 후속 보도 없음"));
       }
       var from = day(claim.first_at);
       var to = day(claim.last_at);

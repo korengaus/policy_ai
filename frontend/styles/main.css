@@ -187,7 +187,7 @@
       flex-wrap: wrap;
       position: relative;
       padding: 4px 0 8px;
-      margin-bottom: 10px;
+      margin-bottom: 8px;
       font-size: var(--fs-meta);
     }
     /* DESIGN-3A4.7: grey DOTTED rule below the utility bar, now FULL-BLEED (100vw)
@@ -223,7 +223,7 @@
     .utility-right {
       display: flex;
       align-items: center;
-      gap: 18px;
+      gap: 20px;
     }
     .utility-link {
       color: var(--slate);
@@ -254,12 +254,12 @@
          DOTTED full-bleed line that the blue active-tab underline sits on. Both
          100vw (overflow-x:hidden keeps it scroll-safe). padding-bottom is 0 so the
          tabs' bottom edge (the blue underline) coincides with the dotted ::after. */
-      margin: 8px 0 14px;
+      margin: 8px 0 12px;
       /* DESIGN-PROGRESS-3: padding split 10/2 (sum kept at 12 so the row height —
          and thus the dotted ::after at bottom:0 — does not move) re-centers the
          tab labels in the band between the (now lowered) black ::before rule and
          the grey dotted ::after. */
-      padding: 10px 0 2px;
+      padding: 8px 0 2px;
     }
     .domain-tabs-row::before {
       content: '';
@@ -311,7 +311,7 @@
     .domain-tabs-row .hot-topics-sort-select {
       min-height: 30px;
       font-size: var(--fs-meta);
-      padding: 6px 30px 6px 12px;
+      padding: 4px 32px 4px 12px;
     }
     .grade-guide-link {
       color: var(--brand);
@@ -330,7 +330,7 @@
     .guide-links {
       display: flex;
       align-items: center;
-      gap: 14px;
+      gap: 12px;
     }
     /* 연결지도's leading glyph — sized to the utility-link text, stroke-inherited so
        it stays neutral (no color emphasis) and follows :hover like the label. */
@@ -385,9 +385,9 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      gap: 18px;
+      gap: 20px;
       flex-wrap: wrap;
-      margin-bottom: 14px;
+      margin-bottom: 12px;
     }
 
     /* DESIGN-3A2: compact header search. The whole .panel was moved into .topbar
@@ -636,13 +636,13 @@
 
     .panel {
       padding: 12px;
-      margin-bottom: 10px;
+      margin-bottom: 8px;
     }
 
     .controls {
       display: grid;
       grid-template-columns: 1fr 132px auto auto;
-      gap: 10px;
+      gap: 8px;
       align-items: end;
     }
 
@@ -659,7 +659,7 @@
       min-height: 42px;
       border: 1px solid var(--line-300); /* 60-APPLY (04): input edges — the edges a hand touches */
       border-radius: 0;
-      padding: 10px 12px;
+      padding: 8px 12px;
       background: var(--paper);
       color: var(--text);
       font-size: var(--fs-value);
@@ -675,7 +675,7 @@
       min-height: 42px;
       border: 0;
       border-radius: 0;
-      padding: 10px 16px;
+      padding: 8px 16px;
       color: white;
       font-size: var(--fs-value);
       font-weight: 800;
@@ -840,7 +840,7 @@
     }
 
     .metric {
-      padding: 15px;
+      padding: 16px;
     }
 
     .metric-label {
@@ -869,7 +869,7 @@
 
     .results {
       display: grid;
-      gap: 14px;
+      gap: 12px;
       margin-top: 16px;
     }
 
@@ -884,7 +884,7 @@
       gap: 12px;
       border-top: 1px solid var(--line);
       margin: 24px 0 0;
-      padding: 14px 0 0;
+      padding: 12px 0 0;
     }
 
     .report-actions-title {
@@ -906,7 +906,7 @@
       border-radius: 0;
       background: var(--paper);
       color: var(--slate);
-      padding: 6px 11px;
+      padding: 4px 12px;
       font-size: var(--fs-micro);
       font-weight: 700;
     }
@@ -943,7 +943,7 @@
       display: inline-flex;
       align-items: center;
       border-radius: 0;
-      padding: 4px 10px;
+      padding: 4px 8px;
       color: white;
       font-size: var(--fs-meta);
       font-weight: 700;
@@ -968,7 +968,7 @@
     .ai-status-inactive { background: var(--slate); }
     .ai-status-error { background: #b45309; }
     .ai-status-note {
-      margin-top: 6px;
+      margin-top: 4px;
       font-size: var(--fs-meta);
       color: var(--slate);
       line-height: 1.4;
@@ -989,7 +989,7 @@
     /* DESIGN-DETAIL-4b FIX 1: the detail page title matches the HOME section-title
        serif scale (.domain-section-title = 1.5rem / 1.25 / 700, --ink). */
     .result-title {
-      margin: 0 0 14px;
+      margin: 0 0 12px;
       color: var(--ink);
       font-size: var(--fs-title-l);
       line-height: 1.3;
@@ -1009,22 +1009,22 @@
     .detail-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 14px;
-      margin: 14px 0;
+      gap: 12px;
+      margin: 12px 0;
     }
 
     .result-summary-grid {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 10px;
-      margin: 14px 0;
+      gap: 8px;
+      margin: 12px 0;
     }
 
     .summary-tile {
       border: 1px solid var(--line);
       border-radius: 0;
       background: var(--paper);
-      padding: 11px;
+      padding: 12px;
       min-height: 74px;
       font-size: 13px;
       line-height: 1.45;
@@ -1042,7 +1042,7 @@
        left rule only, no heavy box (dropped the radius + paper fill). */
     .report-summary-lead {
       margin: 16px 0;
-      padding: 6px 0 6px 18px;
+      padding: 4px 0 4px 20px;
       border-left: 3px solid var(--brand);
       color: var(--ink);
       font-size: 17px;
@@ -1071,7 +1071,7 @@
     .core-indicator-strip {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 10px;
+      gap: 8px;
       margin: 0 0 16px;
     }
 
@@ -1079,7 +1079,7 @@
        detail. Indicators as a clean flat row bounded by thin --line rules (no heavy
        colored tiles), then the 왜 판단 reasoning under a serif sub-heading. */
     .verdict-block {
-      margin: 16px 0 18px;
+      margin: 16px 0 20px;
     }
 
     /* 5b: circulation facts grid — the four spread numbers as data, not prose.
@@ -1096,10 +1096,10 @@
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
       gap: 16px;
-      padding: 14px 0;
+      padding: 12px 0;
       border-top: 1px solid var(--line-100); /* 60-APPLY (04): in-card hairlines */
       border-bottom: 1px solid var(--line-100);
-      margin: 10px 0 0;
+      margin: 8px 0 0;
     }
     .spread-fact {
       min-width: 0;
@@ -1130,7 +1130,7 @@
     .spread-facts-note {
       color: var(--muted);
       font-size: var(--fs-meta);
-      margin: 4px 0 10px;
+      margin: 4px 0 8px;
     }
     /* DETAIL-CHARTS (51-APPLY): the detail's two charts share one row —
        distribution (its own 440px inline cap) left, daily strip right in the
@@ -1152,16 +1152,16 @@
     .spread-daily-strip {
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      gap: 4px;
       min-width: 0;
-      margin: 10px 0 4px;
+      margin: 8px 0 4px;
     }
 
     .verdict-indicators {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 16px;
-      padding: 14px 0;
+      padding: 12px 0;
       border-top: 1px solid var(--line-100); /* 60-APPLY (04): in-card hairlines */
       border-bottom: 1px solid var(--line-100);
     }
@@ -1205,7 +1205,7 @@
     /* DESIGN-DETAIL-4b FIX 1: primary detail section heading — clearly larger than
        the 영향 sub-headings, on the home serif scale (just under the 1.5rem page title). */
     .verdict-reasoning h3 {
-      margin: 0 0 10px;
+      margin: 0 0 8px;
       color: var(--ink);
       font-size: var(--fs-title-s);
       line-height: 1.3;
@@ -1215,7 +1215,7 @@
     /* FIX 1: reader body matches the home card summary (--slate, 0.923rem, ~1.6). */
     .verdict-reasoning ul {
       margin: 0;
-      padding-left: 18px;
+      padding-left: 20px;
       color: var(--slate);
       font-size: var(--fs-meta);
       line-height: 1.65;
@@ -1226,11 +1226,11 @@
       border-radius: 0;
       background: var(--surface-soft);
       margin: 16px 0;
-      padding: 15px;
+      padding: 16px;
     }
 
     .reviewer-dashboard h3 {
-      margin: 0 0 6px;
+      margin: 0 0 4px;
       color: #1e3a8a;
       font-size: 17px;
     }
@@ -1240,11 +1240,11 @@
       border-radius: 0;
       background: #fff7ed;
       margin: 16px 0;
-      padding: 15px;
+      padding: 16px;
     }
 
     .reviewer-action-card h3 {
-      margin: 0 0 6px;
+      margin: 0 0 4px;
       color: #9a3412;
       font-size: 17px;
     }
@@ -1261,7 +1261,7 @@
       width: 100%;
       border: 1px solid #fdba74;
       border-radius: 0;
-      padding: 8px 10px;
+      padding: 8px 8px;
       color: var(--ink);
       font: inherit;
       background: var(--paper);
@@ -1277,7 +1277,7 @@
       display: flex;
       gap: 8px;
       flex-wrap: wrap;
-      margin-top: 10px;
+      margin-top: 8px;
     }
 
     .reviewer-action-buttons button {
@@ -1308,7 +1308,7 @@
       padding: 4px 8px;
       font-size: 12px;
       font-weight: 900;
-      margin-left: 6px;
+      margin-left: 4px;
     }
 
     .verification-summary-card {
@@ -1320,7 +1320,7 @@
     }
 
     .verification-summary-card h3 {
-      margin: 0 0 6px;
+      margin: 0 0 4px;
       color: #1e3a8a;
       font-size: 18px;
     }
@@ -1328,7 +1328,7 @@
     .verification-summary-grid {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 10px;
+      gap: 8px;
       margin-top: 12px;
     }
 
@@ -1336,7 +1336,7 @@
       border: 1px solid #dbeafe;
       border-radius: 0;
       background: var(--paper);
-      padding: 10px;
+      padding: 8px;
       min-width: 0;
     }
 
@@ -1367,7 +1367,7 @@
     .reviewer-dashboard-grid {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 10px;
+      gap: 8px;
       margin-top: 12px;
     }
 
@@ -1375,7 +1375,7 @@
       border: 1px solid #e5e7eb;
       border-radius: 0;
       background: var(--paper);
-      padding: 10px;
+      padding: 8px;
       font-size: 12px;
       line-height: 1.45;
     }
@@ -1401,11 +1401,11 @@
       color: #1e3a8a;
       font-size: 12px;
       font-weight: 800;
-      padding: 6px 8px;
+      padding: 4px 8px;
     }
 
     .score-explain {
-      margin-top: 6px;
+      margin-top: 4px;
       color: var(--gray);
       font-size: var(--fs-meta);
       line-height: 1.45;
@@ -1415,8 +1415,8 @@
       border: 1px solid #bfdbfe;
       border-radius: 0;
       background: #eff6ff;
-      margin: 14px 0;
-      padding: 15px 16px;
+      margin: 12px 0;
+      padding: 16px 16px;
     }
 
     .takeaway-title {
@@ -1428,7 +1428,7 @@
 
     .takeaway-list {
       margin: 0;
-      padding-left: 18px;
+      padding-left: 20px;
       color: var(--text);
       font-size: var(--fs-value);
       line-height: 1.65;
@@ -1444,8 +1444,8 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 10px;
-      margin-bottom: 10px;
+      gap: 8px;
+      margin-bottom: 8px;
     }
 
     .reading-guide-title {
@@ -1457,14 +1457,14 @@
     .reading-guide-grid {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 10px;
+      gap: 8px;
     }
 
     .reading-guide-card {
       border: 1px solid var(--line);
       border-radius: 0;
       background: var(--paper);
-      padding: 11px;
+      padding: 12px;
       color: var(--slate);
       font-size: 13px;
       line-height: 1.5;
@@ -1483,13 +1483,13 @@
     .plain-section-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 18px 22px;
+      gap: 20px 24px;
       margin: 24px 0;
     }
 
     .plain-section {
       border-top: 1px solid var(--line);
-      padding: 14px 0 0;
+      padding: 12px 0 0;
     }
 
     /* FIX 1: the 영향 sub-headings — serif, smaller than the primary section headings. */
@@ -1502,7 +1502,7 @@
 
     .plain-section ul {
       margin: 0;
-      padding-left: 18px;
+      padding-left: 20px;
       color: var(--slate);
       font-size: var(--fs-meta);
       line-height: 1.6;
@@ -1529,14 +1529,14 @@
 
     .headline-card {
       border-bottom: 1px solid var(--line-100);
-      margin-bottom: 14px;
-      padding-bottom: 14px;
+      margin-bottom: 12px;
+      padding-bottom: 12px;
     }
 
     .headline-meta {
       display: flex;
       flex-wrap: wrap;
-      gap: 10px;
+      gap: 8px;
       color: var(--muted);
       font-size: 13px;
       font-weight: 700;
@@ -1556,7 +1556,7 @@
       color: var(--slate);
       font-size: 13px;
       line-height: 1.55;
-      margin-top: 6px;
+      margin-top: 4px;
     }
 
     .public-eyebrow {
@@ -1591,7 +1591,7 @@
       display: flex;
       gap: 20px;
       flex-wrap: wrap;
-      margin: 14px 0 0;
+      margin: 12px 0 0;
     }
 
     /* DESIGN-3A2: underline-style tabs (Semafor/PolitiFact identity). Plain text,
@@ -1625,7 +1625,7 @@
       display: flex;
       align-items: center;
       gap: 8px;
-      margin: 10px 0 0;
+      margin: 8px 0 0;
     }
 
     .hot-topics-sort-label {
@@ -1645,7 +1645,7 @@
       border-radius: 0;
       background-color: var(--paper);
       color: var(--brand);
-      padding: 6px 30px 6px 12px;
+      padding: 4px 32px 4px 12px;
       font-size: var(--fs-meta);
       font-weight: 600;
       cursor: pointer;
@@ -1733,7 +1733,7 @@
          the top gap is just the .home-shell 24px row-gap (the inner wrap's extra
          16px top margin is zeroed below), while a larger bottom margin gives clear
          separation before the full-width verify strip. */
-      margin-bottom: 22px;
+      margin-bottom: 24px;
     }
     /* PAGINATION-SPACING: drop the shared wrap's 16px top margin in the pagination
        context only (tier2's load-more wrap keeps it) so the card->pagination gap is
@@ -1748,7 +1748,7 @@
          flex-wrap lets the same gap double as vertical spacing if the two
          buttons stack on narrow screens (MOBILE-1b safe). Covers both tiers. */
       flex-wrap: wrap;
-      gap: 10px;
+      gap: 8px;
       margin: 16px 0 0;
     }
 
@@ -1784,12 +1784,12 @@
       flex-wrap: wrap;
       justify-content: center;
       align-items: center;
-      gap: 6px;
+      gap: 4px;
     }
     .feed-pagination-btn {
       min-width: 38px;
       min-height: 38px;
-      padding: 6px 12px;
+      padding: 4px 12px;
       background: var(--paper);
       color: var(--brand);
       border: 1px solid var(--line);
@@ -1852,7 +1852,7 @@
       padding: 12px 0 2px;
     }
     .rank-panel-heading {
-      margin-bottom: 10px;
+      margin-bottom: 8px;
     }
     .rank-panel-heading h2 {
       margin: 0;
@@ -1862,7 +1862,7 @@
       font-weight: 500;   /* FONT-WEIGHT-FIX-2: sidebar headings lighter still */
     }
     .rank-panel-heading p {
-      margin: 3px 0 0;
+      margin: 4px 0 0;
       color: var(--muted);
       font-size: var(--fs-micro);
       line-height: 1.4;
@@ -1877,8 +1877,8 @@
     .rank-row {
       display: flex;
       align-items: flex-start;
-      gap: 10px;
-      padding: 10px 2px;
+      gap: 8px;
+      padding: 8px 2px;
       border-top: 1px solid var(--line-100); /* 60-APPLY (04): record-row separator */
       cursor: pointer;
     }
@@ -1949,7 +1949,7 @@
     .rank-verdict {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 4px;
       font-size: var(--fs-micro);
     }
     .rank-verdict-text {
@@ -1964,7 +1964,7 @@
        are 2-class-scoped so they override the sidebar's vertical-divider .rank-row
        rules (source order after them settles any tie). */
     .recent-viewed {
-      margin-top: 22px;
+      margin-top: 24px;
       padding-top: 16px;
       border-top: 1px solid var(--line);
     }
@@ -1972,7 +1972,7 @@
       font-size: var(--fs-meta);
       font-weight: 700;
       color: var(--ink);
-      margin-bottom: 10px;
+      margin-bottom: 8px;
     }
     .recent-viewed-strip {
       display: flex;
@@ -1987,7 +1987,7 @@
       flex: 0 0 auto;
       width: 220px;
       align-items: stretch;
-      padding: 6px 14px;
+      padding: 4px 12px;
       /* DESIGN-UNIFY-2: strip items reuse the sidebar .rank-row markup, which carries
          border-top:1px var(--line) (the vertical-list divider). That painted a short
          horizontal rule above each mini-card. Scope it OFF for the strip only (this
@@ -2048,7 +2048,7 @@
     .report-panel {
       border-top: 1px solid var(--line); /* 60-APPLY (04): section rule */
       padding: 12px 0 2px;
-      margin-top: 18px;
+      margin-top: 20px;
     }
 
     /* 이번 주 검증 현황 — three big numbers (conceptually like .metric-value). */
@@ -2088,7 +2088,7 @@
       padding: 0;
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 8px;
     }
     .legend-row {
       display: flex;
@@ -2104,7 +2104,7 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      margin-top: 3px;
+      margin-top: 4px;
     }
     /* LABEL-1 STEP 5: small-caps axis header separating 공식 근거 / AI 판정. First
        header drops its top margin so the panel keeps its existing rhythm. */
@@ -2194,7 +2194,7 @@
     .report-btn {
       flex: 0 0 auto;
       min-height: 36px;
-      padding: 8px 14px;
+      padding: 8px 12px;
       white-space: nowrap;
       border-radius: 0;
     }
@@ -2208,7 +2208,7 @@
        moved into .domain-tabs-row; the .feed-sort-row wrapper no longer exists). */
 
     .news-home-section {
-      margin: 10px 0;
+      margin: 8px 0;
     }
 
     /* VERIFY-STRIP-REDESIGN-V2: the "이렇게 검증합니다" band as the approved
@@ -2301,7 +2301,7 @@
     .brainmap-home-link {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
+      gap: 4px;
       color: var(--df-link); /* 58-APPLY (01): dark-field link companion */
       font-size: var(--fs-meta);
       font-weight: 700;
@@ -2311,8 +2311,8 @@
       text-decoration: underline;
     }
     .verify-how {
-      margin: 18px 0 24px;
-      padding: 30px 30px 24px;
+      margin: 20px 0 24px;
+      padding: 32px 32px 24px;
       border: 1px solid var(--line);
       border-radius: 0;
       background: var(--paper);
@@ -2374,7 +2374,7 @@
        as meaningful graphics"), 15/600 centered — no numbers, no size steps,
        no rising certainty. */
     .vhf-flow {
-      margin-top: 26px;
+      margin-top: 28px;
     }
     .vhf-node {
       position: relative;
@@ -2397,7 +2397,7 @@
       height: 14px;
       flex: none;
       vertical-align: -2px;
-      margin-right: 6px;
+      margin-right: 4px;
       fill: none;
       stroke: currentColor;
       stroke-width: 2;
@@ -2434,7 +2434,7 @@
       text-align: left;
     }
     .vhf-entry {
-      margin: 0 auto 26px;
+      margin: 0 auto 28px;
     }
     .vhf-lanes {
       display: grid;
@@ -2445,14 +2445,14 @@
     }
     .vhf-lane {
       position: relative;
-      padding: 0 0 18px;
+      padding: 0 0 20px;
       min-width: 0;
     }
     .vhf-lane-name {
       position: relative;
       width: fit-content;
       margin: 0 auto;
-      padding: 2px 10px;
+      padding: 2px 8px;
       background: var(--paper);
       color: var(--slate);
       font-size: var(--fs-micro);
@@ -2463,13 +2463,13 @@
       position: relative;
       width: fit-content;
       margin: 2px auto 0;
-      padding: 0 10px;
+      padding: 0 8px;
       background: var(--paper);
       color: var(--muted);
       font-size: var(--fs-micro);
     }
     .vhf-lane > .vhf-node {
-      margin: 14px auto 0;
+      margin: 12px auto 0;
     }
     .vhf-publish {
       /* 62-APPLY (06): identical box, centered, full-stop alone — it follows
@@ -2481,7 +2481,7 @@
        from the /stats fetch the page already makes; the scope note is part of
        the same line so a figure can never render without it. */
     .verify-how-stats {
-      margin: 6px 0 0;
+      margin: 4px 0 0;
       color: var(--slate);
       font-size: var(--fs-micro);
     }
@@ -2501,9 +2501,9 @@
       align-items: center;
       justify-content: center;
       flex-wrap: wrap;
-      gap: 10px 30px;
-      margin-top: 26px;
-      padding-top: 18px;
+      gap: 8px 32px;
+      margin-top: 28px;
+      padding-top: 20px;
       border-top: 1px solid var(--line);
     }
 
@@ -2516,14 +2516,14 @@
        top rule) so it matches the site instead of the old .history-card box. */
     .recent-analyses {
       margin: 24px 0 16px;
-      padding-top: 18px;
+      padding-top: 20px;
       border-top: 1px solid var(--line);
     }
     .recent-head {
       display: flex;
       align-items: baseline;
       justify-content: space-between;
-      gap: 10px;
+      gap: 8px;
       flex-wrap: wrap;
       margin-bottom: 12px;
     }
@@ -2547,13 +2547,13 @@
     }
     .corrections {
       margin: 24px 0 16px;
-      padding-top: 18px;
+      padding-top: 20px;
       border-top: 1px solid var(--line);
     }
     .corrections-head {
       display: flex;
       align-items: baseline;
-      gap: 10px;
+      gap: 8px;
       flex-wrap: wrap;
       margin-bottom: 12px;
     }
@@ -2629,8 +2629,8 @@
       margin: 0;
     }
     .methodology-section > * + * {
-      margin-top: 34px;
-      padding-top: 34px;
+      margin-top: 36px;
+      padding-top: 36px;
       border-top: 1px solid var(--line);
     }
 
@@ -2651,7 +2651,7 @@
       letter-spacing: 0.08em;
       font-size: var(--fs-micro);
       font-weight: 700;
-      margin-bottom: 10px;
+      margin-bottom: 8px;
     }
     .methodology-masthead h2 {
       margin: 0;
@@ -2687,7 +2687,7 @@
     }
 
     .methodology-card p {
-      margin: 10px 0 0;
+      margin: 8px 0 0;
     }
 
     /* the two-column sub-section pairs (무엇을 검증 / AI는 무엇을, 경고단계 / 한계정정)
@@ -2704,13 +2704,13 @@
        card) becomes a single-column stack; the top-level pairs above stay 2-col. */
     .methodology-card .methodology-grid {
       display: block;
-      margin-top: 14px;
+      margin-top: 12px;
     }
     .methodology-definition {
       border: none;
       border-radius: 0;
       background: none;
-      padding: 14px 0;
+      padding: 12px 0;
       border-top: 1px solid var(--line);
     }
     .methodology-definition:first-child {
@@ -2728,14 +2728,14 @@
 
     .methodology-definition span {
       display: block;
-      margin-top: 6px;
+      margin-top: 4px;
       color: var(--slate);
       font-size: 1rem;
       line-height: 1.55;
     }
 
     .methodology-list {
-      margin: 10px 0 0;
+      margin: 8px 0 0;
       padding-left: 20px;
     }
 
@@ -2763,7 +2763,7 @@
     .topic-card {
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 8px;
       border-bottom: 1px solid var(--line);
       padding: 16px 0;
       cursor: pointer;
@@ -2854,7 +2854,7 @@
        shared .card-domain styling, untouched), the card body flows beside it.
        Region-2 cards render through the unchanged .topic-card-grid rules. */
     .feed-region-heading {
-      margin: 26px 0 12px;
+      margin: 28px 0 12px;
       font-size: var(--fs-value);
       font-weight: 700;
       color: var(--ink);
@@ -2862,7 +2862,7 @@
     .feed-spread-row {
       flex-direction: row;
       align-items: flex-start;
-      gap: 14px;
+      gap: 12px;
       /* 14-APPLY: the status sits at the row's right edge when there is room
          and REFLOWS below when there is not — no fixed status column (the
          shipped strings run long and would wrap or clip in one). */
@@ -2893,7 +2893,7 @@
       min-width: 0;
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 8px;
     }
     .feed-spread-status {
       flex: 0 1 auto;
@@ -2920,7 +2920,7 @@
     /* DESIGN-C2: hero = the SAME card rendered larger (no inner element changed).
        Only type scale + spacing grow; every badge/tag/verdict/source block stays. */
     .topic-card--hero {
-      gap: 14px;
+      gap: 12px;
     }
     /* DESIGN-C3h-3: the always-on hero "<domain> · 오늘의 검증" eyebrow (.hero-today-label)
        was REMOVED — it was a fixed hero label, not a real today signal. Real today
@@ -2962,7 +2962,7 @@
       -webkit-line-clamp: 4;
     }
     .topic-card--hero .card-source-box {
-      padding: 12px 14px;
+      padding: 12px 12px;
     }
     .topic-card--hero .card-source-avatar {
       width: 32px;
@@ -3158,7 +3158,7 @@
        two hero-scoped rules only space them under the summary and keep a long
        daily series from spanning the full hero width. */
     .topic-card--hero .feed-spread-strip {
-      margin-top: 6px;
+      margin-top: 4px;
       /* 33-APPLY: full column width under the title (was capped 320px when it
          sat in the rail). */
       max-width: none;
@@ -3215,7 +3215,7 @@
     .feed-sec-ruled {
       border-top: 1px solid var(--line);
       margin-top: 16px;
-      padding-top: 10px;
+      padding-top: 8px;
     }
 
     .topic-card-top {
@@ -3328,7 +3328,7 @@
       display: block;
       font-size: var(--fs-figure-m);
       font-weight: 700;
-      margin: 0 0 6px;
+      margin: 0 0 4px;
     }
     /* CARD-BADGE-TIERS (26-APPLY): the badge row's four kinds of metadata
        rendered at one 9.4–10px size; now three tiers by SIZE/WEIGHT only —
@@ -3439,7 +3439,7 @@
     .topic-card-tags {
       display: flex;
       flex-wrap: wrap;
-      gap: 6px;
+      gap: 4px;
     }
     .topic-card-tag {
       font-size: var(--fs-micro);
@@ -3512,7 +3512,7 @@
        distinct block on the canvas. */
     .card-source-box {
       margin-top: 8px;
-      padding: 8px 10px;
+      padding: 8px 8px;
       border: 1px solid var(--line);
       border-radius: 0;
       background: var(--paper);
@@ -3599,12 +3599,12 @@
        The inner 배경 맥락/공식 약한 후보 pill (.source-support-badge) is kept. */
     .public-source-grid {
       display: block;
-      margin-top: 6px;
+      margin-top: 4px;
     }
 
     .public-source-card {
-      padding: 14px 0 0;
-      margin-top: 14px;
+      padding: 12px 0 0;
+      margin-top: 12px;
       border-top: 1px solid var(--line);
       min-width: 0;
     }
@@ -3671,7 +3671,7 @@
 
     .public-source-warning {
       margin-top: 8px;
-      padding: 8px 10px;
+      padding: 8px 8px;
       border-radius: 0;
       background: #fff7ed;
       color: #9a3412;
@@ -3692,7 +3692,7 @@
       justify-content: space-between;
       gap: 16px;
       margin: 16px 0 8px;
-      padding: 10px 14px;
+      padding: 8px 12px;
       border: 1px solid #fcd34d;
       border-radius: 0;
       background: #fffbeb;
@@ -3715,7 +3715,7 @@
       font-size: 0.85em;
     }
     .operator-tools-note button {
-      padding: 6px 12px;
+      padding: 4px 12px;
       font-size: 12px;
       border-radius: 0;
       flex: 0 0 auto;
@@ -3758,7 +3758,7 @@
 
     .server-review-panel {
       display: grid;
-      gap: 14px;
+      gap: 12px;
     }
 
     .server-review-admin-warning {
@@ -3766,7 +3766,7 @@
       border-radius: 0;
       background: #fef2f2;
       color: #7f1d1d;
-      padding: 12px 14px;
+      padding: 12px 12px;
       font-size: 0.92rem;
       line-height: 1.55;
       margin-bottom: 4px;
@@ -3788,13 +3788,13 @@
       border: 1px solid #fcd34d;
       border-radius: 0;
       background: #fffbeb;
-      padding: 14px;
+      padding: 12px;
       margin-bottom: 12px;
     }
 
     .server-review-login-panel label {
       display: block;
-      margin-bottom: 6px;
+      margin-bottom: 4px;
       color: #78350f;
       font-size: 13px;
       font-weight: 800;
@@ -3805,10 +3805,10 @@
       min-height: 38px;
       border: 1px solid var(--orange);
       border-radius: 0;
-      padding: 8px 10px;
+      padding: 8px 8px;
       background: var(--paper);
       font-size: 14px;
-      margin-bottom: 10px;
+      margin-bottom: 8px;
     }
 
     .server-review-login-actions {
@@ -3820,13 +3820,13 @@
 
     .server-review-login-actions button {
       min-height: 36px;
-      padding: 6px 14px;
+      padding: 4px 12px;
       font-size: 13px;
     }
 
     .server-review-login-status {
-      margin-top: 10px;
-      padding: 8px 10px;
+      margin-top: 8px;
+      padding: 8px 8px;
       border-radius: 0;
       background: #fef3c7;
       color: #78350f;
@@ -3864,8 +3864,8 @@
     }
 
     .server-review-status {
-      margin-top: 10px;
-      padding: 8px 10px;
+      margin-top: 8px;
+      padding: 8px 8px;
       border-radius: 0;
       background: #fef3c7;
       color: #78350f;
@@ -3896,11 +3896,11 @@
       border: 1px solid #c7d2fe;
       border-radius: 0;
       background: #eef2ff;
-      padding: 14px;
+      padding: 12px;
     }
 
     .server-review-register-panel h4 {
-      margin: 0 0 6px 0;
+      margin: 0 0 4px 0;
       color: #312e81;
       font-size: 14px;
       font-weight: 800;
@@ -3909,13 +3909,13 @@
     .server-review-register-actions {
       display: flex;
       gap: 8px;
-      margin-top: 10px;
+      margin-top: 8px;
       flex-wrap: wrap;
     }
 
     .server-review-register-actions button {
       min-height: 36px;
-      padding: 6px 14px;
+      padding: 4px 12px;
       font-size: 13px;
     }
 
@@ -3923,29 +3923,29 @@
       border: 1px solid #cbd5e1;
       border-radius: 0;
       background: var(--surface-soft);
-      padding: 14px;
+      padding: 12px;
     }
 
     .server-review-list-header {
       display: flex;
-      gap: 10px;
+      gap: 8px;
       align-items: center;
       flex-wrap: wrap;
-      margin-bottom: 10px;
+      margin-bottom: 8px;
     }
 
     .server-review-list-header select {
       min-height: 36px;
       border: 1px solid #cbd5e1;
       border-radius: 0;
-      padding: 6px 10px;
+      padding: 4px 8px;
       background: var(--paper);
       font-size: 13px;
     }
 
     .server-review-list-header button {
       min-height: 36px;
-      padding: 6px 12px;
+      padding: 4px 12px;
       font-size: 13px;
     }
 
@@ -3958,8 +3958,8 @@
       display: flex;
       justify-content: space-between;
       align-items: flex-start;
-      gap: 10px;
-      padding: 10px 12px;
+      gap: 8px;
+      padding: 8px 12px;
       border: 1px solid var(--line);
       border-radius: 0;
       background: var(--paper);
@@ -3991,7 +3991,7 @@
     .server-review-status-chip {
       display: inline-flex;
       align-items: center;
-      padding: 3px 8px;
+      padding: 4px 8px;
       border-radius: 0;
       font-size: var(--fs-micro);
       font-weight: 800;
@@ -4027,7 +4027,7 @@
       border: 1px solid #cbd5e1;
       border-radius: 0;
       background: var(--paper);
-      padding: 14px;
+      padding: 12px;
     }
 
     .server-review-detail[hidden] {
@@ -4035,7 +4035,7 @@
     }
 
     .server-review-detail h3 {
-      margin: 0 0 10px;
+      margin: 0 0 8px;
       font-size: 16px;
     }
 
@@ -4050,7 +4050,7 @@
       border: 1px solid var(--line);
       border-radius: 0;
       background: var(--surface-soft);
-      padding: 8px 10px;
+      padding: 8px 8px;
       font-size: 12px;
       color: var(--slate);
       word-break: break-word;
@@ -4092,7 +4092,7 @@
       width: 100%;
       border: 1px solid #cbd5e1;
       border-radius: 0;
-      padding: 6px 10px;
+      padding: 4px 8px;
       background: var(--paper);
       font-size: 13px;
       font-family: inherit;
@@ -4106,12 +4106,12 @@
     .server-review-decision-panel button {
       margin-top: 12px;
       min-height: 36px;
-      padding: 6px 14px;
+      padding: 4px 12px;
       font-size: 13px;
     }
 
     .server-review-history {
-      margin-top: 14px;
+      margin-top: 12px;
       padding: 12px;
       border: 1px solid var(--line);
       border-radius: 0;
@@ -4119,11 +4119,11 @@
     }
 
     .server-review-history-row {
-      padding: 8px 10px;
+      padding: 8px 8px;
       border: 1px solid var(--line);
       border-radius: 0;
       background: var(--paper);
-      margin-bottom: 6px;
+      margin-bottom: 4px;
       font-size: 12px;
       color: #334155;
     }
@@ -4131,7 +4131,7 @@
     .server-review-history-row .row-head {
       display: flex;
       justify-content: space-between;
-      gap: 10px;
+      gap: 8px;
       font-weight: 800;
       color: var(--ink);
       margin-bottom: 2px;
@@ -4146,7 +4146,7 @@
     .server-review-history-audit {
       display: flex;
       flex-wrap: wrap;
-      gap: 10px;
+      gap: 8px;
       margin: 2px 0 4px;
       color: #64748b;
       font-size: var(--fs-micro);
@@ -4154,13 +4154,13 @@
     }
     .server-review-history-audit span {
       background: #f1f5f9;
-      padding: 2px 6px;
+      padding: 2px 4px;
       border-radius: 0;
     }
 
     .server-review-audit-packet {
-      margin-top: 14px;
-      padding: 12px 14px;
+      margin-top: 12px;
+      padding: 12px 12px;
       border: 1px solid #cbd5e1;
       border-radius: 0;
       background: var(--surface-soft);
@@ -4181,10 +4181,10 @@
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
-      margin-bottom: 6px;
+      margin-bottom: 4px;
     }
     .server-review-audit-packet-actions button {
-      padding: 6px 12px;
+      padding: 4px 12px;
       font-size: 12px;
       border-radius: 0;
     }
@@ -4193,8 +4193,8 @@
       cursor: not-allowed;
     }
     .server-review-audit-packet-summary {
-      margin: 6px 0;
-      padding: 8px 10px;
+      margin: 4px 0;
+      padding: 8px 8px;
       background: var(--paper);
       border: 1px solid var(--line);
       border-radius: 0;
@@ -4208,7 +4208,7 @@
       margin: 0;
       display: grid;
       grid-template-columns: max-content 1fr;
-      gap: 4px 10px;
+      gap: 4px 8px;
     }
     .server-review-audit-packet-summary dt {
       font-weight: 700;
@@ -4221,19 +4221,19 @@
     }
     .server-review-audit-packet-summary .audit-section-title {
       grid-column: 1 / -1;
-      margin-top: 6px;
+      margin-top: 4px;
       font-weight: 800;
       color: var(--ink);
     }
     .server-review-audit-packet-raw-wrap {
-      margin-top: 6px;
+      margin-top: 4px;
     }
     .server-review-audit-packet-raw-wrap[hidden] {
       display: none;
     }
     .server-review-audit-packet-raw {
-      margin: 6px 0 0;
-      padding: 10px;
+      margin: 4px 0 0;
+      padding: 8px;
       background: var(--ink);
       color: var(--line);
       border-radius: 0;
@@ -4253,7 +4253,7 @@
       border-radius: 0;
       background: var(--paper);
       margin: 16px 0;
-      padding: 18px;
+      padding: 20px;
     }
 
     .selected-issue-intro h2 {
@@ -4281,14 +4281,14 @@
       border: 1px solid var(--line-100);
       border-radius: 0;
       background: var(--surface-soft);
-      padding: 10px;
+      padding: 8px;
       color: var(--slate);
       font-size: var(--fs-meta);
     }
 
     .selected-issue-meta strong {
       display: block;
-      margin-top: 3px;
+      margin-top: 4px;
       color: var(--ink);
       font-size: 15px;
     }
@@ -4338,7 +4338,7 @@
 
     /* DESIGN-DETAIL-4b FIX 1: primary section heading on the home serif scale. */
     .verification-card h3 {
-      margin: 0 0 10px;
+      margin: 0 0 8px;
       color: var(--ink);
       font-size: var(--fs-title-s);
       line-height: 1.3;
@@ -4351,7 +4351,7 @@
     .verification-intro {
       display: flex;
       flex-wrap: wrap;
-      gap: 10px;
+      gap: 8px;
       margin-bottom: 12px;
     }
 
@@ -4430,7 +4430,7 @@
        0.923rem — 1px steps that read as one flat level. */
     .collapsible-section summary {
       cursor: pointer;
-      padding: 11px 12px;
+      padding: 12px 12px;
       color: var(--text);
       font-size: 15px;
       font-weight: 800;
@@ -4456,7 +4456,7 @@
       font-size: 15px;
       font-weight: 800;
       color: var(--ink);
-      padding: 10px 0;
+      padding: 8px 0;
     }
     /* DESIGN-DETAIL-5c: flatten the 8 NESTED advanced sub-section boxes → thin-rule
        separated flat sections (was 8 bordered/rounded boxes). The parent
@@ -4476,7 +4476,7 @@
     .verification-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 10px;
+      gap: 8px;
     }
 
     .verification-item {
@@ -4493,7 +4493,7 @@
     .source-list {
       display: grid;
       gap: 8px;
-      margin-top: 6px;
+      margin-top: 4px;
     }
 
     /* DESIGN-DETAIL-5c: shared advanced label+value language (label ABOVE value, both
@@ -4504,7 +4504,7 @@
     .vrf-deflist {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 0 22px;
+      gap: 0 24px;
       margin: 8px 0 0;
     }
     .vrf-cell {
@@ -4527,7 +4527,7 @@
       overflow-wrap: anywhere;
     }
     .vrf-empty {
-      margin-top: 6px;
+      margin-top: 4px;
       color: var(--muted);
       font-size: var(--fs-micro);
     }
@@ -4537,7 +4537,7 @@
       font-weight: 700;
       font-size: var(--fs-meta);
       line-height: 1.5;
-      padding: 3px 0;
+      padding: 4px 0;
     }
     .vrf-check-item + .vrf-check-item {
       border-top: 1px solid var(--line);
@@ -4611,7 +4611,7 @@
       display: flex;
       flex-wrap: wrap;
       align-items: baseline;
-      gap: 6px 10px;
+      gap: 4px 8px;
     }
     .vrf-cand-summary:hover { color: var(--brand-ink); }
     .vrf-cand-trace { font-weight: 700; font-size: var(--fs-micro); }
@@ -4633,7 +4633,7 @@
       font-size: var(--fs-micro);
     }
     .vrf-cand-body .source-candidate-title {
-      margin-bottom: 6px;
+      margin-bottom: 4px;
       font-weight: 700;
     }
 
@@ -4678,19 +4678,19 @@
     }
 
     .claim-list li {
-      margin: 6px 0;
+      margin: 4px 0;
     }
 
     .normalized-claims {
       display: grid;
-      gap: 10px;
+      gap: 8px;
       margin-top: 8px;
     }
 
     /* DESIGN-DETAIL-5c/5d: flat (no box). FIX 4: each normalized claim is one ITEM —
        a stronger var(--rule-strong) rule separates it from the next claim. */
     .normalized-claim {
-      padding: 14px 0 0;
+      padding: 12px 0 0;
       border-top: 1px solid var(--line-100); /* 60-APPLY (04): record separator */
     }
 
@@ -4702,7 +4702,7 @@
 
     .source-candidate-list {
       display: grid;
-      gap: 10px;
+      gap: 8px;
       margin-top: 8px;
     }
 
@@ -4710,12 +4710,12 @@
       border: 1px solid var(--line-100);
       border-radius: 0;
       background: var(--paper);
-      padding: 10px;
+      padding: 8px;
     }
 
     .source-candidate-title {
       font-weight: 800;
-      margin-bottom: 6px;
+      margin-bottom: 4px;
     }
 
     .source-candidate-grid {
@@ -4728,7 +4728,7 @@
     .source-query-list {
       margin-top: 8px;
       display: grid;
-      gap: 6px;
+      gap: 4px;
       font-size: 13px;
     }
 
@@ -4749,7 +4749,7 @@
 
     .evidence-snippet-list {
       display: grid;
-      gap: 10px;
+      gap: 8px;
       margin-top: 8px;
     }
 
@@ -4757,7 +4757,7 @@
        ITEM — a stronger var(--rule-strong) rule separates it from the next claim
        (the per-sentence .vrf-item boundaries sit inside, one weight down by spacing). */
     .evidence-snippet {
-      padding: 14px 0 0;
+      padding: 12px 0 0;
       border-top: 1px solid var(--line-100); /* 60-APPLY (04): record separator */
     }
 
@@ -4774,7 +4774,14 @@
     }
 
     .risk-flags {
-      color: #b45309;
+      /* 72-APPLY (C): source_risk_flags are produced BY the reliability
+         scoring (each flag caps or lowers the score — official_body_mismatch,
+         number_mismatch, missing_critical_fact…), so the amber was a risk
+         judgement wearing a colour. Neutralised like the alert badges: the
+         flag TEXT stays, the colour no longer ranks it. (.ai-status-* stays
+         coloured — it encodes pipeline execution state ok/error/unavailable,
+         a system fact like .error-box, not confidence/risk/impact.) */
+      color: var(--slate);
       font-size: var(--fs-meta);
       margin-top: 4px;
     }
@@ -4801,7 +4808,7 @@
 
     .compact-list {
       margin: 8px 0 0;
-      padding-left: 18px;
+      padding-left: 20px;
       color: var(--slate);
       font-size: var(--fs-meta);
       line-height: 1.55;
@@ -4811,7 +4818,7 @@
       border-radius: 0;
       display: inline-flex;
       font-weight: 900;
-      padding: 3px 8px;
+      padding: 4px 8px;
     }
 
     .debug-ok {
@@ -4877,7 +4884,7 @@
       border-radius: 0;
       font-size: 13px;
       font-weight: 800;
-      padding: 7px 12px;
+      padding: 8px 12px;
     }
     .detail-action-row button.secondary:hover:not(:disabled) {
       background: transparent;
@@ -4925,7 +4932,7 @@
       .detail-nav-link {
         background: none;
         border: 0;
-        padding: 6px 0;
+        padding: 4px 0;
         cursor: pointer;
         text-align: left;
         color: var(--slate);
@@ -4956,13 +4963,13 @@
     }
 
     .history-card {
-      margin-top: 18px;
-      padding: 18px;
+      margin-top: 20px;
+      padding: 20px;
     }
 
     .site-footer {
       margin-top: 28px;
-      padding: 18px 0 4px;
+      padding: 20px 0 4px;
       border-top: 1px solid var(--rule-strong); /* 67-APPLY (A): the footer bookend, thinned with the masthead's — ink tone keeps them heaviest */
       text-align: center;
       color: var(--muted);
@@ -4987,7 +4994,7 @@
       gap: 32px;
       flex-wrap: wrap;
       text-align: left;
-      margin-bottom: 22px;
+      margin-bottom: 24px;
     }
     .footer-brand-zone {
       flex: 1 1 280px;
@@ -5010,7 +5017,7 @@
       opacity: 0.85;
     }
     .footer-desc {
-      margin: 10px 0 0;
+      margin: 8px 0 0;
       max-width: 420px;
       color: var(--muted);
       font-size: var(--fs-meta);
@@ -5061,7 +5068,7 @@
       gap: 12px;
       flex-wrap: wrap;
       text-align: left;
-      margin-top: 14px;
+      margin-top: 12px;
       padding-top: 12px;
       border-top: 1px solid var(--line);
     }
@@ -5073,7 +5080,7 @@
     .footer-policy {
       display: flex;
       flex-wrap: wrap;
-      gap: 14px;
+      gap: 12px;
     }
     .footer-policy a {
       color: var(--muted);
@@ -5085,7 +5092,7 @@
     }
 
     .report-error-link {
-      margin-top: 10px;
+      margin-top: 8px;
       text-align: center;
     }
 
@@ -5112,7 +5119,7 @@
     .history-row {
       display: grid;
       grid-template-columns: 52px 1fr auto;
-      gap: 10px;
+      gap: 8px;
       align-items: start;
       border: none;
       border-top: 1px solid var(--line);
@@ -5156,7 +5163,7 @@
     }
 
     .history-meta {
-      margin-top: 6px;
+      margin-top: 4px;
       color: var(--muted);
       line-height: 1.55;
     }
@@ -5204,7 +5211,7 @@
     .review-filter {
       min-height: 32px;
       border-radius: 0;
-      padding: 8px 10px;
+      padding: 8px 8px;
       font-size: 12px;
       font-weight: 900;
     }
@@ -5375,7 +5382,7 @@
         grid-template-columns: 1fr;
       }
       .vhf-lane {
-        padding: 14px 0;
+        padding: 12px 0;
       }
       /* NODE-LEGEND (54-APPLY): stacked — label above its sentence. */
       .vhf-legend-row {
@@ -5394,7 +5401,7 @@
       /* DESIGN-DETAIL-4: the 4-up verdict indicator row goes 2-up on narrow screens. */
       .verdict-indicators {
         grid-template-columns: 1fr 1fr;
-        gap: 14px;
+        gap: 12px;
       }
 
       .source-candidate-grid {
@@ -5410,7 +5417,7 @@
          2-up grid (then the brand-zone full width); bottom row stacks. */
       .footer-top {
         flex-direction: column;
-        gap: 22px;
+        gap: 24px;
       }
       .footer-links {
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5433,7 +5440,7 @@
       }
 
       .page {
-        padding: 20px 14px 34px;
+        padding: 20px 12px 36px;
       }
 
       .detail-row {
@@ -5495,7 +5502,7 @@
       }
       .utility-right {
         flex-wrap: wrap;
-        gap: 10px 14px;
+        gap: 8px 12px;
       }
 
       /* MOBILE-POLISH E — .category-tabs' 20px gap is tuned for the 1280px page
@@ -5508,15 +5515,15 @@
          sits on the dotted ::after. Open up the row padding on both ends so the
          tabs clear the black rule and the link clears the dotted one. */
       .domain-tabs-row {
-        gap: 10px;
-        padding: 18px 0 10px;
+        gap: 8px;
+        padding: 20px 0 8px;
       }
       .domain-tabs-row .category-tabs {
         flex: 1 1 100%;
-        gap: 10px 16px;
+        gap: 8px 16px;
       }
       .category-tab {
-        padding: 6px 0;
+        padding: 4px 0;
         font-size: var(--fs-value);
       }
 

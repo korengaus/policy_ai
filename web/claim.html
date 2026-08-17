@@ -93,11 +93,11 @@
   header.report-head {
     background: var(--paper);
     border-bottom: 1px solid var(--line);
-    padding: 16px 24px 18px;
+    padding: 16px 24px 20px;
   }
   .brand-row {
-    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-    margin-bottom: 10px;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    margin-bottom: 8px;
   }
   .brand {
     display: inline-flex; align-items: center; gap: 8px;
@@ -127,7 +127,7 @@
      it read like a claim — the same regression 57-APPLY fixed on faded.html.
      Same quiet reader-note treatment as .faded-framing. */
   .report-framing {
-    margin-top: 10px; color: var(--slate);
+    margin-top: 8px; color: var(--slate);
     font-size: 13px; line-height: 1.55; max-width: 760px;
   }
   .report-subtitle { margin-top: 8px; font-size: 13.5px; line-height: 1.55; color: var(--slate); }
@@ -135,12 +135,12 @@
   /* SUPERSEDED notice — explicit, never a silent swap. Neutral styling
      (no red/green semantics). */
   .merge-notice {
-    margin-top: 12px; padding: 10px 14px;
+    margin-top: 12px; padding: 8px 12px;
     background: #fffbeb; border: 1px solid #d9c58a; border-radius: var(--radius-sm);
     font-size: 13px; color: var(--slate); line-height: 1.55;
   }
   .merge-notice strong { color: var(--ink); }
-  main.report-body { max-width: 860px; margin: 0 auto; padding: 22px 20px 40px; }
+  main.report-body { max-width: 860px; margin: 0 auto; padding: 24px 20px 40px; }
   #status { color: var(--slate); font-size: 15px; text-align: center; padding: 48px 24px; }
   /* ONE-SITE (44-APPLY): the home page's primary surfaces are hairline
      cards (1px --line, no shadow, 12px radius); this page's panels join
@@ -148,10 +148,10 @@
   .panel {
     background: var(--paper); border: 1px solid var(--line);
     border-radius: var(--radius);
-    padding: 16px 18px; margin-bottom: 14px;
+    padding: 16px 20px; margin-bottom: 12px;
   }
-  .panel-title { font-size: 13.5px; font-weight: 700; color: var(--slate); margin-bottom: 10px; }
-  .meta-row { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 13px; color: var(--slate); }
+  .panel-title { font-size: 13.5px; font-weight: 700; color: var(--slate); margin-bottom: 8px; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; font-size: 13px; color: var(--slate); }
   /* 64-APPLY (09 folded-in): identity chip only (이 주장) — accent outline,
      squared, no tint fill; the taxonomy's one accent chip. */
   .outlet-badge {
@@ -173,7 +173,7 @@
   /* ONE-CHART-LANGUAGE (42-APPLY): gap 2px → 0 (bars fill their day pitch,
      adjacent article days join into area — the home strips' treatment). */
   .spark-row { display: flex; align-items: flex-end; gap: 0; overflow-x: auto; padding: 4px 2px 0; }
-  .spark-col { display: flex; flex-direction: column; align-items: center; gap: 3px; flex: 1 1 0; min-width: 0; }
+  .spark-col { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 1 1 0; min-width: 0; }
   /* ONE-CHART-LANGUAGE (42-APPLY): the baseline the bars sit on — a per-
      column full-width hairline ordered directly under the bar; with gap 0
      the segments join into one continuous 1px --muted axis line, and it
@@ -195,7 +195,7 @@
   /* 17-APPLY: thinned label line (first date / 최다 N건·일 / last date — the
      detail sparkline's own label pattern) shown when per-column labels no
      longer fit; same muted tokens as .spark-date. */
-  .spark-axis { display: flex; justify-content: space-between; gap: 12px; margin-top: 3px; font-size: 10px; color: var(--muted); }
+  .spark-axis { display: flex; justify-content: space-between; gap: 12px; margin-top: 4px; font-size: 10px; color: var(--muted); }
   .spark-count { font-size: 10.5px; color: var(--slate); font-weight: 700; }
   .spark-date { font-size: 10px; color: var(--muted); }
   .spark-note { margin-top: 8px; font-size: 12px; color: var(--muted); line-height: 1.5; }
@@ -203,7 +203,7 @@
      brand-blue family as .spark-bar (never red/green, never a gauge). The
      current claim's bucket is marked by the existing .outlet-badge chip and
      a bold label — SHOWN, never asserted in a sentence. */
-  .dist-row { display: flex; align-items: center; gap: 10px; margin: 6px 0; }
+  .dist-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
   /* 64-APPLY: 84px clipped 51개 이상 매체 mid-word under the system stack's
      wider glyphs — 100px holds the longest shipped label on one line, and
      keep-all (body) breaks at spaces only if it ever must. */
@@ -215,7 +215,7 @@
   .dist-bar { height: 12px; background: var(--brand); }
   .dist-count { flex: 0 0 auto; font-size: 11.5px; color: var(--muted); white-space: nowrap; }
   /* CLAIM-GRAPHS: facts row — three recorded facts, meta-row styling. */
-  .facts-row { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 13px; color: var(--slate); }
+  .facts-row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; font-size: 13px; color: var(--slate); }
   /* 5c: circulation facts grid — pasted UNCHANGED from frontend/styles/main.css
      (5b block). Same class names, same shared tokens (--line/--muted/--slate/
      --ink, all defined above with identical values), so the detail view and
@@ -224,10 +224,10 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
     gap: 16px;
-    padding: 14px 0;
+    padding: 12px 0;
     border-top: 1px solid var(--line);
     border-bottom: 1px solid var(--line);
-    margin: 10px 0 0;
+    margin: 8px 0 0;
   }
   .spread-fact {
     min-width: 0;
@@ -237,7 +237,7 @@
     color: var(--slate);
     font-size: 12px;
     font-weight: 700;
-    margin-bottom: 5px;
+    margin-bottom: 4px;
   }
   .spread-fact-value {
     display: block;
@@ -251,18 +251,18 @@
   .spread-facts-note {
     color: var(--muted);
     font-size: 12px;
-    margin: 4px 0 10px;
+    margin: 4px 0 8px;
   }
   /* Member table — chronological, plain text verdicts (no colour semantics). */
-  .explain-line { font-size: 13px; color: var(--slate); line-height: 1.6; margin-bottom: 10px; }
+  .explain-line { font-size: 13px; color: var(--slate); line-height: 1.6; margin-bottom: 8px; }
   .explain-line strong { color: var(--ink); }
   .cap-line { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
   table.members { width: 100%; border-collapse: collapse; font-size: 13px; }
   table.members th {
     text-align: left; font-size: 12px; color: var(--muted); font-weight: 700;
-    border-bottom: 1px solid var(--line); padding: 6px 8px; white-space: nowrap;
+    border-bottom: 1px solid var(--line); padding: 4px 8px; white-space: nowrap;
   }
-  table.members td { border-bottom: 1px solid var(--line); padding: 7px 8px; vertical-align: top; color: var(--slate); }
+  table.members td { border-bottom: 1px solid var(--line); padding: 8px 8px; vertical-align: top; color: var(--slate); }
   table.members td.m-date { white-space: nowrap; color: var(--muted); }
   table.members td.m-host { white-space: nowrap; }
   table.members a { color: var(--ink); text-decoration: none; font-weight: 600; }
@@ -277,7 +277,7 @@
   .m-group-toggle {
     width: 100%; text-align: left; font: inherit; font-weight: 700;
     color: var(--ink); background: none; border: 0; cursor: pointer;
-    padding: 9px 8px;
+    padding: 8px 8px;
   }
   .m-group-toggle:hover { color: var(--brand-ink); }
   .m-group-toggle::before { content: "+ "; color: var(--muted); }
@@ -285,7 +285,7 @@
   .m-group-count { color: var(--muted); font-weight: 600; }
   .table-scroll { overflow-x: auto; }
   footer.report-foot {
-    max-width: 860px; margin: 0 auto; padding: 0 20px 46px;
+    max-width: 860px; margin: 0 auto; padding: 0 20px 48px;
     font-size: 12.5px; color: var(--muted); line-height: 1.7;
   }
   footer.report-foot a { color: var(--brand-ink); text-decoration: none; font-weight: 600; }
@@ -484,10 +484,10 @@
     // META ROW — outlet count and article count SEPARATE, never merged.
     var meta = document.getElementById("metaRow");
     if (Number(cluster.outlet_count) > 0) {
-      meta.appendChild(el("span", "outlet-figure", Number(cluster.outlet_count) + "개 매체"));
+      meta.appendChild(el("span", "outlet-figure", Number(cluster.outlet_count).toLocaleString("ko-KR") + "개 매체"));
     }
     if (Number(cluster.member_count) > 0) {
-      meta.appendChild(el("span", null, "기사 " + Number(cluster.member_count) + "건"));
+      meta.appendChild(el("span", null, "기사 " + Number(cluster.member_count).toLocaleString("ko-KR") + "건"));
     }
     var from = day(cluster.earliest_member_published_at);
     var to = day(cluster.latest_member_published_at);
@@ -522,7 +522,7 @@
         // visible per-column count labels carry the real numbers wherever
         // they fit.
         bar.style.height = Math.max(4, Math.round(Math.sqrt(count / max) * 44)) + "px";
-        bar.title = date + " · " + count + "건";
+        bar.title = date + " · " + count.toLocaleString("ko-KR") + "건";
         col.appendChild(bar);
         col.appendChild(el("span", "spark-date", String(date || "").slice(5)));
         return col;
@@ -596,7 +596,7 @@
         if (validDays.length) {
           var axis = el("div", "spark-axis");
           axis.appendChild(el("span", null, validDays[0].slice(5)));
-          axis.appendChild(el("span", null, "최다 " + max + "건/일"));
+          axis.appendChild(el("span", null, "최다 " + max.toLocaleString("ko-KR") + "건/일"));
           axis.appendChild(el("span", null, validDays[validDays.length - 1].slice(5)));
           row.parentNode.insertBefore(axis, row.nextSibling);
         }
@@ -659,7 +659,7 @@
     // PURPOSE ("spreads widely but phrasing differs" is the honest reading).
     var nearSame = cluster.near_anchor_outlet_count;
     if (typeof nearSame === "number" && isFinite(nearSame) && nearSame >= 0) {
-      facts.appendChild(factCell("문구 거의 동일", Math.max(0, nearSame - 1) + "개 매체"));
+      facts.appendChild(factCell("문구 거의 동일", Math.max(0, nearSame - 1).toLocaleString("ko-KR") + "개 매체"));
       factNotes.push("문구 거의 동일 = 첫 보도를 제외하고, 첫 보도와 제목·주장 문구가 거의 같은 매체 수입니다. 전체 확산 매체 수와는 별개이며, 사실 여부 판단이 아닙니다.");
     }
     // Subject is US: member articles whose card shows 공식 근거 확인 (the API
@@ -667,7 +667,7 @@
     // apply). Never a statement about official basis existing in the world.
     var officialCount = data.genuine_official_support_member_count;
     if (typeof officialCount === "number" && isFinite(officialCount) && officialCount >= 0) {
-      facts.appendChild(factCell("공식 근거 확인", "기사 " + officialCount + "건"));
+      facts.appendChild(factCell("공식 근거 확인", "기사 " + officialCount.toLocaleString("ko-KR") + "건"));
       factNotes.push("공식 근거 확인 = 우리 검증에서 공식 자료와의 직접 일치가 확인된 기사 수입니다 (수집 기사 기준). 다른 기사에 공식 근거가 없다는 뜻이 아닙니다.");
     }
     if (facts.childNodes.length) {
@@ -679,8 +679,8 @@
     // no highlight, no confirm/refute badge of any kind.
     if (data.member_rows_capped === true) {
       var capLine = document.getElementById("capLine");
-      capLine.textContent = "전체 " + Number(cluster.member_count) + "건 중 가장 이른 "
-        + members.length + "건만 표시합니다.";
+      capLine.textContent = "전체 " + Number(cluster.member_count).toLocaleString("ko-KR") + "건 중 가장 이른 "
+        + members.length.toLocaleString("ko-KR") + "건만 표시합니다.";
       capLine.hidden = false;
     }
     var tbody = document.getElementById("memberRows");
@@ -725,7 +725,7 @@
       toggle.setAttribute("aria-expanded", "false");
       toggle.setAttribute("aria-controls", bodyId);
       toggle.appendChild(document.createTextNode(key + " · "));
-      toggle.appendChild(el("span", "m-group-count", "기사 " + rows.length + "건"));
+      toggle.appendChild(el("span", "m-group-count", "기사 " + rows.length.toLocaleString("ko-KR") + "건"));
       headCell.appendChild(toggle);
       headRow.appendChild(headCell);
       groupBody.appendChild(headRow);
