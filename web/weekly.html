@@ -124,9 +124,9 @@
   .top-rank {
     flex: 0 0 auto; width: 34px; height: 34px; border-radius: 50%;
     display: inline-flex; align-items: center; justify-content: center;
-    /* ONE-SITE (57-APPLY): chip tint #eef4ff → #eff6ff — the tint the main
-       system's live badge/chip surfaces actually use. */
-    background: #eff6ff; color: var(--brand-ink);
+    /* ONE-SITE (57-APPLY) → 74-APPLY (B): the cool #eff6ff predates the token
+       layer — the system's identity tint is --tint. */
+    background: var(--tint); color: var(--brand-ink);
     font-weight: 800; font-size: 15px;
   }
   .top-main { flex: 1 1 auto; min-width: 0; }
@@ -142,8 +142,8 @@
   }
   .outlet-badge {
     display: inline-flex; align-items: center;
-    background: #eff6ff; color: var(--brand-ink);
-    border-radius: 999px; padding: 2px 8px;
+    background: var(--tint); color: var(--brand-ink);
+    border-radius: 0; padding: 2px 8px;
     font-weight: 700; font-size: 12px;
   }
   /* CLAIM-LINK: sits in the meta row like the other spans; brand-ink link. */
