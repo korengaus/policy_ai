@@ -7236,16 +7236,22 @@
     // only a full render can do. Without this the page silently lost two cards
     // on the late-pick path (caught in validation, not by reading the code).
     let feedGridExcludedCount = 0;
-    // Backstop for a HUNG request only: every explicit failure path (fetch
-    // rejected, !response.ok, empty trending, no qualifying entry) settles
-    // immediately and does not wait for this. 3000ms because the slowest
-    // REAL settle measured against production was ~2.6s on a cold Render
-    // instance — a shorter timer would fire spuriously on a cold start and
-    // reintroduce the very double band paint this exists to prevent.
-    // DELIBERATELY NOT A CANCELLATION: if the pick lands after expiry it still
-    // upgrades the band (band-only, never the grid), so this timer changes
-    // WHEN the band paints and never WHICH card is the hero.
-    const HERO_BAND_SETTLE_TIMEOUT_MS = 3000;
+    // 69-APPLY (HERO-NO-FALSE-CLAIM): the old 3000ms backstop SETTLED the band
+    // — on a cold load the 4.8MB /api/brainmap resolve takes longer than 3s,
+    // so the timer painted the pool fallback (a DIFFERENT claim) and the late
+    // pick then swapped it: for that window the page asserted a hero under a
+    // basis line describing a selection that had not happened. Ruling: timer
+    // expiry keeps the SKELETON; a fallback claim paints only on an EXPLICIT
+    // terminal failure of the pick (fetch rejected, !response.ok, no
+    // qualifying cluster, every candidate row failed — all of which call
+    // settleHeroBand() immediately). This timer is now only a HANG CEILING so
+    // a request that never returns cannot hold an empty box forever: 90s,
+    // above the ~80s a 4.8MB transfer needs at ~500kbps (slow-3G), so a slow
+    // but PROGRESSING load still ends in the true pick with no swap. Only a
+    // hang that somehow resolves after 90s can still repaint the band (the
+    // late-pick pass-through in settleHeroBand is kept on purpose — the
+    // pick, when it exists, always wins).
+    const HERO_BAND_SETTLE_TIMEOUT_MS = 90000;
     // SEARCH-ANALYZE S-i (bug b): the last corpus-search results, cached so a
     // BACK from a card opened off the results can re-render them (the card
     // overwrote #results in place). {query, hits} or null.
@@ -7254,6 +7260,12 @@
     // top hot-topic area when there is no live session search. Populated on
     // load from GET /history; never written to localStorage.
     let serverHotTopicResults = [];
+    // 69-APPLY (HERO-NO-FALSE-CLAIM): true once the init /history fetch has
+    // RETURNED (with rows or empty). While it is false and the pick has
+    // FAILED with an empty pool, the band keeps its reserved height instead
+    // of collapsing to 0 and reappearing when the feed lands — the measured
+    // 7s zero-height layout shift. Set exactly once, in the init fetch.
+    let serverFeedLanded = false;
     // 5d1: whole-pool cluster sizes for the circulation sort — the SAME batched
     // /api/cluster-sizes endpoint the card chips use (5-min HTTP cache), called
     // once per pool BEFORE that pool's first paint (fetch-then-render, so the
@@ -10633,7 +10645,14 @@
       // HERO-PAINT-ORDER: on the genuine home feed the band waits for the pick
       // to settle. Only the BAND waits — the grid paints immediately below the
       // reserved space and is never repainted when the band fills.
-      const heroPending = isTrueHomeFeed && !heroBandSettled;
+      // 69-APPLY (HERO-NO-FALSE-CLAIM): a pick that FAILED before the feed
+      // arrived also holds the reserved box — settling to "" would collapse
+      // the band to 0 height and push it back open when the feed lands (the
+      // measured 7s layout shift). Once the feed HAS landed the settled
+      // branches paint as before (fallback band, or the deliberate
+      // HERO-NO-JUDGEMENT bandless state on an uncounted pool).
+      const heroPending = isTrueHomeFeed && (!heroBandSettled
+        || (!dailyPick && !cumulativePick && !allCards.length && !serverFeedLanded));
       // STABLE-TABS S2: the tab SET is now stable (전체 + all DOMAIN_ORDER), so it
       // no longer depends on the loaded pool — no tabPool derivation needed.
       renderCategoryTabs();
@@ -18971,6 +18990,9 @@
     // currentTopicCards; these server cards only show when neither is active.
     (async () => {
       const serverResults = await getServerRecentAnalyses();
+      // 69-APPLY (HERO-NO-FALSE-CLAIM): the feed fetch has returned — from
+      // here on a settled-failed band may stop holding its reserved height.
+      serverFeedLanded = true;
       if (serverResults.length) {
         // 5d1: fetch-then-render — the size map lands BEFORE the pool's first
         // paint, so the circulation default paints sorted once instead of
@@ -18979,6 +19001,12 @@
         // in server order (id DESC), a defined degrade.
         await loadClusterSizesForSort(serverResults);
         serverHotTopicResults = serverResults;
+        renderHotTopics();
+      } else {
+        // Empty/failed feed: repaint so a reserved box held by the
+        // settled-failed-awaiting-feed state above releases to its real
+        // terminal render. Write-once guards make this a byte-no-op when
+        // nothing changed.
         renderHotTopics();
       }
     })();
