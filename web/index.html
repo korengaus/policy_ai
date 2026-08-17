@@ -7237,21 +7237,24 @@
     // on the late-pick path (caught in validation, not by reading the code).
     let feedGridExcludedCount = 0;
     // 69-APPLY (HERO-NO-FALSE-CLAIM): the old 3000ms backstop SETTLED the band
-    // — on a cold load the 4.8MB /api/brainmap resolve takes longer than 3s,
-    // so the timer painted the pool fallback (a DIFFERENT claim) and the late
-    // pick then swapped it: for that window the page asserted a hero under a
-    // basis line describing a selection that had not happened. Ruling: timer
-    // expiry keeps the SKELETON; a fallback claim paints only on an EXPLICIT
+    // and painted the pool fallback (a DIFFERENT claim) which the late pick
+    // then swapped — for that window the page asserted a hero under a basis
+    // line describing a selection that had not happened. Ruling: timer expiry
+    // keeps the SKELETON; a fallback claim paints only on an EXPLICIT
     // terminal failure of the pick (fetch rejected, !response.ok, no
-    // qualifying cluster, every candidate row failed — all of which call
-    // settleHeroBand() immediately). This timer is now only a HANG CEILING so
-    // a request that never returns cannot hold an empty box forever: 90s,
-    // above the ~80s a 4.8MB transfer needs at ~500kbps (slow-3G), so a slow
-    // but PROGRESSING load still ends in the true pick with no swap. Only a
-    // hang that somehow resolves after 90s can still repaint the band (the
-    // late-pick pass-through in settleHeroBand is kept on purpose — the
-    // pick, when it exists, always wins).
-    const HERO_BAND_SETTLE_TIMEOUT_MS = 90000;
+    // qualifying candidate, every candidate row failed — all of which call
+    // settleHeroBand() immediately). The timer is only a HANG CEILING so a
+    // request that never returns cannot hold an empty box forever.
+    // 70-APPLY (HERO-PICK-ENDPOINT): 90000 → 15000. The 90s value existed
+    // for the 4.8MB /api/brainmap download (~80s at slow-3G 500kbps); the
+    // resolve is now four small sequential requests (/api/hero-pick ~0.4KB +
+    // /history/{id} ~50KB + the two batched size/spread calls), ~4-6s at
+    // slow-3G with a cold server — 15s covers that worst case with margin
+    // while a genuinely hung request holds the skeleton only briefly. Only a
+    // hang that somehow resolves after expiry can still repaint the band
+    // (the late-pick pass-through in settleHeroBand is kept on purpose —
+    // the pick, when it exists, always wins).
+    const HERO_BAND_SETTLE_TIMEOUT_MS = 15000;
     // SEARCH-ANALYZE S-i (bug b): the last corpus-search results, cached so a
     // BACK from a card opened off the results can re-render them (the card
     // overwrote #results in place). {query, hits} or null.
@@ -10275,67 +10278,43 @@
       settleHeroBand();
     }
 
-    // HERO-WHOLE-RECORD (46-APPLY): resolve the home hero by cumulative
-    // outlet count across the WHOLE record, so the Branch B eyebrow's 전체
-    // 기간 claim matches its selection. No endpoint returns "top cluster by
-    // cumulative outlet count" directly — /api/trending ranks by GROWTH
-    // between the last two weekly snapshots (measured: its best row today is
-    // ↑3 while the record's top cluster sits at 80 outlets), and the spread
-    // endpoints all answer per-id. The pick therefore comes from the EXISTING
-    // /api/brainmap graph (the 5-min-cached blob the brain-map page loads):
-    // its clusters carry the SAME precomputed outlet_count every spread
-    // endpoint serves. Candidates walk outlet_count DESC (stable_id
-    // tiebreak, mirroring _compute_trending); the representative id is the
-    // server's own display rule (_build_trending_display_index: lowest-id
-    // member whose title equals label_title, else min member id); the row
-    // loads through the SAME deep-link path the trending picker used
-    // (v2FetchHistoryRow → mapHistoryRowToResult) so the pick can sit
-    // anywhere in the record; the market_commercial skip applies unchanged
-    // (HERO-MARKET-SKIP's own reasoning: promoting one would contradict the
-    // site's policy — rank slippage from that skip is NOT disclosed because
-    // no shipped Korean names it, the same wording constraint STRIP-CAPTION
-    // records). Fail-quiet on every path: no graph / no qualifying cluster /
-    // every fetch fails → pick stays null and the pool-based Branch B
-    // renders exactly as before (the eyebrow then overclaims exactly as it
-    // did before this change — a slim server-side top-claim endpoint would
-    // remove both the degrade and the ~1MB transfer; deliberately not added
-    // here, frontend-only change).
+    // HERO-WHOLE-RECORD (46-APPLY) / HERO-PICK-ENDPOINT (70-APPLY): resolve
+    // the home hero by cumulative outlet count across the WHOLE record, so
+    // the Branch B eyebrow's 전체 기간 claim matches its selection. 46-APPLY
+    // had no direct endpoint and downloaded the full /api/brainmap graph
+    // (measured 4.8MB, ~37s throttled) and walked it here. GET /api/hero-pick
+    // now answers with exactly what that walk consumed: a short ranked
+    // candidate list (top clusters by outlet_count DESC, stable_id tiebreak
+    // — the _compute_trending order), each carrying the representative id
+    // chosen by the server's OWN display rule (_build_trending_display_index)
+    // plus the cluster's stable_id (the SAME fold key grid exclusion uses)
+    // and outlet_count. The walk semantics are unchanged: each candidate is
+    // fail-quiet — the row loads through the SAME deep-link path the
+    // trending picker used (v2FetchHistoryRow → mapHistoryRowToResult) so
+    // the pick can sit anywhere in the record, and the market_commercial
+    // skip is RE-CHECKED on the fetched row even though the server already
+    // excludes it (HERO-MARKET-SKIP's own reasoning: promoting one would
+    // contradict the site's policy — rank slippage from that skip is NOT
+    // disclosed because no shipped Korean names it, the same wording
+    // constraint STRIP-CAPTION records). Fail-quiet on every path: endpoint
+    // down / empty candidates / every fetch fails → pick stays null, the
+    // band settles, and the pool-based Branch B renders exactly as before.
+    // /api/brainmap is untouched — the map page still loads the full graph.
     async function resolveCumulativeHeroPick() {
       try {
-        const response = await fetch(`${API_BASE}/api/brainmap`);
+        const response = await fetch(`${API_BASE}/api/hero-pick`);
         if (!response.ok) { settleHeroBand(); return; }
-        const graph = await response.json();
-        const clusters = (Array.isArray(graph?.clusters) ? graph.clusters : [])
-          .filter((c) => c && c.cluster_id !== null && c.cluster_id !== undefined
-            && Number.isFinite(Number(c.outlet_count)) && Number(c.outlet_count) >= 2);
-        const membersByCluster = new Map();
-        for (const node of (Array.isArray(graph?.nodes) ? graph.nodes : [])) {
-          const cid = node?.cluster_id;
-          const nodeId = Number(node?.id);
-          if (cid === null || cid === undefined || !Number.isInteger(nodeId)) continue;
-          if (!membersByCluster.has(cid)) membersByCluster.set(cid, []);
-          membersByCluster.get(cid).push([nodeId, node?.title || ""]);
-        }
-        clusters.sort((a, b) => (Number(b.outlet_count) - Number(a.outlet_count))
-          || String(a.stable_id || "").localeCompare(String(b.stable_id || "")));
-        // Bounded walk like the trending picker's row list: the top handful
-        // by cumulative count, each candidate fail-quiet.
-        for (const cluster of clusters.slice(0, 5)) {
-          const members = (membersByCluster.get(cluster.cluster_id) || [])
-            .slice().sort((a, b) => a[0] - b[0]);
-          if (!members.length) continue;
-          let rid = members[0][0];
-          const label = cluster.label_title || "";
-          if (label) {
-            for (const [mid, title] of members) {
-              if (title === label) { rid = mid; break; }
-            }
-          }
+        const payload = await response.json();
+        const candidates = Array.isArray(payload?.candidates)
+          ? payload.candidates : [];
+        for (const candidate of candidates) {
+          const rid = Number(candidate?.representative_analysis_id);
+          if (!Number.isInteger(rid)) continue;
           let result = null;
           try {
             const raw = await v2FetchHistoryRow(rid);
             if (raw) result = mapHistoryRowToResult(raw);
-          } catch (_) { /* per-id fetch failure → next cluster */ }
+          } catch (_) { /* per-id fetch failure → next candidate */ }
           if (!result) continue;
           if ((result.content_nature ?? null) === "market_commercial") continue;
           // The hero card's fact cells + strip read clusterSizeMap /
@@ -10347,7 +10326,7 @@
           } catch (_) { /* fact cells/strip degrade to absent — never block */ }
           cumulativeHeroPick = result;
           cumulativeHeroClusterKey =
-            typeof cluster.stable_id === "string" ? cluster.stable_id : "";
+            typeof candidate.stable_id === "string" ? candidate.stable_id : "";
           settleHeroBand();
           return;
         }
@@ -12048,6 +12027,13 @@
       const normalizedClaims = parseMaybeJson(safeRow.normalized_claims) || [];
       const sourceQueries = parseMaybeJson(safeRow.source_queries) || [];
       const missingContext = parseMaybeJson(safeRow.missing_context) || [];
+      // HISTORY-EXTRACTION (70-APPLY): the stored evidence_extraction_summary
+      // JSON column (postgres_storage: analysis_results, written from the
+      // fresh result's verification_card by database.py) was never parsed
+      // here, so a detail opened from history rendered 근거 요약과 부족한 맥락
+      // empty while a freshly analysed one filled it. Parse + carry only —
+      // what the section renders is unchanged.
+      const evidenceExtractionSummary = parseMaybeJson(safeRow.evidence_extraction_summary) || {};
       const marketSignal = parseMaybeJson(safeRow.market_signal);
       const verificationCard = {
         claim_text: safeRow.claim_text || "",
@@ -12060,6 +12046,9 @@
         claim_evidence_map: claimEvidenceMap,
         evidence_quality_summary: debug.evidence_quality_summary || {},
         evidence_strength_summary: debug.evidence_strength_summary || {},
+        // HISTORY-EXTRACTION (70-APPLY): getResultPipelineParts and
+        // getEvidenceSummaryForReport read this off verification_card.
+        evidence_extraction_summary: evidenceExtractionSummary,
         contradiction_checks: contradictionChecks,
         contradiction_summary: contradictionSummary,
         bias_framing_analysis: biasFraming,
@@ -12096,6 +12085,11 @@
         evidence_snippets: evidenceSnippets,
         claim_evidence_map: claimEvidenceMap,
         evidence_quality_summary: debug.evidence_quality_summary || {},
+        // HISTORY-EXTRACTION (70-APPLY): top-level twin of the
+        // verification_card key — the review-feedback merge reads
+        // nextResult.evidence_extraction_summary first (the fresh
+        // AnalyzeResult shape carries both).
+        evidence_extraction_summary: evidenceExtractionSummary,
         contradiction_checks: contradictionChecks,
         contradiction_summary: contradictionSummary,
         bias_framing_analysis: biasFraming,

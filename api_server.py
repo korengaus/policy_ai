@@ -2150,7 +2150,12 @@ def claim_by_lineage(lineage_id: str) -> Response:
 _TRENDING_EMPTY_JSON = '{"trending": []}'
 _TRENDING_DEFAULT_LIMIT = 10  # UI takes the Top 5; return a little headroom.
 _TRENDING_MAX_LIMIT = 20
-_TRENDING_DISPLAY_CACHE: dict = {"row_id": None, "display": None, "urls": {}}
+# HERO-PICK (70-APPLY): "hero" rides the SAME entry — the ranked hero
+# candidate list is derived from the same graph row, so display, urls and
+# hero are dropped together whenever a new brainmap_graph row lands.
+_TRENDING_DISPLAY_CACHE: dict = {
+    "row_id": None, "display": None, "urls": {}, "hero": None,
+}
 
 
 def _fetch_snapshot_batches():
@@ -2346,6 +2351,10 @@ def _load_trending_display_index():
     # index they belong to, so a representative that moved cannot keep an old
     # row's URL and vouch for a tail that is not its publisher.
     _TRENDING_DISPLAY_CACHE["urls"] = {}
+    # HERO-PICK (70-APPLY): same rule for the hero candidates — advancing the
+    # row here without dropping them would let /api/hero-pick serve an older
+    # row's ranking against the new row_id.
+    _TRENDING_DISPLAY_CACHE["hero"] = None
     return display
 
 
@@ -2458,6 +2467,138 @@ def trending_growth(limit: Optional[str] = None) -> Response:
     except Exception:
         logger.exception("Failed to build trending growth ranking")
         return _spread_response(_TRENDING_EMPTY_JSON)
+
+
+# ---------------------------------------------------------------------------
+# HERO-PICK (70-APPLY) — GET /api/hero-pick: the home hero's slim resolve.
+#
+# The home hero selects the record's top cluster by CUMULATIVE outlet_count
+# (main.js resolveCumulativeHeroPick, 46-APPLY). No endpoint answered that
+# directly, so the frontend downloaded the full /api/brainmap graph (measured
+# 4.8MB, ~37s throttled — the reason the hero skeleton carried a 90s hang
+# ceiling) and walked it client-side. This returns ONLY what that walk
+# consumed: a short ranked candidate list — top clusters by outlet_count DESC
+# with stable_id tiebreak (the _compute_trending order) — each carrying the
+# representative id chosen by the server's OWN display rule
+# (_build_trending_display_index), the cluster's stable_id (the fold key the
+# feed uses for grid exclusion) and its outlet_count. Clusters whose
+# representative's content_nature is market_commercial are excluded
+# (HERO-MARKET-SKIP's rule); the client keeps its own fail-quiet re-check on
+# the row it fetches. /api/brainmap itself is untouched — the map page still
+# reads the full graph.
+#
+# SAFETY / HONESTY:
+#   * CIRCULATION FACTS ONLY: stable_id, representative_analysis_id,
+#     outlet_count. NO verdict/score/confidence/label field is read or
+#     written. "N개 매체" is circulation, never 검증.
+#   * READ-ONLY: the same brainmap_graph row the display index reads, parsed
+#     once per row via the shared _TRENDING_DISPLAY_CACHE entry (1 SELECT on
+#     a cache hit — the id probe; 2 on a miss).
+#   * NEVER 500: no graph / PG off / any failure -> {"candidates": []} 200.
+# ---------------------------------------------------------------------------
+_HERO_PICK_EMPTY_JSON = '{"candidates": []}'
+_HERO_PICK_LIMIT = 5  # the client walk's own bound (resolveCumulativeHeroPick)
+
+
+def _build_hero_pick_candidates(graph: dict, display: dict) -> list:
+    """Pure: graph JSON + display index -> ranked hero candidates.
+
+    Mirrors the client walk it replaces: clusters with a real cluster_id and
+    outlet_count >= 2 (the sizes/spread gate), ranked outlet_count DESC with
+    stable_id tiebreak; representative = the display rule's id; candidates
+    whose representative node's content_nature is market_commercial are
+    skipped. Circulation fields only — no verdict is read."""
+    nature_by_id: dict = {}
+    for node in graph.get("nodes") or []:
+        node_id = node.get("id")
+        if node_id is not None:
+            nature_by_id[node_id] = node.get("content_nature") or ""
+    ranked = []
+    for cluster in graph.get("clusters") or []:
+        stable_id = cluster.get("stable_id")
+        outlet_count = cluster.get("outlet_count")
+        if (cluster.get("cluster_id") is None or not stable_id
+                or not isinstance(outlet_count, int) or outlet_count < 2):
+            continue
+        info = display.get(stable_id) or {}
+        representative_id = info.get("representative_analysis_id")
+        if representative_id is None:
+            continue
+        if nature_by_id.get(representative_id) == "market_commercial":
+            continue
+        ranked.append({
+            "stable_id": stable_id,
+            "representative_analysis_id": representative_id,
+            "outlet_count": outlet_count,
+        })
+    ranked.sort(key=lambda c: (-c["outlet_count"], c["stable_id"]))
+    return ranked[:_HERO_PICK_LIMIT]
+
+
+def _load_hero_pick_candidates():
+    """Newest brainmap_graph row -> ranked hero candidates, cached on the
+    SAME _TRENDING_DISPLAY_CACHE entry the display index uses (keyed by row
+    id), so a new graph row drops display, urls and hero together. None on
+    every expected-empty path — the endpoint then serves {"candidates": []}."""
+    import sqlalchemy as sa
+    from sqlalchemy.exc import ProgrammingError
+
+    import postgres_storage
+
+    engine = postgres_storage.get_engine()
+    if engine is None:
+        return None
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(sa.text(
+                "SELECT id FROM brainmap_graph ORDER BY id DESC LIMIT 1"
+            )).fetchone()
+    except ProgrammingError:
+        return None
+    if not row:
+        return None
+    row_id = row[0]
+    if (_TRENDING_DISPLAY_CACHE["row_id"] == row_id
+            and _TRENDING_DISPLAY_CACHE.get("hero") is not None):
+        return _TRENDING_DISPLAY_CACHE["hero"]
+    with engine.connect() as conn:
+        graph_row = conn.execute(sa.text(
+            "SELECT graph_json FROM brainmap_graph WHERE id = :row_id"
+        ), {"row_id": row_id}).fetchone()
+    if not graph_row or not graph_row[0]:
+        return None
+    try:
+        graph = json.loads(graph_row[0])
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(graph, dict):
+        return None
+    display = _build_trending_display_index(graph)
+    candidates = _build_hero_pick_candidates(graph, display)
+    if _TRENDING_DISPLAY_CACHE["row_id"] != row_id:
+        # New row: refresh the shared entry exactly like
+        # _load_trending_display_index, INCLUDING the urls reset — advancing
+        # row_id without dropping the memoised URLs would let /api/trending
+        # keep an older row's URLs against the new index. On a same-row call
+        # (display cached, hero not yet) display and urls are left alone.
+        _TRENDING_DISPLAY_CACHE["row_id"] = row_id
+        _TRENDING_DISPLAY_CACHE["display"] = display
+        _TRENDING_DISPLAY_CACHE["urls"] = {}
+    _TRENDING_DISPLAY_CACHE["hero"] = candidates
+    return candidates
+
+
+@app.get("/api/hero-pick")
+def hero_pick() -> Response:
+    try:
+        candidates = _load_hero_pick_candidates()
+        if not candidates:
+            return _spread_response(_HERO_PICK_EMPTY_JSON)
+        return _spread_response(json.dumps({"candidates": candidates},
+                                           ensure_ascii=False))
+    except Exception:
+        logger.exception("Failed to build hero pick")
+        return _spread_response(_HERO_PICK_EMPTY_JSON)
 
 
 class JobCreateRequest(BaseModel):
