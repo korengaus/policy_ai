@@ -68,34 +68,38 @@
     font-family: system-ui, -apple-system, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif;
     display: flex; flex-direction: column;
   }
+  /* 76-APPLY §02 — masthead, 56px: identity only (mark, 연결지도, ← 홈으로).
+     Nothing operational lives here, so the map starts sooner. The wordmark
+     keeps the shipped favicon+serif treatment — section 07 (wordmark) is a
+     separate decision, not taken here. */
   header.map-head {
-    background: var(--paper);
-    border-bottom: 1px solid var(--line);
-    padding: 16px 24px 12px;
-    flex: 0 0 auto;
-  }
-  /* tickedin identity row — mirrors the site's .brand treatment (favicon mark +
-     serif wordmark). The wordmark links home. */
-  .brand-row {
-    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-    margin-bottom: 8px;
+    height: 56px; flex: 0 0 auto;
+    display: flex; align-items: center; gap: 13px;
+    padding: 0 22px;
+    background: rgba(10, 15, 23, 0.9);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    position: relative; z-index: 6;
   }
   .brand {
     display: inline-flex; align-items: center; gap: 8px;
-    color: var(--ink); text-decoration: none;
+    color: #F2F5FA; text-decoration: none;
     font-family: 'Noto Serif KR', 'Nanum Myeongjo', 'Apple SD Gothic Neo', serif;
-    font-size: 21px; font-weight: 700; letter-spacing: -0.01em;
+    font-size: 19px; font-weight: 700; letter-spacing: 0.01em;
   }
   .brand img { width: 1.25em; height: 1.25em; object-fit: contain; vertical-align: middle; }
   .brand-page-label {
-    color: var(--muted); font-size: 13px; font-weight: 600;
-    padding-left: 12px; border-left: 1px solid var(--line);
+    color: #9AA6B8; font-size: 12.5px; font-weight: 600;
+    padding-left: 13px; border-left: 1px solid rgba(255, 255, 255, 0.14);
   }
   .map-home {
     margin-left: auto; font-size: 13px; font-weight: 600;
     color: var(--brand-ink); text-decoration: none;
   }
   .map-home:hover { text-decoration: underline; }
+  /* §02: title over the canvas — the first fixation point; the honesty
+     refusal is crossed before any node is read. Text-shadow instead of a
+     plate keeps the chrome weightless; bold only on the shipped strongs. */
+  .field-title { position: absolute; left: 20px; top: 18px; max-width: 640px; z-index: 4; pointer-events: none; }
   /* 75-APPLY §01 — the controls, as instruments. One left rail replaces the
      three stacked header rows. Glass, never solid (rgba(13,18,28,0.72) + 14px
      blur): the corpus stays visible through every panel. Accent #7AA2FF marks
@@ -104,8 +108,10 @@
      (a new hide-click would bury shipped controls); on short viewports it
      scrolls internally instead. */
   .rail {
-    position: absolute; left: 20px; top: 16px; width: 312px;
-    max-height: calc(100% - 32px); overflow: auto; z-index: 5;
+    /* §02: top 118 clears the over-canvas title + honesty line; the bottom
+       clearance keeps the stats gauge visible beneath the rail. */
+    position: absolute; left: 20px; top: 118px; width: 312px;
+    max-height: calc(100% - 176px); overflow: auto; z-index: 5;
     display: flex; flex-direction: column; gap: 10px; padding: 14px;
     border-radius: 12px; background: rgba(13, 18, 28, 0.72);
     backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
@@ -194,16 +200,41 @@
     background: rgba(13, 18, 28, 0.72); border-color: rgba(255, 255, 255, 0.09);
     color: #B9C3D4; cursor: default;
   }
-  .map-stats { margin-top: 8px; font-size: 12px; color: var(--muted); }
   .map-title {
-    display: block;
-    font-size: 22px; font-weight: 500; letter-spacing: -0.02em; color: var(--ink);
+    display: block; margin: 0;
+    font-size: 20px; font-weight: 700; letter-spacing: -0.01em; color: #EDF1F7;
+    text-shadow: 0 1px 3px rgba(6, 9, 15, 0.8);
     /* FONT-SWITCH: page title joins the body sans stack; only .brand stays serif. */
     font-family: system-ui, -apple-system, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif;
   }
   /* HONESTY (fixed, always visible): this map is spread/connection, NOT verification. */
-  .map-subtitle { margin-top: 4px; font-size: 13.5px; line-height: 1.55; color: var(--slate); }
-  .map-subtitle strong { color: var(--ink); font-weight: 700; }
+  .map-subtitle {
+    margin: 7px 0 0; font-size: 13px; line-height: 1.65; color: #A9B4C7;
+    text-shadow: 0 1px 3px rgba(6, 9, 15, 0.85);
+  }
+  .map-subtitle strong { color: #EDF1F7; font-weight: 700; }
+  /* §02: stats bottom-left — a gauge, not a control, placed like a map's
+     scale bar. Repositioned, never removed; tabular numerals, every zoom. */
+  .map-stats {
+    position: absolute; left: 20px; bottom: 16px; z-index: 4;
+    padding: 7px 12px; border-radius: 8px;
+    background: rgba(13, 18, 28, 0.72);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    font-size: 12px; color: #96A2B5; font-variant-numeric: tabular-nums;
+    white-space: nowrap; max-width: calc(100% - 40px);
+  }
+  /* §02: the shipped 3D gesture instructions dock bottom-centre only while
+     입체 보기 is on — where the hands are, not in the rail. */
+  .mode-hint {
+    position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%);
+    z-index: 4; padding: 7px 12px; border-radius: 8px;
+    background: rgba(13, 18, 28, 0.72);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    font-size: 12px; color: #96A2B5; line-height: 1.5;
+    max-width: 56%; text-align: center;
+  }
   /* 75-APPLY §01: the rail's dynamic half — segmented scope pair, the domain
      list (key and switch in one: legend = filter), market rows, mode switches.
      BRAINMAP-FILTER semantics unchanged: same data-filter kinds, same
@@ -288,8 +319,10 @@
      the field below the ‹›/리셋 corner, capped so over half the field stays
      visible, scrolling internally — same device the short-laptop rule uses. */
   @media (max-width: 600px) {
-    .rail { left: 12px; right: 12px; width: auto; top: 60px; max-height: 42%; }
-    .map-actions { right: 12px; top: 12px; left: 12px; }
+    .field-title { left: 12px; right: 76px; top: 14px; max-width: none; }
+    .rail { left: 12px; right: 12px; width: auto; top: 148px; max-height: 38%; }
+    .map-actions { right: 12px; top: 12px; max-width: calc(100% - 24px); }
+    .map-stats { left: 12px; bottom: 12px; white-space: normal; max-width: calc(100% - 24px); }
   }
   main.map-body { position: relative; flex: 1 1 auto; min-height: 0; }
   /* MOBILE-POLISH H: touch-action:none is what lets the touch handlers below see a
@@ -297,16 +330,22 @@
      browser as page scroll/zoom before any JS runs, so the graph could never pan or
      pinch on a phone. No effect on mouse input. */
   canvas#map { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: default; touch-action: none; }
-  /* Tooltip as a light site-style card (paper surface, line border, soft shadow). */
+  /* 76-APPLY §03 — tooltip: the light cards' geometry gone dark. Title
+     13.5px/650, meta 12px; near-opaque glass + hairline so it reads over the
+     busiest field; 14px cursor offset and edge flip live in onMove. */
   #tooltip {
     position: absolute; pointer-events: none; display: none;
-    max-width: 320px; padding: 8px 12px;
-    background: var(--paper); color: var(--ink);
-    border: 1px solid var(--line); border-radius: var(--radius-sm);
-    font-size: 12.5px; line-height: 1.5;
-    box-shadow: var(--shadow); z-index: 5;
+    max-width: 380px; padding: 11px 14px;
+    background: rgba(10, 15, 23, 0.92); color: #F0F4FA;
+    border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 6px;
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    font-size: 13.5px; font-weight: 650; line-height: 1.5;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55); z-index: 6;
   }
-  #tooltip .tip-spread { color: var(--brand-ink); margin-top: 4px; font-size: 12px; font-weight: 600; }
+  #tooltip .tip-spread {
+    color: #9FABBE; margin-top: 5px; font-size: 12px; font-weight: 400;
+    font-variant-numeric: tabular-nums;
+  }
   #status {
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
     color: var(--slate); font-size: 15px; text-align: center; padding: 24px;
@@ -315,26 +354,33 @@
 </head>
 <body>
 <header class="map-head">
-  <!-- BRAINMAP-COHESION: tickedin identity row — the site's wordmark (favicon
-       mark + serif "tickedin", same treatment as the main header's .brand),
-       linking home, with the page label + return link. -->
-  <div class="brand-row">
-    <a class="brand" href="/" aria-label="tickedin 홈으로"><img src="/web/assets/favicon-180.png" alt="" aria-hidden="true">tickedin</a>
-    <span class="brand-page-label">연결지도</span>
-    <a class="map-home" href="/">← 홈으로</a>
-  </div>
-  <span class="map-title">뉴스 연결지도</span>
-  <p class="map-subtitle">
-    이 지도는 뉴스의 <strong>유통·연결</strong>을 보여줍니다. <strong>검증이 아닙니다.</strong>
-    가까이 모인 점은 비슷한 내용이 여러 매체에 보도되었다는 뜻일 뿐, 사실 여부와는 무관합니다.
-  </p>
-  <!-- BRAINMAP-FEATURES: one-line numeric stats over the FULL loaded graph
-       (not the filtered view) — circulation counts only. -->
-  <div class="map-stats" id="mapStats"></div>
+  <!-- BRAINMAP-COHESION / 76-APPLY §02: identity-only masthead — the site's
+       wordmark (favicon mark + serif "tickedin", same treatment as the main
+       header's .brand), the page label, the return link. Nothing operational. -->
+  <a class="brand" href="/" aria-label="tickedin 홈으로"><img src="/web/assets/favicon-180.png" alt="" aria-hidden="true">tickedin</a>
+  <span class="brand-page-label">연결지도</span>
+  <a class="map-home" href="/">← 홈으로</a>
 </header>
 <main class="map-body">
   <canvas id="map"></canvas>
   <div id="status">지도를 불러오는 중…</div>
+  <!-- 76-APPLY §02: title + honesty line over the canvas — the first fixation
+       point. Shipped strings verbatim; pointer-events none, so the field
+       beneath stays pannable. -->
+  <div class="field-title">
+    <span class="map-title">뉴스 연결지도</span>
+    <p class="map-subtitle">
+      이 지도는 뉴스의 <strong>유통·연결</strong>을 보여줍니다. <strong>검증이 아닙니다.</strong>
+      가까이 모인 점은 비슷한 내용이 여러 매체에 보도되었다는 뜻일 뿐, 사실 여부와는 무관합니다.
+    </p>
+  </div>
+  <!-- BRAINMAP-FEATURES: one-line numeric stats over the FULL loaded graph
+       (not the filtered view) — circulation counts only. §02: bottom-left,
+       like a map's scale bar. -->
+  <div class="map-stats" id="mapStats"></div>
+  <!-- BRAINMAP-3D-VIEW / §02: gesture hint, bottom-centre, only while 입체
+       보기 is on (updateModeHint owns visibility). -->
+  <div id="modeHint" class="mode-hint" style="display:none"></div>
   <!-- 75-APPLY §01: the instrument rail, docked left over the field. Order is
        the reader's question order — which claim (search), how widely spread
        (threshold ladder), which field (domain list), how to look (modes). The
@@ -430,6 +476,12 @@
   var clusterById = {};     // cluster_id -> cluster meta
   var positions = [];       // per node: {px, py} in CSS pixels
   var labelSpots = [];      // top-cluster label placements
+  // 76-APPLY §03 zoom ladder: centroid anchors for every OTHER cluster, drawn
+  // only past the zoom thresholds (2.5x: 8+ outlets; 6x: every pair). The
+  // base labelSpots pick above is untouched — zooming only ever ADDS.
+  var extraLabelSpots = [];
+  // Canvas labels use the page's own font stack (ctx.font accepts the list).
+  var LABEL_STACK = "system-ui, -apple-system, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif";
   var hoverNode = null;
 
   // BRAINMAP-FILTER: client-side domain filter over the already-loaded nodes
@@ -891,10 +943,11 @@
     // BRAINMAP-3D-VIEW: opt-in comparison mode. "보기" reuses the legend's
     // own vocabulary (전체 보기); the row appears only when the payload
     // carries 3D coordinates. Default is ALWAYS the 2D map.
+    // (§02: the 3D gesture hint is a static bottom-centre overlay in the
+    // map body now — #modeHint — not a rail row; updateModeHint still owns it.)
     if (has3d) {
       html += '<button type="button" class="key key-switch" data-filter="mode3d" aria-pressed="false">' +
-              '<span>입체 보기</span><span class="sw" aria-hidden="true"></span></button>' +
-              '<span id="modeHint" class="legend-note" style="display:none"></span>';
+              '<span>입체 보기</span><span class="sw" aria-hidden="true"></span></button>';
     }
     document.getElementById("legend").innerHTML = html;
   }
@@ -1113,6 +1166,25 @@
       if (title.length > 20) title = title.slice(0, 20) + "…";
       return { cluster_id: c.cluster_id, x: cx / m, y: cy / m, title: title, spread: c.size_label };
     });
+    // 76-APPLY §03: anchors for the zoom ladder's ADDED labels — every cluster
+    // not already in the base pick, via the SAME centroid mechanism (same
+    // members, same truncation). draw() gates them by view.scale and skips
+    // off-screen anchors; nothing here re-places or re-orders the base set.
+    var inBase = {};
+    top.forEach(function (c) { inBase[c.cluster_id] = true; });
+    extraLabelSpots = [];
+    graph.clusters.forEach(function (c) {
+      if (inBase[c.cluster_id]) return;
+      var members = byCluster[c.cluster_id] || [];
+      if (!members.length) return;
+      var cx = 0, cy = 0;
+      members.forEach(function (i) { cx += positions[i].px; cy += positions[i].py; });
+      var m = members.length;
+      var title = c.label_title || "";
+      if (title.length > 20) title = title.slice(0, 20) + "…";
+      extraLabelSpots.push({ cluster_id: c.cluster_id, x: cx / m, y: cy / m,
+        title: title, spread: c.size_label, outlets: c.outlet_count || 0 });
+    });
   }
 
   function draw() {
@@ -1286,21 +1358,20 @@
       ctx.restore();
     }
 
-    // Hover glow + ring — marks the POINTER only, never a data value, and is
-    // identical for every node it touches.
+    // 76-APPLY §03 hover ring: 16px, 1.5px #E9EEF5 with a soft 3px halo —
+    // marks the POINTER only, never a data value; locates a node in a busy
+    // field without recolouring it. Identical for every node it touches.
     if (hoverNode && !intro.active) {
       var hx = toScreenX(wx(hoverNode._i)), hy = toScreenY(wy(hoverNode._i));
-      var glow = ctx.createRadialGradient(hx, hy, 0, hx, hy, 16);
-      glow.addColorStop(0, "rgba(158, 193, 255, 0.35)");
-      glow.addColorStop(1, "rgba(158, 193, 255, 0)");
       ctx.beginPath();
-      ctx.fillStyle = glow;
-      ctx.arc(hx, hy, 16, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.arc(hx, hy, 10.2, 0, Math.PI * 2);
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "rgba(233, 238, 245, 0.15)";
+      ctx.stroke();
       ctx.beginPath();
-      ctx.arc(hx, hy, 6, 0, Math.PI * 2);
-      ctx.lineWidth = 1.6;
-      ctx.strokeStyle = "#dbe7f8";
+      ctx.arc(hx, hy, 8, 0, Math.PI * 2);
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = "#E9EEF5";
       ctx.stroke();
     }
 
@@ -1320,23 +1391,64 @@
     // Font stays constant screen size; only the anchor point transforms.
     // BRAINMAP-ATMOSPHERE: labels appear once the nodes have settled (their
     // anchors are centroids of FINAL positions, so drawing them mid-flight
-    // would label empty space). Halo/ink swapped for the dark canvas.
+    // would label empty space).
+    // 76-APPLY §03 — label type: title 12.5px/650 #EAEFF6, count 11.5px/400
+    // #A5B0C2, fixed screen-space size at EVERY zoom: the count may state a
+    // cluster's size, the type may never perform it (both lines are set at
+    // the same two sizes for every cluster). Plate: rgba(8,12,19,0.55),
+    // radius 6 — canvas cannot backdrop-blur, so the spec's 3px blur is
+    // carried by the plate's alpha alone; dots ghost through, not vanish.
     if (intro.active) return;
     ctx.textAlign = "center";
+    var LBL_TITLE_FONT = "650 12.5px " + LABEL_STACK;
+    var LBL_COUNT_FONT = "400 11.5px " + LABEL_STACK;
+    function platePath(x, y, pw, ph, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + pw, y, x + pw, y + ph, r);
+      ctx.arcTo(x + pw, y + ph, x, y + ph, r);
+      ctx.arcTo(x, y + ph, x, y, r);
+      ctx.arcTo(x, y, x + pw, y, r);
+      ctx.closePath();
+    }
+    function drawLabel(s) {
+      var lx = toScreenX(s.x), ly = toScreenY(s.y);
+      ctx.font = LBL_TITLE_FONT;
+      var tw = ctx.measureText(s.title).width;
+      ctx.font = LBL_COUNT_FONT;
+      var cw = ctx.measureText(s.spread).width;
+      var pw = Math.max(tw, cw) + 18;         // 9px side padding
+      // Text keeps the shipped baselines (title ly-14, count ly); the plate
+      // wraps that block with the mock's 3px top / 4px bottom padding.
+      platePath(lx - pw / 2, ly - 27, pw, 34, 6);
+      ctx.fillStyle = "rgba(8, 12, 19, 0.55)";
+      ctx.fill();
+      ctx.font = LBL_TITLE_FONT;
+      ctx.fillStyle = "#EAEFF6";
+      ctx.fillText(s.title, lx, ly - 14);
+      ctx.font = LBL_COUNT_FONT;
+      ctx.fillStyle = "#A5B0C2";
+      ctx.fillText(s.spread, lx, ly);
+    }
     labelSpots.forEach(function (s) {
       if (filtering && !activeClusters[s.cluster_id]) return;
-      var lx = toScreenX(s.x), ly = toScreenY(s.y);
-      ctx.font = "600 12px sans-serif";
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = "rgba(8, 13, 24, 0.85)";
-      ctx.strokeText(s.title, lx, ly - 14);
-      ctx.fillStyle = "#dce6f4";
-      ctx.fillText(s.title, lx, ly - 14);
-      ctx.font = "11px sans-serif";
-      ctx.strokeText(s.spread, lx, ly);
-      ctx.fillStyle = "#9fb0c8";
-      ctx.fillText(s.spread, lx, ly);
+      drawLabel(s);
     });
+    // §03 zoom ladder: full extent keeps the base set above, unchanged;
+    // ≈2.5× ADDS labels for 8+ outlet clusters; by ≈6× every pair is
+    // labelled. Zooming only adds — nothing visible at extent disappears.
+    // Same pick mechanism and filter rule as the base labels; off-screen
+    // anchors are skipped, never re-placed.
+    if (view.scale >= 2.5) {
+      var needOutlets = (view.scale >= 6) ? 0 : 8;
+      extraLabelSpots.forEach(function (s) {
+        if (s.outlets < needOutlets) return;
+        if (filtering && !activeClusters[s.cluster_id]) return;
+        var sx = toScreenX(s.x), sy = toScreenY(s.y);
+        if (sx < -220 || sx > w + 220 || sy < -60 || sy > h + 60) return;
+        drawLabel(s);
+      });
+    }
   }
 
   // Hit test in SCREEN space so the radius stays a constant ~9px at any zoom.
@@ -1393,9 +1505,16 @@
     }
     tooltip.innerHTML = escapeHtml(n.title || "(제목 없음)") + spread;
     tooltip.style.display = "block";
-    var tx = Math.min(mx + 14, rect.width - 330);
+    // 76-APPLY §03: 14px offset from the cursor, FLIPPING to the other side
+    // at the right/bottom edges (measured after the content is set, so the
+    // flip uses the real rendered box).
+    var tw = tooltip.offsetWidth, th = tooltip.offsetHeight;
+    var tx = mx + 14;
+    if (tx + tw > rect.width - 4) tx = mx - 14 - tw;
+    var ty = my + 14;
+    if (ty + th > rect.height - 4) ty = my - 14 - th;
     tooltip.style.left = Math.max(4, tx) + "px";
-    tooltip.style.top = (my + 14) + "px";
+    tooltip.style.top = Math.max(4, ty) + "px";
   }
 
   function onDown(ev) {
@@ -2334,7 +2453,7 @@
         }
         tooltip.innerHTML = escapeHtml(focusNode.title || "(제목 없음)") + fspread;
         tooltip.style.display = "block";
-        tooltip.style.left = Math.max(4, Math.min(fw / 2 + 14, fw - 330)) + "px";
+        tooltip.style.left = Math.max(4, Math.min(fw / 2 + 14, fw - 394)) + "px";
         tooltip.style.top = (fh / 2 + 14) + "px";
       }
     } catch (e) { /* focus is optional — never break the map */ }
