@@ -38,8 +38,10 @@
   /* BRAINMAP-ATMOSPHERE: this page moves to a dark canvas so the domain
      colours read as points of light. Tokens are PAGE-LOCAL (copied, never
      linked) — the home page keeps its light, restrained treatment untouched.
-     Encodings are unchanged: x/y = embedding location, size = outlet count,
-     colour = domain. Only the atmosphere changes. */
+     Encodings: x/y = embedding location refined by the 79-APPLY cluster pass
+     (same-cluster attraction + equal-strength centroid separation — see
+     refineLayout2D), colour = domain. Node size encodes nothing (77-APPLY
+     jitter band). Only the atmosphere changes. */
   :root {
     /* 66-APPLY: synced to the design system's DARK-FIELD companions
        (main.css --dark-field / --df-*) — the map stays dark, but on the
@@ -2524,6 +2526,103 @@
     });
   }
 
+  // 79-APPLY: the refinement pass (see the call site in start() for why).
+  // Deterministic — fixed iteration counts, payload-order loops, a hashed
+  // (never random) nudge for exactly-coincident centroids — so every load of
+  // the same payload yields byte-identical coordinates.
+  function refineLayout2D() {
+    var t0 = (window.performance && performance.now) ? performance.now() : 0;
+    var REF_W = 1360, REF_H = 764, REF_PAD = 40;   // 1440x900 reference frame
+    var TIGHTEN = 0.06;  // member keeps 6% of its centroid offset
+    var SEP = 36;        // centroids repel below this distance (ref px)
+    var REP = 0.6;       // repulsion strength (equal for every pair)
+    var ANCHOR = 0.012;  // spring back to the original embedding centroid
+    var ITERS = 240;     // fixed — determinism and a bounded settle
+    var nodes = graph.nodes, n = nodes.length;
+    var idx = {}, cids = [];
+    for (var i = 0; i < n; i++) {
+      var cid = nodes[i].cluster_id;
+      if (cid === null || cid === undefined) continue;
+      if (idx[cid] === undefined) { idx[cid] = cids.length; cids.push(cid); }
+    }
+    var K = cids.length;
+    if (!K) return;
+    var cx = new Float64Array(K), cy = new Float64Array(K), cnt = new Float64Array(K);
+    for (i = 0; i < n; i++) {
+      var nd = nodes[i];
+      if (nd.cluster_id === null || nd.cluster_id === undefined) continue;
+      var ci = idx[nd.cluster_id];
+      cx[ci] += REF_PAD + nd.x * REF_W;
+      cy[ci] += REF_PAD + nd.y * REF_H;
+      cnt[ci] += 1;
+    }
+    var ax = new Float64Array(K), ay = new Float64Array(K);
+    for (var k = 0; k < K; k++) {
+      cx[k] /= cnt[k]; cy[k] /= cnt[k];
+      ax[k] = cx[k]; ay[k] = cy[k];
+    }
+    var fx = new Float64Array(K), fy = new Float64Array(K);
+    var xMin = 48, xMax = REF_PAD + REF_W - 8, yMin = 48, yMax = REF_PAD + REF_H - 8;
+    for (var it = 0; it < ITERS; it++) {
+      var grid = {};
+      for (k = 0; k < K; k++) {
+        var gk = ((cx[k] / SEP) | 0) * 4096 + ((cy[k] / SEP) | 0);
+        (grid[gk] || (grid[gk] = [])).push(k);
+      }
+      for (k = 0; k < K; k++) { fx[k] = 0; fy[k] = 0; }
+      for (k = 0; k < K; k++) {
+        var gx = (cx[k] / SEP) | 0, gy = (cy[k] / SEP) | 0;
+        for (var dgx = -1; dgx <= 1; dgx++) {
+          for (var dgy = -1; dgy <= 1; dgy++) {
+            var bucket = grid[(gx + dgx) * 4096 + (gy + dgy)];
+            if (!bucket) continue;
+            for (var bi = 0; bi < bucket.length; bi++) {
+              var o = bucket[bi];
+              if (o <= k) continue;
+              var ddx = cx[k] - cx[o], ddy = cy[k] - cy[o];
+              var dist = Math.sqrt(ddx * ddx + ddy * ddy);
+              if (dist >= SEP) continue;
+              if (dist < 1e-6) {
+                // coincident centroids: a deterministic hashed nudge.
+                ddx = ((cids[k] * 2654435761 % 97) - 48) / 48;
+                ddy = ((cids[k] * 40503 % 89) - 44) / 44;
+                dist = 1;
+              }
+              var f = REP * (SEP - dist) / dist;
+              fx[k] += ddx * f; fy[k] += ddy * f;
+              fx[o] -= ddx * f; fy[o] -= ddy * f;
+            }
+          }
+        }
+      }
+      for (k = 0; k < K; k++) {
+        fx[k] += (ax[k] - cx[k]) * ANCHOR;
+        fy[k] += (ay[k] - cy[k]) * ANCHOR;
+        cx[k] += fx[k]; cy[k] += fy[k];
+        if (cx[k] < xMin) cx[k] = xMin; else if (cx[k] > xMax) cx[k] = xMax;
+        if (cy[k] < yMin) cy[k] = yMin; else if (cy[k] > yMax) cy[k] = yMax;
+      }
+    }
+    // Write back: each member keeps TIGHTEN of its original offset from its
+    // ORIGINAL centroid, re-hung on the separated centroid; unclustered
+    // nodes are never touched.
+    for (i = 0; i < n; i++) {
+      var nd2 = nodes[i];
+      if (nd2.cluster_id === null || nd2.cluster_id === undefined) continue;
+      var ci2 = idx[nd2.cluster_id];
+      var px0 = REF_PAD + nd2.x * REF_W, py0 = REF_PAD + nd2.y * REF_H;
+      nd2.x = (cx[ci2] + (px0 - ax[ci2]) * TIGHTEN - REF_PAD) / REF_W;
+      nd2.y = (cy[ci2] + (py0 - ay[ci2]) * TIGHTEN - REF_PAD) / REF_H;
+    }
+    // Debug gauges for capture/validation harnesses only — encode nothing.
+    window.__bmRefineMs = t0 ? Math.round(((performance.now() - t0)) * 10) / 10 : null;
+    window.__bmField = function () {
+      return graph.nodes.map(function (m) {
+        return [m.x, m.y, (m.cluster_id === null || m.cluster_id === undefined) ? -1 : m.cluster_id];
+      });
+    };
+  }
+
   function start(data) {
     if (!data || data.empty === true || !data.nodes || data.nodes.length === 0) {
       statusEl.textContent = "지도가 아직 생성되지 않았습니다.";
@@ -2531,6 +2630,24 @@
     }
     graph = data;
     graph.nodes.forEach(function (n, i) { n._i = i; nodeById[n.id] = n; });
+    // 79-APPLY — LAYOUT REFINEMENT. The payload's x/y is the builder's
+    // embedding projection; it places by content similarity, so members of
+    // the SAME cluster scatter almost as widely as unrelated nodes (measured:
+    // same-cluster median pairwise distance 192px vs 420px cross-cluster at
+    // 1440 — zero of 1,204 clusters visually separable). This pass is a
+    // deterministic refinement run ONCE at load, in a fixed 1360x764
+    // reference frame so every device computes identical coordinates:
+    //   1. same-cluster attraction — each member keeps only TIGHTEN of its
+    //      offset from its cluster's centroid (those nodes genuinely share a
+    //      cluster; pulling them together states exactly that);
+    //   2. centroid separation — cluster centroids repel pairwise below SEP
+    //      px with EQUAL strength regardless of member count, anchored to
+    //      their original embedding centroid so the topical geography holds.
+    // POSITIONS ONLY: membership, edges, colours, sizes, alphas untouched.
+    // Cluster size is never consulted — no size-derived position, spacing or
+    // prominence. The 11,284 unconnected nodes are NOT moved at all: they
+    // keep their embedding coordinates (no demotion, no edge-push).
+    refineLayout2D();
     // BRAINMAP-3D-VIEW: the comparison mode exists only when the builder
     // emitted 3D coordinates; older payloads simply never show the chip.
     has3d = graph.nodes.length > 0 && graph.nodes.every(function (n) {
