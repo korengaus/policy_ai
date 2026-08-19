@@ -6814,13 +6814,15 @@
         </ul>
       </div>
 
-      <div class="methodology-card">
-        <h3><svg class="section-icon" aria-hidden="true"><use href="#ic-compass"/></svg>🔥 새로 부상한 이슈 · 공식 확인 진행 중</h3>
-        <p>
-          최근 새로 퍼지기 시작한 주장에 붙는 표시로, 카드에는 <strong>“🔥 새로 부상한 이슈 · 공식 확인 진행 중”</strong>으로 나타납니다.
-          보도의 최신성·활발함을 나타내며, 주장의 진위와는 무관합니다. 공식 확인이 아직 진행 중이라는 뜻입니다.
-        </p>
-      </div>
+      <!-- 83-APPLY (D): the 🔥 freshly-broken badge's documentation card was
+           REMOVED from this page. Measured on real rows the badge fires on
+           ~2% (its gate requires NO official candidate at all, and ~3/4 of
+           rows find at least a weak one), so this page documented a marker
+           readers effectively never meet. RULING: stop documenting rather
+           than loosen the gate — loosening would admit the candidate-only
+           majority and turn the signal into decoration. The badge itself
+           (FRESHNESS_BADGE_LABEL / isFreshlyBroken, main.js) still renders
+           for rows that genuinely qualify. -->
     </section>
 
     <!-- ABOUT-PAGE: "tickedin 소개" — a full-page VIEW-SWAP sibling of #homeScreen /
