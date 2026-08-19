@@ -1032,12 +1032,32 @@ def _spread_response(payload_json: str) -> Response:
 #     wildcards (%/_/\) in q are escaped with ESCAPE '\' so a user typing
 #     "%" cannot match everything.
 #   * NEVER 500: empty/too-short q, no match, PG disabled, or any failure
-#     -> {"results": []} at HTTP 200 (the spread/weekly posture).
+#     -> {"results": [], "total": 0, "offset": 0} at HTTP 200 (the
+#     spread/weekly posture). A non-numeric offset degrades to 0, never 422.
+#
+# SEARCH-PAGE (89-APPLY): the endpoint now carries a TRUE total and an offset.
+# The measured defect: q=교육 matched 2,110 rows, the response held 10, and
+# the client sentence read as a complete count. The COUNT(*) and the page
+# SELECT share ONE WHERE fragment (_SEARCH_WHERE_SQL) with the SAME bound
+# :pattern, so the total and the page can never disagree. Cost per request:
+# two sequential scans of the ~16k-row table (one COUNT, one LIMIT/OFFSET
+# page), single-digit ms each — pg_trgm remains the later optimization.
 # ---------------------------------------------------------------------------
-_SEARCH_EMPTY_JSON = '{"results": []}'
+_SEARCH_EMPTY_JSON = '{"results": [], "total": 0, "offset": 0}'
 _SEARCH_LIMIT = 10
 _SEARCH_MAX_QUERY_CHARS = 200  # mirrors the /analyze 200-char cap
 _SEARCH_SNIPPET_CHARS = 120
+# Sanity clamp for the offset — far past the corpus, so a hostile offset can
+# never make Postgres walk an absurd OFFSET, while every real page stays
+# reachable.
+_SEARCH_MAX_OFFSET = 100000
+# ONE where clause for BOTH the page SELECT and the COUNT — same fragment,
+# same bound :pattern, same ESCAPE — so the two statements cannot drift.
+_SEARCH_WHERE_SQL = (
+    "FROM analysis_results "
+    "WHERE title ILIKE :pattern ESCAPE '\\' "
+    "OR claim_text ILIKE :pattern ESCAPE '\\' "
+)
 
 
 def _build_search_pattern(q: str) -> str:
@@ -1050,37 +1070,40 @@ def _build_search_pattern(q: str) -> str:
     return f"%{escaped}%"
 
 
-def _search_corpus_rows(q: str):
+def _search_corpus_rows(q: str, offset: int = 0):
     """Read-only: newest-first substring match on title OR claim_text.
-    Returns a list of row tuples (id, title, claim_text, published_at,
-    review_status), or [] when PG is disabled. ILIKE is PostgreSQL's
-    case-insensitive LIKE — the live store; ~7.6k rows, so a sequential
-    scan is fine for v1 (a pg_trgm index is the later optimization if the
-    corpus grows 10x)."""
+    Returns (rows, total) — one page of row tuples (id, title, claim_text,
+    published_at, review_status) plus the TRUE match count — or ([], 0)
+    when PG is disabled. Page and count are built from the one shared
+    _SEARCH_WHERE_SQL fragment with the same bound :pattern, so they can
+    never disagree. Two sequential scans of the ~16k-row table per call
+    (a pg_trgm index is the later optimization if the corpus grows 10x)."""
     import sqlalchemy as sa
 
     import postgres_storage
 
     engine = postgres_storage.get_engine()
     if engine is None:
-        return []
-    stmt = sa.text(
+        return [], 0
+    count_stmt = sa.text("SELECT COUNT(*) " + _SEARCH_WHERE_SQL)
+    page_stmt = sa.text(
         "SELECT id, title, claim_text, published_at, review_status "
-        "FROM analysis_results "
-        "WHERE title ILIKE :pattern ESCAPE '\\' "
-        "OR claim_text ILIKE :pattern ESCAPE '\\' "
-        "ORDER BY id DESC LIMIT :row_limit"
+        + _SEARCH_WHERE_SQL
+        + "ORDER BY id DESC LIMIT :row_limit OFFSET :row_offset"
     )
+    binds = {"pattern": _build_search_pattern(q)}
     with engine.connect() as conn:
-        rows = conn.execute(stmt, {
-            "pattern": _build_search_pattern(q),
+        total = conn.execute(count_stmt, binds).scalar() or 0
+        rows = conn.execute(page_stmt, {
+            **binds,
             "row_limit": _SEARCH_LIMIT,
+            "row_offset": max(0, int(offset)),
         }).fetchall()
-    return list(rows)
+    return list(rows), int(total)
 
 
 @app.get("/api/search")
-def search_corpus(q: str = "") -> Response:
+def search_corpus(q: str = "", offset: str = "0") -> Response:
     def _empty() -> Response:
         return Response(
             content=_SEARCH_EMPTY_JSON,
@@ -1092,8 +1115,16 @@ def search_corpus(q: str = "") -> Response:
         query = (q or "").strip()[:_SEARCH_MAX_QUERY_CHARS]
         if len(query) < 2:
             return _empty()
+        # offset is typed str + parsed by hand so a garbage value degrades to
+        # page 0 (this route's fail-soft posture), never a 422.
+        try:
+            page_offset = int(str(offset).strip() or "0")
+        except (TypeError, ValueError):
+            page_offset = 0
+        page_offset = max(0, min(page_offset, _SEARCH_MAX_OFFSET))
+        rows, total = _search_corpus_rows(query, page_offset)
         results = []
-        for row_id, title, claim_text, published_at, review_status in _search_corpus_rows(query):
+        for row_id, title, claim_text, published_at, review_status in rows:
             snippet = (claim_text or "").strip()
             if len(snippet) > _SEARCH_SNIPPET_CHARS:
                 snippet = snippet[:_SEARCH_SNIPPET_CHARS] + "…"
@@ -1105,7 +1136,9 @@ def search_corpus(q: str = "") -> Response:
                 "review_status": review_status,
             })
         return Response(
-            content=json.dumps({"results": results}, ensure_ascii=False),
+            content=json.dumps(
+                {"results": results, "total": total, "offset": page_offset},
+                ensure_ascii=False),
             media_type="application/json",
             headers={"Cache-Control": "no-store"},
         )

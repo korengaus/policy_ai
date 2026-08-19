@@ -10042,10 +10042,26 @@
     // Honesty: hits show only the existing draft badge (review_status) — no
     // new ranking, no new label; the offer copy says "no prior analysis
     // exists", never anything about truth.
-    function renderSearchHitsView(query, hits) {
+    // SEARCH-PAGE (89-APPLY): the view now states the server's TRUE total —
+    // the old sentence said "10건을 찾았습니다" while 교육 matched 2,110 rows
+    // (measured), a cap read as a complete count. `total` degrades to
+    // hits.length when the server predates the field, which reproduces the
+    // old behavior exactly (no button, page count = shown count).
+    // The basis line: results are newest-first (ORDER BY id DESC) and every
+    // other ordering on this site states its basis on screen — this one now
+    // does too, composed from the shipped 최신순 (the sort dropdown's own
+    // option, template.html) in the shipped basis-line pattern
+    // ("<basis> · 검증이 아닙니다", #feedSortBasis / the band eyebrows).
+    // The 더 보기 button is the shipped load-more (string + classes from
+    // #tier2LoadMore, template.html) — an append pattern fits a server-paged
+    // list; the numeric pager pages a FULLY-LOADED client pool, which this
+    // list is not.
+    function renderSearchHitsView(query, hits, total) {
       metricsEl.style.display = "none";
+      const totalCount = Math.max(Number(total) || 0, hits.length);
       resultsEl.innerHTML = `
-        <div class="empty-state">'${escapeHtml(query)}' 관련 기존 분석 ${hits.length}건을 찾았습니다. 제목을 누르면 전체 검증 카드가 열립니다.</div>
+        <div class="empty-state">'${escapeHtml(query)}' 관련 기존 분석 ${escapeHtml(formatCount(totalCount))}건을 찾았습니다. 제목을 누르면 전체 검증 카드가 열립니다.</div>
+        <div class="public-eyebrow">최신순 · 검증이 아닙니다</div>
         ${hits.map((hit, index) => `
           <div class="history-row" data-search-hit-id="${Number(hit.result_id) || 0}" role="button" tabindex="0">
             <div class="history-id">#${escapeHtml(index + 1)}</div>
@@ -10060,7 +10076,15 @@
             </div>
           </div>
         `).join("")}
+        ${hits.length < totalCount
+          ? `<button type="button" class="secondary hot-topics-load-more" data-search-load-more>더 보기</button>`
+          : ""}
       `;
+      const moreButton = resultsEl.querySelector("[data-search-load-more]");
+      if (moreButton) {
+        moreButton.addEventListener("click",
+          () => loadMoreSearchHits(query, hits, moreButton));
+      }
       resultsEl.querySelectorAll("[data-search-hit-id]").forEach((row) => {
         const id = Number(row.getAttribute("data-search-hit-id"));
         if (!(id > 0)) return;
@@ -10105,9 +10129,35 @@
       }
     }
 
-    function renderSearchHits(query, hits) {
-      lastSearchHitsCache = { query, hits };
-      renderSearchHitsView(query, hits);
+    // SEARCH-PAGE (89-APPLY): fetch the NEXT page (offset = rows already
+    // shown) and append. Dedup by result_id: a row inserted between requests
+    // shifts every offset, so the next page can repeat a row already on
+    // screen — the same claim must never render twice. Every failure path
+    // just re-enables the button (fail-soft, matching the search fetch
+    // itself); a success re-renders the view, which rebinds all handlers.
+    async function loadMoreSearchHits(query, hits, button) {
+      button.disabled = true;
+      try {
+        const response = await fetch(
+          `${API_BASE}/api/search?q=${encodeURIComponent(query)}&offset=${hits.length}`);
+        if (!response.ok) { button.disabled = false; return; }
+        const data = await response.json();
+        const more = (data && Array.isArray(data.results)) ? data.results : [];
+        if (!more.length) { button.disabled = false; return; }
+        const seen = new Set(hits.map((h) => Number(h.result_id)));
+        const merged = hits.concat(
+          more.filter((m) => !seen.has(Number(m.result_id))));
+        const newTotal = Math.max(Number(data.total) || 0, merged.length);
+        lastSearchHitsCache = { query, hits: merged, total: newTotal };
+        renderSearchHitsView(query, merged, newTotal);
+      } catch (_) {
+        button.disabled = false;
+      }
+    }
+
+    function renderSearchHits(query, hits, total) {
+      lastSearchHitsCache = { query, hits, total };
+      renderSearchHitsView(query, hits, total);
       pushSearchHistoryState(window.scrollY || 0);
       showScreen("detail");
     }
@@ -10151,11 +10201,16 @@
       v2UpdateProgress(30, "기존 분석 검색 중…");
       setBusy(true);
       let hits = [];
+      // SEARCH-PAGE (89-APPLY): carry the server's TRUE total through to the
+      // view. Missing field (older server) → hits.length, i.e. exactly the
+      // pre-total behavior.
+      let searchTotal = 0;
       try {
         const response = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(query)}`);
         if (response.ok) {
           const data = await response.json();
           if (data && Array.isArray(data.results)) hits = data.results;
+          searchTotal = Math.max(Number(data && data.total) || 0, hits.length);
         }
       } catch (error) {
         // Search unavailable → fall through to the offer (never auto-run
@@ -10164,8 +10219,8 @@
         setBusy(false);
       }
       if (hits.length) {
-        v2UpdateProgress(100, `기존 분석 ${hits.length}건을 찾았습니다`);
-        renderSearchHits(query, hits);
+        v2UpdateProgress(100, `기존 분석 ${formatCount(searchTotal)}건을 찾았습니다`);
+        renderSearchHits(query, hits, searchTotal);
       } else {
         v2UpdateProgress(100, "기존 분석 없음 — 새 분석을 제안합니다");
         renderAnalyzeOffer(query);
@@ -12180,7 +12235,8 @@
           methodologyHistoryActive = false;
           aboutHistoryActive = false;
           gradeStatusHistoryActive = false;
-          renderSearchHitsView(lastSearchHitsCache.query, lastSearchHitsCache.hits);
+          renderSearchHitsView(lastSearchHitsCache.query, lastSearchHitsCache.hits,
+            lastSearchHitsCache.total);
           showScreen("detail");
           const searchY = (typeof navState.scrollY === "number") ? navState.scrollY : 0;
           requestAnimationFrame(() => { window.scrollTo(0, searchY || 0); });
