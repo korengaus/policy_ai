@@ -2722,38 +2722,47 @@
       padding: 16px 12px 16px 9px;
     }
 
-    /* RULE-AND-SPACE (32-APPLY): was C3-1's boxed card (full border + radius +
-       16px padding). The design target separates by hairline rules and space,
-       not boxes — each grid card now carries ONE top hairline (the same
-       var(--line) the divider list uses) and the grid gap does the rest. The
-       hairline is KEPT at every width on purpose: at 390's single column,
-       space-only separation reads as one undifferentiated stream. Scoped so
-       the divider-list .topic-card elsewhere (hero, region-1 rows) is
-       untouched; neutralizes the divider-list border-bottom and hover bleed
-       exactly as the boxed rule did. Same tokens; no new colors. */
+    /* 81-APPLY (v7 §04 SURFACES): the grid cards become CARDS again — surface
+       #fbfbf9 (--paper), border 1px #d9d8cf (--line), radius 0, padding 24 —
+       replacing 32-APPLY's top-hairline rows. That earlier un-boxing predated
+       the ivory ground: on today's --canvas the half-step-lighter surface
+       lifts a card rather than caging it, and every other layer of the system
+       has been taken. CARDS vs ROWS per the spec: cards get border+padding;
+       record rows (the divider-list .topic-card — hero band, region-1 rows)
+       keep hairline separators + the hover tone and are deliberately NOT
+       boxed here. Same tokens; no new colors. */
     .topic-card-grid > .topic-card {
-      border: none;
-      border-top: 1px solid var(--line);
+      border: 1px solid var(--line);
       border-radius: 0;
-      padding: 16px 0 0;
+      background: var(--paper);
+      padding: 24px;
     }
     .topic-card-grid > .topic-card:hover {
       margin: 0;
-      padding: 16px 0 0;
-      /* 60-APPLY (04): hover is the row tint alone — the accent hairline made
-         the hovered row's EDGE gain a colour no peer edge has; the title's
-         link colour (below) stays as the actionable cue. */
+      padding: 24px;
+      /* 60-APPLY (04): hover is the row tint alone; the title's link colour
+         (below) stays as the actionable cue. No lift, no transform. */
       background: var(--row-hover);
     }
-    /* .selected inside the grid → the divider-list left-bar marker, adapted:
-       3px brand bar + brand top rule + faint tint; padding-left clears the bar. */
+    /* .selected inside the grid → the divider-list left-bar marker, adapted
+       to the box: 3px brand bar inside the card border + faint tint;
+       padding-left clears the bar. */
     .topic-card-grid > .topic-card.selected {
       margin: 0;
-      padding: 16px 0 0 12px;
-      border: none;
-      border-top: 1px solid var(--brand);
+      padding: 24px 24px 24px 21px;
+      border: 1px solid var(--line);
       border-left: 3px solid var(--brand);
       background: var(--tint);
+    }
+    /* v7 §04: the in-card hairline (--line-100 #e8e7e0) separates the card's
+       record text from its status meta — internal separation belongs to the
+       lighter rule, the border to --line. Grid cards close with the
+       .topic-card-verdict block (the AI 검증 상태 line); .topic-card-meta is
+       covered too for card variants that render it. */
+    .topic-card-grid > .topic-card .topic-card-verdict,
+    .topic-card-grid > .topic-card .topic-card-meta {
+      border-top: 1px solid var(--line-100);
+      padding-top: 12px;
     }
     /* CARD-FOOT-ALIGN: grid stretch already equalises the three card BOXES in a
        row (measured equal); the ragged look is the content ending at different

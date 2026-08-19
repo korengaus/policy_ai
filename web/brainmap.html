@@ -1305,11 +1305,16 @@
     // no-op unless the zoom crossed a quantised radius step.
     refreshComboSprites();
 
-    // 77-APPLY §04 edge: 0.6px on the spec's cooler hue, base alpha 0.07 at
-    // the overview — at 6,531 lines anything brighter becomes a surface
-    // instead of structure. The shipped zoom-graduated ramp is KEPT (style,
-    // not encoding: one width and one alpha for every edge at any moment).
-    var edgeAlpha = 0.07 + 0.06 * Math.min(1, Math.max(0, view.scale - 1));
+    // 77-APPLY §04 edge: 0.6px on the spec's cooler hue. The zoom-graduated
+    // ramp is KEPT (style, not encoding: one width and one alpha for every
+    // edge at any moment — never varying with cluster size or edge count).
+    // 81-APPLY: base 0.07 -> 0.13. Measured: at extent 0.07 composited to
+    // 1.12:1 against the field — invisible regardless of length, so the
+    // 80-APPLY edge-length gain (74% of edges over 15px) reached nobody.
+    // 0.13 composites to 1.26:1, the bottom of the measured readable band:
+    // edges surface as faint webbing without turning the field into a mesh.
+    // Only the base moved; the ramp's +0.06 zoom increment is unchanged.
+    var edgeAlpha = 0.13 + 0.06 * Math.min(1, Math.max(0, view.scale - 1));
     var edgeWidth = 0.6;
     // BRAINMAP-3D-DEPTH (Part B2): in 3D ONLY, and only ABOVE 2x, edges keep
     // strengthening as the view zooms in. Justified by count: 6,353 edges are
