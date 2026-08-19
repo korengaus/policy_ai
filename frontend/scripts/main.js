@@ -2605,6 +2605,21 @@
       selectedIssueIntroEl.style.display = "none";
     }
 
+    // SEARCH-PANEL (90-APPLY): hide-only twin of renderSelectedIssueIntro's
+    // results branch, for views that render INTO #results with NO selected
+    // issue — the corpus-search list and its no-match offer. Measured: the
+    // panel's placeholder ("상세 보기를 누르거나 검색어를 입력하면…") sat
+    // above the search count line, instructing the reader to do what they
+    // had just done; every other state already hides it (renderResults) or
+    // never shows it (home states hide the whole detail screen). The
+    // element stays (getElementById target), and the cleared / no-data
+    // paths still restore the placeholder via renderSelectedIssueIntro([]).
+    function hideSelectedIssueIntro() {
+      if (!selectedIssueIntroEl) return;
+      selectedIssueIntroEl.innerHTML = "";
+      selectedIssueIntroEl.style.display = "none";
+    }
+
     function clearCurrentReportContext() {
       currentReportContext = null;
       reportActionsEl.style.display = "none";
@@ -10058,6 +10073,7 @@
     // list is not.
     function renderSearchHitsView(query, hits, total) {
       metricsEl.style.display = "none";
+      hideSelectedIssueIntro();
       const totalCount = Math.max(Number(total) || 0, hits.length);
       resultsEl.innerHTML = `
         <div class="empty-state">'${escapeHtml(query)}' 관련 기존 분석 ${escapeHtml(formatCount(totalCount))}건을 찾았습니다. 제목을 누르면 전체 검증 카드가 열립니다.</div>
@@ -10164,6 +10180,11 @@
 
     function renderAnalyzeOffer(query) {
       metricsEl.style.display = "none";
+      // SEARCH-PANEL (90-APPLY): same reasoning as the hits view — the offer
+      // sentence ("기존 분석이 없습니다") carries this state by itself; the
+      // placeholder above it would tell the reader to type a search they
+      // just typed.
+      hideSelectedIssueIntro();
       // ANALYZE-EXPOSURE: anonymous visitors are never OFFERED a paid analysis
       // (the pipeline writes rows into the curated corpus the weekly report
       // and distribution histogram read from). A search miss shows the offer's
