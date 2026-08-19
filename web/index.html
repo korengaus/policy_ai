@@ -10405,6 +10405,18 @@
         (c) => clusterSizeMap.get(Number(c.recordId)) >= 2);
     }
 
+    // DOMAIN-HERO-MIN (86-APPLY): a domain tab's fallback band renders only
+    // when its top cluster has spread to at least this many outlets. Measured
+    // live (2026-08-20): all 13 domain tabs rendered a hero, 11 of them from a
+    // top count of 2-4 — the same visual weight the whole-record hero carries
+    // at 80 outlets, so size implied a significance the data does not hold.
+    // A circulation rule, not a content judgement: every record stays
+    // eligible and simply has to earn the slot. Below the line the tab is
+    // bandless (the existing HERO-NO-JUDGEMENT state — rows begin directly,
+    // nothing leaves the grid). 전체 is exempt on every branch: the
+    // whole-record pick and the home pool fallback are unchanged.
+    const DOMAIN_HERO_MIN_OUTLETS = 5;
+
     function heroBandHtml(hot, dailyPick, circulation, cumulativePick) {
       if (dailyPick) {
         const heroOutlets = Number(trendingHeroPickRow?.current_outlet_count);
@@ -10694,6 +10706,18 @@
       // user-selectable sort option — chosen BY the reader, never for them.
       const hot = heroCirculation
         ? sortTopicCards(filtered, "전체 기간 매체 수 순") : filtered;
+      // DOMAIN-HERO-MIN (86-APPLY): on a domain tab the band must EARN its
+      // slot — hot[0] (the pool's top by whole-record outlet count; absent
+      // from clusterSizeMap reads 0) needs >= DOMAIN_HERO_MIN_OUTLETS. This
+      // ONE flag gates the band markup (the `circulation` arg below), the
+      // grid hold-back (heroKeys) and the hero-alone fallback together, so a
+      // suppressed band can never orphan a card out of the grid. On 전체 it
+      // equals heroCirculation exactly — home renders byte-identically
+      // (paintHeroBandOnly, 전체-only by its own guard, is untouched for the
+      // same reason).
+      const heroBandEligible = heroCirculation && (activeDomain === "전체"
+        || (clusterSizeMap.get(Number(hot[0]?.recordId)) || 0)
+             >= DOMAIN_HERO_MIN_OUTLETS);
       // DESIGN-C3h-3: the dedicated 오늘의 검증 row was removed — today cards now flow
       // into the normal sorted feed carrying the per-card "오늘 검증" badge (isTodayCard).
       // So the pool excludes ONLY the hero cards (no longer the today cards).
@@ -10705,7 +10729,7 @@
       // HERO-NO-JUDGEMENT: bandless render → nothing leaves the grid.
       // HERO-ONE-CARD (23-APPLY): the band holds ONE card, so exactly one key
       // leaves the pool — hot[1] flows back to region 1's first row.
-      const heroKeys = heroCirculation
+      const heroKeys = heroBandEligible
         ? new Set(hot.slice(0, 1).map((c) => c.key)) : new Set();
       // HERO-PAINT-ORDER: while the branch is unknown the grid must not depend
       // on it — excluding hot[0]/hot[1] now would DROP two cards from the page
@@ -10781,7 +10805,7 @@
         startHeroBandTimer();
       } else {
         hotTopicsTopEl.classList.remove("hero-band-reserved");
-        writeHeroBandHtml(heroBandHtml(hot, dailyPick, heroCirculation, cumulativePick));
+        writeHeroBandHtml(heroBandHtml(hot, dailyPick, heroBandEligible, cumulativePick));
       }
       if (!hot.length) {
         // STABLE-TABS S2: a domain tab whose data is still fetching / failed shows
@@ -10793,7 +10817,7 @@
         } else {
           writeFeedGridHtml('<div class="empty-state">검색을 실행하거나 최근 분석을 불러오면 검증 카드가 표시됩니다.</div>');
         }
-      } else if (dailyPick || cumulativePick || heroPending || !heroCirculation || hot.length >= 2) {
+      } else if (dailyPick || cumulativePick || heroPending || !heroBandEligible || hot.length >= 2) {
         // FEED-SPLIT: active on genuine feed renders (home + domain tabs)
         // under the circulation sort. REGION-2-ALWAYS (31-APPLY): the old
         // third condition (pool has a counted row somewhere) turned the WHOLE
