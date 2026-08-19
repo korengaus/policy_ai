@@ -578,8 +578,10 @@
          smaller (header tightening), without changing the html master font-size. */
       font-size: clamp(2.0rem, 3.2vw, 2.25rem);
       line-height: 1.15;
-      letter-spacing: -0.02em;
-      font-weight: 800;
+      /* 78-APPLY §07 T2: wordmark tracking/weight come from the shared .brand
+         rule (650 / -0.01em); the old 800/-0.02em local pair is retired. */
+      letter-spacing: -0.01em;
+      font-weight: 650;
     }
 
     /* LOGO-HOME — wordmark is a home link (href="/" → full reload to clean
@@ -597,7 +599,7 @@
       opacity: 0.85;
     }
 
-    /* tickedin logo signature — the ✓ in verification green. */
+    /* tickedin logo signature — the tally mark on the brand-blue tile. */
     .brand {
       display: inline-flex;
       align-items: center;
@@ -628,22 +630,26 @@
     .rank-panel-heading h2 {
       font-family: var(--font-sans); /* 58-APPLY: heading group follows the body stack token */
     }
-    /* DESIGN-C3g: the brand wordmark (+ the footer brand via the shared .brand
-       class) reverts to the prior Noto Serif KR; all the other headings above stay
-       Nanum Myeongjo. Same graceful fallback chain. */
+    /* 78-APPLY §07 T2 (ruling): the wordmark leaves the serif for the system
+       sans at weight 650, -0.01em — more instrument, less archive. Shared by
+       the header + footer via this one .brand rule. The word itself and every
+       Korean string are untouched. */
     .brand {
-      font-family: 'Noto Serif KR', 'Apple SD Gothic Neo', 'Pretendard', serif;
+      font-family: var(--font-sans);
+      font-weight: 650;
+      letter-spacing: -0.01em;
     }
 
     /* HOME-UI-3: header mark is the literal favicon image (pixel-identical to
        the tab/share icon), not a CSS glyph. The PNG already has rounded
-       corners, so no border-radius is applied. */
+       corners, so no border-radius is applied.
+       78-APPLY §07 mark ruling A: the asset now bakes the TALLY — three EQUAL
+       3:16-proportioned white strokes on the #2E5BD7 tile (a tally records
+       counts; equal heights rank nothing). The old green checkmark asset —
+       which read as "verified", the one claim this product refuses — is
+       retired everywhere this file is referenced. */
     .logo-tick {
       display: inline-block;
-      /* DESIGN-3A2: scales with the larger wordmark. NOTE: the check-mark color
-         is BAKED INTO the raster PNG (favicon-180.png) — it renders GREEN and
-         cannot be recolored via CSS. A BLUE logo asset must replace this file
-         (deferred; favicon + og-image are separate assets, also deferred). */
       width: 1.25em;
       height: 1.25em;
       object-fit: contain;
@@ -3179,13 +3185,17 @@
 
     .topic-card-title {
       margin: 0;
-      color: var(--ink);
+      /* 78-APPLY §08 option A: title 17px/700 −0.01em #141C28 — the headline
+         voice separates from the summary on TWO axes (weight + ink) while
+         sizes stay put. Grey is hierarchy, not status: no hue shift. */
+      color: #141C28;
       font-size: var(--fs-title-s);
       line-height: 1.45;
+      letter-spacing: -0.01em;
       /* FONT-WEIGHT-FIX-2: base covers grid + secondary card titles. The LARGE
          3.0rem hero headline overrides this to 400 in .topic-card--hero below —
          big type carries a lighter weight, so the hero reads lightest of all. */
-      font-weight: 500;
+      font-weight: 700;
       display: -webkit-box;
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
@@ -3207,9 +3217,12 @@
     /* HOMEPAGE-TIERED: summary returns on TIER-1 (detailed) cards only; concise
        TIER-2 cards omit it. Clamp keeps detailed cards tidy. */
     .topic-card-summary {
-      color: var(--slate);
+      /* 78-APPLY §08 option A: summary 15px/400 #5B6674, lh 1.62 — the size
+         never drops below the 15px floor; the ink steps back instead.
+         #5B6674 on the white card = 5.9:1. */
+      color: #5B6674;
       font-size: var(--fs-body);
-      line-height: 1.55;
+      line-height: 1.62;
       display: -webkit-box;
       -webkit-line-clamp: 3;
       -webkit-box-orient: vertical;
@@ -3217,6 +3230,12 @@
       /* MOBILE-OVERFLOW-FIX: same long-token wrap as .topic-card-title.
          59-APPLY: break-word removed here too — inherited keep-all governs. */
       overflow-wrap: anywhere;
+    }
+    /* 78-APPLY §08 option A: 10px between title and summary (the card's flex
+       gap is 8px; this tops up only the title→summary seam, so meta rows keep
+       their rhythm). */
+    .topic-card-title + .topic-card-summary {
+      margin-top: 2px;
     }
 
     .topic-card-meta {
@@ -4944,8 +4963,10 @@
        scales with the wordmark and stays aligned. */
     .footer-brand {
       font-size: 1.9rem;
-      font-weight: 800;
-      letter-spacing: -0.02em;
+      /* 78-APPLY §07 T2: weight/tracking follow the shared .brand (650 /
+         -0.01em); the local 800/-0.02em pair is retired. */
+      font-weight: 650;
+      letter-spacing: -0.01em;
       /* DESIGN-UNIFY: clickable → home (same as the header logo; .brand already
          provides inline-flex/align). */
       cursor: pointer;
@@ -13787,13 +13808,36 @@
       ctx.fillRect(0, 0, width, height);
       ctx.textBaseline = "alphabetic";
 
-      // Brand row — plain sans wordmark this slice (no webfont dependency).
+      // Brand row — 78-APPLY §07: the TALLY mark (three EQUAL white strokes on
+      // the #2E5BD7 tile — a tally records counts; equal heights rank
+      // nothing) + the T2 sans wordmark at 650. The share image is the face
+      // this product wears in a chat app; it must match the mastheads.
+      // Tile 64px at the 40px-tile proportions (stroke .075/.4, gap .075,
+      // tile radius .25, stroke radius 2.4). Vector shapes only — the canvas
+      // stays untainted.
+      const tileSize = 64;
+      const tileY = 62;
+      ctx.fillStyle = "#2E5BD7";
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(margin, tileY, tileSize, tileSize, 16);
+      else ctx.rect(margin, tileY, tileSize, tileSize);
+      ctx.fill();
+      ctx.fillStyle = "#FFFFFF";
+      const strokeW = 4.8, strokeH = 25.6, strokeGap = 4.8;
+      const strokesX = margin + (tileSize - (3 * strokeW + 2 * strokeGap)) / 2;
+      const strokesY = tileY + (tileSize - strokeH) / 2;
+      for (let si = 0; si < 3; si++) {
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(strokesX + si * (strokeW + strokeGap), strokesY, strokeW, strokeH, 2.4);
+        else ctx.rect(strokesX + si * (strokeW + strokeGap), strokesY, strokeW, strokeH);
+        ctx.fill();
+      }
       ctx.fillStyle = palette.brand;
-      ctx.font = `800 46px ${SHARE_IMAGE_FONTS}`;
-      ctx.fillText("tickedin", margin, 108);
+      ctx.font = `650 46px ${SHARE_IMAGE_FONTS}`;
+      ctx.fillText("tickedin", margin + tileSize + 16, 108);
       ctx.fillStyle = palette.muted;
       ctx.font = `600 22px ${SHARE_IMAGE_FONTS}`;
-      ctx.fillText("정책 뉴스, 어디까지 퍼졌는지 확인하세요", margin + 216, 104);
+      ctx.fillText("정책 뉴스, 어디까지 퍼졌는지 확인하세요", margin + tileSize + 16 + 216, 104);
 
       // Claim title — wrapped, max 3 lines.
       ctx.fillStyle = palette.ink;

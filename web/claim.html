@@ -102,8 +102,9 @@
   .brand {
     display: inline-flex; align-items: center; gap: 8px;
     color: var(--ink); text-decoration: none;
-    font-family: 'Noto Serif KR', 'Nanum Myeongjo', 'Apple SD Gothic Neo', serif;
-    font-size: 21px; font-weight: 700; letter-spacing: -0.01em;
+    /* 78-APPLY §07 T2: system sans 650, -0.01em (was Noto Serif KR 700). */
+    font-family: system-ui, -apple-system, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif;
+    font-size: 21px; font-weight: 650; letter-spacing: -0.01em;
   }
   .brand img { width: 1.25em; height: 1.25em; object-fit: contain; vertical-align: middle; }
   .brand-page-label {

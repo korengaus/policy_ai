@@ -6881,13 +6881,36 @@
       ctx.fillRect(0, 0, width, height);
       ctx.textBaseline = "alphabetic";
 
-      // Brand row — plain sans wordmark this slice (no webfont dependency).
+      // Brand row — 78-APPLY §07: the TALLY mark (three EQUAL white strokes on
+      // the #2E5BD7 tile — a tally records counts; equal heights rank
+      // nothing) + the T2 sans wordmark at 650. The share image is the face
+      // this product wears in a chat app; it must match the mastheads.
+      // Tile 64px at the 40px-tile proportions (stroke .075/.4, gap .075,
+      // tile radius .25, stroke radius 2.4). Vector shapes only — the canvas
+      // stays untainted.
+      const tileSize = 64;
+      const tileY = 62;
+      ctx.fillStyle = "#2E5BD7";
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(margin, tileY, tileSize, tileSize, 16);
+      else ctx.rect(margin, tileY, tileSize, tileSize);
+      ctx.fill();
+      ctx.fillStyle = "#FFFFFF";
+      const strokeW = 4.8, strokeH = 25.6, strokeGap = 4.8;
+      const strokesX = margin + (tileSize - (3 * strokeW + 2 * strokeGap)) / 2;
+      const strokesY = tileY + (tileSize - strokeH) / 2;
+      for (let si = 0; si < 3; si++) {
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(strokesX + si * (strokeW + strokeGap), strokesY, strokeW, strokeH, 2.4);
+        else ctx.rect(strokesX + si * (strokeW + strokeGap), strokesY, strokeW, strokeH);
+        ctx.fill();
+      }
       ctx.fillStyle = palette.brand;
-      ctx.font = `800 46px ${SHARE_IMAGE_FONTS}`;
-      ctx.fillText("tickedin", margin, 108);
+      ctx.font = `650 46px ${SHARE_IMAGE_FONTS}`;
+      ctx.fillText("tickedin", margin + tileSize + 16, 108);
       ctx.fillStyle = palette.muted;
       ctx.font = `600 22px ${SHARE_IMAGE_FONTS}`;
-      ctx.fillText("정책 뉴스, 어디까지 퍼졌는지 확인하세요", margin + 216, 104);
+      ctx.fillText("정책 뉴스, 어디까지 퍼졌는지 확인하세요", margin + tileSize + 16 + 216, 104);
 
       // Claim title — wrapped, max 3 lines.
       ctx.fillStyle = palette.ink;
