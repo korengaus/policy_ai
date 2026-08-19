@@ -313,25 +313,10 @@
       font-size: var(--fs-meta);
       padding: 4px 32px 4px 12px;
     }
-    .grade-guide-link {
-      color: var(--brand);
-      font-size: var(--fs-meta);
-      font-weight: 650;
-      text-decoration: none;
-      white-space: nowrap;
-    }
-    .grade-guide-link:hover {
-      color: var(--brand-ink);
-      text-decoration: underline;
-    }
-    /* NAV-RESTRUCTURE: the tab row now carries TWO guide links. Wrapping them keeps
-       .domain-tabs-row's space-between at two children and lets the pair wrap as a
-       unit on narrow screens. Additive — no existing rule changed. */
-    .guide-links {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
+    /* NAV-ROWS (85-APPLY): .grade-guide-link / .guide-links removed — the two
+       SITE-UNDERSTANDING links (검증 방법 / 상태 안내) moved from the tab row to
+       the utility bar as plain .utility-link items, so the header nav reads
+       uniform and the tab row carries category filters only. */
     /* 연결지도's leading glyph — sized to the utility-link text, stroke-inherited so
        it stays neutral (no color emphasis) and follows :hover like the label. */
     .utility-link--icon {
@@ -5473,9 +5458,9 @@
          rule (.domain-tabs-row::before) is absolutely positioned at top:8px OF THE
          ROW BOX with a 10/2 padding split calibrated for the single-line desktop
          case; once the row wraps that geometry no longer holds and the rule lands
-         inside the tab band while 검증 등급 안내 (pushed onto its own wrapped line)
-         sits on the dotted ::after. Open up the row padding on both ends so the
-         tabs clear the black rule and the link clears the dotted one. */
+         inside the tab band. Open up the row padding on both ends so the wrapped
+         tabs clear the black rule and the dotted one. (NAV-ROWS 85-APPLY: the
+         guide links this originally also protected now live in the utility bar.) */
       .domain-tabs-row {
         gap: 8px;
         padding: 20px 0 8px;

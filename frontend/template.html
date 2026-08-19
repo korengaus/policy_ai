@@ -99,9 +99,14 @@
              showing a fabricated total. Replaces the old 검증 진행 (draft) figure. -->
         <span class="utility-counts"><span id="utilityCumulativeClause" hidden>누적 기록 <strong class="utility-count-num" id="utilityTotalCount">—</strong>건 · </span>이번 주 <strong class="utility-count-num" id="utilityUpdateCount">—</strong>건</span>
       </div>
-      <!-- NAV-RESTRUCTURE: this header carries the CONTENT/FEATURE destinations only.
-           The two SITE-UNDERSTANDING links (검증 방법 / 등급·상태 안내) live in the tab
-           row below. 연결지도 is emphasised by POSITION (first) + a small line icon
+      <!-- NAV-RESTRUCTURE → NAV-ROWS (85-APPLY): this header now carries BOTH the
+           CONTENT/FEATURE destinations and the two SITE-UNDERSTANDING links
+           (검증 방법 / 상태 안내, moved here from the tab row — the tab row filters
+           content; these two explain the product, so they belong with About, not
+           between category filters). Labels + hrefs byte-identical; the click
+           handlers bind document-wide by href (main.js querySelectorAll on
+           a[href="#methodology"] / a[href="#gradeStatus"]), so position is free.
+           연결지도 is emphasised by POSITION (first) + a small line icon
            (#ic-network, a unique network-graph glyph — distinct from the shared
            #ic-workflow used on About) + NAV-EMPHASIS brand-blue text/icon
            (.utility-link--map) — contrast only, no box/pill, so the header keeps
@@ -110,6 +115,8 @@
         <a class="utility-link utility-link--icon utility-link--map" href="/web/brainmap.html"><svg class="utility-icon" aria-hidden="true"><use href="#ic-network"/></svg>연결지도</a>
         <a class="utility-link" href="/web/weekly.html">주간 리포트</a>
         <a class="utility-link" href="/web/faded.html">후속 끊긴 주장</a>
+        <a class="utility-link" href="#methodology">검증 방법</a>
+        <a class="utility-link" href="#gradeStatus">상태 안내</a>
         <a class="utility-link" href="#about">About</a>
         <a class="utility-link" href="mailto:contact@tickedin.org">Contact</a>
         <a class="utility-link" href="mailto:contact@tickedin.org">제보하기</a>
@@ -183,19 +190,11 @@
       </div>
       <!-- DESIGN-C3h-1c: the feed SORT control moved OUT of this row to a
            .feed-sort-row just above the feed (adjacent to the sortable list it
-           controls). "검증 등급 안내 →" now sits at the right end of the tab row. -->
-      <!-- MOBILE-POLISH 2b: repointed #methodology → #gradeLegend. This link says
-           검증 등급 안내 but opened the methodology page, the same conflation G(c)
-           fixed on the footer's 등급 안내; it now lands on the real 검증 등급 legend
-           via the shared show-home-then-scroll handler. -->
-      <!-- NAV-RESTRUCTURE: both SITE-UNDERSTANDING links sit here, 검증 방법 first.
-           Wrapped in one span so .domain-tabs-row's justify-content:space-between
-           still sees exactly two children (tabs | guide links) and the pair wraps
-           together on narrow screens. -->
-      <span class="guide-links">
-        <a class="grade-guide-link" href="#methodology">검증 방법</a>
-        <a class="grade-guide-link" href="#gradeStatus">상태 안내</a>
-      </span>
+           controls). -->
+      <!-- NAV-ROWS (85-APPLY): the .guide-links span (검증 방법 / 상태 안내) moved
+           UP to the utility bar — this row now holds category filters only. The
+           row keeps justify-content:space-between with one child (tabs), which
+           left-aligns the tabs unchanged. -->
     </nav>
 
     <!-- DESIGN-DETAIL-2: #homeScreen wraps the home-only view (#metrics through
