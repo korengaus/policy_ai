@@ -1606,6 +1606,10 @@
     .feed-sort-row {
       display: flex;
       justify-content: flex-end;
+      /* 82-APPLY (D): the basis caption sat flush against the select, so the
+         control and its caption read as one element. One 12px step of the
+         spacing scale separates them. */
+      gap: 12px;
       /* SORT-ROW-BASELINE: #feedSortBasis is a flex SIBLING of .hot-topics-sort
          here (not a child), so the default stretch pinned its text to the row
          top while the select's text centres. Centre the children so all three
@@ -2392,6 +2396,30 @@
     }
     .vhf-lane > .vhf-node {
       margin: 12px auto 0;
+    }
+    /* 82-APPLY (C): sequence WITHIN a lane — the design's named compliant
+       maximum: a short vertical tick between a lane's own stages. The
+       `.vhf-lane > .vhf-node + .vhf-node` selector is the containment proof:
+       it can only match a node whose PREVIOUS SIBLING inside the same
+       .vhf-lane div is also a node — the entry/publish shared boxes live
+       outside .vhf-lanes, the lane name/note are not .vhf-node, and siblings
+       cannot cross the lane div, so a tick can never span lanes or touch the
+       shared boxes. NOT an arrow and NOT a rising read: a plain 2x12px
+       rectangle (no head, no taper), one uniform --line tint, identical
+       between every consecutive pair in both lanes, no numbering — it states
+       "these follow each other", never "this one concludes". */
+    .vhf-lane > .vhf-node + .vhf-node {
+      margin-top: 18px;
+    }
+    .vhf-lane > .vhf-node + .vhf-node::before {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: -15px;
+      width: 2px;
+      height: 12px;
+      transform: translateX(-50%);
+      background: var(--line);
     }
     .vhf-publish {
       /* 62-APPLY (06): identical box, centered, full-stop alone — it follows

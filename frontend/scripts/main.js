@@ -7236,7 +7236,7 @@
             ${factsGrid}
             ${chartRow}
             ${syndicationLine}
-            <div class="spread-map-link"><a href="/web/brainmap.html?focus=${encodeURIComponent(id)}" target="_blank" rel="noopener noreferrer">브레인맵에서 유사 보도 보기 →</a></div>
+            <div class="spread-map-link"><a href="/web/brainmap.html?focus=${encodeURIComponent(id)}" target="_blank" rel="noopener noreferrer">브레인맵에서 유사 보도 보기</a></div>
           `;
           section.hidden = false;
           const mergedWrapper = section.closest(".spread-merged-section");
@@ -7421,7 +7421,7 @@
             && typeof timeline.lineage_id === "string"
             ? timeline.lineage_id.trim() : "";
           const claimLink = lineage
-            ? `<div><a class="claim-link" href="/web/claim.html?id=${encodeURIComponent(lineage)}">이 주장 전체 확산 기록 →</a></div>`
+            ? `<div><a class="claim-link" href="/web/claim.html?id=${encodeURIComponent(lineage)}">이 주장 전체 확산 기록</a></div>`
             : "";
           section.innerHTML = `
             <h3>어떤 매체가 보도했나</h3>

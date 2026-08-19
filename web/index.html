@@ -1642,6 +1642,10 @@
     .feed-sort-row {
       display: flex;
       justify-content: flex-end;
+      /* 82-APPLY (D): the basis caption sat flush against the select, so the
+         control and its caption read as one element. One 12px step of the
+         spacing scale separates them. */
+      gap: 12px;
       /* SORT-ROW-BASELINE: #feedSortBasis is a flex SIBLING of .hot-topics-sort
          here (not a child), so the default stretch pinned its text to the row
          top while the select's text centres. Centre the children so all three
@@ -2428,6 +2432,30 @@
     }
     .vhf-lane > .vhf-node {
       margin: 12px auto 0;
+    }
+    /* 82-APPLY (C): sequence WITHIN a lane — the design's named compliant
+       maximum: a short vertical tick between a lane's own stages. The
+       `.vhf-lane > .vhf-node + .vhf-node` selector is the containment proof:
+       it can only match a node whose PREVIOUS SIBLING inside the same
+       .vhf-lane div is also a node — the entry/publish shared boxes live
+       outside .vhf-lanes, the lane name/note are not .vhf-node, and siblings
+       cannot cross the lane div, so a tick can never span lanes or touch the
+       shared boxes. NOT an arrow and NOT a rising read: a plain 2x12px
+       rectangle (no head, no taper), one uniform --line tint, identical
+       between every consecutive pair in both lanes, no numbering — it states
+       "these follow each other", never "this one concludes". */
+    .vhf-lane > .vhf-node + .vhf-node {
+      margin-top: 18px;
+    }
+    .vhf-lane > .vhf-node + .vhf-node::before {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: -15px;
+      width: 2px;
+      height: 12px;
+      transform: translateX(-50%);
+      background: var(--line);
     }
     .vhf-publish {
       /* 62-APPLY (06): identical box, centered, full-stop alone — it follows
@@ -5777,8 +5805,8 @@
            still sees exactly two children (tabs | guide links) and the pair wraps
            together on narrow screens. -->
       <span class="guide-links">
-        <a class="grade-guide-link" href="#methodology">검증 방법 →</a>
-        <a class="grade-guide-link" href="#gradeStatus">상태 안내 →</a>
+        <a class="grade-guide-link" href="#methodology">검증 방법</a>
+        <a class="grade-guide-link" href="#gradeStatus">상태 안내</a>
       </span>
     </nav>
 
@@ -6007,7 +6035,7 @@
               <div class="legend-body"><span class="legend-label">추가 검증 필요</span></div>
             </li>
           </ul>
-          <a class="legend-more-link" href="#gradeStatus">상태 안내 전체 →</a>
+          <a class="legend-more-link" href="#gradeStatus">상태 안내 전체</a>
         </section>
 
         <!-- SIDEBAR-RANK-B2: 제보 input. The 의뢰하기 button opens a mailto to the
@@ -6056,7 +6084,7 @@
           <div class="brainmap-home-title">뉴스 연결지도</div>
           <p class="brainmap-home-desc">이 지도는 뉴스의 유통·연결을 보여줍니다. 검증이 아닙니다.
             가까이 모인 점은 비슷한 내용이 여러 매체에 보도되었다는 뜻일 뿐, 사실 여부와는 무관합니다.</p>
-          <a class="brainmap-home-link" href="/web/brainmap.html"><svg class="utility-icon" aria-hidden="true"><use href="#ic-network"/></svg>연결지도 →</a>
+          <a class="brainmap-home-link" href="/web/brainmap.html"><svg class="utility-icon" aria-hidden="true"><use href="#ic-network"/></svg>연결지도</a>
         </div>
         <!-- 68-APPLY (A): the design system's own constellation, copied verbatim
              (19 nodes: 16 dim + 3 brighter hubs; 3 stroke paths / 16 segments,
@@ -6566,9 +6594,9 @@
           </div>
         </div>
         <nav class="verify-how-links" aria-label="자세히 보기">
-          <a class="verify-how-link" href="#methodology">검증 방법 전체 →</a>
-          <a class="verify-how-link" href="#gradeStatus">상태 안내 →</a>
-          <a class="verify-how-link verify-how-link--map" href="/web/brainmap.html"><svg class="utility-icon" aria-hidden="true"><use href="#ic-network"/></svg>연결지도 →</a>
+          <a class="verify-how-link" href="#methodology">검증 방법 전체</a>
+          <a class="verify-how-link" href="#gradeStatus">상태 안내</a>
+          <a class="verify-how-link verify-how-link--map" href="/web/brainmap.html"><svg class="utility-icon" aria-hidden="true"><use href="#ic-network"/></svg>연결지도</a>
         </nav>
         </section>
       </div>
@@ -6624,7 +6652,7 @@
              today (one neutral pill tone, dots gone from cards + all three
              legends), so promising a colour explanation pointed at nothing.
              The remaining items (배지·숫자·경고 단계) are all still real. -->
-        <p>카드에 표시되는 배지·숫자·경고 단계의 의미는 <a href="#gradeStatus">상태 안내 →</a>에서 확인하실 수 있습니다.</p>
+        <p>카드에 표시되는 배지·숫자·경고 단계의 의미는 <a href="#gradeStatus">상태 안내</a>에서 확인하실 수 있습니다.</p>
       </div>
     </section>
 
@@ -6844,9 +6872,9 @@
 
       <div class="methodology-card">
         <h3><svg class="section-icon" aria-hidden="true"><use href="#ic-compass"/></svg>더 보기</h3>
-        <p><a class="map-more-link" href="/web/brainmap.html"><svg class="utility-icon" aria-hidden="true"><use href="#ic-network"/></svg>연결지도 →</a> 뉴스가 어떻게 유통·연결되는지 보여주는 지도입니다.</p>
-        <p><a href="#methodology">검증 방법 →</a> 무엇을, 어떤 출처 우선순위로 검증하는지 설명합니다.</p>
-        <p><a href="#gradeStatus">상태 안내 →</a> 카드의 배지·숫자가 무엇을 뜻하는지 설명합니다.</p>
+        <p><a class="map-more-link" href="/web/brainmap.html"><svg class="utility-icon" aria-hidden="true"><use href="#ic-network"/></svg>연결지도</a> 뉴스가 어떻게 유통·연결되는지 보여주는 지도입니다.</p>
+        <p><a href="#methodology">검증 방법</a> 무엇을, 어떤 출처 우선순위로 검증하는지 설명합니다.</p>
+        <p><a href="#gradeStatus">상태 안내</a> 카드의 배지·숫자가 무엇을 뜻하는지 설명합니다.</p>
       </div>
     </section>
 
@@ -14172,7 +14200,7 @@
             ${factsGrid}
             ${chartRow}
             ${syndicationLine}
-            <div class="spread-map-link"><a href="/web/brainmap.html?focus=${encodeURIComponent(id)}" target="_blank" rel="noopener noreferrer">브레인맵에서 유사 보도 보기 →</a></div>
+            <div class="spread-map-link"><a href="/web/brainmap.html?focus=${encodeURIComponent(id)}" target="_blank" rel="noopener noreferrer">브레인맵에서 유사 보도 보기</a></div>
           `;
           section.hidden = false;
           const mergedWrapper = section.closest(".spread-merged-section");
@@ -14357,7 +14385,7 @@
             && typeof timeline.lineage_id === "string"
             ? timeline.lineage_id.trim() : "";
           const claimLink = lineage
-            ? `<div><a class="claim-link" href="/web/claim.html?id=${encodeURIComponent(lineage)}">이 주장 전체 확산 기록 →</a></div>`
+            ? `<div><a class="claim-link" href="/web/claim.html?id=${encodeURIComponent(lineage)}">이 주장 전체 확산 기록</a></div>`
             : "";
           section.innerHTML = `
             <h3>어떤 매체가 보도했나</h3>
