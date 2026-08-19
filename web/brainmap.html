@@ -96,68 +96,107 @@
     color: var(--brand-ink); text-decoration: none;
   }
   .map-home:hover { text-decoration: underline; }
-  .map-reset {
-    /* BRAINMAP-FEATURES: margin-left:auto moved to .map-search so the whole
-       search+count+spread+리셋 group right-aligns together. */
-    font-size: 12.5px; font-weight: 600; padding: 4px 12px;
-    border: 1px solid var(--line); border-radius: var(--radius-sm);
-    background: var(--paper); color: var(--slate); cursor: pointer;
-    font-family: inherit;
+  /* 75-APPLY §01 — the controls, as instruments. One left rail replaces the
+     three stacked header rows. Glass, never solid (rgba(13,18,28,0.72) + 14px
+     blur): the corpus stays visible through every panel. Accent #7AA2FF marks
+     INTERACTIVE STATE only, never data — domain colour appears in the rail
+     only as the legend dots. The rail deliberately has NO collapse toggle
+     (a new hide-click would bury shipped controls); on short viewports it
+     scrolls internally instead. */
+  .rail {
+    position: absolute; left: 20px; top: 16px; width: 312px;
+    max-height: calc(100% - 32px); overflow: auto; z-index: 5;
+    display: flex; flex-direction: column; gap: 10px; padding: 14px;
+    border-radius: 12px; background: rgba(13, 18, 28, 0.72);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
   }
-  .map-reset:hover { color: var(--ink); border-color: var(--muted); }
-  /* BRAINMAP-FOCUS: the focus chip is the 리셋 button's chrome with the brand
-     accent, so an active focus is visible without inventing a new control
-     language. Not a data encoding — a UI state. */
-  .map-focus { border-color: var(--brand); color: var(--brand-ink); background: #142642; }
-  .map-focus[disabled] { border-color: var(--line); color: var(--slate); background: var(--paper); cursor: default; }
-  /* BRAINMAP-FEATURES: search input + spread dropdown share the 리셋 button's
-     calm chrome (site tokens). The count is a muted live annotation. */
+  .rail-div { height: 1px; background: rgba(255, 255, 255, 0.07); flex: none; }
+  /* Search leads the rail: the only free-text instrument. */
   .map-search {
-    margin-left: auto;
-    font-size: 12.5px; padding: 4px 12px; width: 170px;
-    border: 1px solid var(--line); border-radius: var(--radius-sm);
-    background: var(--paper); color: var(--ink); font-family: inherit;
+    width: 100%; height: 34px; padding: 0 12px; border-radius: 7px;
+    border: 1px solid rgba(255, 255, 255, 0.10); background: rgba(255, 255, 255, 0.05);
+    color: #EDF1F7; font-size: 13px; outline: none; font-family: inherit;
   }
-  .map-search:focus { outline: 2px solid var(--brand); outline-offset: 1px; }
-  .search-count { font-size: 12px; color: var(--slate); white-space: nowrap; }
-  /* BRAINMAP-SEARCH-NAV: step through the matches. Reuses the 리셋 button's
-     chrome — no new control language, no new dependency. Lives in the same
-     wrapping .head-row as the other controls, so on a narrow screen it reflows
-     onto its own line exactly like the focus chip. The buttons are 34px in
-     BOTH axes (comfortably over the 24px CSS-px tap floor) because a phone has
-     neither an Enter key in view nor arrow keys — the visible control is the
-     ONLY route there. */
-  .search-nav { display: none; align-items: center; align-self: center; gap: 4px; }
+  .map-search:focus { border-color: #7AA2FF; box-shadow: 0 0 0 3px rgba(122, 162, 255, 0.18); }
+  .search-count { font-size: 12px; color: #8E99AB; padding: 0 2px; }
+  .search-count:empty { display: none; }
+  /* 확산 규모 as a 4-stop ladder: a threshold is one value on an ordered
+     scale; stops on a track show the whole range a dropdown hides. Every stop
+     label is the shipped <option> string verbatim. */
+  .spread-head { display: flex; align-items: baseline; gap: 6px; padding: 0 2px; font-size: 12.5px; }
+  .spread-head .lbl { color: #8E99AB; }
+  .spread-head .val { color: #EDF1F7; font-weight: 650; }
+  .spread { position: relative; margin-top: 6px; }
+  .spread .track { position: absolute; left: 7.5px; top: 14px; bottom: 14px; width: 1px; background: rgba(255, 255, 255, 0.12); }
+  .stop {
+    position: relative; display: flex; align-items: center; gap: 10px;
+    height: 26px; width: 100%; cursor: pointer; background: transparent;
+    border: 0; padding: 0; margin: 0; font-family: inherit; text-align: left;
+    border-radius: 6px; font-size: 12.5px; color: #A6B1C4;
+  }
+  .stop:hover { background: rgba(255, 255, 255, 0.04); }
+  .stop:focus-visible { outline: 2px solid #7AA2FF; outline-offset: 1px; }
+  .stop .pip {
+    width: 12px; height: 12px; border-radius: 50%; box-sizing: border-box;
+    border: 1.5px solid rgba(255, 255, 255, 0.28); background: #0D131F;
+    display: flex; align-items: center; justify-content: center; flex: none;
+  }
+  .stop[aria-checked="true"] { color: #EDF1F7; font-weight: 650; }
+  .stop[aria-checked="true"] .pip { border-color: #7AA2FF; }
+  .stop[aria-checked="true"] .pip::after { content: ""; width: 5px; height: 5px; border-radius: 50%; background: #7AA2FF; }
+  /* ‹ › paging + 리셋 dock top-right — the corner opposite filter-building, so
+     a trackpad overshoot cannot wreck a built-up state. 리셋 is the screen's
+     only filled button: one recovery affordance, always findable. */
+  .map-actions {
+    position: absolute; right: 20px; top: 16px; z-index: 5;
+    display: flex; align-items: center; justify-content: flex-end;
+    gap: 8px; flex-wrap: wrap;
+  }
+  .search-nav { display: none; align-items: center; gap: 8px; }
   .nav-step {
-    font-size: 16px; line-height: 1; font-weight: 700;
-    min-width: 34px; min-height: 34px; padding: 0 8px;
-    border: 1px solid var(--line); border-radius: var(--radius-sm);
-    background: var(--paper); color: var(--slate); cursor: pointer;
+    width: 32px; height: 32px; min-width: 32px; padding: 0;
+    border-radius: 8px; background: rgba(13, 18, 28, 0.72);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    display: flex; align-items: center; justify-content: center;
+    color: #C6CFDD; font-size: 16px; line-height: 1; cursor: pointer;
     font-family: inherit;
   }
-  .nav-step:hover:not([disabled]) { color: var(--ink); border-color: var(--muted); }
-  .nav-step:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+  .nav-step:hover:not([disabled]) { background: rgba(122, 162, 255, 0.12); }
+  .nav-step:focus-visible { outline: 2px solid #7AA2FF; outline-offset: 1px; }
   /* Disabled reads as a dimmer INK, never a lower opacity — opacity encodes
      nothing on this page and must keep encoding nothing. */
-  .nav-step[disabled] { opacity: 1; color: #46536b; cursor: default; }
+  .nav-step[disabled] { opacity: 1; color: #5F6B80; cursor: default; }
   .nav-pos {
-    font-size: 12.5px; font-weight: 700; color: var(--brand-ink);
+    font-size: 12.5px; font-weight: 700; color: #D7E3FF;
     min-width: 60px; text-align: center; white-space: nowrap;
     font-variant-numeric: tabular-nums;
+    text-shadow: 0 1px 3px rgba(6, 9, 15, 0.85);
   }
   /* The order is a FACT about the list, not a ranking — said out loud, next to
      the position, so "1 / 123" cannot be read as "the most relevant". */
-  .nav-note { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
-  .map-spread {
-    font-size: 12.5px; font-weight: 600; padding: 4px 8px;
-    border: 1px solid var(--line); border-radius: var(--radius-sm);
-    background: var(--paper); color: var(--slate); cursor: pointer;
-    font-family: inherit;
+  .nav-note { font-size: 11.5px; color: #8E99AB; white-space: nowrap; text-shadow: 0 1px 3px rgba(6, 9, 15, 0.85); }
+  .act-div { width: 1px; height: 18px; background: rgba(255, 255, 255, 0.12); flex: none; }
+  .map-reset {
+    height: 32px; padding: 0 14px; border-radius: 8px;
+    background: rgba(122, 162, 255, 0.16); border: 1px solid rgba(122, 162, 255, 0.45);
+    display: flex; align-items: center; color: #D7E3FF;
+    font-size: 12.5px; font-weight: 650; cursor: pointer; font-family: inherit;
   }
-  .map-spread:hover { color: var(--ink); border-color: var(--muted); }
+  .map-reset:hover { background: rgba(122, 162, 255, 0.24); }
+  .map-reset:focus-visible { outline: 2px solid #7AA2FF; outline-offset: 1px; }
+  /* BRAINMAP-FOCUS: the focus chip shares 리셋's accent chrome, so an active
+     focus is visible without inventing a new control language. Its transient
+     note state (unclustered tap) drops to the plain glass chrome. */
+  .map-focus[disabled] {
+    background: rgba(13, 18, 28, 0.72); border-color: rgba(255, 255, 255, 0.09);
+    color: #B9C3D4; cursor: default;
+  }
   .map-stats { margin-top: 8px; font-size: 12px; color: var(--muted); }
-  .head-row { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
   .map-title {
+    display: block;
     font-size: 22px; font-weight: 500; letter-spacing: -0.02em; color: var(--ink);
     /* FONT-SWITCH: page title joins the body sans stack; only .brand stays serif. */
     font-family: system-ui, -apple-system, 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif;
@@ -165,53 +204,93 @@
   /* HONESTY (fixed, always visible): this map is spread/connection, NOT verification. */
   .map-subtitle { margin-top: 4px; font-size: 13.5px; line-height: 1.55; color: var(--slate); }
   .map-subtitle strong { color: var(--ink); font-weight: 700; }
-  .legend {
-    margin-top: 8px; display: flex; flex-wrap: wrap; gap: 8px 16px;
-    font-size: 12.5px; color: var(--slate); align-items: center;
-  }
-  /* BRAINMAP-FILTER: legend keys are interactive filter toggles. They read as
-     calm tappable chips (site tokens), with a clear active state. Clicking a
-     domain isolates its constellation; "전체 보기" restores all. */
+  /* 75-APPLY §01: the rail's dynamic half — segmented scope pair, the domain
+     list (key and switch in one: legend = filter), market rows, mode switches.
+     BRAINMAP-FILTER semantics unchanged: same data-filter kinds, same
+     delegated click handler, same mutual exclusions. */
+  .legend { display: flex; flex-direction: column; gap: 10px; }
   .legend .key {
-    display: inline-flex; align-items: center; gap: 4px;
-    font-family: inherit; font-size: 12.5px; color: var(--slate);
-    background: transparent; border: 1px solid transparent; border-radius: 0;
-    padding: 4px 8px; cursor: pointer; line-height: 1.15;
-    transition: background .12s, border-color .12s, color .12s;
+    display: flex; align-items: center; gap: 8px;
+    height: 26px; padding: 0 8px; margin: 0; border: 0; border-radius: 6px;
+    background: transparent; font-family: inherit; font-size: 12.5px;
+    color: #B9C3D4; cursor: pointer; text-align: left; line-height: 1.15;
+    transition: background .12s, color .12s; flex: none;
   }
-  /* BRAINMAP-MULTI-DOMAIN: on TOUCH pointers only, the chips grow to a real tap
-     target. Measured at 320/360/390px the legend chip was 22.4px tall — under
-     any tap-target floor — which mattered little when a reader tapped ONE
-     domain and matters a lot now that building a combination means tapping
-     several in a row. Gated on (pointer: coarse), so the desktop legend is
-     byte-identical to what it was. Padding only: no size or opacity encoding
-     is involved, and the twelve chips still wrap in the same order. */
-  @media (pointer: coarse) {
-    .legend .key { padding: 8px 12px; }
-    .legend { gap: 8px 12px; }
+  .legend .key:hover { background: rgba(255, 255, 255, 0.05); color: #C9D2E0; }
+  .legend .key:focus-visible { outline: 2px solid #7AA2FF; outline-offset: 1px; }
+  /* 전체 보기 | 분야 여러 개 고르기 — selection MODES, not filters, so they sit
+     as a segmented pair above the list they govern. */
+  .legend .seg {
+    display: flex; background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 7px;
+    padding: 2px; gap: 2px;
   }
-  .legend .key:hover { background: #17233a; border-color: var(--line); color: var(--ink); }
-  .legend .key:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+  .legend .seg .key {
+    flex: 1; height: auto; display: block; text-align: center; padding: 0;
+    line-height: 24px; font-size: 12px; border-radius: 5px; color: #A6B1C4;
+  }
+  .legend .seg .key:hover { background: rgba(255, 255, 255, 0.06); }
+  .legend .seg .key.active {
+    background: rgba(122, 162, 255, 0.16); color: #EDF1F7; font-weight: 650;
+    box-shadow: inset 0 0 0 1px rgba(122, 162, 255, 0.35);
+  }
+  /* Domain list = legend: two columns, shipped corpus-volume order, all 13
+     visible without scrolling. Active (solo) = accent wash + inset left bar —
+     accent marks state, the dot keeps carrying the domain colour. */
+  .legend .dgrid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 6px; }
   .legend .key.active {
-    background: #142642; border-color: var(--brand); color: var(--brand-ink); font-weight: 700;
+    color: #EDF1F7; font-weight: 650; background: rgba(122, 162, 255, 0.10);
+    box-shadow: inset 2px 0 0 #7AA2FF;
   }
-  /* BRAINMAP-MULTI-DOMAIN: the selected mark. A CHECKMARK plus the existing
-     active chrome (filled ground, brand border, brand ink, bold) — never
-     opacity, which encodes nothing on this page, and never size, which encodes
-     outlet count. The span keeps its 9px whether or not it holds the glyph, so
-     toggling a domain cannot reflow the twelve chips or make a selected chip
-     read as bigger. */
-  .legend .key .tick {
-    display: inline-block; width: 9px; text-align: center;
-    font-size: 11.5px; font-weight: 700; line-height: 1; color: var(--brand-ink);
+  /* BRAINMAP-MULTI-DOMAIN: while 분야 여러 개 고르기 is on, each domain row
+     shows a checkbox square — filled when the domain is in the selection, NO
+     ✓ glyph (none anywhere in this product). The square only appears in
+     multi-select mode, so a plain solo click keeps its shipped look. Never
+     opacity (encodes nothing here), never size (encodes outlet count). */
+  .legend .box {
+    display: none; width: 12px; height: 12px; border-radius: 3px;
+    border: 1.5px solid rgba(255, 255, 255, 0.30); box-sizing: border-box; flex: none;
   }
-  /* The chip order is corpus volume, stated so a multi-selection row cannot be
-     read as a priority list. Same disclosure the search stepper makes. */
-  .legend-note { font-size: 11.5px; color: var(--muted); }
-  .legend .dot {
-    width: 10px; height: 10px; border-radius: 50%; display: inline-block;
+  .legend.multi-on .key[data-filter="domain"] .box { display: inline-block; }
+  .legend.multi-on .key[data-filter="domain"].active {
+    background: transparent; box-shadow: none; font-weight: 400; color: #EDF1F7;
   }
-  .legend .dot.hollow { background: transparent !important; border: 2px solid #8b9cb6; }
+  .legend.multi-on .key[data-filter="domain"].active .box { background: #7AA2FF; border-color: #7AA2FF; }
+  /* The row order is corpus volume, stated so the list cannot be read as a
+     priority list. Same disclosure the search stepper makes. */
+  .legend-note { font-size: 11.5px; color: #8E99AB; line-height: 1.5; padding: 0 8px; }
+  .legend .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
+  .legend .dot.hollow { background: transparent !important; border: 1.5px solid #8FA0B8; box-sizing: border-box; }
+  /* 숨기기 / 집중 모드 / 입체 보기 are STATES, not picks — each renders its
+     own switch position so the rail reads like a console at a glance. */
+  .legend .key-switch { justify-content: space-between; gap: 10px; height: 28px; }
+  .legend .key-switch .sw {
+    width: 28px; height: 16px; border-radius: 8px;
+    background: rgba(255, 255, 255, 0.14); position: relative; flex: none;
+    transition: background .12s;
+  }
+  .legend .key-switch .sw::after {
+    content: ""; position: absolute; top: 2px; left: 2px;
+    width: 12px; height: 12px; border-radius: 50%; background: #8E99AB;
+    transition: left .12s, background .12s;
+  }
+  .legend .key-switch.active { background: transparent; box-shadow: none; color: #EDF1F7; font-weight: 400; }
+  .legend .key-switch.active .sw { background: rgba(122, 162, 255, 0.45); }
+  .legend .key-switch.active .sw::after { left: 14px; background: #EDF1F7; }
+  /* Touch: rows grow to a real tap target (padding/height only — no size or
+     opacity encoding is involved, and the column order is unchanged). */
+  @media (pointer: coarse) {
+    .legend .key, .stop { height: 34px; }
+    .legend .key-switch { height: 34px; }
+  }
+  /* Narrow phones: the rail cannot dock beside a 390px field, and it may not
+     collapse (a hide-click would bury shipped controls). It spans the top of
+     the field below the ‹›/리셋 corner, capped so over half the field stays
+     visible, scrolling internally — same device the short-laptop rule uses. */
+  @media (max-width: 600px) {
+    .rail { left: 12px; right: 12px; width: auto; top: 60px; max-height: 42%; }
+    .map-actions { right: 12px; top: 12px; left: 12px; }
+  }
   main.map-body { position: relative; flex: 1 1 auto; min-height: 0; }
   /* MOBILE-POLISH H: touch-action:none is what lets the touch handlers below see a
      coherent gesture — the default (auto) hands one-finger drags and pinches to the
@@ -244,42 +323,11 @@
     <span class="brand-page-label">연결지도</span>
     <a class="map-home" href="/">← 홈으로</a>
   </div>
-  <div class="head-row">
-    <span class="map-title">뉴스 연결지도</span>
-    <!-- BRAINMAP-FEATURES: keyword search (substring over node titles, dims
-         non-matches via the SAME isActive mechanism the domain filter uses) +
-         a spread-size dropdown (cluster outlet_count threshold). Circulation
-         vocabulary only — 일치/연결/매체, never verdict words. -->
-    <input type="search" id="mapSearch" class="map-search" placeholder="제목 검색" autocomplete="off" aria-label="노드 제목 검색">
-    <span id="searchCount" class="search-count" aria-live="polite"></span>
-    <!-- BRAINMAP-SEARCH-NAV: position within the results + a visible stepper.
-         Shown only while a query is active. "3 / 123" is a POSITION IN A LIST,
-         never a rank: the order is the graph's own node order (analysis_results
-         id ascending), which carries no relevance meaning — the note beside it
-         says so. -->
-    <span id="searchNav" class="search-nav" style="display:none">
-      <button type="button" id="searchPrev" class="nav-step" aria-label="이전 일치 항목으로">‹</button>
-      <span id="searchPos" class="nav-pos" aria-live="polite" aria-atomic="true"></span>
-      <button type="button" id="searchNext" class="nav-step" aria-label="다음 일치 항목으로">›</button>
-      <span class="nav-note">수록 순 · 관련도순 아님</span>
-    </span>
-    <select id="spreadFilter" class="map-spread" aria-label="확산 규모 필터">
-      <option value="0" selected>확산 규모: 전체</option>
-      <option value="3">3개 매체 이상 보도</option>
-      <option value="5">5개 매체 이상 보도</option>
-      <option value="10">10개 매체 이상 보도</option>
-    </select>
-    <!-- BRAINMAP-FOCUS: appears only while a cluster is focused (or the
-         one-shot arm is waiting). Lives in the same wrapping flex row as the
-         other controls, so it reflows onto its own line on a narrow screen. -->
-    <button type="button" id="focusChip" class="map-reset map-focus" style="display:none"></button>
-    <button type="button" id="resetView" class="map-reset">리셋</button>
-  </div>
+  <span class="map-title">뉴스 연결지도</span>
   <p class="map-subtitle">
     이 지도는 뉴스의 <strong>유통·연결</strong>을 보여줍니다. <strong>검증이 아닙니다.</strong>
     가까이 모인 점은 비슷한 내용이 여러 매체에 보도되었다는 뜻일 뿐, 사실 여부와는 무관합니다.
   </p>
-  <div class="legend" id="legend" aria-label="범례"></div>
   <!-- BRAINMAP-FEATURES: one-line numeric stats over the FULL loaded graph
        (not the filtered view) — circulation counts only. -->
   <div class="map-stats" id="mapStats"></div>
@@ -287,6 +335,52 @@
 <main class="map-body">
   <canvas id="map"></canvas>
   <div id="status">지도를 불러오는 중…</div>
+  <!-- 75-APPLY §01: the instrument rail, docked left over the field. Order is
+       the reader's question order — which claim (search), how widely spread
+       (threshold ladder), which field (domain list), how to look (modes). The
+       rail occludes ~312px of the centre-weighted cloud's cheapest margin and
+       deliberately has no collapse toggle. -->
+  <div class="rail">
+    <!-- BRAINMAP-FEATURES: keyword search (substring over node titles, dims
+         non-matches via the SAME isActive mechanism the domain filter uses).
+         Circulation vocabulary only — 일치/연결/매체, never verdict words. -->
+    <input type="search" id="mapSearch" class="map-search" placeholder="제목 검색" autocomplete="off" aria-label="노드 제목 검색">
+    <span id="searchCount" class="search-count" aria-live="polite"></span>
+    <div class="rail-div"></div>
+    <!-- BRAINMAP-FEATURES: the spread threshold (cluster outlet_count), as a
+         4-stop ladder over the same 0/3/5/10 values the shipped <select>
+         carried — every stop label is that select's option string verbatim
+         (the first option, 「확산 규모: 전체」, split into the ladder's
+         heading and its 전체 stop). -->
+    <div>
+      <div class="spread-head"><span class="lbl">확산 규모:</span><span class="val" id="spreadValue">전체</span></div>
+      <div class="spread" id="spreadFilter" role="radiogroup" aria-label="확산 규모 필터">
+        <div class="track" aria-hidden="true"></div>
+        <button type="button" class="stop" role="radio" aria-checked="true" data-spread="0"><span class="pip" aria-hidden="true"></span>전체</button>
+        <button type="button" class="stop" role="radio" aria-checked="false" data-spread="3"><span class="pip" aria-hidden="true"></span>3개 매체 이상 보도</button>
+        <button type="button" class="stop" role="radio" aria-checked="false" data-spread="5"><span class="pip" aria-hidden="true"></span>5개 매체 이상 보도</button>
+        <button type="button" class="stop" role="radio" aria-checked="false" data-spread="10"><span class="pip" aria-hidden="true"></span>10개 매체 이상 보도</button>
+      </div>
+    </div>
+    <div class="rail-div"></div>
+    <div class="legend" id="legend" aria-label="범례"></div>
+  </div>
+  <!-- 75-APPLY §01: paging + recovery in the corner opposite filter-building.
+       BRAINMAP-SEARCH-NAV: the stepper shows only while a query is active;
+       "3 / 123" is a POSITION IN A LIST, never a rank — the note says so.
+       BRAINMAP-FOCUS: the chip appears only while a cluster is focused (or
+       the one-shot arm is waiting). -->
+  <div class="map-actions">
+    <span id="searchNav" class="search-nav" style="display:none">
+      <button type="button" id="searchPrev" class="nav-step" aria-label="이전 일치 항목으로">‹</button>
+      <span id="searchPos" class="nav-pos" aria-live="polite" aria-atomic="true"></span>
+      <button type="button" id="searchNext" class="nav-step" aria-label="다음 일치 항목으로">›</button>
+      <span class="nav-note">수록 순 · 관련도순 아님</span>
+      <span class="act-div" aria-hidden="true"></span>
+    </span>
+    <button type="button" id="focusChip" class="map-reset map-focus" style="display:none"></button>
+    <button type="button" id="resetView" class="map-reset">리셋</button>
+  </div>
   <div id="tooltip"></div>
 </main>
 <script>
@@ -747,49 +841,61 @@
       counts[d] = (counts[d] || 0) + 1;
     });
     var order = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; });
-    // BRAINMAP-FILTER: each key is a filter toggle. "전체 보기" (active by
-    // default) restores all; a domain key isolates its constellation; the
-    // hollow market key isolates 시장·시세 nodes. Palette hex unchanged.
-    var html = '<button type="button" class="key key-all active" data-filter="all" aria-pressed="true">전체 보기</button>';
-    // BRAINMAP-MULTI-DOMAIN: the touch route to combining domains, sitting next
-    // to 전체 보기 because both set the SCOPE of the domain selection. On
+    // 75-APPLY §01: the rail's dynamic half. BRAINMAP-FILTER semantics are
+    // unchanged — same data-filter kinds, same delegated click handler, same
+    // mutual exclusions; only the chrome moved from wrapping chip rows to the
+    // rail's column. 전체 보기 (active by default) restores all; a domain row
+    // isolates its constellation; the hollow market row isolates 시장·시세
+    // nodes. Palette hex unchanged.
+    // BRAINMAP-MULTI-DOMAIN: 분야 여러 개 고르기 is the touch route to
+    // combining domains, paired with 전체 보기 because both set the SCOPE of
+    // the domain selection — a segmented pair above the list it governs. On
     // desktop Ctrl/⌘/Shift+click does the same thing without a mode.
-    html += '<button type="button" class="key" data-filter="multi-arm" aria-pressed="false">' +
-            '분야 여러 개 고르기</button>';
+    var html = '<div class="seg">' +
+               '<button type="button" class="key key-all active" data-filter="all" aria-pressed="true">전체 보기</button>' +
+               '<button type="button" class="key" data-filter="multi-arm" aria-pressed="false">분야 여러 개 고르기</button>' +
+               '</div>';
+    html += '<div class="dgrid">';
     html += order.map(function (d) {
       var name = DOMAIN_KO[d] || d;
-      // The tick span is ALWAYS present (empty when unselected) so toggling a
-      // domain never reflows the legend and a selected chip is never wider.
+      // The box span is ALWAYS present (shown only in multi-select mode, as a
+      // filled-when-selected square — no ✓ glyph anywhere in this product) so
+      // toggling never reflows the grid and a selected row is never wider.
       return '<button type="button" class="key" data-filter="domain" aria-pressed="false" data-domain="' + escapeHtml(d) + '">' +
-             '<span class="tick" aria-hidden="true"></span>' +
+             '<span class="box" aria-hidden="true"></span>' +
              '<span class="dot" style="background:' + colorFor(d) + '"></span>' +
              escapeHtml(name) + "</button>";
     }).join("");
+    html += '</div>';
+    // BRAINMAP-MULTI-DOMAIN: the rows are ordered by how many articles each
+    // domain has, which is a FACT about the corpus and not a judgement about
+    // which domain matters more. The footnote stays attached to the list so
+    // the order cannot be read as a ranking — the same disclosure the search
+    // stepper makes about its own ordering.
+    html += '<div class="legend-note">분야 순서는 기사 수 순 · 중요도 아님</div>';
+    html += '<div class="rail-div"></div>';
     html += '<button type="button" class="key" data-filter="market" aria-pressed="false">' +
             '<span class="dot hollow"></span>시장·시세 소식(빈 점)</button>';
-    // BRAINMAP-FOCUS: content-nature toggle. Same .key chip, same delegated
-    // click handler, same dimming — it only adds one AND condition. The label
-    // reuses the existing "시장·시세 소식" wording verbatim from the key above
-    // (and the home page's 시장·시세 chip); only the verb is new.
-    html += '<button type="button" class="key" data-filter="nature-hide">' +
-            '시장·시세 소식 숨기기</button>';
+    // BRAINMAP-FOCUS: content-nature toggle. Same delegated click handler,
+    // same dimming — it only adds one AND condition. Hiding is a STATE, not a
+    // pick, so the row carries a switch. The label reuses the existing
+    // "시장·시세 소식" wording verbatim; only the verb differs.
+    html += '<button type="button" class="key key-switch" data-filter="nature-hide" aria-pressed="false">' +
+            '<span>시장·시세 소식 숨기기</span><span class="sw" aria-hidden="true"></span></button>';
+    html += '<div class="rail-div"></div>';
+    // Modes last: 집중 모드 and 입체 보기 change how you look, not what is
+    // shown — stateful and rare, so lowest in the rail.
     // BRAINMAP-FOCUS: one-shot arm for touch (no modifier key on a phone).
-    html += '<button type="button" class="key" data-filter="focus-arm">' +
-            '집중 모드: 다음 탭한 묶음만</button>';
+    html += '<button type="button" class="key key-switch" data-filter="focus-arm" aria-pressed="false">' +
+            '<span>집중 모드: 다음 탭한 묶음만</span><span class="sw" aria-hidden="true"></span></button>';
     // BRAINMAP-3D-VIEW: opt-in comparison mode. "보기" reuses the legend's
-    // own vocabulary (전체 보기); the chip appears only when the payload
+    // own vocabulary (전체 보기); the row appears only when the payload
     // carries 3D coordinates. Default is ALWAYS the 2D map.
     if (has3d) {
-      html += '<button type="button" class="key" data-filter="mode3d">' +
-              '입체 보기</button>' +
-              '<span id="modeHint" class="search-count" style="display:none"></span>';
+      html += '<button type="button" class="key key-switch" data-filter="mode3d" aria-pressed="false">' +
+              '<span>입체 보기</span><span class="sw" aria-hidden="true"></span></button>' +
+              '<span id="modeHint" class="legend-note" style="display:none"></span>';
     }
-    // BRAINMAP-MULTI-DOMAIN: the chips are ordered by how many articles each
-    // domain has, which is a FACT about the corpus and not a judgement about
-    // which domain matters more. Now that several can be on at once the row
-    // could start to read as a priority list, so it says what the order is —
-    // the same disclosure the search stepper makes about its own ordering.
-    html += '<span class="legend-note">분야 순서는 기사 수 순 · 중요도 아님</span>';
     document.getElementById("legend").innerHTML = html;
   }
 
@@ -1681,11 +1787,12 @@
       else if (kind === "all") on = (!domainSel.length && !marketOnly);
       if (on) k.classList.add("active"); else k.classList.remove("active");
       k.setAttribute("aria-pressed", on ? "true" : "false");
-      // The checkmark is what says MULTI-selection: several chips can be on at
-      // once, which the single-selection chrome never had to express.
-      var tick = k.querySelector ? k.querySelector(".tick") : null;
-      if (tick) tick.textContent = on ? "✓" : "";
     }
+    // 75-APPLY §01: the filled square is what says MULTI-selection (never a
+    // ✓ glyph — none anywhere in this product). The squares render only while
+    // 분야 여러 개 고르기 is on, via this container class.
+    var lg = document.getElementById("legend");
+    if (lg) lg.classList.toggle("multi-on", multiSelectMode);
   }
 
   // BRAINMAP-FEATURES: live search count — over the FULLY COMPOSED active set
@@ -1952,9 +2059,21 @@
   }
 
   // BRAINMAP-FEATURES: spread-size dropdown (cluster outlet_count threshold).
-  function onSpreadChange(ev) {
+  // 75-APPLY §01: the spread threshold is a 4-stop ladder (delegated click on
+  // the radiogroup), not a <select> — same 0/3/5/10 values, same filtering
+  // path. The heading's value readout echoes the active stop's own shipped
+  // label, so the ladder can never say one thing and the readout another.
+  function onSpreadClick(ev) {
+    var btn = ev.target.closest(".stop");
+    if (!btn) return;
     skipIntro();
-    spreadMin = Number(ev.target.value) || 0;
+    spreadMin = Number(btn.getAttribute("data-spread")) || 0;
+    var stops = document.querySelectorAll("#spreadFilter .stop");
+    for (var i = 0; i < stops.length; i++) {
+      stops[i].setAttribute("aria-checked", stops[i] === btn ? "true" : "false");
+    }
+    var val = document.getElementById("spreadValue");
+    if (val) val.textContent = btn.textContent;
     hoverNode = null;
     tooltip.style.display = "none";
     updateSearchCount();
@@ -2141,7 +2260,7 @@
     if (prevMatchBtn) prevMatchBtn.addEventListener("click", function () { stepMatch(-1); });
     if (nextMatchBtn) nextMatchBtn.addEventListener("click", function () { stepMatch(1); });
     var spreadEl = document.getElementById("spreadFilter");
-    if (spreadEl) spreadEl.addEventListener("change", onSpreadChange);
+    if (spreadEl) spreadEl.addEventListener("click", onSpreadClick);
     layout();
     // BRAINMAP-ATMOSPHERE: arrive. Runs once per page load; a ?focus= deep
     // link (below) skips it so the linked node is centred immediately.
