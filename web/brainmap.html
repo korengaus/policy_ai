@@ -119,6 +119,17 @@
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
   }
   .rail-div { height: 1px; background: rgba(255, 255, 255, 0.07); flex: none; }
+  /* 77-APPLY C: the rail's internal scrollbar joins the dark system. Thin and
+     low-key but VISIBLE — a scrolling panel must keep its affordance, so the
+     thumb stays painted (no auto-hide, no transparent thumb). */
+  .rail { scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.25) transparent; }
+  .rail::-webkit-scrollbar { width: 8px; }
+  .rail::-webkit-scrollbar-track { background: transparent; }
+  .rail::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.25); border-radius: 4px;
+    border: 2px solid transparent; background-clip: padding-box;
+  }
+  .rail::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.38); background-clip: padding-box; border: 2px solid transparent; }
   /* Search leads the rail: the only free-text instrument. */
   .map-search {
     width: 100%; height: 34px; padding: 0 12px; border-radius: 7px;
@@ -193,6 +204,26 @@
   }
   .map-reset:hover { background: rgba(122, 162, 255, 0.24); }
   .map-reset:focus-visible { outline: 2px solid #7AA2FF; outline-offset: 1px; }
+  /* 77-APPLY §05 empty state: when a filter combination matches nothing, the
+     field ghosts and 리셋 — the one recovery affordance — breathes. Visual
+     only: the spec's one-line "no result" sentence must be supplied, so no
+     Korean is written here. Motion respects prefers-reduced-motion. */
+  .map-reset.pulse { animation: omPulse 1.8s ease-in-out infinite; }
+  @keyframes omPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(122, 162, 255, 0); }
+    50% { box-shadow: 0 0 0 6px rgba(122, 162, 255, 0.22); }
+  }
+  @media (prefers-reduced-motion: reduce) { .map-reset.pulse { animation: none; } }
+  /* 77-APPLY §05 loading: a 2px accent hairline runs under the masthead while
+     the graph loads — instruments render before data; the shipped settle
+     animation is the loading state. Removed once the payload arrives. */
+  .load-bar { position: absolute; left: 0; right: 0; top: 0; height: 2px; overflow: hidden; z-index: 7; }
+  .load-bar span { display: block; width: 38%; height: 100%; background: #7AA2FF; animation: omLoad 1.5s linear infinite; }
+  @keyframes omLoad {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(360%); }
+  }
+  @media (prefers-reduced-motion: reduce) { .load-bar span { animation: none; width: 100%; opacity: 0.5; } }
   /* BRAINMAP-FOCUS: the focus chip shares 리셋's accent chrome, so an active
      focus is visible without inventing a new control language. Its transient
      note state (unclustered tap) drops to the plain glass chrome. */
@@ -363,6 +394,7 @@
 </header>
 <main class="map-body">
   <canvas id="map"></canvas>
+  <div id="loadBar" class="load-bar" aria-hidden="true"><span></span></div>
   <div id="status">지도를 불러오는 중…</div>
   <!-- 76-APPLY §02: title + honesty line over the canvas — the first fixation
        point. Shipped strings verbatim; pointer-events none, so the field
@@ -563,6 +595,10 @@
   var DEPTH_BUCKETS = 24;
   var bucketNodeStart = null; // Int32Array(DEPTH_BUCKETS+1): slices of drawOrder
   var bucketEdges = null;     // Array(DEPTH_BUCKETS) of edge-index arrays
+  // 77-APPLY §04: per-node depth for the 3D distance fade / size attenuation.
+  // Set by layout() in 3D, null in 2D. Presentation only — depth is layout,
+  // never a measured value, and the fade is neutral (alpha only, hue fixed).
+  var depth3d = null, depth3dMin = 0, depth3dSpan = 1;
   // BRAINMAP-3D-DEPTH (Part C): the cloud's own edge, as a WORLD-SPACE SPHERE
   // around the 3D centroid. Projected orthographically a sphere is always a
   // circle of the same radius, so this boundary is EXACTLY invariant under
@@ -665,10 +701,24 @@
   }
 
   // BRAINMAP-DEPTH-STYLE: rendering constants. Coordinates NEVER move; only
-  // how a node is painted changes. Everything here is IDENTICAL for every
-  // node, so none of it encodes anything.
-  var R_CLUSTERED = 3.0;    // was 3.4 — small trim against bright-on-dark
-  var R_UNCLUSTERED = 1.9;  // was 2.1 —   irradiation (hue mapping untouched)
+  // how a node is painted changes.
+  // 77-APPLY §04: node marks are uniform 1.3–2.4px — the variance is RANDOM
+  // jitter (a stable per-node hash), never degree, never clustered-ness: an
+  // 80-outlet cluster earns more dots, not bigger ones, and the unlinked 72%
+  // render at the SAME sizes and the SAME alpha as connected nodes — the
+  // singles are the corpus's honest shape, not a background layer. (This
+  // retires the old 3.0/1.9 + 0.95/0.6 clustered/unclustered split, which
+  // was a size+luminance encoding of exactly the kind the page forbids.)
+  var R_JITTER_MIN = 1.3, R_JITTER_MAX = 2.4;
+  var R_JITTER_STEPS = 12;  // quantised so the sprite cache stays small
+  function jitterStep(i) {
+    // Stable, meaning-free hash of the node's load index — same every frame,
+    // uncorrelated with degree, domain, or anything measured.
+    return ((i * 2654435761) >>> 16) % R_JITTER_STEPS;
+  }
+  function jitterRadius(step) {
+    return R_JITTER_MIN + step * ((R_JITTER_MAX - R_JITTER_MIN) / (R_JITTER_STEPS - 1));
+  }
   // LEGIBILITY: ring thinned 1.25 -> 0.5 and drawn INSET, so a node's
   // footprint is exactly its radius (was r+1.25 — a 1.9px node wore a
   // 3.15px footprint and read as a hollow donut). Uniform for every node.
@@ -681,9 +731,8 @@
   // the live graph: at 4x zoom with today's 3px marks only 30.0% of on-screen
   // nodes are visibly clipped by a neighbour (it reads as a flat scatter); at
   // 6px that is 73.6% clipped while still only 1.0% fully hidden.
-  //   UNIFORM: one factor multiplies EVERY node's radius, so R_CLUSTERED /
-  //   R_UNCLUSTERED keep their exact ratio and size still encodes outlet count
-  //   precisely. Nothing per-node varies.
+  //   UNIFORM: one factor multiplies EVERY node's radius, so the jitter
+  //   band keeps its exact proportions. Nothing per-node varies with data.
   //   Floor 1: zooming OUT never shrinks a node, so the overview is unchanged.
   //   Cap 2: takes effect at scale 4 (sqrt(4) = 2) and holds to MAX_SCALE 8,
   //   so marks stop at 6.0px / 3.8px and never become blobs.
@@ -699,10 +748,8 @@
     var f = Math.max(1, Math.min(R_ZOOM_CAP, Math.sqrt(view.scale)));
     // Quantised to 0.05 steps so the sprite cache stays small (a continuous
     // factor would mint a fresh sprite per zoom step). The FACTOR is rounded,
-    // never the radius: both base radii are then multiplied by the SAME number,
-    // so R_CLUSTERED : R_UNCLUSTERED stays exactly 3.0 : 1.9 at every zoom and
-    // the size encoding is untouched. Rounding each radius separately would
-    // have skewed that ratio, which is precisely what must not happen.
+    // never the radius: every jitter-band radius is multiplied by the SAME
+    // number, so the band's proportions hold exactly at every zoom.
     return Math.round(f * 20) / 20;
   }
   function scaledRadius(base) {
@@ -768,25 +815,29 @@
   // (zoom in 3D), so the combo sprites are re-resolved whenever THAT changes —
   // once per frame, not once per node.
   var nodeCombo = null;         // Uint16Array: node index -> combo id
-  var comboDomain = [], comboClustered = [], comboMarket = [];
+  var comboDomain = [], comboJitter = [], comboMarket = [];
   var comboSprite = [], comboAlpha = [];
   var comboRadiusScale = -1;    // radiusScale() the sprites were resolved at
 
   function buildNodeCombos() {
+    // 77-APPLY §04: a combo is (domain, market, jitter step) — the clustered
+    // flag no longer selects a sprite or an alpha, because linked and
+    // unlinked nodes render identically. Combos stay small: 13 domains x 2 x
+    // 12 steps worst case.
     var seen = {}, n = graph.nodes.length;
     nodeCombo = new Uint16Array(n);
-    comboDomain = []; comboClustered = []; comboMarket = [];
+    comboDomain = []; comboJitter = []; comboMarket = [];
     for (var i = 0; i < n; i++) {
       var nd = graph.nodes[i];
-      var cl = nd.cluster_id !== null && nd.cluster_id !== undefined;
       var mk = nd.content_nature === "market_commercial";
-      var k = (nd.domain || "") + "|" + (cl ? 1 : 0) + "|" + (mk ? 1 : 0);
+      var js = jitterStep(i);
+      var k = (nd.domain || "") + "|" + js + "|" + (mk ? 1 : 0);
       var id = seen[k];
       if (id === undefined) {
         id = comboDomain.length;
         seen[k] = id;
         comboDomain.push(nd.domain);
-        comboClustered.push(cl);
+        comboJitter.push(js);
         comboMarket.push(mk);
       }
       nodeCombo[i] = id;
@@ -802,10 +853,11 @@
     for (var c = 0; c < comboDomain.length; c++) {
       comboSprite.push(spriteFor(
         colorFor(comboDomain[c]),
-        scaledRadius(comboClustered[c] ? R_CLUSTERED : R_UNCLUSTERED),
+        scaledRadius(jitterRadius(comboJitter[c])),
         comboMarket[c]));
-      // The SAME expression stampNode used per node, evaluated per combo.
-      comboAlpha.push(comboMarket[c] ? 0.75 : (comboClustered[c] ? 0.95 : 0.6));
+      // §04: ONE alpha for every solid node, linked or not; the market class
+      // keeps its shipped 0.75 — its distinction is the hollow SHAPE.
+      comboAlpha.push(comboMarket[c] ? 0.75 : 0.95);
     }
   }
 
@@ -981,6 +1033,22 @@
     });
     return clusterMemberCache;
   }
+  // 77-APPLY §04 hover lift: cluster_id -> indexes into graph.edges whose BOTH
+  // endpoints are in that cluster. Built once, lazily — membership never
+  // changes while a graph is loaded.
+  var clusterEdgeCache = null;
+  function clusterEdges() {
+    if (clusterEdgeCache) return clusterEdgeCache;
+    clusterEdgeCache = {};
+    graph.edges.forEach(function (e, ei) {
+      var a = nodeById[e.src], b = nodeById[e.dst];
+      if (!a || !b) return;
+      var ca = a.cluster_id, cb = b.cluster_id;
+      if (ca === null || ca === undefined || ca !== cb) return;
+      (clusterEdgeCache[ca] = clusterEdgeCache[ca] || []).push(ei);
+    });
+    return clusterEdgeCache;
+  }
   function labelTopClusters() {
     if (labelTopCache) return labelTopCache;
     labelTopCache = graph.clusters
@@ -1112,6 +1180,10 @@
       // Computed here — once per rotation — so pan/zoom frames pay nothing.
       var dmin = depth[drawOrder[0]], dmax = depth[drawOrder[drawOrder.length - 1]];
       var span = (dmax - dmin) || 1;
+      // 77-APPLY §04 입체 보기: depth = size attenuation + NEUTRAL distance
+      // fade only — no hue shift with depth, so 3D stays navigation, not
+      // decoration. stampNode reads these; null in 2D (see the else branch).
+      depth3d = depth; depth3dMin = dmin; depth3dSpan = span;
       function bucketOf(d) {
         var b = Math.floor((d - dmin) / span * DEPTH_BUCKETS);
         return b < 0 ? 0 : (b >= DEPTH_BUCKETS ? DEPTH_BUCKETS - 1 : b);
@@ -1139,6 +1211,7 @@
       cloudProj = null;
       bucketNodeStart = null;
       bucketEdges = null;
+      depth3d = null;
       // Same allocation hoist on the 2D side, same bit-identical arithmetic.
       var pos2 = positionSlots(graph.nodes.length);
       for (var qi = 0; qi < graph.nodes.length; qi++) {
@@ -1185,6 +1258,11 @@
       extraLabelSpots.push({ cluster_id: c.cluster_id, x: cx / m, y: cy / m,
         title: title, spread: c.size_label, outlets: c.outlet_count || 0 });
     });
+    // 77-APPLY B: collision priority is ACCESSION ORDER (cluster_id
+    // ascending) within each tier — meaning-free, stable, and explicitly not
+    // size, so no cluster's label wins a spot by being bigger.
+    labelSpots.sort(function (a, b) { return a.cluster_id - b.cluster_id; });
+    extraLabelSpots.sort(function (a, b) { return a.cluster_id - b.cluster_id; });
   }
 
   function draw() {
@@ -1220,8 +1298,12 @@
     // no-op unless the zoom crossed a quantised radius step.
     refreshComboSprites();
 
-    var edgeAlpha = 0.10 + 0.06 * Math.min(1, Math.max(0, view.scale - 1));
-    var edgeWidth = 0.5;
+    // 77-APPLY §04 edge: 0.6px on the spec's cooler hue, base alpha 0.07 at
+    // the overview — at 6,531 lines anything brighter becomes a surface
+    // instead of structure. The shipped zoom-graduated ramp is KEPT (style,
+    // not encoding: one width and one alpha for every edge at any moment).
+    var edgeAlpha = 0.07 + 0.06 * Math.min(1, Math.max(0, view.scale - 1));
+    var edgeWidth = 0.6;
     // BRAINMAP-3D-DEPTH (Part B2): in 3D ONLY, and only ABOVE 2x, edges keep
     // strengthening as the view zooms in. Justified by count: 6,353 edges are
     // on screen at 1x and still 6,082 at 2x (so the existing ramp correctly
@@ -1236,7 +1318,7 @@
       edgeWidth += 0.40 * eBoost;
     }
     ctx.lineWidth = edgeWidth;
-    ctx.strokeStyle = "rgba(148, 170, 205, " + edgeAlpha.toFixed(3) + ")";
+    ctx.strokeStyle = "rgba(150, 172, 216, " + edgeAlpha.toFixed(3) + ")";
     // Stroke one batch of edges as a single path. `list` is an array of indexes
     // into graph.edges, or null for "every edge" (the 2D path — no allocation).
     function strokeEdges(list) {
@@ -1282,6 +1364,17 @@
       // top of that is pure slack.
       if (sx + s.half < -CULL_PAD || sx - s.half > w + CULL_PAD
           || sy + s.half < -CULL_PAD || sy - s.half > h + CULL_PAD) return;
+      // 77-APPLY §04 입체 보기: in 3D a node far from the camera stamps a
+      // touch smaller and fainter — size attenuation + neutral distance fade,
+      // the same curve for every node. Depth is layout, not data; hue never
+      // varies with it. 2D stamps are byte-identical to before this block.
+      if (depth3d) {
+        var dt = (depth3d[ni] - depth3dMin) / depth3dSpan;   // 0 far -> 1 near
+        var dk = 0.78 + 0.22 * dt;
+        ctx.globalAlpha = comboAlpha[ci] * (0.7 + 0.3 * dt);
+        ctx.drawImage(s.c, sx - s.half * dk, sy - s.half * dk, s.size * dk, s.size * dk);
+        return;
+      }
       ctx.globalAlpha = comboAlpha[ci];
       ctx.drawImage(s.c, sx - s.half, sy - s.half, s.size, s.size);
     }
@@ -1293,8 +1386,14 @@
     // BRAINMAP-FILTER: when filtering, draw the non-matching nodes first as a
     // faint underlay — the selected set pops while its place in the whole map
     // stays visible (dim, not hide, to keep spatial context).
+    // 77-APPLY §05/§04 (RULING: ghosts taken): non-matches ghost at 10% grey
+    // under filters so the corpus's shape never lies; under 집중 모드 the rest
+    // holds at 16% — isolation never deletes the corpus. Ghosts are GREY
+    // (domain hue stripped) at a fraction of a match's alpha, so a ghost can
+    // never be read as a match.
     if (filtering) {
       ctx.fillStyle = "#7e8ea8";
+      var ghostAlpha = (focusCluster !== null) ? 0.16 : 0.10;
       graph.nodes.forEach(function (n, i) {
         if (isActive(n)) return;
         var dx = toScreenX(wx(i)), dy = toScreenY(wy(i));
@@ -1302,7 +1401,7 @@
         // radius. A dimmed node clipped by the edge still draws.
         if (dx + 1.8 < -CULL_PAD || dx - 1.8 > w + CULL_PAD
             || dy + 1.8 < -CULL_PAD || dy - 1.8 > h + CULL_PAD) return;
-        ctx.globalAlpha = 0.14;
+        ctx.globalAlpha = ghostAlpha;
         ctx.beginPath();
         ctx.arc(dx, dy, 1.8, 0, Math.PI * 2);
         ctx.fill();
@@ -1334,6 +1433,32 @@
       for (var oi2 = 0; oi2 < graph.nodes.length; oi2++) stampNode(oi2);
     }
     ctx.globalAlpha = 1;
+
+    // 77-APPLY §04 hover: the hovered node's cluster answers — its edges lift
+    // to 0.45 alpha and its (active) member nodes restamp at full alpha. A
+    // pointer state, identical for every cluster it touches; filtered-out
+    // members stay ghosts — hover never overrides a filter.
+    if (hoverNode && !intro.active
+        && hoverNode.cluster_id !== null && hoverNode.cluster_id !== undefined) {
+      var liftEdges = clusterEdges()[hoverNode.cluster_id];
+      if (liftEdges && liftEdges.length) {
+        ctx.lineWidth = edgeWidth;
+        ctx.strokeStyle = "rgba(150, 172, 216, 0.45)";
+        strokeEdges(liftEdges);
+      }
+      var liftMembers = clusterMembers()[hoverNode.cluster_id] || [];
+      liftMembers.forEach(function (mi) {
+        var mn = graph.nodes[mi];
+        if (filtering && !isActive(mn)) return;
+        var ms = comboSprite[nodeCombo[mi]];
+        var mx2 = toScreenX(wx(mi)), my2 = toScreenY(wy(mi));
+        ctx.globalAlpha = 1;
+        ctx.drawImage(ms.c, mx2 - ms.half, my2 - ms.half, ms.size, ms.size);
+      });
+      ctx.globalAlpha = 1;
+      // restore the frame's edge style for any later stroke
+      ctx.strokeStyle = "rgba(150, 172, 216, " + edgeAlpha.toFixed(3) + ")";
+    }
 
     // BRAINMAP-SEARCH-NAV: the CURRENT match, marked with a DASHED RING at a
     // constant screen radius. Deliberately not opacity (opacity encodes nothing
@@ -1411,34 +1536,71 @@
       ctx.arcTo(x, y, x + pw, y, r);
       ctx.closePath();
     }
+    // 77-APPLY B — screen-space collision avoidance for label plates. Greedy
+    // AABB placement: each candidate tries its shipped position (plate over
+    // the anchor), then the mirror position below the anchor, and is DROPPED
+    // if both collide with an already-placed plate. It only moves or drops —
+    // a label's text and cluster never change. PRIORITY when two labels want
+    // one spot: base tier before ladder tier (so nothing visible at extent is
+    // displaced by a zoomed-in addition), then ACCESSION ORDER (cluster_id
+    // ascending) — the same meaning-free order the search stepper discloses,
+    // and deliberately NOT cluster size: size deciding visibility would be
+    // the importance claim this page forbids. Cost: text widths are measured
+    // once per label ever (cached on the spot); per frame it is one transform
+    // + at most two O(placed) AABB scans per visible label — tens of labels,
+    // a few thousand float compares, well under 0.1ms.
+    var placedPlates = [];
+    var labelsDrawn = 0;
+    function plateCollides(x0, y0, x1, y1) {
+      for (var pi = 0; pi < placedPlates.length; pi++) {
+        var p = placedPlates[pi];
+        if (x0 < p[2] && x1 > p[0] && y0 < p[3] && y1 > p[1]) return true;
+      }
+      return false;
+    }
     function drawLabel(s) {
       var lx = toScreenX(s.x), ly = toScreenY(s.y);
-      ctx.font = LBL_TITLE_FONT;
-      var tw = ctx.measureText(s.title).width;
-      ctx.font = LBL_COUNT_FONT;
-      var cw = ctx.measureText(s.spread).width;
-      var pw = Math.max(tw, cw) + 18;         // 9px side padding
+      if (s._pw === undefined) {
+        ctx.font = LBL_TITLE_FONT;
+        var tw = ctx.measureText(s.title).width;
+        ctx.font = LBL_COUNT_FONT;
+        var cw = ctx.measureText(s.spread).width;
+        s._pw = Math.max(tw, cw) + 18;        // 9px side padding
+      }
+      var pw = s._pw, GAP = 2;
+      var x0 = lx - pw / 2;
       // Text keeps the shipped baselines (title ly-14, count ly); the plate
-      // wraps that block with the mock's 3px top / 4px bottom padding.
-      platePath(lx - pw / 2, ly - 27, pw, 34, 6);
+      // wraps that block with the mock's 3px top / 4px bottom padding. The
+      // fallback mirrors the whole block below the anchor (+36px).
+      var y0 = ly - 27, dyText = 0;
+      if (plateCollides(x0 - GAP, y0 - GAP, x0 + pw + GAP, y0 + 34 + GAP)) {
+        y0 = ly + 9; dyText = 36;
+        if (plateCollides(x0 - GAP, y0 - GAP, x0 + pw + GAP, y0 + 34 + GAP)) return;
+      }
+      placedPlates.push([x0, y0, x0 + pw, y0 + 34]);
+      labelsDrawn++;
+      platePath(x0, y0, pw, 34, 6);
       ctx.fillStyle = "rgba(8, 12, 19, 0.55)";
       ctx.fill();
       ctx.font = LBL_TITLE_FONT;
       ctx.fillStyle = "#EAEFF6";
-      ctx.fillText(s.title, lx, ly - 14);
+      ctx.fillText(s.title, lx, ly - 14 + dyText);
       ctx.font = LBL_COUNT_FONT;
       ctx.fillStyle = "#A5B0C2";
-      ctx.fillText(s.spread, lx, ly);
+      ctx.fillText(s.spread, lx, ly + dyText);
     }
+    // Base tier first (accession order — see layout()'s sort), off-screen
+    // anchors skipped like the ladder's.
     labelSpots.forEach(function (s) {
       if (filtering && !activeClusters[s.cluster_id]) return;
+      var bx = toScreenX(s.x), by = toScreenY(s.y);
+      if (bx < -220 || bx > w + 220 || by < -60 || by > h + 60) return;
       drawLabel(s);
     });
-    // §03 zoom ladder: full extent keeps the base set above, unchanged;
-    // ≈2.5× ADDS labels for 8+ outlet clusters; by ≈6× every pair is
-    // labelled. Zooming only adds — nothing visible at extent disappears.
-    // Same pick mechanism and filter rule as the base labels; off-screen
-    // anchors are skipped, never re-placed.
+    // §03 zoom ladder: full extent keeps the base set above; ≈2.5× ADDS
+    // labels for 8+ outlet clusters; by ≈6× every pair is labelled. Zooming
+    // only adds — the base tier always places first, so an addition can
+    // never displace it. Same pick mechanism and filter rule as the base.
     if (view.scale >= 2.5) {
       var needOutlets = (view.scale >= 6) ? 0 : 8;
       extraLabelSpots.forEach(function (s) {
@@ -1449,6 +1611,8 @@
         drawLabel(s);
       });
     }
+    // Debug gauge for capture/validation harnesses only — encodes nothing.
+    window.__bmLabelCount = labelsDrawn;
   }
 
   // Hit test in SCREEN space so the radius stays a constant ~9px at any zoom.
@@ -1956,6 +2120,26 @@
         ? (total.toLocaleString("ko-KR") + "건 일치 · 그중 " + connected.toLocaleString("ko-KR") + "건 연결됨") : "";
     }
     updateSearchNav();
+    updateEmptyState();
+  }
+
+  // 77-APPLY §05 empty state: a filter combination that matches NOTHING ghosts
+  // the whole field (the ghost underlay already draws every node once none is
+  // active) and sets 리셋 pulsing. VISUAL ONLY — the spec's one-line "no
+  // result" sentence must be supplied by the operator; no Korean is invented
+  // here. Every filter path funnels through updateSearchCount, so this stays
+  // in sync without touching any handler.
+  function updateEmptyState() {
+    var btn = document.getElementById("resetView");
+    if (!btn || !graph) return;
+    var empty = false;
+    if (anyFilterActive()) {
+      empty = true;
+      for (var i = 0; i < graph.nodes.length; i++) {
+        if (isActive(graph.nodes[i])) { empty = false; break; }
+      }
+    }
+    btn.classList.toggle("pulse", empty);
   }
 
   // BRAINMAP-SEARCH-NAV: the visible stepper's own state. Present only while a
@@ -2232,7 +2416,22 @@
       setFocus(n);
       return;
     }
-    if (n.id) window.location.href = "/?result_id=" + encodeURIComponent(n.id);
+    // 77-APPLY §04 press: the node flashes white, then navigates to its claim
+    // page. Presentation only — the destination and the click semantics are
+    // unchanged; the flash is identical for every node.
+    if (n.id) {
+      var fx = toScreenX(positions[n._i].px), fy = toScreenY(positions[n._i].py);
+      ctx.save();
+      ctx.globalAlpha = 1;
+      ctx.beginPath();
+      ctx.arc(fx, fy, 5, 0, Math.PI * 2);
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fill();
+      ctx.restore();
+      setTimeout(function () {
+        window.location.href = "/?result_id=" + encodeURIComponent(n.id);
+      }, 130);
+    }
   }
 
   // BRAINMAP-FOCUS: focus one cluster. An UNCLUSTERED node (9,678 of them) has
@@ -2363,6 +2562,10 @@
       hasEdgeById[e.dst] = true;
     });
     statusEl.style.display = "none";
+    // 77-APPLY §05: payload arrived — the loading hairline comes down; the
+    // shipped settle animation carries the rest of the loading state.
+    var loadBar = document.getElementById("loadBar");
+    if (loadBar) loadBar.style.display = "none";
     buildLegend(graph.nodes);
     renderStats();
     document.getElementById("legend").addEventListener("click", onLegendClick);
@@ -2469,6 +2672,8 @@
     })
     .then(start)
     .catch(function () {
+      var loadBar = document.getElementById("loadBar");
+      if (loadBar) loadBar.style.display = "none";
       statusEl.textContent = "지도를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.";
     });
 })();
