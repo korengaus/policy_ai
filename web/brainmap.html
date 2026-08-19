@@ -2533,7 +2533,16 @@
   function refineLayout2D() {
     var t0 = (window.performance && performance.now) ? performance.now() : 0;
     var REF_W = 1360, REF_H = 764, REF_PAD = 40;   // 1440x900 reference frame
-    var TIGHTEN = 0.06;  // member keeps 6% of its centroid offset
+    // 80-APPLY: TIGHTEN swept at 0.06/0.10/0.15/0.22/0.30/1.0 and set from the
+    // numbers. 0.06 maximised separable clusters (355) but collapsed the
+    // edges — median rendered edge 11.8px with 72% under the 15px visibility
+    // floor, so the graph's connections vanished at extent. 0.10 lifts the
+    // median edge to 19.7px with 74% over 15px while grouping holds
+    // (same-cluster 19.2px vs cross 448px; r90 13.2px — still under half the
+    // 36px separation gutter). 0.15+ trades separability (29 -> 3 -> 0) for
+    // little further edge gain. Edges are all within-cluster, so length and
+    // cohesion pull on the same rope; 0.10 is where both still read.
+    var TIGHTEN = 0.10;  // member keeps 10% of its centroid offset
     var SEP = 36;        // centroids repel below this distance (ref px)
     var REP = 0.6;       // repulsion strength (equal for every pair)
     var ANCHOR = 0.012;  // spring back to the original embedding centroid
