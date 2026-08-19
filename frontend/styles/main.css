@@ -3008,6 +3008,28 @@
       font-size: var(--fs-figure-xl);
       margin-top: auto;
     }
+    /* HERO-TWO-FORMS (87-APPLY): the REDUCED domain band — rendered when the
+       tab's top cluster sits under DOMAIN_HERO_MIN_OUTLETS (main.js; the
+       choice reads that one outlet count and nothing else). Same card, same
+       elements, same colors, same weights: the two parts sized for a large
+       spread step down ONE already-shipped token each — headline
+       title-xl 32 → title-l 24 (the detail page's own .result-title size,
+       with its 1.3 line-height pairing), figures figure-xl 40 → figure-l 28
+       (the shipped step between xl and the mobile cells' figure-m; the
+       ≤960px override below still takes both forms to figure-m, so the two
+       forms stay two forms at every width). Nothing is dimmed, muted or
+       greyed — the reduced form states a smaller spread, not a lesser claim.
+       The summary and the daily strip are DROPPED in JS
+       (renderTopicCardHtml), never display:none'd here, so the DOM says
+       what the reader sees. */
+    .topic-card--hero-sm .topic-card-title {
+      font-size: var(--fs-title-l);
+      line-height: 1.3;
+    }
+    .topic-card--hero-sm .spread-fact-value {
+      font-size: var(--fs-figure-l);
+    }
+
     .hero-spread-range {
       color: var(--slate);
       font-size: var(--fs-meta);
