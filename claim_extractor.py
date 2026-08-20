@@ -188,6 +188,42 @@ def _is_personnel_notice_title(title: str) -> bool:
     return any(pattern.search(normalized) for pattern in _PERSONNEL_TITLE_MARKERS)
 
 
+# TITLE-ATTRIB (93-APPLY) — fallback claims (summary/title, including every
+# personnel-gated row) were shipping the feed's own attribution suffix:
+# "[인사] 국가데이터처 - 연합뉴스" rendered the wire service's name as claim
+# text. Same category as the chrome the extractor already strips, in a
+# different position; the chrome patterns themselves are untouched.
+#
+# WHAT IS STRIPPED — a trailing " - X" where X is ONE token (no whitespace,
+# no inner dash, no leading digit, 2–24 chars), iterated so "— 조선비즈 -
+# Chosunbiz" clears. Measured over all 16,026 real corpus titles: 710 carry a
+# trailing spaced-dash segment; every one of the 294 DISTINCT single-token
+# segments is an outlet, domain or author attribution — zero content.
+#
+# WHAT IS REFUSED — (a) multi-word trailing segments: real subtitles live
+# there ("… - 돌봄 지옥, 사라지는 요양보호사", "… - 낙인이 아닌 신뢰의
+# 제도로"), so spaced outlets like "KBS 뉴스" are an accepted miss; (b)
+# leading bracket tags ([인사], [속보]): they name the document type — on a
+# personnel card the tag is the only predicate left; (c) the institution name
+# itself: content; (d) dash-LESS trailing outlet tokens seen in mangled feed
+# summaries ("… 서울Pn"): not detectable without an outlet registry. The
+# no-leading-digit guard keeps spaced number ranges ("30만 - 50만원") whole.
+#
+# FLOOR — if stripping leaves the cleaned claim under the extractor's own
+# 18-char fragment floor (_collect_sentences), the fallback is left alone,
+# exactly as the 91-APPLY backfill left short results alone.
+_TRAILING_ATTRIBUTION = re.compile(r"\s+-\s+(?!\d)[^\s-]{2,24}\s*$")
+
+
+def _strip_trailing_attribution(text: str) -> str:
+    text = _normalize_text(text)
+    while True:
+        candidate = _TRAILING_ATTRIBUTION.sub("", text, count=1)
+        if candidate == text or not candidate.strip():
+            return text
+        text = candidate
+
+
 # CLAIM-DISPLAY-2 FIX B: the old pattern split on a BARE Korean ender
 # (다|요|죠|음|임|됨|함) + whitespace, with no punctuation required. Ordinary
 # mid-sentence words end in those syllables — 보다, 부터, 이다, 마다 — so a
@@ -366,6 +402,12 @@ def extract_verifiable_claims(
 
     if not claims and fallback_text:
         fallback_claim = _clean_claim(fallback_text)
+        # TITLE-ATTRIB (93-APPLY): drop the feed's trailing outlet attribution
+        # from the fallback, but only when what remains clears the extractor's
+        # own 18-char floor — otherwise the fallback is left exactly as it was.
+        stripped_claim = _clean_claim(_strip_trailing_attribution(fallback_text))
+        if stripped_claim != fallback_claim and len(stripped_claim) >= 18:
+            fallback_claim = stripped_claim
         if fallback_claim:
             claims.append(fallback_claim)
 

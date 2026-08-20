@@ -297,6 +297,68 @@ class PersonnelGateTests(unittest.TestCase):
         self.assertNotEqual(claims, ["국가데이터처 조직 개편"])
 
 
+class TitleAttributionTests(unittest.TestCase):
+    """TITLE-ATTRIB (93-APPLY) — fallback claims drop the feed's trailing
+    " - 매체명" attribution. Every title below is a REAL corpus title (ids
+    noted). Measured over all 16,026 titles: 659 strip, all 294 distinct
+    removed suffixes are outlet/domain/author attribution, 0 content."""
+
+    def test_strips_single_trailing_outlet(self):
+        # id=13086
+        claims = extract_verifiable_claims(
+            "", title="폴란드 통계청, 안양 스마트도시 견학 - 신아일보")
+        self.assertEqual(claims, ["폴란드 통계청, 안양 스마트도시 견학"])
+
+    def test_strips_outlet_after_parenthesised_list(self):
+        # id=13946
+        claims = extract_verifiable_claims(
+            "", title="2025년 6월 인구동향(출생, 사망, 혼인, 이혼) - 서울Pn")
+        self.assertEqual(claims, ["2025년 6월 인구동향(출생, 사망, 혼인, 이혼)"])
+
+    def test_strips_outlet_but_keeps_glued_hyphens(self):
+        # id=13336 — the trailing outlet goes; the glued name-role hyphens
+        # are content and stay whole.
+        claims = extract_verifiable_claims(
+            "", title="대변인-권병기, 지필공실장-손영래, 건강보험국장-유주현 - 데일리팜")
+        self.assertEqual(claims,
+                         ["대변인-권병기, 지필공실장-손영래, 건강보험국장-유주현"])
+
+    def test_floor_leaves_short_personnel_fallback_alone(self):
+        # id=16026 — stripping would leave 11 chars, under the extractor's
+        # 18-char floor, so the fallback ships exactly as before (91-APPLY
+        # backfill precedent: never store a below-floor fragment).
+        claims = extract_verifiable_claims(
+            "", title="[인사] 국가데이터처 - 연합뉴스")
+        self.assertEqual(claims, ["[인사] 국가데이터처 - 연합뉴스"])
+
+    def test_multiword_subtitle_survives(self):
+        # id=9055 — a spaced-dash MULTI-WORD tail is a subtitle, not an
+        # outlet; it must survive untouched.
+        title = "'추적 60분' 초고령사회의 민낯 - 돌봄 지옥, 사라지는 요양보호사"
+        self.assertEqual(
+            claim_extractor._strip_trailing_attribution(title), title)
+
+    def test_multiword_subtitle_survives_with_leading_tag(self):
+        # id=15601
+        title = "[메디컬 窓] 필수의료 살리기 - 낙인이 아닌 신뢰의 제도로"
+        self.assertEqual(
+            claim_extractor._strip_trailing_attribution(title), title)
+
+    def test_outlet_lookalike_content_without_dash_survives(self):
+        # id=12472 — 정책브리핑 is an outlet name but here it is the SUBJECT;
+        # with no spaced-dash delimiter nothing is touched.
+        title = "정책브리핑 RSS 서비스 제공 중단 안내"
+        self.assertEqual(
+            claim_extractor._strip_trailing_attribution(title), title)
+
+    def test_leading_bracket_tag_is_not_stripped(self):
+        # The section tag names the document type and stays; only the
+        # trailing attribution goes. (id=13581)
+        claims = extract_verifiable_claims(
+            "", title="[보도참고] 최근 청년층 고용동향과 정책지원 방향 - 서울Pn")
+        self.assertEqual(claims, ["[보도참고] 최근 청년층 고용동향과 정책지원 방향"])
+
+
 class ChromeHonestyTests(unittest.TestCase):
     def test_no_verdict_field_in_extractor_source(self):
         # The extractor feeds the verdict layers but must not reach into them.
