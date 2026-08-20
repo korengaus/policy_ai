@@ -160,6 +160,34 @@ def _strip_article_chrome(text: str) -> str:
     return text
 
 
+# PERSONNEL-GATE (92-APPLY) — personnel-roster articles were having their
+# NAME LISTS selected as the claim: department names contain policy keywords
+# as substrings (운영지원과 → 운영 + 지원, 국회사무처 → 국회), so a roster
+# passes _is_verifiable and then out-scores real sentences on keyword count,
+# length and digits. Measured over the full 16,026-row corpus: 20 rows carry
+# a personnel marker in the title and 11 of them render a roster claim; every
+# roster-claim row carries one of the markers below. The gate recognises the
+# DOCUMENT TYPE by the wire services' own title label and routes the article
+# to the existing summary/title fallback (the path 9 sibling rows already
+# took) — the row is still collected, clustered and counted; only the claim
+# sentence changes. Nothing here judges what a claim is worth, and no verdict
+# field, score threshold or chrome pattern is touched.
+_PERSONNEL_TITLE_MARKERS = [
+    # "[인사]", "[인사] 국가데이터처", "[8월18일 인사종합] …" — a leading
+    # bracket tag whose content ENDS in 인사/인사종합. Agency names merely
+    # containing 인사 ("[인사혁신처] …") do not end in the marker and pass.
+    re.compile(r"^\s*[\[［][^\]］]{0,12}인사(?:종합)?\s*[\]］]"),
+    # "…첫 5급 이상 인사(종합)" — 인사 immediately before the wire (종합)
+    # roundup tag. 인사청문회(종합) has 회 before the paren and passes.
+    re.compile(r"인사\s*[(（]\s*종합\s*[)）]"),
+]
+
+
+def _is_personnel_notice_title(title: str) -> bool:
+    normalized = _normalize_text(title or "")
+    return any(pattern.search(normalized) for pattern in _PERSONNEL_TITLE_MARKERS)
+
+
 # CLAIM-DISPLAY-2 FIX B: the old pattern split on a BARE Korean ender
 # (다|요|죠|음|임|됨|함) + whitespace, with no punctuation required. Ordinary
 # mid-sentence words end in those syllables — 보다, 부터, 이다, 마다 — so a
@@ -310,7 +338,13 @@ def extract_verifiable_claims(
 ) -> list[str]:
     source_text = article_body if article_body and len(article_body) >= 100 else ""
     fallback_text = summary or title or ""
-    sentences = _split_sentences(source_text) if source_text else []
+    # PERSONNEL-GATE (92-APPLY): a personnel-roster article's body is a name
+    # list, never ranked — the summary/title fallback below records the
+    # circulation instead. Everything downstream is unchanged.
+    if _is_personnel_notice_title(title):
+        sentences = []
+    else:
+        sentences = _split_sentences(source_text) if source_text else []
 
     ranked = sorted(
         (sentence for sentence in sentences if _is_verifiable(sentence)),

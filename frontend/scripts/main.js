@@ -608,9 +608,13 @@
       draft_unverified: "추가 검증 필요",
       draft_needs_context: "맥락 추가 확인 필요",
       draft_needs_official_confirmation: "공식 출처 확인 필요",
-      draft_misleading: "오해 가능성 있음",
+      // DEAD-LABEL-RETIRE (92-APPLY): draft_misleading and draft_outdated
+      // removed — no producer path can emit either (verification_card.py
+      // rule literals, llm_judge/honesty_guard whitelists) and no stored row
+      // carries them. Removed from web/claim.html in the same pass; the
+      // card_render_audit key-set gate compares both files in both
+      // directions, so a one-sided removal fails loudly.
       draft_disputed: "상충 근거 확인 필요",
-      draft_outdated: "최신 여부 확인 필요",
     };
     const REVIEW_STATUS_LABELS = {
       ai_draft_pending_human_review: "AI 초안, 사람 검토 대기",

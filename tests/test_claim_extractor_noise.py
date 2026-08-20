@@ -225,6 +225,78 @@ class ChromeEndToEndTests(unittest.TestCase):
         self.assertEqual(claims, ["정부가 최대 1억5000만원의 사업화 자금을 지원한다."])
 
 
+class PersonnelGateTests(unittest.TestCase):
+    """PERSONNEL-GATE (92-APPLY) — a title-marker gate routes personnel
+    articles to the summary/title fallback so a promotions roster is never
+    ranked as the claim. Titles below are REAL corpus titles (ids noted),
+    measured over all 16,026 rows: 20 marker hits, all personnel, 0 policy
+    articles caught."""
+
+    # A real roster body (id=15949's stored claim): department names carry
+    # policy keywords as substrings, so unGATED it ranks as a claim.
+    ROSTER_BODY = ("국가데이터 4급 승진 국가데이터처 서주희 감사담당관실 "
+                   "유달순 통계정책과 임지우 통계정책과 조성현 통계서비스기획과 "
+                   "최경아 물가동향과 이정화 고용통계과 권순필 교육기획과 "
+                   "이주희 조사관리국 운영지원과 국회사무처 전보 발령 명단이다.")
+
+    def test_bracket_insa_marker(self):
+        # id=15949
+        self.assertTrue(claim_extractor._is_personnel_notice_title(
+            "[인사] 국가데이터처"))
+
+    def test_bracket_insa_marker_glued(self):
+        # id=8030 — no space after the tag
+        self.assertTrue(claim_extractor._is_personnel_notice_title(
+            "[인사]전남광주특별시교육청 광주청사"))
+
+    def test_bracket_insa_jonghap_marker(self):
+        # id=15948 — dated digest tag
+        self.assertTrue(claim_extractor._is_personnel_notice_title(
+            "[8월18일 인사종합] 국가데이터처 외"))
+
+    def test_insa_jonghap_suffix_marker(self):
+        # id=8026 — wire roundup suffix
+        self.assertTrue(claim_extractor._is_personnel_notice_title(
+            "전남광주통합특별시교육청 출범 후 첫 5급 이상 인사(종합)"))
+
+    def test_lookalike_insight_tag_passes(self):
+        # id=25 — [부동산 인사이트] is a column tag, not a roster
+        self.assertFalse(claim_extractor._is_personnel_notice_title(
+            "[부동산 인사이트] 전세, 월세가 사라지고 있다 - 비즈한국"))
+
+    def test_lookalike_policy_insight_tag_passes(self):
+        # id=14128
+        self.assertFalse(claim_extractor._is_personnel_notice_title(
+            "[정책 인사이트] '한국형 주치의' 윤곽…치매·장애인 넘어 고혈압·당뇨"))
+
+    def test_lookalike_insawi_passes(self):
+        # id=9530 — 인사위 회부 is a disciplinary-referral story
+        self.assertFalse(claim_extractor._is_personnel_notice_title(
+            '[단독] "아동학대 부실 대응"...양주시 공무원 인사위 회부'))
+
+    def test_lookalike_insa_prose_passes(self):
+        # id=8037 — marker-less personnel PROSE headline: stays ungated (the
+        # gate keys on the wire label, never on topic)
+        self.assertFalse(claim_extractor._is_personnel_notice_title(
+            "전남광주통합특별시교육청, 5급 이상 일반직 공무원 인사 단행"))
+
+    def test_gated_article_falls_back_to_title(self):
+        # Roster body + marker title → the summary/title fallback is the
+        # claim; the roster is never selected. claims stays NON-EMPTY, so the
+        # row is still recorded and counted.
+        claims = extract_verifiable_claims(
+            self.ROSTER_BODY, title="[인사] 국가데이터처", summary="")
+        self.assertEqual(claims, ["[인사] 국가데이터처"])
+
+    def test_ungated_title_still_ranks_body(self):
+        # Same body under a non-marker title: selection is untouched — the
+        # gate recognises the document type, it does not judge sentences.
+        claims = extract_verifiable_claims(
+            self.ROSTER_BODY, title="국가데이터처 조직 개편", summary="")
+        self.assertTrue(claims)
+        self.assertNotEqual(claims, ["국가데이터처 조직 개편"])
+
+
 class ChromeHonestyTests(unittest.TestCase):
     def test_no_verdict_field_in_extractor_source(self):
         # The extractor feeds the verdict layers but must not reach into them.
