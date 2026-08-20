@@ -7384,6 +7384,11 @@
     const domainResultsCache = new Map();
     let domainLoadingKey = null;
     let domainFetchErrorKey = null;
+    // HONEST-FAILURE (96-APPLY): true when the ONE home-feed /history fetch
+    // (init-time, 전체) failed — the feed's empty grid then shows the shipped
+    // STABLE-TABS failure line instead of the empty-state instruction, which
+    // told a reader to run a search rather than that loading failed.
+    let homeFeedFetchFailed = false;
     // TITLE-TAIL-STRIP: tail->apex evidence folded (via the pure
     // outletTailEvidenceAdd) over every row the page has loaded — the recent
     // feed plus all per-domain caches. DERIVED AT LOAD TIME from the data
@@ -10879,6 +10884,12 @@
           writeFeedGridHtml(domainFetchErrorKey === activeDomain
             ? '<div class="empty-state">이 분야의 뉴스를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</div>'
             : '<div class="empty-state">불러오는 중…</div>');
+        } else if (homeFeedFetchFailed && isHomeFeedRender && activeDomain === "전체") {
+          // HONEST-FAILURE (96-APPLY): the init /history fetch failed. Reuse
+          // the STABLE-TABS failure line verbatim (전체 is the active row of
+          // the same 분야 tab strip) — a failure must never render the
+          // empty-state instruction below, which asserts the corpus works.
+          writeFeedGridHtml('<div class="empty-state">이 분야의 뉴스를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</div>');
         } else {
           writeFeedGridHtml('<div class="empty-state">검색을 실행하거나 최근 분석을 불러오면 검증 카드가 표시됩니다.</div>');
         }
@@ -12998,6 +13009,45 @@
         source_origin: "evidence_snippet",
       }));
       candidates.forEach((source) => merged.push({ ...source, source_origin: "candidate" }));
+      // EVIDENCE-FIRST (96-APPLY): the same official document is stored TWICE —
+      // full strength fields on its source_candidates copy (which line
+      // "origin === candidate" keeps out of the public rows) and stripped
+      // fields on its evidence_sources copy (which therefore under-badges as
+      // 공식 약한 후보). Record 16000's 산림청 direct match rendered 공식
+      // 직접 근거 inside the collapse and 약한 후보 on the visible row — one
+      // document, two claims. Thread the candidate twin's OWN stored fields
+      // (classification / body_match / score, matched by url else title) onto
+      // the public copy so sourceTraceability's EXISTING tiers read the same
+      // data everywhere. Gated by the shipped genuine predicate: on a card
+      // without genuine official support nothing is enriched, so the honest
+      // top line can never be out-claimed (OFFICIAL-EVIDENCE-DISPLAY-HONESTY
+      // posture) and such cards render byte-identically.
+      const cardDebug = (result?.verification_card || result || {}).debug_summary || result?.debug_summary || {};
+      if (officialEvidenceIsGenuine(reliability, cardDebug)) {
+        const strengthByKey = new Map();
+        candidates.forEach((candidate) => {
+          if (!candidate) return;
+          const cls = candidate.official_evidence_classification
+            || candidate.official_direct_match_classification;
+          if (!cls) return;
+          [candidate.url || candidate.source_url || "",
+           candidate.title || candidate.source_title || ""].forEach((key) => {
+            if (key && !strengthByKey.has(key)) strengthByKey.set(key, candidate);
+          });
+        });
+        merged.forEach((row) => {
+          if (row.source_origin === "candidate") return;
+          if (row.official_evidence_classification || row.official_direct_match_classification) return;
+          const twin = strengthByKey.get(row.url || row.source_url || "")
+            || strengthByKey.get(row.title || row.source_title || "");
+          if (!twin) return;
+          row.official_evidence_classification = twin.official_evidence_classification
+            || twin.official_direct_match_classification;
+          row.official_body_match = twin.official_body_match;
+          row.official_evidence_score = twin.official_evidence_score
+            ?? twin.official_final_direct_match_score;
+        });
+      }
       const seen = new Set();
       let filtered = merged.filter((source) => isPublicSupportingSource(source, reliability));
       if (!filtered.length) {
@@ -13009,8 +13059,29 @@
         if (!key.trim() || seen.has(key)) return false;
         seen.add(key);
         return true;
-      }).slice(0, 3);
-      return { items: unique, reliability, officialLimitation: publicOfficialLimitationNote(result, reliability, unique) };
+      });
+      // EVIDENCE-FIRST (96-APPLY): the visible three were simply the FIRST
+      // three survivors of the merge order (evidence_sources → snippets), so
+      // a card's strongest official match could lose its slot to weaker rows
+      // that happened to merge earlier — record 16000 claimed direct support
+      // while its 공식 직접 근거 row sat below the cut. Stable-sort by the
+      // SAME tier the row's own badge states (sourceTraceability — direct,
+      // then context, then the rest, original order preserved within a tier)
+      // and cut afterwards. Nothing a row says about itself changes, weak
+      // candidates are reordered rather than suppressed, and cards with no
+      // official tier sort entirely stable (byte-identical render).
+      const traceTierRank = (source) => {
+        const label = sourceTraceability(source, reliability).label;
+        if (label === "공식 직접 근거") return 0;
+        if (label === "공식 맥락 근거") return 1;
+        return 2;
+      };
+      const ranked = unique
+        .map((source, index) => [traceTierRank(source), index, source])
+        .sort((a, b) => a[0] - b[0] || a[1] - b[1])
+        .map((entry) => entry[2])
+        .slice(0, 3);
+      return { items: ranked, reliability, officialLimitation: publicOfficialLimitationNote(result, reliability, ranked) };
     }
 
     function renderPublicSourceCards(result) {
@@ -16571,15 +16642,19 @@
     // at most the recent-100 window (api_server.py history / limit=300 → 100
     // rows, measured), so this is the widest the shipped endpoint goes —
     // deeper needs a backend change, deliberately not made here.
+    // HONEST-FAILURE (96-APPLY): failure returns null (the STABLE-TABS domain
+    // fetch contract) instead of [] — an empty array said "the corpus is
+    // empty" for a dropped connection, and the feed then rendered the
+    // empty-state instruction instead of a failure line.
     async function getServerRecentAnalyses(limit = 100) {
       try {
         const response = await fetch(`${API_BASE}/history?limit=${encodeURIComponent(limit)}`);
-        if (!response.ok) return [];
+        if (!response.ok) return null;
         const body = await response.json();
         const rows = Array.isArray(body?.results) ? body.results : [];
         return rows.map(mapHistoryRowToResult);
       } catch (_) {
-        return [];
+        return null;
       }
     }
 
@@ -17206,26 +17281,60 @@
       // view. Missing field (older server) → hits.length, i.e. exactly the
       // pre-total behavior.
       let searchTotal = 0;
+      // HONEST-FAILURE (96-APPLY): a rejected/failed fetch used to fall into
+      // the SAME branch as a genuine zero-hit result, so a dropped connection
+      // rendered "기존 분석이 없습니다" — a false claim about the corpus.
+      // Failure and miss are now separate states. NOTE the residual: the
+      // server's own exception handler answers 200 with the empty payload
+      // (api_server.py search_corpus → _empty()), and that case is
+      // indistinguishable from a real miss on this side.
+      let searchFailed = false;
       try {
         const response = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(query)}`);
         if (response.ok) {
           const data = await response.json();
           if (data && Array.isArray(data.results)) hits = data.results;
           searchTotal = Math.max(Number(data && data.total) || 0, hits.length);
+        } else {
+          searchFailed = true;
         }
       } catch (error) {
-        // Search unavailable → fall through to the offer (never auto-run
-        // the paid pipeline, never dead-end).
+        searchFailed = true;
       } finally {
         setBusy(false);
       }
       if (hits.length) {
         v2UpdateProgress(100, `기존 분석 ${formatCount(searchTotal)}건을 찾았습니다`);
         renderSearchHits(query, hits, searchTotal);
+      } else if (searchFailed) {
+        // No search-scoped failure sentence ships anywhere; the shipped RETRY
+        // sentence (the second sentence of the STABLE-TABS feed line, the map
+        // status line and the login error) is reused verbatim, asserting
+        // nothing about the corpus. The progress line is hidden rather than
+        // given a claim it cannot support.
+        v2SetProgressVisible(false);
+        renderSearchFailure();
       } else {
-        v2UpdateProgress(100, "기존 분석 없음 — 새 분석을 제안합니다");
+        // The offer clause was a promise only the operator's view keeps —
+        // anonymous readers were told a proposal was coming that never
+        // rendered (ANALYZE-EXPOSURE removed it). Same string for the
+        // operator; its shipped first clause alone for everyone else.
+        v2UpdateProgress(100, operatorToolsFlagSet()
+          ? "기존 분석 없음 — 새 분석을 제안합니다"
+          : "기존 분석 없음");
         renderAnalyzeOffer(query);
       }
+    }
+
+    // HONEST-FAILURE (96-APPLY): the search-failure view. Mirrors the offer
+    // view's screen handling but carries ONLY the shipped retry sentence —
+    // no claim is better than a wrong claim.
+    function renderSearchFailure() {
+      metricsEl.style.display = "none";
+      hideSelectedIssueIntro();
+      resultsEl.innerHTML = '<div class="empty-state">잠시 후 다시 시도해 주세요.</div>';
+      pushDetailHistoryState(window.scrollY || 0);
+      showScreen("detail");
     }
 
     // SHARE-IMAGE Slice 1: delegated handler for the per-card share button
@@ -19137,7 +19246,10 @@
       // 69-APPLY (HERO-NO-FALSE-CLAIM): the feed fetch has returned — from
       // here on a settled-failed band may stop holding its reserved height.
       serverFeedLanded = true;
-      if (serverResults.length) {
+      // HONEST-FAILURE (96-APPLY): null = the fetch FAILED (network/HTTP) —
+      // render the failure line, never the empty-state instruction.
+      homeFeedFetchFailed = serverResults === null;
+      if (serverResults && serverResults.length) {
         // 5d1: fetch-then-render — the size map lands BEFORE the pool's first
         // paint, so the circulation default paints sorted once instead of
         // flashing server order and reshuffling. Costs one sequential request
