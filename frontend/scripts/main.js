@@ -10263,6 +10263,21 @@
     });
 
     analyzeBtn.addEventListener("click", searchFirst);
+    // ENTER-SEARCH (91-APPLY): the inputs sit in a plain <div class="controls">
+    // (no <form>), so Enter in the search field did NOTHING — only the button
+    // worked. Bind Enter to searchFirst ITSELF (the button's handler, not a
+    // copy — two paths would drift). isComposing guard: committing Korean IME
+    // composition ends with an Enter keydown; that commit must not fire a
+    // search mid-typing. The count field gets the same binding: Enter in any
+    // field of a control group is universally expected to press the primary
+    // button, and searchFirst is what that button does regardless of focus.
+    // No <form> is introduced and there is no submit default to suppress.
+    const searchOnEnter = (event) => {
+      if (event.key !== "Enter" || event.isComposing) return;
+      searchFirst();
+    };
+    queryInput.addEventListener("keydown", searchOnEnter);
+    maxNewsInput.addEventListener("keydown", searchOnEnter);
     historyBtn.addEventListener("click", loadHistory);
     copyReportBtn.addEventListener("click", copyReport);
     downloadReportBtn.addEventListener("click", downloadReport);
