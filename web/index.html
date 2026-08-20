@@ -8053,6 +8053,15 @@
         [/\bexcluded document_type\s*:\s*/gi, "제외 문서 유형: "],
         [/\bdocument_type\s*:\s*/gi, "문서 유형: "],
         [/\bConnection reset by peer\b/gi, "공식 사이트 연결이 중단됐습니다"],
+        // DISPLAY-LEAK-FIX-3 (99-APPLY) — a BYLINE EMAIL in stored evidence
+        // prose ("안은혜 기자 iamgrace_ahn@kakao.com", id 15718): the evidence
+        // matcher harvested an article's trailer line as an evidence sentence
+        // (a path the 71-APPLY extraction-time chrome strip never touches),
+        // and the address's local part is machine text on a reader surface
+        // (snake-case zero class). Bounded to the byline shape — 기자/특파원
+        // followed by an @-address — so an informational email inside real
+        // prose can never be eaten; the role word itself stays.
+        [/(기자|특파원)\s*[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]*/g, "$1"],
         // DISPLAY-LEAK-FIX-2 — the four enums the committed render scanner
         // still measured raw on ~3.6% of cards (source_risk_flags'
         // possible_redirect; news_context/primary_source/fact_check inside a
@@ -15970,6 +15979,29 @@
         const shorter = words.slice(0, -1).join(" ").replace(/[,，、·\s]+$/, "");
         if (shorter.length < CLAIM_TRIM_FLOOR_CHARS) break;
         cut = shorter;
+      }
+      // QUOTE-CLOSE (99-APPLY): a budget cut can stop IMMEDIATELY BEFORE a
+      // closing curly quote (id 15912: the claim carries "“내가 방에 왜
+      // 왔지?”" across the 115 boundary, so the face ended …왔지? with the ”
+      // one character away) — the face then shows an opened quote that never
+      // closes, mid-quotation. A new input shape (curly-quoted headline runs
+      // glued into claim text), not a bypassed path: no earlier trim pass
+      // looks at quotes. When the very next character of the source is the
+      // closing mark AND the cut holds its unclosed opener, append that one
+      // mark — the quotation completes, nothing is dropped, and every other
+      // face is returned byte-identical. (A first attempt backed the whole
+      // quoted fragment off instead; over the live corpus that re-exposed
+      // binding tails on 29 faces, so it was replaced with this.) Inline —
+      // the render audit pins main.js helpers by name.
+      if (value.startsWith(cut)) {
+        const next = value.charAt(cut.length);
+        const opener = next === "”" ? "“" : (next === "’" ? "‘" : "");
+        if (opener) {
+          const lastOpen = cut.lastIndexOf(opener);
+          if (lastOpen !== -1 && cut.indexOf(next, lastOpen + 1) === -1) {
+            cut += next;
+          }
+        }
       }
       return `${cut}…`;
     }
