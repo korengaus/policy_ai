@@ -4910,6 +4910,23 @@
       .detail-nav-link:hover {
         color: var(--brand-ink);
       }
+      /* DEAD-NAV (97-APPLY): a button whose section this card lacks is
+         visibly disabled — greyed, no pointer, no hover shift — instead of
+         silently doing nothing. */
+      .detail-nav-link[disabled] {
+        color: var(--line-300);
+        cursor: default;
+      }
+      .detail-nav-link[disabled]:hover {
+        color: var(--line-300);
+      }
+      /* DEAD-NAV (97-APPLY): fewer than two live targets → no rail at all
+         (navigation between fewer than two places is not navigation). Must
+         outrank the :not([hidden]) display:flex above, so it sits after it
+         at the same specificity + class. */
+      #detailScreen > .detail-page-nav.detail-nav-collapsed {
+        display: none;
+      }
     }
 
     .source-button {

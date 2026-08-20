@@ -2322,7 +2322,22 @@
       // <details> COLLAPSED by default, with a one-line at-a-glance summary
       // (출처유형 · 발행처 · 신뢰도 · 검증역할). Expanding shows the full populated-only
       // label+value list + matched sentences + risk flags. ~8×22 cells → N one-line rows.
-      const list = Array.isArray(sourceCandidates) ? sourceCandidates : [];
+      // DEDUP-STORED-TRIPLES (97-APPLY): the pipeline stores the candidate
+      // roster once PER CLAIM (record 15972: 3 claims × 26 candidates = 78
+      // stored rows; the copies differ only in claim_index and the per-claim
+      // source_id — every substantive field is identical). Render each
+      // candidate once: first copy kept, original order preserved, keyless
+      // rows never dropped. Display-only; the stored data is untouched. The
+      // text-export path reads the raw stored list separately and still
+      // carries all copies — its dedup is a later decision, not smuggled here.
+      const seenCandidateKeys = new Set();
+      const list = (Array.isArray(sourceCandidates) ? sourceCandidates : []).filter((source) => {
+        const key = `${source?.url || ""}|${source?.title || ""}`;
+        if (key === "|") return true;
+        if (seenCandidateKeys.has(key)) return false;
+        seenCandidateKeys.add(key);
+        return true;
+      });
       if (!list.length) {
         return '<div class="evidence-source-meta">표시할 출처 탐색 후보가 없습니다.</div>';
       }
@@ -6198,6 +6213,33 @@
     }
 
 
+    // GATE-THE-CLAIM (97-APPLY): the WATCH bullets assert that specific NAMED
+    // things are insufficient, but rendered unconditionally on every WATCH
+    // card — record 16000 (genuine official support, quality strong 5 / avg
+    // 98, all contradiction counts zero) carried "…일부가 아직 충분하지
+    // 않습니다" one line above "강한 근거가 확인됐습니다". That is a gate
+    // defect, not a different-axes reading: the bullet's own claim was false.
+    // Each predicate below tests exactly what its bullet names, through the
+    // SAME inputs its sibling bullets read (officialEvidenceIsGenuine; the
+    // quality condition is evidenceQualityExplanation's strong branch; the
+    // refutation counts are contradictionExplanation's own fields), so the
+    // gate and the sentences can never disagree. A false bullet is
+    // suppressed, never rewritten.
+    function watchDirectEvidenceInsufficient(quality, sourceReliabilitySummary, debugSummary) {
+      const genuineOk = officialEvidenceIsGenuine(sourceReliabilitySummary, debugSummary) === true;
+      const strongQuality = numberValue(quality?.strong, 0) > 0
+        && numberValue(quality?.average_evidence_quality_score, 0) >= 75;
+      return !(genuineOk && strongQuality);
+    }
+
+    function watchInsufficiencyHolds(quality, sourceReliabilitySummary, contradictionSummary, debugSummary) {
+      const refutationInsufficient =
+        numberValue(contradictionSummary?.insufficient_evidence_count, 0) > 0
+        || numberValue(contradictionSummary?.needs_official_confirmation_count, 0) > 0;
+      return watchDirectEvidenceInsufficient(quality, sourceReliabilitySummary, debugSummary)
+        || refutationInsufficient;
+    }
+
     function alertReasonBullets(level, decision, confidence, impact, quality, sourceReliabilitySummary, contradictionSummary, debugSummary) {
       // CARD-SIMPLIFY: the "최종 점수 N점" mentions are OFF the public bullets —
       // final_score itself is unchanged in data (still stored, still driving
@@ -6211,7 +6253,10 @@
         bullets.push("다만 HIGH는 실제 공식 근거와 반박 여부를 함께 확인해 해석해야 합니다.");
       } else if (level === "WATCH") {
         bullets.push("정책 영향 가능성은 있지만 현재 근거 기준으로 확정 판단보다 관찰이 적절합니다.");
-        bullets.push("공식 근거, 본문 직접 일치, 반박 가능성 중 일부가 아직 충분하지 않습니다.");
+        // GATE-THE-CLAIM (97-APPLY): only when something it names IS insufficient.
+        if (watchInsufficiencyHolds(quality, sourceReliabilitySummary, contradictionSummary, debugSummary)) {
+          bullets.push("공식 근거, 본문 직접 일치, 반박 가능성 중 일부가 아직 충분하지 않습니다.");
+        }
       } else if (level === "LOW") {
         bullets.push("현재 근거와 영향도를 종합하면 낮은 경고 단계입니다.");
         bullets.push("정책 변화로 확정하기에는 직접 근거가 약하거나 영향 범위가 제한적입니다.");
@@ -6255,7 +6300,11 @@
         additions.push("공식 근거와 기사 내용의 연결 강도가 높아 주요 위험 신호로 분류했습니다.");
         additions.push("사람 검토가 필요한 항목은 최종 확정 전에 출처 원문과 반박 가능성을 확인해야 합니다.");
       } else if (context.level === "WATCH") {
-        additions.push("직접 공식 근거 또는 본문 일치가 충분하지 않아 HIGH로 확정하지 않았습니다.");
+        // GATE-THE-CLAIM (97-APPLY): same defect one function down — this
+        // bullet names 직접 공식 근거 / 본문 일치 only, so its gate tests those.
+        if (watchDirectEvidenceInsufficient(context.quality, context.sourceReliabilitySummary, context.debugSummary)) {
+          additions.push("직접 공식 근거 또는 본문 일치가 충분하지 않아 HIGH로 확정하지 않았습니다.");
+        }
         additions.push("다음 단계는 관련 공식 상세문서와 후속 해명·정정 자료를 확인하는 것입니다.");
       } else if (context.level === "LOW") {
         additions.push("현재 확인된 근거만으로는 긴급한 정책 위험 신호가 크지 않습니다.");
@@ -7977,11 +8026,20 @@
                    free family — NOT filled pills. .card-watch = the home's tier-tinted
                    warning tag; .card-domain = the home's quiet brand-tinted domain
                    text. Same text, same classes as renderTopicCardHtml. -->
+              <!-- KICKER-STATE (97-APPLY): two pipeline-state chips left the
+                   first line. 미분류 is the legacy topic classifier's null
+                   bucket (82.8% of the corpus, 13,263/16,026 rows) — the
+                   absence of a classification rendered as if it were one;
+                   real topic values (전세대출 규제 …) still render. The
+                   AI-assist chip is a DISCLOSURE and is MOVED, not removed —
+                   it now sits on the AI 검증 상태 line below, the page's
+                   process-status surface, still on the open page (the
+                   DETAIL-POLISH intent that no honesty signal hides in a
+                   collapse is preserved). Strings unchanged. -->
               <div class="platform-kicker">
                 <span class="card-watch ${alertClass(level)}">${escapeHtml(formatAlert(level))}</span>
-                <span class="card-domain">${escapeHtml(topic)}</span>
+                ${topic === "미분류" ? "" : `<span class="card-domain">${escapeHtml(topic)}</span>`}
                 <span class="card-domain">정책 뉴스</span>
-                ${renderAiStatusBadge(result)}
               </div>
               <h2 class="result-title">
                 <a href="${url}" target="_blank" rel="noopener noreferrer">${title}</a>
@@ -8020,6 +8078,7 @@
             <div class="verdict-indicator">
               <span class="verdict-label">AI 검증 상태</span>
               <span class="verdict-value">${escapeHtml(safeAiDraftVerdictForExport(result))}</span>
+              ${renderAiStatusBadge(result)}
             </div>
 
             <!-- STATUS-WHY-PROMOTED (55-APPLY) / 55-FIX: only the dual-axis
@@ -8198,12 +8257,19 @@
         ].map(([label, sel]) =>
           `<button type="button" class="detail-nav-link" data-nav-target="${escapeHtml(sel)}">${escapeHtml(label)}</button>`
         ).join("");
+        // DEAD-NAV (97-APPLY): sync immediately; the hydrator chains below
+        // re-sync as sections land.
+        syncDetailNavState();
       }
       // SPREAD-TIMELINE Slice 2: hydrate the detail card's spread placeholder
       // after the innerHTML pass. Fire-and-forget; internally fail-silent.
-      loadSpreadAnnotations();
+      // DEAD-NAV (97-APPLY): the two hydrators below create/reveal the nav's
+      // spread and members targets asynchronously — re-sync the rail's
+      // disabled state when each settles (Promise.resolve tolerates either a
+      // promise or a plain return; the hydrators stay fail-silent).
+      Promise.resolve(loadSpreadAnnotations()).then(syncDetailNavState, syncDetailNavState);
       // CLUSTER-SURFACE S-a: hydrate the sibling-coverage placeholder the same way.
-      loadClusterMembers();
+      Promise.resolve(loadClusterMembers()).then(syncDetailNavState, syncDetailNavState);
       loadTopicTimeline();
       // DETAIL-IA-3: hydrate the answer line the same way (fail-silent).
       loadAnswerLines();
@@ -10735,6 +10801,32 @@
     // DETAIL-NAV (49-APPLY): delegated scroll for the in-page nav buttons.
     // scrollIntoView only — location.hash and the history stack are never
     // touched, so the popstate router / HISTORY-BACK behaviour is unchanged.
+    // DEAD-NAV (97-APPLY): the rail's four buttons are static while their
+    // target sections hydrate asynchronously, so a card lacking a section had
+    // a button that silently did nothing (record 15972: 얼마나 퍼졌나 left
+    // scrollY at 0). Each button whose target is absent or hidden is now
+    // DISABLED VISIBLY (the native [disabled] attribute + CSS) rather than
+    // conditionally rendered: sections land at different times, so a
+    // re-rendered rail would reflow and reorder under the reader, while a
+    // stable rail with greyed entries keeps the page's shape and states
+    // honestly that THIS card lacks that section. With fewer than two live
+    // targets the rail hides entirely — a rail navigating between fewer than
+    // two places is not navigation.
+    function syncDetailNavState() {
+      const nav = document.getElementById("detailPageNav");
+      if (!nav || nav.hidden) return;
+      const buttons = nav.querySelectorAll("[data-nav-target]");
+      if (!buttons.length) return;
+      let enabled = 0;
+      buttons.forEach((btn) => {
+        const target = document.querySelector(btn.getAttribute("data-nav-target"));
+        const live = !!(target && !target.hidden);
+        btn.disabled = !live;
+        if (live) enabled += 1;
+      });
+      nav.classList.toggle("detail-nav-collapsed", enabled < 2);
+    }
+
     const detailPageNavEl = document.getElementById("detailPageNav");
     if (detailPageNavEl) {
       detailPageNavEl.addEventListener("click", (event) => {
