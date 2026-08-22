@@ -1845,63 +1845,15 @@ def _fetch_claim_member_rows(member_ids):
 # Same narrow measured rule: both sides must look like editions of the same
 # periodic release family — never the naive periods-must-agree rule (27% FP).
 # ---------------------------------------------------------------------------
-_OFFICIAL_PERIODIC_FAMILY_RE = re.compile(r"동향|지수|변동률")
-_RE_PERIOD_YEAR_MONTH = re.compile(r"(20\d{2})년\s*(\d{1,2})월")
-_RE_PERIOD_DOTTED = re.compile(r"(20\d{2})[.\-/](\d{1,2})(?![\d.\-/])")
-_RE_PERIOD_SHORT_YM = re.compile(r"(?:^|[^0-9])(\d{2})년\s*(\d{1,2})월")
-_RE_PERIOD_YEAR_ONLY = re.compile(r"(20\d{2})년")
-_RE_PERIOD_LONE_MONTH = re.compile(r"(?:^|[^년\d.\-/])(\d{1,2})월")
-
-
-def _parse_korean_period_tokens(raw_text):
-    """Port of main.js parseKoreanPeriodTokens: text -> [(year, month|None)]."""
-    text = raw_text if isinstance(raw_text, str) else (
-        "" if raw_text is None else str(raw_text))
-    if not text:
-        return []
-    periods: list = []
-    seen: set = set()
-
-    def push(year_value, month_value):
-        try:
-            year = int(year_value)
-            month = None if month_value is None else int(month_value)
-        except (TypeError, ValueError):
-            return
-        if not 2000 <= year <= 2099:
-            return
-        if month is not None and not 1 <= month <= 12:
-            return
-        key = (year, month)
-        if key not in seen:
-            seen.add(key)
-            periods.append(key)
-
-    for m in _RE_PERIOD_YEAR_MONTH.finditer(text):
-        push(m.group(1), m.group(2))
-    for m in _RE_PERIOD_DOTTED.finditer(text):
-        push(m.group(1), m.group(2))
-    # 2-digit editions ("26년 6월") — [^0-9] guard keeps "2026년"'s tail out.
-    for m in _RE_PERIOD_SHORT_YM.finditer(text):
-        push(2000 + int(m.group(1)), m.group(2))
-    had_explicit_pair = bool(periods)
-    years: list = []
-    for m in _RE_PERIOD_YEAR_ONLY.finditer(text):
-        year = int(m.group(1))
-        if year not in years:
-            years.append(year)
-    # "2021년, 11월" shape: a lone year + standalone month(s), no explicit pair.
-    if not had_explicit_pair and years:
-        for m in _RE_PERIOD_LONE_MONTH.finditer(text):
-            push(years[0], m.group(1))
-    for year in years:
-        if not any(p[0] == year for p in periods):
-            push(year, None)
-    return periods
-
-
-def _official_periods_agree(a, b):
-    return a[0] == b[0] and (a[1] is None or b[1] is None or a[1] == b[1])
+# PERIOD-GATE (100-APPLY): the predicate's primitives now live in the matcher
+# (official_evidence_resolution.py) so analysis time and display time share
+# ONE Python implementation; the names below are kept for every caller here
+# and for scripts/b2b_readiness_audit.py's C7 parity check.
+from official_evidence_resolution import (  # noqa: E402
+    OFFICIAL_PERIODIC_FAMILY_RE as _OFFICIAL_PERIODIC_FAMILY_RE,
+    official_periods_agree as _official_periods_agree,
+    parse_korean_period_tokens as _parse_korean_period_tokens,
+)
 
 
 def _coerce_json_array(value):
@@ -1940,9 +1892,13 @@ def _official_periodic_edition_mismatch(source_candidates, normalized_claims,
             periods = _parse_korean_period_tokens(title)
             if not periods:
                 continue
+            # PERIOD-SIBLING (101-APPLY): periods come from the periodic-
+            # edition titles themselves — a year-only sibling title no longer
+            # vouches for a wrong-month edition (id 16105). Mirrors main.js.
+            if not _OFFICIAL_PERIODIC_FAMILY_RE.search(title):
+                continue
             doc_periods.extend(periods)
-            if _OFFICIAL_PERIODIC_FAMILY_RE.search(title):
-                has_periodic_edition = True
+            has_periodic_edition = True
         if not (has_periodic_edition and doc_periods):
             return False
         claim_periods: list = []

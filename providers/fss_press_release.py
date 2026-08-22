@@ -95,6 +95,16 @@ MIN_CLAIM_TOKEN_OVERLAP = 1
 _SOURCE_TAG = "fss_press_release"
 
 _TAG_RE = re.compile(r"<[^>]+>")
+# ESCAPED-MARKUP (101-APPLY): the LIVE contentKor arrives ENTITY-ESCAPED
+# ("&lt;p&gt; &lt;span style=&quot;font-size: 12pt;&quot;&gt;ㅁ 8월 19일…"), so a
+# tag strip that runs BEFORE html.unescape sees no tags at all and the decode
+# step then manufactures literal "<p> <span …>" in the cleaned body. Measured:
+# every FSS candidate since the lane's first rows (2026-06-18; 918 candidates
+# on 294 rows) carried the tags into official_matched_sentences, and one of
+# them (id 16040) reached a reader's evidence row. The strip below runs on the
+# DECODED text and only removes real tag shapes — an ASCII tag name after "<"
+# — so Korean angle-bracket quotes ("<가계부채>") decoded from &lt;…&gt; stay.
+_HTML_TAG_RE = re.compile(r"</?[A-Za-z][^<>]*>")
 _TOKEN_RE = re.compile(r"[가-힣A-Za-z0-9.%]+")
 
 # Provider-local relevance-token cleanup (mirrors M36/M36b doctrine; kept DISTINCT
@@ -162,6 +172,10 @@ def _clean_body(text: Optional[str]) -> str:
     if not text:
         return ""
     no_tags = _TAG_RE.sub(" ", text)
+    # ESCAPED-MARKUP (101-APPLY): decode FIRST (the live field is entity-
+    # escaped), then strip the real tag shapes that decoding reveals. The raw
+    # strip above is kept for bodies that arrive unescaped.
+    no_tags = _HTML_TAG_RE.sub(" ", html.unescape(no_tags))
     no_noise = no_tags.replace("u203B", " ").replace("nn", " ")
     return _sanitize(html.unescape(no_noise))
 

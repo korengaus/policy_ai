@@ -73,8 +73,20 @@ FLAGSHIP_REPRESENTATIVE = 8523
 # What this check catches is GROWTH — a new wrong-period attachment displayed
 # as confirmed would be the fourth instance of the defect fixed three times.
 # Baseline measured 2026-07-27: exactly these three cards (MATCHER-GUARD).
-MATCHER_MISMATCH_KNOWN_IDS = frozenset({7871, 9534, 13977})
-MATCHER_MISMATCH_BASELINE = 3
+# PERIOD-GATE (100-APPLY, 2026-08-23): 15617 and 15693 folded in. Both were
+# produced before the matcher gained its period-compatibility gate
+# (official_evidence_resolution.periodic_edition_period_gate); with the
+# producer fixed this set is a closed HISTORICAL list of pre-gate rows, not a
+# ratchet — stored rows are deliberately not reprocessed, so the ids stay.
+# One residual shape the matcher gate cannot see: 7871's matched claim carries
+# only relative dates (내년 2월 26일) while a SIBLING claim names 2024/2025 —
+# this predicate reads every claim's date, the matcher reads the matched one.
+# 101-APPLY: 16195 (created 2026-08-21, pre-gate) folded — the exact shape the
+# matcher gate now blocks; 16105 joins via the PERIOD-SIBLING predicate fix
+# (it was always a wrong-period card; the display predicate could not see it).
+# The list stays historical: nothing produced after the gate can enter it.
+MATCHER_MISMATCH_KNOWN_IDS = frozenset({7871, 9534, 13977, 15617, 15693, 16105, 16195})
+MATCHER_MISMATCH_BASELINE = 7
 # C1-OBSERVE-NOT-COMPARE (2026-08-04) — the four EMAIL_* constants that used to
 # live here (78 / 156 / 2026-06-30 / 2026-07-19) were typed by hand from an
 # outreach draft and went stale the moment the cluster grew. On 08-04 the live

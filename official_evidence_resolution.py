@@ -350,6 +350,130 @@ def _official_match_reason_ko(classification: str, score: int, best: dict, has_b
     return "공식 도메인이지만 기사 주장과 다른 주제라 검증 근거에서 제외했습니다."
 
 
+# ---------------------------------------------------------------------------
+# PERIOD-GATE (100-APPLY) — the one period predicate, now owned by the matcher.
+#
+# These helpers were ported from frontend/scripts/main.js (parseKoreanPeriodTokens
+# + officialPeriodicEditionMismatch) into api_server.py during CLAIM-GRAPHS as
+# the display-side suppression predicate; api_server.py now IMPORTS them from
+# here so there is still exactly one Python copy (main.js remains the reference
+# implementation; keep the two in sync). Moving them here is what lets the
+# matcher test period compatibility at analysis time instead of leaving the
+# defect to be suppressed at display: a periodic government release (고용동향,
+# 가계대출 동향, 물가지수 …) carries enough boilerplate to term-match almost
+# any claim in its subject area, so without this test every new monthly
+# edition manufactures fresh wrong-period "primary evidence" by construction.
+#
+# Same narrow measured rule as the display predicate — both sides must look
+# like editions of the same periodic release family (title carries 동향/지수/
+# 변동률 AND a parseable period), never the naive periods-must-agree rule.
+# Measured over every stored official candidate with a body match (2,128
+# strong/medium candidates on 1,130 rows, 2026-08-23): the gate fires on 12
+# candidates across 11 rows, each a different year/month from its document
+# (2017년 3월 claim ↔ 2026년 6월 고용동향, 2024년 claim ↔ 2026년 6월 가계대출
+# 동향 …); zero true matches rejected.
+# ---------------------------------------------------------------------------
+OFFICIAL_PERIODIC_FAMILY_RE = re.compile(r"동향|지수|변동률")
+_RE_PERIOD_YEAR_MONTH = re.compile(r"(20\d{2})년\s*(\d{1,2})월")
+_RE_PERIOD_DOTTED = re.compile(r"(20\d{2})[.\-/](\d{1,2})(?![\d.\-/])")
+_RE_PERIOD_SHORT_YM = re.compile(r"(?:^|[^0-9])(\d{2})년\s*(\d{1,2})월")
+_RE_PERIOD_YEAR_ONLY = re.compile(r"(20\d{2})년")
+_RE_PERIOD_LONE_MONTH = re.compile(r"(?:^|[^년\d.\-/])(\d{1,2})월")
+
+PERIOD_GATE_STATUS = "periodic_edition_period_mismatch"
+
+
+def parse_korean_period_tokens(raw_text) -> list:
+    """Port of main.js parseKoreanPeriodTokens: text -> [(year, month|None)]."""
+    text = raw_text if isinstance(raw_text, str) else (
+        "" if raw_text is None else str(raw_text))
+    if not text:
+        return []
+    periods: list = []
+    seen: set = set()
+
+    def push(year_value, month_value):
+        try:
+            year = int(year_value)
+            month = None if month_value is None else int(month_value)
+        except (TypeError, ValueError):
+            return
+        if not 2000 <= year <= 2099:
+            return
+        if month is not None and not 1 <= month <= 12:
+            return
+        key = (year, month)
+        if key not in seen:
+            seen.add(key)
+            periods.append(key)
+
+    for m in _RE_PERIOD_YEAR_MONTH.finditer(text):
+        push(m.group(1), m.group(2))
+    for m in _RE_PERIOD_DOTTED.finditer(text):
+        push(m.group(1), m.group(2))
+    # 2-digit editions ("26년 6월") — [^0-9] guard keeps "2026년"'s tail out.
+    for m in _RE_PERIOD_SHORT_YM.finditer(text):
+        push(2000 + int(m.group(1)), m.group(2))
+    had_explicit_pair = bool(periods)
+    years: list = []
+    for m in _RE_PERIOD_YEAR_ONLY.finditer(text):
+        year = int(m.group(1))
+        if year not in years:
+            years.append(year)
+    # "2021년, 11월" shape: a lone year + standalone month(s), no explicit pair.
+    if not had_explicit_pair and years:
+        for m in _RE_PERIOD_LONE_MONTH.finditer(text):
+            push(years[0], m.group(1))
+    for year in years:
+        if not any(p[0] == year for p in periods):
+            push(year, None)
+    return periods
+
+
+def official_periods_agree(a, b) -> bool:
+    return a[0] == b[0] and (a[1] is None or b[1] is None or a[1] == b[1])
+
+
+def claim_period_tokens(claims: list) -> list:
+    """Claim-side periods the way the display predicate reads them: every
+    claim's explicit date_or_time first; only when none parses, the claim
+    texts themselves."""
+    periods: list = []
+    for claim in claims or []:
+        if isinstance(claim, dict) and claim.get("date_or_time"):
+            periods.extend(parse_korean_period_tokens(claim["date_or_time"]))
+    if not periods:
+        for claim in claims or []:
+            if isinstance(claim, dict) and claim.get("claim_text"):
+                periods.extend(parse_korean_period_tokens(claim["claim_text"]))
+    return periods
+
+
+def periodic_edition_period_gate(document_title: str, claims: list) -> dict:
+    """Analysis-time period-compatibility test for ONE official candidate.
+
+    Returns {"mismatch": bool, "document_periods": [...], "claim_periods": [...]}.
+    mismatch is True only when (a) the document title names a periodic-release
+    family AND parses a period, (b) the claims for this candidate parse an
+    explicit period, and (c) no claim period agrees with any document period.
+    A title without a period, a claim without a year ("내년 2월 26일"), or a
+    non-periodic document never trips it. Pure; never raises."""
+    try:
+        title = document_title if isinstance(document_title, str) else ""
+        doc_periods = parse_korean_period_tokens(title)
+        if not (doc_periods and OFFICIAL_PERIODIC_FAMILY_RE.search(title)):
+            return {"mismatch": False, "document_periods": doc_periods, "claim_periods": []}
+        claim_periods = claim_period_tokens(claims)
+        if not claim_periods:
+            return {"mismatch": False, "document_periods": doc_periods, "claim_periods": []}
+        mismatch = not any(official_periods_agree(c, d)
+                           for c in claim_periods for d in doc_periods)
+        return {"mismatch": mismatch, "document_periods": doc_periods,
+                "claim_periods": claim_periods}
+    except Exception:
+        return {"mismatch": False, "document_periods": [], "claim_periods": []}
+
+
 def _resolve_source(source: dict, claims: list[dict]) -> dict:
     item = dict(source or {})
     if item.get("source_type") not in {"official_government", "public_institution"}:
@@ -363,9 +487,12 @@ def _resolve_source(source: dict, claims: list[dict]) -> dict:
     source_title = sanitize_text(title)
 
     all_matches = []
-    for claim in claims or []:
-        if int(claim.get("_claim_index", 0)) != int(item.get("claim_index") or 0):
-            continue
+    indexed_claims = [
+        claim
+        for claim in (claims or [])
+        if int(claim.get("_claim_index", 0)) == int(item.get("claim_index") or 0)
+    ]
+    for claim in indexed_claims:
         scored = sorted(
             (_sentence_match_score(claim, sentence, source_title) for sentence in sentences[:80]),
             key=lambda match: (-match["official_evidence_score"], match["sentence"]),
@@ -379,6 +506,28 @@ def _resolve_source(source: dict, claims: list[dict]) -> dict:
         bool(body_text and len(body_text) >= 300),
         url_resolution["official_url_resolution_status"],
     )
+    # PERIOD-GATE (100-APPLY): sits here, between term-overlap classification
+    # and the official_body_match promotion below. A periodic-edition document
+    # whose parsed period is incompatible with this candidate's claim period is
+    # classified weak_official_candidate_only (an existing value) instead of
+    # strong/medium — so it never sets official_body_match, never counts as
+    # has_genuine_official_support, and evaluate_source_candidate's
+    # body-mismatch clamp (score<=70) keeps it out of verification_role
+    # primary_evidence. The candidate itself stays in source_candidates with
+    # the test recorded on it: the gate blocks promotion, not existence.
+    # Classification thresholds and the scorer above are untouched.
+    period_gate = periodic_edition_period_gate(source_title, indexed_claims)
+    if period_gate["mismatch"] and classification in {
+        "strong_official_direct_support",
+        "medium_official_contextual_support",
+    }:
+        item["official_period_gate"] = {
+            "status": PERIOD_GATE_STATUS,
+            "document_periods": [list(p) for p in period_gate["document_periods"]],
+            "claim_periods": [list(p) for p in period_gate["claim_periods"]],
+            "ungated_classification": classification,
+        }
+        classification = "weak_official_candidate_only"
     has_body = bool(body_text and len(body_text) >= 300)
     body_status = "body_fetched" if body_text and len(body_text) >= 300 else "body_missing_or_short"
     if not url:
@@ -423,7 +572,7 @@ def _resolve_source(source: dict, claims: list[dict]) -> dict:
         item["official_final_direct_match_score"] = max(int(item.get("official_final_direct_match_score") or 0), score)
         item["official_body_match_reason"] = item["official_resolution_reason"]
         item["retrieval_method"] = "official_evidence_resolved"
-    elif item.get("official_body_fetched"):
+    elif item.get("official_body_fetched") or item.get("official_period_gate"):
         item["official_body_match"] = False
         item["official_body_match_reason"] = item["official_resolution_reason"]
         item["official_final_direct_match_score"] = max(int(item.get("official_final_direct_match_score") or 0), score)

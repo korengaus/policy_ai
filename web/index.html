@@ -8196,8 +8196,16 @@
         text.replace(/\s{2,}/g, " ").replace(/\s+([,.])/g, "$1").trim());
     }
 
+    // ESCAPED-MARKUP (101-APPLY): stored evidence text from the FSS lane
+    // (2026-06-18 → 08-21, 294 rows) carries literal "<p> <span style=…>"
+    // because the provider decoded entities AFTER stripping tags; the
+    // producer is fixed, stored rows are not rewritten, so the reader-text
+    // launder drops real tag shapes (ASCII tag name after "<") here. Korean
+    // angle-bracket quotes ("<가계부채>") are not tags and stay. (Regex kept
+    // inline: the render scan extracts this function verbatim.)
     function userFacingReportText(value, fallback = "-") {
-      const text = stripInternalDiagnosticText(value);
+      const text = stripInternalDiagnosticText(
+        typeof value === "string" ? value.replace(/<\/?[A-Za-z][^<>]*>/g, " ").replace(/\s{2,}/g, " ").trim() : value);
       if (!text || text === "-" || text === "null" || text === "undefined") return fallback;
       return text;
     }
@@ -12510,8 +12518,16 @@
           const title = String(cand.title || "");
           const periods = parseKoreanPeriodTokens(title);
           if (!periods.length) return;
+          // PERIOD-SIBLING (101-APPLY): the period test is taken from the
+          // periodic-edition titles THEMSELVES. Before, every primary official
+          // title contributed its periods, so a year-only sibling ("2026년
+          // 상반기 지역별고용조사 …" → (2026, ∅)) agreed with any month of that
+          // year and let a 2026년 5월 claim keep its "26년 7월 고용동향" as
+          // confirmed (id 16105). Measured over all 1,130 body-match rows:
+          // exactly one row changes (16105).
+          if (!OFFICIAL_PERIODIC_FAMILY_RE.test(title)) return;
           docAllPeriods.push(...periods);
-          if (OFFICIAL_PERIODIC_FAMILY_RE.test(title)) hasPeriodicEdition = true;
+          hasPeriodicEdition = true;
         });
         if (hasPeriodicEdition && docAllPeriods.length) {
           const normalized = coerceJsonArray(verification.normalized_claims || result.normalized_claims);

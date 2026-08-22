@@ -186,6 +186,21 @@ class BodyCleaningTests(unittest.TestCase):
         self.assertEqual(fss._clean_body(None), "")
         self.assertEqual(fss._clean_body(""), "")
 
+    def test_clean_body_strips_entity_escaped_markup(self):
+        # ESCAPED-MARKUP (101-APPLY): the LIVE contentKor shape (id 16040) —
+        # the markup arrives as entities, so a pre-decode tag strip saw
+        # nothing and the decode step produced literal "<p> <span …>" text.
+        live = ("&lt;p&gt; &lt;span style=&quot;font-size: 12pt;&quot;&gt;ㅁ 8월 19일(수) ~ "
+                "20일(목) 양일간, 서울 동대문디자인플라자(DDP)에서 금융권 최대 규모 "
+                "채용행사인 「2026 금융권 공동채용 박람회」가 개최된다&lt;/span&gt;&lt;/p&gt;"
+                "&lt;p&gt;&lt;br&gt;&lt;가계부채&gt; 관리 기조 유지&lt;/p&gt;")
+        body = fss._clean_body(live)
+        self.assertNotRegex(body, r"</?[A-Za-z][^<>]*>")
+        self.assertNotIn("style=", body)
+        self.assertIn("2026 금융권 공동채용 박람회", body)
+        # Korean angle-bracket quotes are content, not markup — they stay.
+        self.assertIn("<가계부채>", body)
+
 
 class FailClosedTests(unittest.TestCase):
     def _ready_provider(self):
