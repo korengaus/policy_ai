@@ -17,6 +17,12 @@ from config import RECENT_DAYS
 from text_utils import decode_response_text, sanitize_data, sanitize_text
 
 from structured_logging import get_logger
+# STALE-BULLETIN (104-APPLY): the matcher's own periodic-family test and
+# period parser — ONE implementation, reused here at collection time.
+from official_evidence_resolution import (
+    OFFICIAL_PERIODIC_FAMILY_RE,
+    parse_korean_period_tokens,
+)
 
 log = get_logger(__name__)
 
@@ -523,6 +529,79 @@ def _is_political_subject(normalized: str) -> bool:
     return has_action or has_event or name_at_head    # the politician/election is the subject
 
 
+# STALE-BULLETIN (104-APPLY) — our own statistics seed queries (고용동향/
+# 인구동향/가계동향조사, scheduler.py STAT-SEED) reach an outlet's searchable
+# archive: go.seoul.co.kr re-posts of monthly bulletins dated 2015–2025 were
+# stored as TODAY's claims (46 of its 83 rows over a year old; two fake
+# clusters of 18 and 11 editions each presented as one spreading story; three
+# period-mismatch known-set rows; the hero_digit_start growth signal). The
+# record carries no true document date — `published` is Google's re-index
+# date — so the only signal is the title, and this is a RULE, not an outlet
+# ban: any outlet with a searchable archive is covered.
+#
+# Shape (measured over all 16,267 stored titles with each row's own
+# collection date): a periodic-family title (the matcher's
+# OFFICIAL_PERIODIC_FAMILY_RE: 동향|지수|변동률) whose HEAD — after optional
+# leading [tag]/(tag) — is an explicit year+MONTH period (parsed by the
+# matcher's parse_korean_period_tokens) that ended more than
+# STALE_BULLETIN_DAYS before collection. Narrowings, each from a real title:
+#   * head position only — "국가데이터처, 6월 산업활동동향 발표...2020년 6월
+#     이후 최대폭" (id 14558) and "경제고통지수, 2011년 이후 최고" (3807) name
+#     an old period mid-title and must survive;
+#   * an explicit month only — quarter/half-year/annual shapes ("2025년
+#     3/4분기 가계동향조사", "2025년 하반기 경제동향 발표") parse as year-only
+#     and are exempt: their publication lag runs to six months, so a
+#     just-published report (5387, collected 8 days after release) would
+#     otherwise be dropped;
+#   * a range marker right after the period (이후/부터/이래/들어/까지) exempts
+#     the retrospective-analysis shape "2021년 6월 이후 고용동향 …";
+#   * 90 days, not 60 — 인구동향 is published ~55 days after its month, so at
+#     60 days "2026년 5월 인구동향" (15115) was rejected 16 days after KOSTAT
+#     released it. At 90 days the rule rejects 36 stored rows: 35 go.seoul
+#     archive re-posts + 1 undecoded news.google.com twin of one of them,
+#     and ZERO live releases.
+# The matched row is dropped exactly like opinion_or_column /
+# political_subject (same tier, same silent primary-pool drop) — a bulletin
+# edition that old cannot be a claim anyone is circulating today. Residual
+# miss, deliberately not closed here: the apostrophe shape "'21.2월 고용동향"
+# is not parsed by the shared parser, and extending the parser would change
+# the matcher's gate.
+STALE_BULLETIN_DAYS = 90
+_STALE_BULLETIN_LEAD_TAG_RE = re.compile(
+    r"^(?:\s*[\[\(（［][^\]\)）］]{0,20}[\]\)）］])*\s*")
+_STALE_BULLETIN_HEAD_RE = re.compile(
+    r"^(?:\d{2,4}년\s*\d{1,2}월|20\d{2}[.\-/]\d{1,2}월?)"
+    r"(?!\s*(?:이후|부터|이래|들어|까지|말|초))")
+
+
+def _stale_periodic_bulletin_period(title: str, today=None):
+    """(year, month) of a stale head-period bulletin title, else None.
+    `today` is the collection date (UTC date); injectable for tests."""
+    try:
+        text = title if isinstance(title, str) else ""
+        if not text or not OFFICIAL_PERIODIC_FAMILY_RE.search(text):
+            return None
+        head = _STALE_BULLETIN_HEAD_RE.match(_STALE_BULLETIN_LEAD_TAG_RE.sub("", text))
+        if not head:
+            return None
+        periods = [p for p in parse_korean_period_tokens(head.group(0)) if p[1] is not None]
+        if not periods:
+            return None
+        year, month = periods[0]
+        # period end = first day of the following month (exclusive bound)
+        if month == 12:
+            period_end = datetime(year + 1, 1, 1, tzinfo=timezone.utc).date()
+        else:
+            period_end = datetime(year, month + 1, 1, tzinfo=timezone.utc).date()
+        if today is None:
+            today = datetime.now(timezone.utc).date()
+        if (today - period_end).days > STALE_BULLETIN_DAYS:
+            return (year, month)
+        return None
+    except Exception:
+        return None
+
+
 def _reject_title_reason(title: str, query: str = "") -> str | None:
     normalized = _normalize_spaces(title)
     if not normalized:
@@ -548,6 +627,10 @@ def _reject_title_reason(title: str, query: str = "") -> str | None:
     # news that merely names a politician ("X 정부 ... 부동산 대책") is NOT dropped.
     if _is_political_subject(normalized):
         return "political_subject"
+    # STALE-BULLETIN (104-APPLY): an archived periodic bulletin edition whose
+    # month ended >90 days before collection — see the block above.
+    if _stale_periodic_bulletin_period(normalized) is not None:
+        return "stale_periodic_bulletin"
     low_quality = _low_quality_phrase(normalized)
     if low_quality:
         return f"low quality phrase: {low_quality}"
@@ -1224,7 +1307,7 @@ def search_google_news_rss_with_meta(query: str, max_results: int = 3):
     if raw_results:
         raw_results = [
             item for item in raw_results
-            if _reject_title_reason(item.get("title", "")) not in ("opinion_or_column", "political_subject")
+            if _reject_title_reason(item.get("title", "")) not in ("opinion_or_column", "political_subject", "stale_periodic_bulletin")
         ]
     recent_results = [
         item for item in raw_results if is_recent(item.get("published", ""), days=RECENT_DAYS)
@@ -1298,7 +1381,7 @@ def search_google_news_rss_with_meta(query: str, max_results: int = 3):
         if naver_items:
             naver_items = [
                 item for item in naver_items
-                if _reject_title_reason(item.get("title", "")) not in ("opinion_or_column", "political_subject")
+                if _reject_title_reason(item.get("title", "")) not in ("opinion_or_column", "political_subject", "stale_periodic_bulletin")
             ]
         # Bypass the strict 30d is_recent gate for the primary tier (sort=date
         # already biases toward recency); M17b is the hard on-topic gate.
