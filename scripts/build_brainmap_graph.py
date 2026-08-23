@@ -91,9 +91,16 @@ KNN_BLOCK_ROWS = 512
 # Read-only corpus fetch. LOW-MEMORY: only the 6 metadata columns the graph
 # needs — never source_candidates / debug_summary / any heavy blob.
 # (original_url feeds the distinct-outlet count only; never stored verbatim.)
+# GRAPH-EXCLUSION (106-APPLY): rows marked graph_exclusion (today: the 36
+# stale archived bulletin editions a re-run of the collection gate
+# identifies — 2015-2026 editions of one statistic that clustered into fake
+# "spreading claims") stay in analysis_results, keep their /?result_id=
+# links (an archived weekly report references one), and simply stop feeding
+# the graph. COALESCE-free IS NULL: rows without the column value (all
+# normal rows) are selected exactly as before.
 SELECT_ROWS_SQL = (
     "SELECT id, title, domain, content_nature, claim_text, original_url "
-    "FROM analysis_results ORDER BY id"
+    "FROM analysis_results WHERE graph_exclusion IS NULL ORDER BY id"
 )
 # Read-only vector fetch (whole cache page for the provider+model; filtered
 # in Python against the corpus keys — same approach the experiments proved).
@@ -152,6 +159,26 @@ def normalize_outlet_host(url):
         if host.startswith(prefix):
             host = host[len(prefix):]
     return host
+
+
+# AGGREGATOR-NOT-OUTLET (106-APPLY): an aggregator is a directory, not an
+# outlet that carried a story. news.google.com URLs reach the corpus only
+# when the collector's gnewsdecoder fails (google_rss is the collector's own
+# transport; the redirect URL is stored as original_url in that one failure
+# path — 36 rows, 34 of them from a single 2026-07-22 decoder outage), and
+# the exact-text host union then counted the aggregator as a second 매체:
+# 10 live clusters carried an outlet_count inflated by exactly one. This is
+# a DOMAIN LIST, deliberately: the collector has exactly one aggregator
+# transport, the naver fallback stores publisher URLs, and a general
+# "redirect-shaped URL" heuristic would guess. Excluding the host can never
+# under-count a real outlet — the aggregator never carried the story.
+AGGREGATOR_HOSTS = frozenset({"news.google.com"})
+
+
+def _distinct_outlets(hosts):
+    """Distinct REAL outlets from a host union: blanks and aggregator
+    directory hosts never count."""
+    return {h for h in hosts if h and h not in AGGREGATOR_HOSTS}
 
 
 # ---------------------------------------------------------------------------
@@ -550,12 +577,24 @@ def build_graph(ids, titles, domains, content_natures, X,
         # rows — one outlet publishing twice is ONE 매체. Blank hosts are
         # excluded; if no member has a usable URL, fall back to the member
         # count (the pre-existing behavior; never inflates vs. it).
-        outlets = set()
+        raw_hosts = set()
         if outlet_sets:
             for i in members:
-                outlets.update(outlet_sets[i] or ())
-        outlets.discard("")
-        outlet_count = len(outlets) or len(members)
+                raw_hosts.update(outlet_sets[i] or ())
+        outlets = _distinct_outlets(raw_hosts)
+        # AGGREGATOR-NOT-OUTLET (106-APPLY): if members had ONLY aggregator
+        # URLs (a whole-cluster decode failure), the member-count fallback
+        # would INFLATE the headline figure (three same-outlet rows behind
+        # google redirects read as "3개 매체"). A directory listing proves at
+        # least one carrier whose identity is unknown — floor 1, never the
+        # member count. Rows with NO usable URL at all keep the pre-existing
+        # member-count fallback unchanged.
+        if outlets:
+            outlet_count = len(outlets)
+        elif raw_hosts & AGGREGATOR_HOSTS:
+            outlet_count = 1
+        else:
+            outlet_count = len(members)
         # SYNDICATION-STAT B5d 2a — additive spread-structure fields. Anchor =
         # earliest member; NEAR tier = distinct outlets whose title+claim
         # cosine vs the anchor >= 0.95 (anchor's own outlet counts; cosine is
@@ -572,9 +611,8 @@ def build_graph(ids, titles, domains, content_natures, X,
                 sim = 1.0 if i == anchor else float(Xn[anchor] @ Xn[i])
                 if sim >= SYNDICATION_SIM_THRESHOLD:
                     near_outlets.update(outlet_sets[i] or ())
-            near_outlets.discard("")
-            exact_outlets = set(outlet_sets[anchor] or ())
-            exact_outlets.discard("")
+            near_outlets = _distinct_outlets(near_outlets)
+            exact_outlets = _distinct_outlets(set(outlet_sets[anchor] or ()))
         clusters.append({
             "cluster_id": cluster_id,
             "stable_id": stable_id,
