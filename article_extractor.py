@@ -309,12 +309,54 @@ def _extract_with_beautifulsoup_html(html: str, encoding: str = "utf-8") -> str:
     return _best_text_block(soup)
 
 
+# SHORT-BODY FALLBACK (102-APPLY) — when trafilatura returns a clean body
+# under the 300-char floor, the BeautifulSoup container used to win purely
+# on length, and that container can carry the related-headline list (id
+# 15912: 261-char body -> 784-char blob ending in seven headlines). Measured
+# over 178 live articles (one fetch each, 3 per host): 11 came in under the
+# floor; 7 of those had trafilatura EMPTY or broken and the fallback is
+# right (4 real bodies recovered), so that branch is unchanged. Of the 3
+# with a clean short body, the fallback was better once (it added the lead
+# sentence), equal once, worse once (a headline + a font-size UI line) —
+# a blanket "prefer trafilatura" would lose the lead sentence. So the rule
+# is narrowed to the clean-short-body case and judges what the fallback
+# ADDS: lines absent from the trafilatura body are split into sentence-
+# like (ending in terminal punctuation or 다) and not; the fallback wins
+# only if the sentence-like characters are at least as many as the rest.
+# Headline lists, stamps and e-mail lines are never sentence-like, body
+# paragraphs always are. No reprocessing of stored rows.
+_SENTENCE_LIKE_LINE = re.compile(r"(?:[.!?。]|다)[”’\"')\]]?\s*$")
+
+
+def _fallback_adds_body_text(extracted: str, fallback: str) -> bool:
+    """True when the lines the fallback adds on top of the trafilatura body
+    are predominantly sentences (by character count) rather than
+    headline-shaped fragments."""
+    known_lines = {line.strip() for line in extracted.splitlines() if line.strip()}
+    sentence_chars = 0
+    other_chars = 0
+    for raw_line in fallback.splitlines():
+        line = raw_line.strip()
+        if not line or line in known_lines or line in extracted:
+            continue
+        if _SENTENCE_LIKE_LINE.search(line):
+            sentence_chars += len(line)
+        else:
+            other_chars += len(line)
+    return sentence_chars >= other_chars
+
+
 def _extract_candidate_text(html: str, encoding: str) -> str:
     extracted = _extract_with_trafilatura_html(html)
 
     if len(extracted) < 300 or _is_probably_broken(extracted):
         fallback = _extract_with_beautifulsoup_html(html, encoding=encoding)
-        if len(fallback) > len(extracted) or not _is_probably_broken(fallback):
+        if extracted and not _is_probably_broken(extracted):
+            # clean short body: the fallback must add body text, not a
+            # headline list, to replace it (SHORT-BODY FALLBACK above).
+            if _fallback_adds_body_text(extracted, fallback):
+                extracted = fallback
+        elif len(fallback) > len(extracted) or not _is_probably_broken(fallback):
             extracted = fallback
 
     return clean_extracted_text(extracted)

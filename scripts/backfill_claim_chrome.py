@@ -183,7 +183,18 @@ def main(argv=None) -> int:
     parser.add_argument("--sample", type=int, default=30,
                         help="Removed-fragment samples to print (default 30).")
     parser.add_argument("--batch-size", type=int, default=1000)
+    # 102-APPLY: a later re-run (new chrome pattern) must NOT overwrite the
+    # 91-APPLY backup/log — those are the rollback record for 875 rows. A
+    # tag gives this run its own files: _chrome_backfill_<tag>_backup.jsonl.
+    parser.add_argument("--tag", default="",
+                        help="Suffix for this run's backup/log file names.")
     args = parser.parse_args(argv)
+    global BACKUP_PATH, LOG_PATH_DRY, LOG_PATH_WRITE
+    if args.tag:
+        tag = args.tag.strip("_")
+        BACKUP_PATH = _PROJECT_ROOT / f"_chrome_backfill_{tag}_backup.jsonl"
+        LOG_PATH_DRY = _PROJECT_ROOT / f"_chrome_backfill_{tag}_dryrun_log.jsonl"
+        LOG_PATH_WRITE = _PROJECT_ROOT / f"_chrome_backfill_{tag}_log.jsonl"
 
     raw_url = os.environ.get("DATABASE_URL")
     if not raw_url:

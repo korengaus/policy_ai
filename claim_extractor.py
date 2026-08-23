@@ -109,8 +109,12 @@ _CHROME_CLOCK = r"\d{1,2}\s*[:시]\s*\d{2}(?:\s*:\s*\d{2})?\s*분?"
 _CHROME_PATTERNS = [
     # (a) wire dateline "(지역=매체)" / "[세종=뉴시스]" — paren or square
     # bracket, optionally followed by the inline byline "이름 기자 =".
+    # 102-APPLY: the left side also admits the outlet|dateline separator
+    # ㅣ / | / ｜ ("[스포츠서울ㅣ원주=김기원기자]", "[더팩트 | 정리=손원태 기자]")
+    # — re-measured over all 16,267 stored claim texts: 7 rows, zero
+    # legitimate claims.
     re.compile(
-        r"[(\[]\s*[가-힣A-Za-z][가-힣A-Za-z0-9·\s]{0,14}=\s*[가-힣A-Za-z][가-힣A-Za-z0-9·\s]{0,18}[)\]]\s*"
+        r"[(\[]\s*[가-힣A-Za-z][가-힣A-Za-z0-9·ㅣ|｜\s]{0,14}=\s*[가-힣A-Za-z][가-힣A-Za-z0-9·\s]{0,18}[)\]]\s*"
         r"(?:[가-힣]{2,4}\s*[가-힣]{0,8}(?:기자|특파원)\s*=\s*)?"),
     # (b) inline byline "이름 [전문]기자 = " anywhere ("박재찬 보험전문기자 =",
     # "…뉴스임창용 기자=") — the trailing "=" is what makes it a byline.

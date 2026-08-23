@@ -55,6 +55,33 @@ class ChromeStripSpecimenTests(unittest.TestCase):
         self.assertEqual(_strip_article_chrome(text),
                          "내년 최저임금이 시간당 1만700원으로 결정됐다.")
 
+    # 102-APPLY — outlet ㅣ dateline separator inside the bracket. One
+    # specimen per separator character (Hangul ㅣ U+3163, ASCII |, full-width
+    # ｜). Re-measured after the edit over all 16,267 stored claim texts:
+    # exactly 7 rows match, every one a byline, zero legitimate claims.
+    def test_bracket_dateline_hangul_i_separator(self):
+        # id=5405
+        text = "[스포츠서울ㅣ원주=김기원기자]국가데이터처가 주관하는 인구주택총조사가 실시된다."
+        self.assertEqual(_strip_article_chrome(text),
+                         "국가데이터처가 주관하는 인구주택총조사가 실시된다.")
+
+    def test_bracket_dateline_spaced_hangul_i_separator(self):
+        # id=7548
+        text = "[스포츠서울 ㅣ 순창=고봉석 기자] 전북 순창군이 귀농·귀촌 우수지자체상을 수상했다."
+        self.assertEqual(_strip_article_chrome(text),
+                         "전북 순창군이 귀농·귀촌 우수지자체상을 수상했다.")
+
+    def test_bracket_dateline_ascii_pipe_separator(self):
+        # id=15695
+        text = "[더팩트 | 정리=손원태 기자] 정부가 수도권 23만호 공급책을 내놓았다."
+        self.assertEqual(_strip_article_chrome(text),
+                         "정부가 수도권 23만호 공급책을 내놓았다.")
+
+    def test_bracket_dateline_fullwidth_pipe_separator(self):
+        text = "[더팩트｜서천=노경완 기자] 충남 서천군이 농림어업총조사를 마무리했다."
+        self.assertEqual(_strip_article_chrome(text),
+                         "충남 서천군이 농림어업총조사를 마무리했다.")
+
     def test_bare_byline_with_role(self):
         # id=14749
         text = "박재찬 보험전문기자 = 삼성생명이 판매 전략을 전환했다."
@@ -176,6 +203,14 @@ class ChromeFalsePositiveTests(unittest.TestCase):
         "최저임금위원회는 2026년 8월 5일 시간당 1만700원 인상안을 의결했다.",
         # 사진 mentioned as a word, not a caption:
         "위성 사진 분석 결과 개발제한구역 내 불법 건축물이 확인됐다.",
+        # 102-APPLY look-alikes: a separator inside a bracket tag is NOT a
+        # dateline without the "=" (why the separator only widens the
+        # left-of-= class, and the = shape is still required):
+        "[기획ㅣ청년정책] 정부가 청년 월세 지원 대상을 확대한다.",
+        "[단독 | 분석] 국토부가 수도권 공급 대책을 다음 달 발표한다.",
+        "[표｜분기별 취업자 증감] 통계청이 고용 동향을 발표했다.",
+        # separator + = but no bracket at all (the bracket is required):
+        "정부는 서울ㅣ경기=수도권 광역 교통망 확충에 3조원을 투입한다.",
     ]
 
     def test_legitimate_claims_unchanged(self):
