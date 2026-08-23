@@ -99,6 +99,14 @@
     font-family: var(--font-sans);
   }
   .report-week { margin-top: 4px; font-size: 13.5px; color: var(--slate); font-weight: 600; }
+  /* SNAPSHOT-BASIS (105-APPLY): the figures below are FROZEN at generation
+     (payload_json is written once and never re-rendered), and the only line
+     that said so — "기준 시점: … 브레인맵 · … 집계" — sat in the footer under
+     the archive list, where no reader meets it before the numbers. The same
+     composition, plus the site's shipped 주간 스냅샷 기준 (home trending
+     panel / hero eyebrow / claim timeline), now renders directly under the
+     week range. Footer line unchanged; no number or ordering touched. */
+  .report-basis { margin-top: 2px; font-size: 12.5px; color: var(--slate); }
   /* HONESTY (fixed, always visible): circulation ranking, NOT verification.
      QUIET-FRAMING (57-APPLY): was a brand-outlined pill — emphasis on a
      disclaimer made the denial read like a claim. Restyled to the main
@@ -178,6 +186,9 @@
        scopes using the page's own words (전체 기간 / 매체 수). Sort unchanged. -->
   <div class="report-title">이번 주 확산된 정책 주장 (전체 기간 매체 수 순)</div>
   <div class="report-week" id="weekRange"></div>
+  <!-- SNAPSHOT-BASIS (105-APPLY): filled by render() from the stored
+       graph_generated_at / generated_at — the same values the footer shows. -->
+  <div class="report-basis" id="basis"></div>
   <div class="report-framing" id="framing">확산 규모 기준 · 사실 검증 아님</div>
   <p class="report-subtitle">
     이 목록은 여러 매체가 <strong>유사하게 보도한 규모</strong> 순입니다.
@@ -341,6 +352,21 @@
 
     document.getElementById("weekRange").textContent =
       day(report.week_start) + " ~ " + day(report.week_end);
+    // SNAPSHOT-BASIS (105-APPLY): where the reader meets the figures, say
+    // what they are fixed to. 주간 스냅샷 기준 is the shipped home/claim
+    // vocabulary for "from the weekly snapshot"; the 기준 시점 composition is
+    // the footer's own line, verbatim, built from the same stored dates.
+    // Parts render only when their date exists (old rows), never dangling.
+    var basisParts = ["주간 스냅샷 기준"];
+    var graphDay = day(report.graph_generated_at), genDay = day(report.generated_at);
+    if (graphDay && genDay) {
+      basisParts.push("기준 시점: " + graphDay + " 브레인맵 · " + genDay + " 집계");
+    } else if (graphDay) {
+      basisParts.push("기준 시점: " + graphDay + " 브레인맵");
+    } else if (genDay) {
+      basisParts.push("기준 시점: " + genDay + " 집계");
+    }
+    document.getElementById("basis").textContent = basisParts.join(" · ");
     // WEEKLY-ARCHIVE-SELF-EXCLUDE: the latest view learns its own week here.
     displayedWeek = day(report.week_start) || displayedWeek;
     reportSettled = true;
