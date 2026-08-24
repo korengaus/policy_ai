@@ -831,7 +831,8 @@ def brainmap_graph() -> Response:
 _SPREAD_NOT_FOUND_JSON = '{"found": false}'
 # corpus (CLAIM-GRAPHS): the outlet-count distribution rides the SAME
 # row-keyed cache; kept beside — not inside — the pinned indexes shape.
-_SPREAD_CACHE: dict = {"row_id": None, "indexes": None, "corpus": None}
+_SPREAD_CACHE: dict = {"row_id": None, "indexes": None, "corpus": None,
+                       "generated_at": None}
 
 
 # CLAIM-GRAPHS: corpus outlet-count histogram buckets (inclusive ranges;
@@ -935,6 +936,12 @@ def _load_spread_indexes():
     _SPREAD_CACHE["row_id"] = row_id
     _SPREAD_CACHE["indexes"] = indexes
     _SPREAD_CACHE["corpus"] = _build_corpus_distribution(graph)
+    # BUILD-BASIS (112-APPLY): the graph's own build timestamp (top-level
+    # generated_at written by build_brainmap_graph.maybe_write), cached beside
+    # the indexes so /api/claim and /api/cluster-spreads can state the basis
+    # of build-derived figures. None on old rows lacking the key — consumers
+    # then OMIT the field rather than invent a date.
+    _SPREAD_CACHE["generated_at"] = graph.get("generated_at")
     return indexes
 
 
@@ -1696,8 +1703,19 @@ def cluster_spreads(ids: Optional[str] = None) -> Response:
                 "daily_truncated": daily_truncated,
                 "stable_id": cluster_meta.get("stable_id"),
             }
-        return _spread_response(json.dumps({"spreads": spreads},
-                                           ensure_ascii=False))
+        payload = {"spreads": spreads}
+        # BUILD-BASIS (112-APPLY): additive top-level timestamp of the graph
+        # build the counts come from. Only on populated responses (every
+        # empty/malformed path above returns the byte-identical empty JSON),
+        # OMITTED when unknown (old graph row without the key), and paired by
+        # IDENTITY with the cache entry the indexes came from — a timestamp is
+        # never attached to counts it might not describe (also keeps the
+        # patched-seam tests' pinned bodies byte-identical). Per-id entries
+        # are untouched.
+        graph_generated_at = _SPREAD_CACHE.get("generated_at")
+        if graph_generated_at and indexes is _SPREAD_CACHE.get("indexes"):
+            payload["graph_generated_at"] = graph_generated_at
+        return _spread_response(json.dumps(payload, ensure_ascii=False))
     except Exception:
         logger.exception("Failed to build cluster spreads")
         return _spread_response(_CLUSTER_SPREADS_EMPTY_JSON)
@@ -2108,6 +2126,14 @@ def claim_by_lineage(lineage_id: str) -> Response:
             requested, cluster_meta, member_ids, rows, superseded,
             corpus=_SPREAD_CACHE.get("corpus"),
             genuine_official_member_count=_count_genuine_official_members(rows))
+        # BUILD-BASIS (112-APPLY): additive top-level timestamp of the graph
+        # build the cluster counts come from; OMITTED when unknown (old graph
+        # row without the key), and paired by IDENTITY with the cache entry
+        # the indexes came from (never a timestamp for counts it might not
+        # describe). found:false stays byte-identical.
+        graph_generated_at = _SPREAD_CACHE.get("generated_at")
+        if graph_generated_at and indexes is _SPREAD_CACHE.get("indexes"):
+            payload["graph_generated_at"] = graph_generated_at
         return _spread_response(json.dumps(payload, ensure_ascii=False))
     except Exception:
         logger.exception("Failed to build claim payload")
@@ -2144,6 +2170,7 @@ _TRENDING_MAX_LIMIT = 20
 # hero are dropped together whenever a new brainmap_graph row lands.
 _TRENDING_DISPLAY_CACHE: dict = {
     "row_id": None, "display": None, "urls": {}, "hero": None,
+    "generated_at": None,
 }
 
 
@@ -2344,6 +2371,9 @@ def _load_trending_display_index():
     # row here without dropping them would let /api/hero-pick serve an older
     # row's ranking against the new row_id.
     _TRENDING_DISPLAY_CACHE["hero"] = None
+    # BUILD-BASIS (112-APPLY): the build timestamp tracks the row it was
+    # parsed from — refreshed on every path that advances row_id.
+    _TRENDING_DISPLAY_CACHE["generated_at"] = graph.get("generated_at")
     return display
 
 
@@ -2574,6 +2604,10 @@ def _load_hero_pick_candidates():
         _TRENDING_DISPLAY_CACHE["display"] = display
         _TRENDING_DISPLAY_CACHE["urls"] = {}
     _TRENDING_DISPLAY_CACHE["hero"] = candidates
+    # BUILD-BASIS (112-APPLY): timestamp of the row these candidates came
+    # from, set on BOTH the new-row and same-row paths (the graph was parsed
+    # either way); None on old rows lacking the key.
+    _TRENDING_DISPLAY_CACHE["generated_at"] = graph.get("generated_at")
     return candidates
 
 
@@ -2583,8 +2617,16 @@ def hero_pick() -> Response:
         candidates = _load_hero_pick_candidates()
         if not candidates:
             return _spread_response(_HERO_PICK_EMPTY_JSON)
-        return _spread_response(json.dumps({"candidates": candidates},
-                                           ensure_ascii=False))
+        payload = {"candidates": candidates}
+        # BUILD-BASIS (112-APPLY): additive top-level timestamp of the graph
+        # build the ranking comes from; OMITTED when unknown, and paired by
+        # IDENTITY with the cache entry the candidates came from (never a
+        # timestamp for a ranking it might not describe). Empty/error paths
+        # above keep the byte-identical empty JSON.
+        graph_generated_at = _TRENDING_DISPLAY_CACHE.get("generated_at")
+        if graph_generated_at and candidates is _TRENDING_DISPLAY_CACHE.get("hero"):
+            payload["graph_generated_at"] = graph_generated_at
+        return _spread_response(json.dumps(payload, ensure_ascii=False))
     except Exception:
         logger.exception("Failed to build hero pick")
         return _spread_response(_HERO_PICK_EMPTY_JSON)

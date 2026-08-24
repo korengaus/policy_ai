@@ -376,6 +376,11 @@
     const clusterFoldKeyMap = new Map();
     const clusterFoldKeyAttempted = new Set();
     const clusterSpreadMap = new Map();
+    // BUILD-BASIS (112-APPLY): the graph build's timestamp, from the SAME
+    // /api/cluster-spreads response the counts come from (additive top-level
+    // graph_generated_at; absent on old graph rows -> stays null and no
+    // basis note renders — never a fabricated date).
+    let clusterSpreadGraphGeneratedAt = null;
     async function loadClusterFoldKeys(ids) {
       const pending = (Array.isArray(ids) ? ids : []).filter((id) =>
         clusterSizeMap.get(id) >= 2 && !clusterFoldKeyAttempted.has(id));
@@ -386,6 +391,9 @@
           `${API_BASE}/api/cluster-spreads?ids=${encodeURIComponent(pending.join(","))}`);
         if (!response.ok) return;
         const data = await response.json();
+        if (data && typeof data.graph_generated_at === "string" && data.graph_generated_at) {
+          clusterSpreadGraphGeneratedAt = data.graph_generated_at;
+        }
         const spreads = data && data.spreads ? data.spreads : {};
         for (const [rid, spread] of Object.entries(spreads)) {
           const id = Number(rid);
@@ -3236,22 +3244,36 @@
         if (!(opts && opts.hero)) return "";
         const info = clusterSpreadMap.get(Number(card.recordId)) || null;
         if (!info) return "";
-        const cell = (label, value) => `<div class="spread-fact"><span class="spread-fact-label">${label}</span><span class="spread-fact-value">${value}</span></div>`;
+        const cell = (label, value, basis) => `<div class="spread-fact"><span class="spread-fact-label">${label}</span><span class="spread-fact-value">${value}</span>${basis || ""}</div>`;
         const cells = [];
+        // BUILD-BASIS (112-APPLY): the three cells do NOT share one basis —
+        // 매체 수 and 보도 건수 are figures of the graph BUILD, 확산 기간 is a
+        // per-request read over the build's member set — so each cell states
+        // its OWN basis instead of one grid line papering over the mix. Both
+        // constructions are shipped verbatim: 기준 시점: <date> 브레인맵
+        // (weekly.html) with the date from the same /api/cluster-spreads
+        // response the counts came from, and (수집 기사 기준) (the range
+        // line's own note). No date known -> no note, never a guess.
+        const buildDay = (typeof clusterSpreadGraphGeneratedAt === "string" && clusterSpreadGraphGeneratedAt)
+          ? clusterSpreadGraphGeneratedAt.slice(0, 10) : "";
+        const buildBasisNote = buildDay
+          ? `<span class="spread-facts-note spread-fact-basis">기준 시점: ${escapeHtml(buildDay)} 브레인맵</span>`
+          : "";
+        const collectedBasisNote = `<span class="spread-facts-note spread-fact-basis">(수집 기사 기준)</span>`;
         // 62-APPLY (03/07): "Units sit 4px off the numeral" — the unit half
         // of each shipped value form is wrapped (markup only, byte-identical
         // text) so CSS can set it at value-step weight beside the figure.
         const outletCount = Number(clusterSizeMap.get(Number(card.recordId)));
         if (Number.isFinite(outletCount) && outletCount >= 2) {
-          cells.push(cell("전체 확산 매체 수", `${escapeHtml(formatCount(outletCount))}<span class="fact-unit">개 매체</span>`));
+          cells.push(cell("전체 확산 매체 수", `${escapeHtml(formatCount(outletCount))}<span class="fact-unit">개 매체</span>`, buildBasisNote));
         }
         const articleTotal = Number(info.size);
         if (Number.isFinite(articleTotal) && articleTotal > 0) {
-          cells.push(cell("보도 건수", `${escapeHtml(formatCount(articleTotal))}<span class="fact-unit">건</span>`));
+          cells.push(cell("보도 건수", `${escapeHtml(formatCount(articleTotal))}<span class="fact-unit">건</span>`, buildBasisNote));
         }
         const spanDays = Number(info.span_days);
         if (Number.isFinite(spanDays) && spanDays > 0) {
-          cells.push(cell("확산 기간", `${escapeHtml(String(spanDays))}<span class="fact-unit">일</span>`));
+          cells.push(cell("확산 기간", `${escapeHtml(String(spanDays))}<span class="fact-unit">일</span>`, collectedBasisNote));
         }
         const factCells = cells.length
           ? `<div class="spread-facts hero-spread-cells">${cells.join("")}</div>`
