@@ -10538,12 +10538,18 @@
     }
 
     // HONEST-FAILURE (96-APPLY): the search-failure view. Mirrors the offer
-    // view's screen handling but carries ONLY the shipped retry sentence —
-    // no claim is better than a wrong claim.
+    // view's screen handling. 116-APPLY: the retry line alone said WHAT to do
+    // but not WHAT HAPPENED — a reader could not tell a failure from a miss.
+    // The DECIDED sentence (검색 결과를 불러오지 못했습니다.) mirrors the
+    // domain tabs' own shipped failure construction ("이 분야의 뉴스를
+    // 불러오지 못했습니다."), changing only what failed — the REQUEST, never
+    // the reader's search terms. The shipped retry sentence follows it.
+    // This view renders ONLY from the searchFailed branch; a genuine
+    // zero-hit miss still renders renderAnalyzeOffer's corpus sentence.
     function renderSearchFailure() {
       metricsEl.style.display = "none";
       hideSelectedIssueIntro();
-      resultsEl.innerHTML = '<div class="empty-state">잠시 후 다시 시도해 주세요.</div>';
+      resultsEl.innerHTML = '<div class="empty-state">검색 결과를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</div>';
       pushDetailHistoryState(window.scrollY || 0);
       showScreen("detail");
     }
