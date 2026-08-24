@@ -7420,6 +7420,9 @@
         const data = await response.json();
         if (data && typeof data.graph_generated_at === "string" && data.graph_generated_at) {
           clusterSpreadGraphGeneratedAt = data.graph_generated_at;
+          // 113-APPLY: the date can land after the grid's first paint —
+          // refresh the grid-level basis line without waiting for a repaint.
+          updateFeedBuildBasis();
         }
         const spreads = data && data.spreads ? data.spreads : {};
         for (const [rid, spread] of Object.entries(spreads)) {
@@ -10805,6 +10808,30 @@
       return html;
     }
 
+    // BUILD-BASIS (113-APPLY): ONE grid-level basis line for the feed's
+    // 매체-N chips (and the region-1 기사-건수 figures) — a note under every
+    // chip would drown the cards, and every chip on the grid comes from the
+    // SAME newest brainmap_graph row (cluster-sizes and cluster-spreads both
+    // serve the same server-cached row; a mix would need a rebuild landing
+    // inside one page-load's fetch window). The date is the additive
+    // graph_generated_at captured from the SAME cluster-spreads batch the
+    // grid's circulation facts come from; unknown -> no line, never a guess.
+    // Sits beside the sort-basis eyebrow in the feed toolbar and is NOT
+    // gated on the active sort — chips render under every ordering.
+    function updateFeedBuildBasis() {
+      const sortBasisEl = document.getElementById("feedSortBasis");
+      if (!sortBasisEl || typeof clusterSpreadGraphGeneratedAt !== "string"
+        || !clusterSpreadGraphGeneratedAt) return;
+      let node = document.getElementById("feedBuildBasis");
+      if (!node) {
+        node = document.createElement("span");
+        node.id = "feedBuildBasis";
+        node.className = "public-eyebrow";
+        sortBasisEl.insertAdjacentElement("afterend", node);
+      }
+      node.textContent = `기준 시점: ${clusterSpreadGraphGeneratedAt.slice(0, 10)} 브레인맵`;
+    }
+
     function renderHotTopics(preferredResults) {
       if (!hotTopicsEl) return;
       // 5d1: the on-screen sorting BASIS (static #feedSortBasis node in the
@@ -10813,6 +10840,7 @@
       // on every paint so tab/sort changes can never leave it stale.
       const sortBasisEl = document.getElementById("feedSortBasis");
       if (sortBasisEl) sortBasisEl.hidden = activeSort !== "전체 기간 매체 수 순";
+      updateFeedBuildBasis();
       const allCards = currentTopicCards(preferredResults);
       // HOME-TOP5 S5b: 오늘의 한 장 applies ONLY to the genuine 전체 home feed —
       // never to a domain tab's hero or a search/preferred-results render.
@@ -14287,7 +14315,10 @@
     // Data arrives on the SAME /api/spread response the section already
     // fetches (computed per graph row server-side, never a page constant);
     // absent corpus (older server) renders nothing.
-    function corpusDistributionHtml(corpus, outletCount) {
+    // BUILD-BASIS (113-APPLY): optional basisNote — the distribution is
+    // computed per graph row (build-derived), so the caller may append the
+    // build's 기준 시점 line under the caption; "" keeps today's markup.
+    function corpusDistributionHtml(corpus, outletCount, basisNote) {
       const buckets = Array.isArray(corpus?.outlet_buckets) ? corpus.outlet_buckets : [];
       if (!buckets.length || !Number.isFinite(outletCount) || outletCount < 2) return "";
       let maxCount = 0;
@@ -14324,6 +14355,7 @@
             <div style="margin:8px 0 4px;max-width:640px;">
               <div role="img" aria-label="수집된 주장의 확산 규모 분포" style="display:flex;flex-direction:column;gap:4px;">${rows}</div>
               <div style="font-size:var(--fs-micro);color:var(--muted);margin-top:4px;">수집된 주장의 확산 규모 분포 — 우리가 수집한 범위 기준입니다.</div>
+              ${basisNote || ""}
             </div>`;
     }
 
@@ -14400,7 +14432,22 @@
           // and a 0 we did not measure would be a lie; only the 문구 거의 동일
           // 0 is real (claim.html renders 0개 매체 for it today). The grid
           // carries no status, no colour, no emphasis.
-          const spreadFactCell = (label, value) => `<div class="spread-fact"><span class="spread-fact-label">${label}</span><span class="spread-fact-value">${value}</span></div>`;
+          const spreadFactCell = (label, value, basis) => `<div class="spread-fact"><span class="spread-fact-label">${label}</span><span class="spread-fact-value">${value}</span>${basis || ""}</div>`;
+          // BUILD-BASIS (113-APPLY): the grid mixes bases — 매체 수 / 보도
+          // 건수 / 문구 거의 동일 are figures of the graph BUILD, 확산 기간 is
+          // a per-request read already covered by the grid-level collected-
+          // basis note directly below. So the build cells carry their OWN
+          // in-cell 기준 시점: <date> 브레인맵 (weekly.html's shipped
+          // construction; the hero cells' 112-APPLY discipline), dated from
+          // THIS response's additive graph_generated_at — the same payload
+          // the counts came in, so the timestamp can never describe data it
+          // did not arrive with. Absent field (old graph row / older server)
+          // -> no note, never a guess.
+          const spreadBuildDay = (typeof data?.graph_generated_at === "string" && data.graph_generated_at)
+            ? data.graph_generated_at.slice(0, 10) : "";
+          const spreadBuildBasisNote = spreadBuildDay
+            ? `<span class="spread-facts-note spread-fact-basis">기준 시점: ${escapeHtml(spreadBuildDay)} 브레인맵</span>`
+            : "";
           // POLISH-LABELS 4: corpus-scoped wording (claim.html's solved form) —
           // first_at is the earliest COLLECTED member, not the claim's origin
           // and not this article's date, so 최초 보도 overclaimed (the 최저임금
@@ -14442,7 +14489,7 @@
           // null (pre-2a graph rows) omits the cell.
           const nearCell = nearShown === null
             ? ""
-            : spreadFactCell("문구 거의 동일", `${escapeHtml(formatCount(nearShown))}<span class="fact-unit">개 매체</span>`);
+            : spreadFactCell("문구 거의 동일", `${escapeHtml(formatCount(nearShown))}<span class="fact-unit">개 매체</span>`, spreadBuildBasisNote);
           // 4b: the ARTICLE count beside the OUTLET count. The block stated only
           // "{N}개 매체", so 40 outlets / 158 articles and 40 / 40 read identically
           // to a reader. api_server.py:1566 records the two as deliberately
@@ -14459,7 +14506,7 @@
           // guessing which of the two is right would not be.
           const memberSize = Number(data?.cluster?.size);
           const sizeCell = Number.isFinite(memberSize) && memberSize >= outletCount
-            ? spreadFactCell("보도 건수", `${escapeHtml(formatCount(memberSize))}<span class="fact-unit">건</span>`)
+            ? spreadFactCell("보도 건수", `${escapeHtml(formatCount(memberSize))}<span class="fact-unit">건</span>`, spreadBuildBasisNote)
             : "";
           // 5b: cells in fixed order — 매체 / 건수 / 기간 / 문구. The outlet cell
           // is unconditional inside this block (the >=2 gate above is its
@@ -14467,7 +14514,7 @@
           // absent, and auto-fit re-flows the remaining cells across the row so
           // a 2-cell or 1-cell grid reads as fewer facts, never as zeros.
           const factsGrid = `<div class="spread-facts">${
-            spreadFactCell("전체 확산 매체 수", `${escapeHtml(formatCount(outletCount))}<span class="fact-unit">개 매체</span>`)
+            spreadFactCell("전체 확산 매체 수", `${escapeHtml(formatCount(outletCount))}<span class="fact-unit">개 매체</span>`, spreadBuildBasisNote)
           }${sizeCell}${timelineCell}${nearCell}</div>
             <div class="spread-facts-note">(수집 기사 기준)</div>`;
           // DETAIL-IA MERGE: this div is a CHILD of the 얼마나 퍼졌나 wrapper —
@@ -14488,7 +14535,11 @@
           // Order of the section's parts is otherwise unchanged; either chart
           // absent → the other keeps its column (grid handles a lone child).
           const chartRow = (() => {
-            const distHtml = corpusDistributionHtml(data?.corpus_outlet_distribution, outletCount);
+            // BUILD-BASIS (113-APPLY): the distribution is build-derived, so
+            // its 기준 시점 line goes INSIDE its own block — a row-level line
+            // would also appear to cover the per-request daily strip beside it.
+            const distHtml = corpusDistributionHtml(data?.corpus_outlet_distribution, outletCount,
+              spreadBuildDay ? `<div class="spread-facts-note spread-fact-basis">기준 시점: ${escapeHtml(spreadBuildDay)} 브레인맵</div>` : "");
             const stripHtml = detailDailyStripHtml(timeline.daily);
             if (!distHtml && !stripHtml) return "";
             return `<div class="spread-chart-row">${distHtml}${stripHtml}</div>`;

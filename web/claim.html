@@ -592,6 +592,12 @@
           row.appendChild(articleCol(point.date, Number(point.count) || 0));
         });
       }
+      // BUILD-BASIS (113-APPLY): the timeline plots per-request published_at
+      // day counts over the build's frozen member set — a collected-articles
+      // read, NOT a build-frozen figure — so its basis is the shipped
+      // collected-basis note, never a build date.
+      document.getElementById("sparkRow").insertAdjacentElement(
+        "afterend", el("div", "basis-note", "(수집 기사 기준)"));
       document.getElementById("timelinePanel").hidden = false;
       // 17-APPLY FIT-PASS (measured AFTER unhide, so clientWidth is real):
       // when the per-column share can no longer fit a date label (<34px),

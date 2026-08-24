@@ -144,6 +144,49 @@ class ClusterSpreadsGraphGeneratedAtTests(_CacheIsolationMixin,
         self.assertEqual(no_ids.json(), {"spreads": {}})
 
 
+class SpreadGraphGeneratedAtTests(_CacheIsolationMixin, unittest.TestCase):
+    """113-APPLY: /api/spread joins the same contract."""
+
+    def _get(self, generated_at, analysis_id=1):
+        api_server._SPREAD_CACHE["indexes"] = FAKE_INDEXES
+        api_server._SPREAD_CACHE["generated_at"] = generated_at
+        with patch.object(api_server, "_load_spread_indexes",
+                          return_value=FAKE_INDEXES), \
+             patch.object(api_server, "_fetch_published_at",
+                          return_value=["2026-08-01T09:00:00",
+                                        "2026-08-03T10:00:00"]):
+            return self.client.get("/api/spread/%d" % analysis_id)
+
+    def test_present_when_cached_pair(self):
+        body = self._get(TS).json()
+        self.assertTrue(body["found"])
+        self.assertEqual(body["graph_generated_at"], TS)
+        self.assertEqual(body["cluster"]["outlet_count"], 3)
+
+    def test_absent_when_timestamp_unknown(self):
+        body = self._get(None).json()
+        self.assertTrue(body["found"])
+        self.assertNotIn("graph_generated_at", body)
+
+    def test_absent_when_indexes_not_the_cached_entry(self):
+        api_server._SPREAD_CACHE["indexes"] = None
+        api_server._SPREAD_CACHE["generated_at"] = TS
+        with patch.object(api_server, "_load_spread_indexes",
+                          return_value=FAKE_INDEXES), \
+             patch.object(api_server, "_fetch_published_at",
+                          return_value=[]):
+            body = self.client.get("/api/spread/1").json()
+        self.assertNotIn("graph_generated_at", body)
+
+    def test_not_found_body_unchanged(self):
+        api_server._SPREAD_CACHE["indexes"] = FAKE_INDEXES
+        api_server._SPREAD_CACHE["generated_at"] = TS
+        with patch.object(api_server, "_load_spread_indexes",
+                          return_value=FAKE_INDEXES):
+            body = self.client.get("/api/spread/9999").json()
+        self.assertEqual(body, {"found": False})
+
+
 class HeroPickGraphGeneratedAtTests(_CacheIsolationMixin, unittest.TestCase):
     CANDIDATES = [{"stable_id": "abc123def456",
                    "representative_analysis_id": 1, "outlet_count": 3}]

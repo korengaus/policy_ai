@@ -1297,6 +1297,16 @@ def spread_annotation(analysis_id: int) -> Response:
         payload = _build_spread_payload(cluster_meta, member_ids,
                                         published_values,
                                         corpus=_SPREAD_CACHE.get("corpus"))
+        # BUILD-BASIS (113-APPLY): additive top-level timestamp of the graph
+        # build the cluster counts come from — same field, format and rules
+        # as /api/claim, /api/cluster-spreads and /api/hero-pick (112-APPLY):
+        # OMITTED when unknown (old graph row without the key), paired by
+        # IDENTITY with the cache entry the indexes came from (never a
+        # timestamp for counts it might not describe). found:false stays
+        # byte-identical.
+        graph_generated_at = _SPREAD_CACHE.get("generated_at")
+        if graph_generated_at and indexes is _SPREAD_CACHE.get("indexes"):
+            payload["graph_generated_at"] = graph_generated_at
         return _spread_response(json.dumps(payload, ensure_ascii=False))
     except Exception:
         logger.exception("Failed to build spread annotation")
