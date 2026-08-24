@@ -69,6 +69,31 @@ from honesty_guard import (  # noqa: E402
 # asserted byte-exact against the whitelist below — drift refuses to run.
 SYNDICATION_NOTE = "첫 보도와 제목·주장 문구가 거의 동일"
 
+# Basis phrasing — REUSED SHIPPED FORMS, never new customer-facing Korean:
+#   * COLLECTED_BASIS is the site's article-count basis note byte-exact
+#     (frontend/template.html #verifyHowStats, web/claim.html 확산 기간 cells).
+#   * BASIS_LINE_* mirror weekly.html's 기준 시점 composition (weekly.html:361-367)
+#     including its partial-date branches — same words, same order, same separator.
+COLLECTED_BASIS = "(수집 기사 기준)"
+BASIS_LINE_BOTH = "기준 시점: %s 브레인맵 · %s 집계"
+BASIS_LINE_GRAPH = "기준 시점: %s 브레인맵"
+BASIS_LINE_GEN = "기준 시점: %s 집계"
+
+
+def compose_basis_line(graph_generated_at, generated_at):
+    """weekly.html:357-367 mirrored: day() = first 10 chars; render whichever
+    dates exist, in the shipped composition; empty when neither is known."""
+    graph_day = str(graph_generated_at or "")[:10]
+    gen_day = str(generated_at or "")[:10]
+    if graph_day and gen_day:
+        return BASIS_LINE_BOTH % (graph_day, gen_day)
+    if graph_day:
+        return BASIS_LINE_GRAPH % graph_day
+    if gen_day:
+        return BASIS_LINE_GEN % gen_day
+    return ""
+
+
 # Footer honesty line — GENERATED copy, so it must carry none of the
 # forbidden vocab (검증/confirmed/verified/truth/probability). It describes
 # the briefing as a circulation summary, never a truth or outcome judgment.
@@ -184,9 +209,13 @@ def filter_entries_for_customer(entries, lookup, profile):
     return kept
 
 
-def build_briefing_data(profile, kept, week_start, week_end, top_n):
+def build_briefing_data(profile, kept, week_start, week_end, top_n,
+                        basis=None):
     """The verdict-free data dict (audit JSON + HTML input). No official
-    status field (v1), no truth/falsity/probability field anywhere."""
+    status field (v1), no truth/falsity/probability field anywhere.
+    ``basis`` (optional): {"graph_generated_at", "generated_at"} — composed
+    into the shipped 기준 시점 line so every live figure carries its build
+    date, exactly as weekly.html does."""
     items = []
     for rank, (entry, cluster, matched_domains, matched_keywords) in enumerate(
             kept[:top_n], start=1):
@@ -219,6 +248,8 @@ def build_briefing_data(profile, kept, week_start, week_end, top_n):
         },
         "week": {"start": week_start, "end": week_end},
         "framing": FRAMING_TEXT,
+        "basis": compose_basis_line((basis or {}).get("graph_generated_at"),
+                                    (basis or {}).get("generated_at")),
         "items": items,
         "note": FOOTER_NOTE,
     }
@@ -233,7 +264,8 @@ def briefing_honesty_ok(data):
     are NOT vocab-scanned."""
     ok, violations = validate_payload(data)
     generated = [data.get("note") or "", data.get("kind") or "",
-                 data.get("framing") or ""]
+                 data.get("framing") or "", data.get("basis") or "",
+                 COLLECTED_BASIS]
     for item in data.get("items") or []:
         generated.append(item.get("syndication_note") or "")
     for text in generated:
@@ -258,6 +290,10 @@ def render_briefing_html(data):
     esc = html.escape
     customer = data["customer"]["display_name"]
     week = data["week"]
+    # 기준 시점 line (shipped weekly.html composition) — rendered under the
+    # period exactly where weekly.html shows its basis; omitted when unknown.
+    basis_div = ('<div class="period">%s</div>' % esc(data["basis"])
+                 if data.get("basis") else "")
     rows = []
     for item in data["items"]:
         period = "%s → %s" % ((item["first_at"] or "")[:10],
@@ -282,7 +318,7 @@ def render_briefing_html(data):
         <div class="rank">%d</div>
         <div class="body">
           <div class="title">%s</div>
-          <div class="meta">%s개 매체 · %s%s</div>
+          <div class="meta">%s개 매체 · %s%s %s</div>
           %s
           <div class="matched">관련: %s</div>
           <div class="links">%s</div>
@@ -291,6 +327,7 @@ def render_briefing_html(data):
             item["rank"], esc(item["title"]),
             esc(str(item["outlet_count"] or "?")), esc(period),
             esc(" · %s" % span if span else ""),
+            esc(COLLECTED_BASIS),
             synd,
             esc(" · ".join(matched) or "-"),
             " · ".join(links),
@@ -338,6 +375,7 @@ def render_briefing_html(data):
   <div class="brand">tickedin</div>
   <h1>%s · 정책 확산 브리핑</h1>
   <div class="period">%s ~ %s</div>
+  %s
   <div class="chip">%s</div>
   <div class="intro">%s 관심 영역의 뉴스가 이번 기간 얼마나 널리 유통되었는지 보여주는 모니터링 요약입니다. 각 주장의 사실 여부에 대한 판단이 아닙니다.</div>
 </header>
@@ -349,7 +387,8 @@ def render_briefing_html(data):
 </body>
 </html>
 """ % (esc(customer), esc(customer), esc(week["start"]), esc(week["end"]),
-       esc(data["framing"]), esc(customer), "".join(rows), esc(data["note"]))
+       basis_div, esc(data["framing"]), esc(customer), "".join(rows),
+       esc(data["note"]))
 
 
 # ---------------------------------------------------------------------------
@@ -448,7 +487,10 @@ def run_selftest() -> int:
                "domains": ["realestate", "finance", "welfare"], "keywords": [],
                "content_nature": ["government_policy", "mixed_or_unclear"]}
     kept = filter_entries_for_customer(entries, lookup, profile)
-    data = build_briefing_data(profile, kept, week_start, week_end, DEFAULT_TOP_N)
+    data = build_briefing_data(
+        profile, kept, week_start, week_end, DEFAULT_TOP_N,
+        basis={"graph_generated_at": "2026-07-12T18:00:00+00:00",
+               "generated_at": "2026-07-13T02:00:00+00:00"})
     by_sid = {i["stable_id"]: i for i in data["items"]}
     e_ok = (by_sid["aaaaaaaaaaaa"]["syndication_note"] == SYNDICATION_NOTE
             and by_sid["bbbbbbbbbbbb"]["syndication_note"] == ""
@@ -469,11 +511,22 @@ def run_selftest() -> int:
     h_ok = not any(bad in keys_blob.lower()
                    for bad in ("truth", "falsity", "probability", "verdict"))
 
+    # (k) basis: the shipped 기준 시점 composition (all three branches) and
+    # both basis notes present in the rendered HTML.
+    k_ok = (data["basis"] == "기준 시점: 2026-07-12 브레인맵 · 2026-07-13 집계"
+            and data["basis"] in html_out
+            and COLLECTED_BASIS in html_out
+            and compose_basis_line("2026-07-12T18:00:00+00:00", None)
+                == "기준 시점: 2026-07-12 브레인맵"
+            and compose_basis_line(None, "2026-07-13T02:00:00+00:00")
+                == "기준 시점: 2026-07-13 집계"
+            and compose_basis_line(None, None) == "")
+
     checks = {"a_domain": a_ok, "b_keyword": b_ok, "c_nature_gate": c_ok,
               "d_or_union": d_ok, "e_syndication": e_ok, "f_honesty": f_ok,
               "g_vocab": g_ok, "h_no_truth_field": h_ok,
               "i_exclude_drops": i_ok, "ii_crossover_kept": ii_ok,
-              "iii_backward_compat": iii_ok}
+              "iii_backward_compat": iii_ok, "k_basis": k_ok}
     for name, ok in checks.items():
         print("  %-18s %s" % (name, "ok" if ok else "FAIL"))
     if not f_ok:
@@ -496,6 +549,13 @@ def main(argv=None) -> int:
                         help="OFFLINE logic check (synthetic graph; no DB).")
     parser.add_argument("--customer", default=None,
                         help="One customer id from the config (default: all).")
+    parser.add_argument("--keyword", default=None,
+                        help="Ad-hoc single-keyword briefing (no customer "
+                             "config): the keyword is casefold-substring "
+                             "matched against cluster label + member titles; "
+                             "no domain filter, no content_nature gate. The "
+                             "keyword itself is the display name — this mode "
+                             "introduces no new customer-facing copy.")
     parser.add_argument("--week-start", default=None,
                         help="YYYY-MM-DD window start (default: today-6, UTC).")
     parser.add_argument("--week-end", default=None,
@@ -521,17 +581,29 @@ def main(argv=None) -> int:
         print("[b2b] week_start %s is after week_end %s — aborting." % (week_start, week_end))
         return 1
 
-    try:
-        config = json.loads(Path(args.config).read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        print("[b2b] cannot read config %s: %s" % (args.config, exc))
+    keyword = (args.keyword or "").strip()
+    if keyword and args.customer:
+        print("[b2b] --keyword and --customer are mutually exclusive.")
         return 1
-    profiles = config.get("customers") or []
-    if args.customer:
-        profiles = [p for p in profiles if p.get("id") == args.customer]
-        if not profiles:
-            print("[b2b] no customer %r in %s" % (args.customer, args.config))
+    if keyword:
+        # KEYWORD MODE: an ad-hoc one-keyword profile through the EXACT same
+        # filter/data/render/honesty path as a configured customer. The
+        # display name is the keyword the customer sent — no invented copy.
+        profiles = [{"id": "kw_%s" % keyword, "display_name": keyword,
+                     "domains": [], "keywords": [keyword],
+                     "content_nature": []}]
+    else:
+        try:
+            config = json.loads(Path(args.config).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            print("[b2b] cannot read config %s: %s" % (args.config, exc))
             return 1
+        profiles = config.get("customers") or []
+        if args.customer:
+            profiles = [p for p in profiles if p.get("id") == args.customer]
+            if not profiles:
+                print("[b2b] no customer %r in %s" % (args.customer, args.config))
+                return 1
 
     raw_url = os.environ.get("DATABASE_URL")
     if not raw_url:
@@ -552,6 +624,7 @@ def main(argv=None) -> int:
         if not graph_row:
             print("[b2b] no brainmap_graph row — run scripts/build_brainmap_graph.py first.")
             return 1
+        graph_generated_at = graph_row[1]
         try:
             graph = json.loads(graph_row[2])
         except (TypeError, ValueError):
@@ -576,7 +649,18 @@ def main(argv=None) -> int:
                   "empty briefing skipped (specify at least one relevance axis)." % cid)
             continue
         kept = filter_entries_for_customer(entries, lookup, profile)
-        data = build_briefing_data(profile, kept, week_start, week_end, args.top_n)
+        data = build_briefing_data(
+            profile, kept, week_start, week_end, args.top_n,
+            basis={"graph_generated_at": graph_generated_at,
+                   "generated_at": datetime.now(timezone.utc).isoformat()})
+        if not data["items"]:
+            # NO-PADDING: an empty briefing is not a deliverable. There is no
+            # shipped customer-facing empty-state sentence for this surface,
+            # so nothing is written rather than padding around nothing.
+            print("[b2b] %s: 0 matching clusters in %s..%s — NO briefing "
+                  "written (nothing to send; do not pad an empty window)."
+                  % (cid, week_start, week_end))
+            continue
         ok, violations = briefing_honesty_ok(data)
         if not ok:
             failures += 1
