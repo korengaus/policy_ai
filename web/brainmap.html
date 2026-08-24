@@ -2408,10 +2408,21 @@
     (graph.clusters || []).forEach(function (c) {
       if (c.outlet_count > maxOutlets) maxOutlets = c.outlet_count;
     });
+    // BUILD-BASIS (114-APPLY): the build timestamp travels IN this same
+    // payload (top-level generated_at, written by build_brainmap_graph) —
+    // every figure on this page, cluster labels included, comes from this
+    // one fetched graph, so one page-level line on the stats gauge covers
+    // them honestly. Shipped weekly.html construction reused verbatim
+    // (브레인맵 kept even here: it names the artifact whose build stamped
+    // the date, and it is the same phrase every other surface shows). An
+    // old payload without the field appends NOTHING — no dangling separator.
+    var buildDay = (typeof graph.generated_at === "string"
+      && graph.generated_at.length >= 10) ? graph.generated_at.slice(0, 10) : "";
     el.textContent = "노드 " + graph.nodes.length + "개 · 연결 " + graph.edges.length
       + "개 · 클러스터 " + (graph.clusters || []).length
       + "개 · 연결된 노드 " + connected + "개 · 미연결 " + isolated + "개"
-      + (maxOutlets > 0 ? " · 최대 확산 " + maxOutlets.toLocaleString("ko-KR") + "개 매체" : "");
+      + (maxOutlets > 0 ? " · 최대 확산 " + maxOutlets.toLocaleString("ko-KR") + "개 매체" : "")
+      + (buildDay ? " · 기준 시점: " + buildDay + " 브레인맵" : "");
   }
 
   function onClick(ev) {
