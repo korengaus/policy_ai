@@ -14,6 +14,25 @@ WHAT IT RUNS, in order, the second GATED on the first:
     scripts/embed_backfill.py          must print "=== SUMMARY ==="
     scripts/build_brainmap_graph.py    must print "wrote 1 brainmap_graph row"
 
+GRAPH-ALREADY-CURRENT (109-APPLY): before either child runs, ONE cheap query
+compares the newest brainmap_graph.generated_at against the newest
+analysis_results.created_at. If a graph STRICTLY NEWER than the newest corpus
+row already exists, both children are skipped and the notification says the
+graph is already current, naming when it was built — every Monday the weekly
+spine builds at ~22:46 UTC and this cron was rebuilding the identical corpus
+at ~23:16, sixteen minutes of DB streaming for a byte-equivalent graph, and
+the operator was reading the no-op's lineage numbers. FAIL-OPEN TO BUILDING:
+an unset DATABASE_URL, an unreachable DB, a missing brainmap_graph table, or
+any parse problem -> the check returns None and the run proceeds exactly as
+before (so a Monday where the spine failed still gets its daily rebuild — no
+fresh graph row exists, the comparison cannot say "current", and the fallback
+survives by construction). ANY corpus insert — scheduled collection or an
+operator /analyze between the two runs — bumps MAX(created_at) past the graph
+and forces a normal build. KNOWN LIMIT, stated on purpose: analysis_results
+has no updated_at, so an in-place backfill that inserts nothing is invisible
+to this check until the next insert (typically the next 21:00 collection);
+operators running backfills follow them with a manual build anyway.
+
 THE SILENT-SUCCESS TRAP (the reason the old command carried greps): BOTH
 scripts print a guidance line and ``return 0`` when DATABASE_URL is unset, and
 build_brainmap_graph does the same when USE_POSTGRES_WRITE != "true"
@@ -58,10 +77,12 @@ otherwise identical.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -98,6 +119,90 @@ STEPS = (
      "argv": ["scripts/build_brainmap_graph.py"],
      "marker": "wrote 1 brainmap_graph row"},
 )
+
+# GRAPH-ALREADY-CURRENT (109-APPLY) — one round trip, both newest timestamps.
+# brainmap_graph.generated_at is TIMESTAMPTZ; analysis_results.created_at is
+# TEXT holding uniform ISO-8601 UTC ("2026-08-23T21:58:10.841273+00:00" —
+# probe-confirmed: all 16,345 rows non-null, T-separated, +00:00 suffixed, so
+# lexicographic MAX() IS chronological MAX()). The subselect form keeps this
+# a single statement that still works when either table is empty (NULL ->
+# fail-open to building).
+FRESHNESS_SQL = (
+    "SELECT (SELECT MAX(generated_at) FROM brainmap_graph), "
+    "(SELECT MAX(created_at) FROM analysis_results)")
+
+
+def _as_utc(value):
+    """Normalize either side of the freshness comparison to an aware UTC
+    datetime. Accepts an aware/naive datetime (naive is trusted as UTC — both
+    stored columns are written in UTC) or an ISO-8601 string. None, or
+    anything unparseable, -> None: the caller treats that as 'cannot prove
+    the graph is current' and builds."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return (value.replace(tzinfo=timezone.utc) if value.tzinfo is None
+                else value.astimezone(timezone.utc))
+    try:
+        return _as_utc(datetime.fromisoformat(str(value)))
+    except ValueError:
+        return None
+
+
+def should_skip_build(graph_ts, corpus_ts):
+    """True ONLY when a graph exists and is STRICTLY newer than the newest
+    corpus row. Every uncertain case — no graph row yet (spine failed, or
+    first ever run), no corpus row, unparseable timestamp, exact tie —
+    returns False and the build runs. Skipping is the optimization;
+    building is the safe default."""
+    graph_utc, corpus_utc = _as_utc(graph_ts), _as_utc(corpus_ts)
+    if graph_utc is None or corpus_utc is None:
+        return False
+    return graph_utc > corpus_utc
+
+
+def fetch_freshness():
+    """The production freshness source: (graph_ts, corpus_ts) from ONE
+    read-only SELECT, or None on ANY problem (unset DATABASE_URL, connect
+    failure, missing table). None means 'build normally' — this check may
+    save a rebuild, never block one."""
+    raw_url = os.environ.get("DATABASE_URL")
+    if not raw_url:
+        print("[graph-alert] DATABASE_URL unset — freshness check skipped; "
+              "children run and fail-close on their own env guards.")
+        return None
+    url = (raw_url.replace("postgresql+psycopg://", "postgresql://")
+                  .replace("postgresql+psycopg2://", "postgresql://"))
+    try:
+        import psycopg
+
+        with psycopg.connect(url, connect_timeout=10) as conn:
+            with conn.cursor() as cur:
+                cur.execute(FRESHNESS_SQL)
+                row = cur.fetchone()
+        return (row[0], row[1]) if row else None
+    except Exception as exc:  # noqa: BLE001 — check must never fail the run
+        print("[graph-alert] freshness check failed (%s) — building normally."
+              % type(exc).__name__)
+        return None
+
+
+def build_skip_notification(graph_ts, corpus_ts):
+    """(title, message) for the already-current skip. Deliberately NOT the
+    실패 shape and NOT high priority: this is the system correctly declining
+    to repeat itself, and it names the build the operator should read — on
+    Mondays, the weekly spine's."""
+    graph_utc, corpus_utc = _as_utc(graph_ts), _as_utc(corpus_ts)
+    title = "일일 브레인맵 — 이미 최신 (재빌드 생략)"
+    lines = [
+        "기존 그래프 생성: %s" % graph_utc.strftime("%Y-%m-%d %H:%M UTC"),
+        "최신 수집 데이터: %s — 그 이후 신규 없음"
+        % corpus_utc.strftime("%Y-%m-%d %H:%M UTC"),
+        "동일 데이터 재빌드는 같은 그래프를 만들므로 생략 — "
+        "새 데이터가 들어오면 다음 실행이 정상 빌드",
+    ]
+    return title, "\n".join(lines)
+
 
 # Operator-facing numbers, lifted from the captured output. Every one of these
 # is optional: a missing line degrades that field to 미상 and never fails the
@@ -200,11 +305,38 @@ def build_notification(results, failure, minutes, steps=STEPS):
     return title, "\n".join([head] + lines), "high"
 
 
-def run(child_runner, notifier, steps=STEPS):
+def run(child_runner, notifier, steps=STEPS, freshness=None):
     """Orchestrate one wrapped run; returns the exit code.
+
+    `freshness` (optional callable -> (graph_ts, corpus_ts) or None) is the
+    GRAPH-ALREADY-CURRENT gate: when it proves the newest graph postdates the
+    newest corpus row, the children are skipped and the run exits 0 with the
+    already-current notification. None / a raising callable / an unprovable
+    pair all fall through to a normal build.
 
     Each step must return 0 AND print its marker before the next one starts.
     """
+    if freshness is not None:
+        pair = None
+        try:
+            pair = freshness()
+        except Exception as exc:  # noqa: BLE001 — gate may never fail the run
+            print("[graph-alert] freshness check raised %s — building "
+                  "normally." % type(exc).__name__)
+        if pair and should_skip_build(*pair):
+            title, message = build_skip_notification(*pair)
+            print("[graph-alert] graph already current (graph %s > corpus %s)"
+                  " — skipping both children." % (pair[0], pair[1]))
+            try:
+                notifier(title, message, priority="default")
+            except Exception as exc:  # noqa: BLE001
+                print("[graph-alert] notify raised %s — ignored"
+                      % type(exc).__name__)
+            return 0
+        if pair:
+            print("[graph-alert] graph not current (graph %s, corpus %s) — "
+                  "building." % (pair[0], pair[1]))
+
     started = time.time()
     results = []
     failure = None
@@ -241,7 +373,7 @@ def main(argv=None) -> int:
 
     import weekly_spine
 
-    return run(run_child, weekly_spine.notify)
+    return run(run_child, weekly_spine.notify, freshness=fetch_freshness)
 
 
 # ---------------------------------------------------------------------------
@@ -399,6 +531,71 @@ def selftest() -> int:
     rc, text = run_child(["-c", "raise SystemExit(0)"])
     check("7b clean child", rc == 0 and text == "")
 
+    # 9. GRAPH-ALREADY-CURRENT — graph strictly newer than the newest corpus
+    # row (the Monday 22:46-spine-build / 23:16-daily case): NO child runs,
+    # exit 0, ONE default-priority notification that names the existing
+    # build's time and does not use the 실패 shape. Types are the production
+    # ones: TIMESTAMPTZ datetime for the graph, ISO TEXT for the corpus.
+    graph_ts = datetime(2026, 8, 23, 22, 46, 12, tzinfo=timezone.utc)
+    corpus_older = "2026-08-23T21:58:10.841273+00:00"
+    sent.clear()
+    runner, state = scripted((0, SAMPLE_EMBED), (0, SAMPLE_GRAPH))
+    rc = run(runner, notifier, freshness=lambda: (graph_ts, corpus_older))
+    check("9 skip exits 0", rc == 0)
+    check("9 no children ran", state["i"] == 0)
+    check("9 one notification", len(sent) == 1)
+    check("9 title is the already-current shape",
+          sent[0][0] == "일일 브레인맵 — 이미 최신 (재빌드 생략)")
+    check("9 not the 실패 shape", "실패" not in sent[0][0] + sent[0][1])
+    check("9 default priority", sent[0][2] == "default")
+    check("9 names the existing build time",
+          "기존 그래프 생성: 2026-08-23 22:46 UTC" in sent[0][1])
+
+    # 10. THE FALLBACK SURVIVES — the spine failed, so NO graph newer than the
+    # corpus exists (graph row absent entirely, or only an old one): both
+    # children run exactly as before the gate existed.
+    sent.clear()
+    runner, state = scripted((0, SAMPLE_EMBED), (0, SAMPLE_GRAPH))
+    rc = run(runner, notifier, freshness=lambda: (None, corpus_older))
+    check("10 no graph row at all -> builds", rc == 0 and state["i"] == 2)
+    sent.clear()
+    runner, state = scripted((0, SAMPLE_EMBED), (0, SAMPLE_GRAPH))
+    stale_graph = datetime(2026, 8, 22, 23, 16, 20, tzinfo=timezone.utc)
+    rc = run(runner, notifier, freshness=lambda: (stale_graph, corpus_older))
+    check("10b yesterday's graph only -> builds", rc == 0 and state["i"] == 2)
+    check("10b success notification, not skip",
+          sent[0][0].startswith("일일 브레인맵 완료"))
+
+    # 11. ANY CORPUS CHANGE STILL BUILDS — an operator analysis inserted
+    # between the spine build and this run (corpus one second newer), and the
+    # exact-tie case, both build.
+    runner, state = scripted((0, SAMPLE_EMBED), (0, SAMPLE_GRAPH))
+    rc = run(runner, notifier,
+             freshness=lambda: (graph_ts, "2026-08-23T22:46:13+00:00"))
+    check("11 corpus newer by 1s -> builds", rc == 0 and state["i"] == 2)
+    runner, state = scripted((0, SAMPLE_EMBED), (0, SAMPLE_GRAPH))
+    rc = run(runner, notifier,
+             freshness=lambda: (graph_ts, "2026-08-23T22:46:12+00:00"))
+    check("11b exact tie -> builds (strictly-newer rule)",
+          rc == 0 and state["i"] == 2)
+
+    # 12. FAIL-OPEN — a None-returning or RAISING freshness source builds
+    # normally; unparseable timestamps build normally.
+    runner, state = scripted((0, SAMPLE_EMBED), (0, SAMPLE_GRAPH))
+    rc = run(runner, notifier, freshness=lambda: None)
+    check("12 freshness None -> builds", rc == 0 and state["i"] == 2)
+
+    def boom_freshness():
+        raise RuntimeError("db down")
+
+    runner, state = scripted((0, SAMPLE_EMBED), (0, SAMPLE_GRAPH))
+    rc = run(runner, notifier, freshness=boom_freshness)
+    check("12b raising freshness -> builds", rc == 0 and state["i"] == 2)
+    check("12c unparseable corpus ts -> no skip",
+          should_skip_build(graph_ts, "not-a-date") is False)
+    check("12d naive datetime trusted as UTC",
+          should_skip_build(datetime(2026, 8, 23, 23, 0), corpus_older) is True)
+
     # 8. NOTIFY PATH, FOR REAL — weekly_spine.notify is called with NTFY_URL /
     # NTFY_TOPIC cleared, so it takes its documented print-instead-of-send
     # branch: no socket is opened, and the return is False. This exercises the
@@ -425,7 +622,7 @@ def selftest() -> int:
     if failures:
         print("SELFTEST FAILED: " + ", ".join(failures))
         return 1
-    print("SELFTEST PASSED (12 cases, 38 assertions)")
+    print("SELFTEST PASSED (21 cases, 54 assertions)")
     return 0
 
 

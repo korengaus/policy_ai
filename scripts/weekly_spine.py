@@ -145,17 +145,57 @@ def build_child_argv(script_name, dry_run, selftest, week_start=None,
     return argv
 
 
+# SPINE-SUMMARY-LINEAGE (109-APPLY): the summary used to carry ONLY each
+# child's last stdout line, and the builder's last line is the row-written
+# confirmation — so the lineage numbers (carried/minted/merged_away, printed
+# one line earlier) never reached the notification, and the operator read
+# them from the daily-graph cron's no-op rebuild instead. These prefixes are
+# the EXACT literals the builder prints (build_brainmap_graph.py:1262); a
+# matching line is appended to that step's marker. Selection is by prefix on
+# the full captured stdout, not by position, so reordering the builder's
+# output cannot drop it silently.
+KEY_LINE_PREFIXES = ("[brainmap] lineage:",)
+# The one step expected to print a lineage line; its ABSENCE is reported,
+# never silently dropped — a summary that quietly loses a line again is the
+# defect this fixes.
+_LINEAGE_STEP_LABEL = "build_brainmap_graph"
+_LINEAGE_MISSING_NOTE = "계보 라인 없음 — 빌더 출력 형식 변경 여부 확인 필요"
+
+
+def _tail_with_key_lines(stdout):
+    """Step marker: the last non-empty stdout line, plus any KEY_LINE_PREFIXES
+    line printed earlier (latest occurrence, ' · '-joined). Pure — selftested."""
+    lines = [line.strip() for line in (stdout or "").splitlines()
+             if line.strip()]
+    if not lines:
+        return ""
+    tail = lines[-1]
+    for prefix in KEY_LINE_PREFIXES:
+        if tail.startswith(prefix):
+            continue  # the key line IS the last line — never duplicate it
+        for line in reversed(lines[:-1]):
+            if line.startswith(prefix):
+                tail = "%s · %s" % (tail, line)
+                break
+    return tail
+
+
 def summarize_results(results):
     """One line per step for the success notify. `results` is the list of
     per-step dicts from run_chain. Uses the child's last non-empty stdout
-    line as its 'step-done marker' — robust without brittle per-child
-    parsing."""
+    line as its 'step-done marker' (plus any KEY_LINE_PREFIXES line the
+    runner surfaced) — robust without brittle per-child parsing. For the
+    build step specifically, a SUCCESSFUL run whose marker carries no
+    lineage line gets an explicit says-so note instead of silence."""
     lines = []
     for r in results:
         marker = (r.get("tail") or "").strip() or "(no output)"
+        if (r.get("label") == _LINEAGE_STEP_LABEL and r.get("rc") == 0
+                and KEY_LINE_PREFIXES[0] not in marker):
+            marker = "%s · %s" % (marker, _LINEAGE_MISSING_NOTE)
         lines.append("%d. %s: rc=%d (%.1fs) — %s"
                      % (r["step"], r["label"], r["rc"], r["seconds"],
-                        marker[:160]))
+                        marker[:200]))
     return "\n".join(lines)
 
 
@@ -357,20 +397,19 @@ def db_precheck(dry_run):
 # ---------------------------------------------------------------------------
 def _subprocess_runner(argv):
     """Default child runner: run the child, echo its output live-ish, and
-    return (rc, last_nonempty_stdout_line). Captures so the notify summary
-    can carry a per-step marker; also prints so the operator sees it."""
+    return (rc, marker) where marker is the last non-empty stdout line plus
+    any KEY_LINE_PREFIXES line (the builder's lineage numbers). Captures so
+    the notify summary can carry a per-step marker; also prints so the
+    operator sees it."""
     proc = subprocess.run(argv, capture_output=True, text=True,
                           encoding="utf-8", errors="replace")
     if proc.stdout:
         print(proc.stdout, end="" if proc.stdout.endswith("\n") else "\n")
     if proc.stderr:
         print(proc.stderr, end="" if proc.stderr.endswith("\n") else "\n")
-    tail = ""
-    for line in reversed((proc.stdout or "").splitlines()):
-        if line.strip():
-            tail = line.strip()
-            break
-    return proc.returncode, tail
+    # SPINE-SUMMARY-LINEAGE: last line plus any key line (lineage) — see
+    # _tail_with_key_lines.
+    return proc.returncode, _tail_with_key_lines(proc.stdout)
 
 
 def run_chain(steps, runner):
@@ -529,6 +568,47 @@ def _selftest_logic():
     summary = summarize_results(res_all)
     check("summary has one line per step",
           summary.count("\n") == 3 and "1. s1" in summary)
+
+    # (g) SPINE-SUMMARY-LINEAGE: the marker keeps the last line AND surfaces
+    # the lineage line printed earlier; no lineage line -> just the last line;
+    # a lineage line that IS the last line is not duplicated.
+    builder_out = ("[brainmap] nodes=16032 edges=6595 clusters=1223\n"
+                   "[brainmap] lineage: carried=1213 minted=10 merged_away=2\n"
+                   "[brainmap] wrote 1 brainmap_graph row (generated_at=X)\n")
+    tail_g = _tail_with_key_lines(builder_out)
+    check("key-line marker = last line + lineage line",
+          tail_g == "[brainmap] wrote 1 brainmap_graph row (generated_at=X)"
+                    " · [brainmap] lineage: carried=1213 minted=10 "
+                    "merged_away=2")
+    check("no key line -> plain last line",
+          _tail_with_key_lines("a\nb\n") == "b")
+    check("key line as last line is not duplicated",
+          _tail_with_key_lines("x\n[brainmap] lineage: carried=1 minted=0 "
+                               "merged_away=0\n")
+          == "[brainmap] lineage: carried=1 minted=0 merged_away=0")
+    check("empty output -> empty marker", _tail_with_key_lines("") == "")
+
+    # (h) a SUCCESSFUL build step whose marker lost the lineage line says so
+    # in the summary — visible absence, never a silent drop. Other steps and
+    # failed builds are not annotated.
+    with_lineage = summarize_results([
+        {"step": 2, "label": "build_brainmap_graph", "rc": 0, "seconds": 1.0,
+         "tail": tail_g}])
+    check("build summary line carries the lineage numbers",
+          "carried=1213 minted=10 merged_away=2" in with_lineage
+          and _LINEAGE_MISSING_NOTE not in with_lineage)
+    without = summarize_results([
+        {"step": 2, "label": "build_brainmap_graph", "rc": 0, "seconds": 1.0,
+         "tail": "[brainmap] wrote 1 brainmap_graph row (generated_at=X)"}])
+    check("missing lineage line is reported, not dropped",
+          _LINEAGE_MISSING_NOTE in without)
+    other = summarize_results([
+        {"step": 1, "label": "embed_backfill", "rc": 0, "seconds": 1.0,
+         "tail": "=== SUMMARY ==="},
+        {"step": 2, "label": "build_brainmap_graph", "rc": 5, "seconds": 1.0,
+         "tail": "boom"}])
+    check("non-build and failed steps get no lineage note",
+          _LINEAGE_MISSING_NOTE not in other)
 
     print("[selftest A] %s"
           % ("PASS" if not failures else "FAIL: " + ", ".join(failures)))
