@@ -4055,6 +4055,12 @@ def faded_claims() -> Response:
                 "first_at": row.get("first_at"),
                 "last_at": row.get("last_at"),
                 "silence_days": row.get("silence_days"),
+                # BUILD-BASIS (115-APPLY): when this row's numbers were
+                # MEASURED — generate_faded_candidates stamps generated_at on
+                # every insert/refresh, so outlet_count / silence_days /
+                # 보도 기간 are all true AS OF this moment, not as of the
+                # reader's page load. Additive; null on legacy rows.
+                "generated_at": row.get("generated_at"),
             })
     except Exception:
         logger.exception("Failed to load faded claims")

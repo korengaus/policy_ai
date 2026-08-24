@@ -88,6 +88,11 @@
   /* ONE-SITE (57-APPLY) → 74-APPLY (B): the cool #eff6ff predates the token
      layer — the system's identity tint is --tint; radius 0 per the 04 rule. */
   .outlet-badge { display: inline-flex; align-items: center; background: var(--tint); color: var(--brand-ink); border-radius: 0; padding: 2px 8px; font-weight: 700; font-size: 12px; }
+  /* BUILD-BASIS (115-APPLY): per-item measurement-time note (기준 시점: …
+     집계 — weekly.html's shipped composition branch for a measurement date).
+     Per ITEM, not page-level: each row's numbers are frozen at that row's
+     own generator run. */
+  .item-basis { color: var(--muted); font-size: 12px; font-weight: 600; }
   footer.faded-foot { max-width: 860px; margin: 0 auto; padding: 0 20px 48px; font-size: 13px; color: var(--muted); line-height: 1.7; }
   footer.faded-foot a { color: var(--brand-ink); text-decoration: none; font-weight: 600; }
   footer.faded-foot a:hover { text-decoration: underline; }
@@ -151,6 +156,19 @@
       var from = day(claim.first_at);
       var to = day(claim.last_at);
       if (from && to) meta.appendChild(el("span", null, "보도 기간 " + from + " → " + to));
+      // BUILD-BASIS (115-APPLY): this row's numbers (매체 수, N일째, 보도
+      // 기간) were all MEASURED at the generator run stamped on the row —
+      // NOT at the reader's page load, and NOT at a brainmap build (the row
+      // stores no graph ref, so 기준 시점: … 브레인맵 would be a false
+      // claim). The shipped measurement-date branch of the weekly.html
+      // composition (기준 시점: <date> 집계) states exactly what is true.
+      // Candidates come from an operator-run script on no fixed schedule; a
+      // bare date states when without implying a cadence we do not keep.
+      // Absent field (older payload / legacy row) -> nothing renders.
+      var measured = day(claim.generated_at);
+      if (measured) {
+        meta.appendChild(el("span", "item-basis", "기준 시점: " + measured + " 집계"));
+      }
       li.appendChild(meta);
       list.appendChild(li);
     });

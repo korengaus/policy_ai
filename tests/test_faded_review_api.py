@@ -177,6 +177,9 @@ class PublicFadedClaimsTests(_ClientMixin, unittest.TestCase):
         self.assertEqual(claim["representative_analysis_id"], 202)
         self.assertEqual(claim["outlet_count"], 12)
         self.assertEqual(claim["silence_days"], 57)
+        # BUILD-BASIS (115-APPLY): the row's measurement timestamp passes
+        # through so the page can state when these numbers were true.
+        self.assertEqual(claim["generated_at"], "g")
         # Slim public shape: no curation/internal fields leak — including the
         # Slice-4a AI recommendation fields (operator-side review aid ONLY;
         # the fixture row carries them, the public payload must not).
