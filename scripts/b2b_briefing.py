@@ -102,6 +102,17 @@ FOOTER_NOTE = (
     "각 주장의 사실 여부나 정책의 추진·성패에 대한 판단이 아닙니다."
 )
 
+# 111-APPLY RULING — the empty-record sentence, wording DECIDED by the task
+# (not invented here): an empty keyword briefing is still an answer, and it
+# says the record is empty — nothing else. The day count is a slot so the
+# sentence always names the window actually used (week_start..week_end,
+# inclusive). Because the ruled wording says 최근 ("the last N days"), it is
+# honest ONLY when the window ends on the run's UTC today; a historical
+# window has no ruled sentence, so main() writes nothing and says why.
+EMPTY_RECORD_NOTE = (
+    "이 키워드는 최근 %d일 수집 범위에서 여러 매체로 퍼진 기록이 없습니다."
+)
+
 # Byte-exactness gate: the two reused framing strings MUST be the whitelisted
 # bytes. A drifted literal is a bug — refuse to run at import time.
 if FRAMING_TEXT not in FRAMING_WHITELIST:
@@ -265,7 +276,7 @@ def briefing_honesty_ok(data):
     ok, violations = validate_payload(data)
     generated = [data.get("note") or "", data.get("kind") or "",
                  data.get("framing") or "", data.get("basis") or "",
-                 COLLECTED_BASIS]
+                 data.get("empty_note") or "", COLLECTED_BASIS]
     for item in data.get("items") or []:
         generated.append(item.get("syndication_note") or "")
     for text in generated:
@@ -332,6 +343,12 @@ def render_briefing_html(data):
             esc(" · ".join(matched) or "-"),
             " · ".join(links),
         ))
+    if data.get("empty_note"):
+        # RULED empty state (111-APPLY): the decided sentence and NOTHING
+        # else — no suggestions, no related keywords, no filler.
+        content = '<div class="empty">%s</div>' % esc(data["empty_note"])
+    else:
+        content = '<ol class="items">%s\n  </ol>' % "".join(rows)
     return """<!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -363,6 +380,8 @@ def render_briefing_html(data):
   .meta { color: var(--slate); font-size: 13.5px; margin-top: 4px; }
   .synd { color: var(--slate); font-size: 13px; margin-top: 4px; }
   .matched { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
+  .empty { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius-sm);
+    box-shadow: var(--shadow); padding: 18px 16px; margin-top: 12px; color: var(--slate); font-size: 15px; }
   .links { margin-top: 6px; font-size: 13px; }
   .links a { color: var(--brand); text-decoration: none; }
   .links a:hover { color: var(--brand-ink); text-decoration: underline; }
@@ -380,14 +399,13 @@ def render_briefing_html(data):
   <div class="intro">%s 관심 영역의 뉴스가 이번 기간 얼마나 널리 유통되었는지 보여주는 모니터링 요약입니다. 각 주장의 사실 여부에 대한 판단이 아닙니다.</div>
 </header>
 <main>
-  <ol class="items">%s
-  </ol>
+  %s
 </main>
 <footer>%s</footer>
 </body>
 </html>
 """ % (esc(customer), esc(customer), esc(week["start"]), esc(week["end"]),
-       basis_div, esc(data["framing"]), esc(customer), "".join(rows),
+       basis_div, esc(data["framing"]), esc(customer), content,
        esc(data["note"]))
 
 
@@ -522,11 +540,31 @@ def run_selftest() -> int:
                 == "기준 시점: 2026-07-13 집계"
             and compose_basis_line(None, None) == "")
 
+    # (l) 111-APPLY empty-record path: the ruled sentence (day-count slot)
+    # renders with the SAME framing/basis/footer, and nothing else fills the
+    # main area (no item list); the honesty scan covers the sentence.
+    empty_data = build_briefing_data(
+        {"id": "kw_없는키워드", "display_name": "없는키워드", "domains": [],
+         "keywords": ["없는키워드"], "content_nature": []},
+        [], week_start, week_end, DEFAULT_TOP_N,
+        basis={"graph_generated_at": "2026-07-12T18:00:00+00:00",
+               "generated_at": "2026-07-13T02:00:00+00:00"})
+    empty_data["empty_note"] = EMPTY_RECORD_NOTE % 30
+    empty_honest, _ = briefing_honesty_ok(empty_data)
+    empty_html = render_briefing_html(empty_data)
+    l_ok = (empty_honest
+            and (EMPTY_RECORD_NOTE % 30) in empty_html
+            and "<ol" not in empty_html
+            and FRAMING_TEXT in empty_html
+            and FOOTER_NOTE in empty_html
+            and empty_data["basis"] in empty_html)
+
     checks = {"a_domain": a_ok, "b_keyword": b_ok, "c_nature_gate": c_ok,
               "d_or_union": d_ok, "e_syndication": e_ok, "f_honesty": f_ok,
               "g_vocab": g_ok, "h_no_truth_field": h_ok,
               "i_exclude_drops": i_ok, "ii_crossover_kept": ii_ok,
-              "iii_backward_compat": iii_ok, "k_basis": k_ok}
+              "iii_backward_compat": iii_ok, "k_basis": k_ok,
+              "l_empty_record": l_ok}
     for name, ok in checks.items():
         print("  %-18s %s" % (name, "ok" if ok else "FAIL"))
     if not f_ok:
@@ -654,13 +692,28 @@ def main(argv=None) -> int:
             basis={"graph_generated_at": graph_generated_at,
                    "generated_at": datetime.now(timezone.utc).isoformat()})
         if not data["items"]:
-            # NO-PADDING: an empty briefing is not a deliverable. There is no
-            # shipped customer-facing empty-state sentence for this surface,
-            # so nothing is written rather than padding around nothing.
-            print("[b2b] %s: 0 matching clusters in %s..%s — NO briefing "
-                  "written (nothing to send; do not pad an empty window)."
-                  % (cid, week_start, week_end))
-            continue
+            # 111-APPLY RULING: an empty KEYWORD briefing is still an answer —
+            # it says the record is empty, in the decided sentence, and
+            # nothing else. The day count names the window actually used, and
+            # the 최근-phrased sentence is honest only when the window ends on
+            # the run's UTC today; otherwise (historical window, or a
+            # customer-profile briefing, which the ruling did not word)
+            # nothing is written and the run says why.
+            window_days = (
+                datetime.strptime(week_end, "%Y-%m-%d").date()
+                - datetime.strptime(week_start, "%Y-%m-%d").date()).days + 1
+            if keyword and week_end == today.isoformat():
+                data["empty_note"] = EMPTY_RECORD_NOTE % window_days
+            else:
+                print("[b2b] %s: 0 matching clusters in %s..%s — NO briefing "
+                      "written (the ruled empty-record sentence says 최근 N일 "
+                      "and only fits a keyword window ending today; this run "
+                      "is %s)."
+                      % (cid, week_start, week_end,
+                         "a historical window" if keyword
+                         else "a customer profile, which the ruling did not "
+                              "word"))
+                continue
         ok, violations = briefing_honesty_ok(data)
         if not ok:
             failures += 1
