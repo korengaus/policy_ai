@@ -1789,8 +1789,23 @@
         return '<div class="evidence-source-meta">표시할 정규화된 주장이 없습니다.</div>';
       }
 
+      // LOCATION-CELL-REMOVED: the 지역 row is GONE from this list — display only,
+      // claim.location is still stored and still feeds every retrieval consumer
+      // (source_retrieval_agent, evidence_extraction_agent, contradiction_agent,
+      // official_evidence_resolution, official_source_body, providers/*) and still
+      // ships in the API's normalized_claims. It was drawn from
+      // claim_normalizer._first_match — a plain substring scan with no word
+      // boundary — so it asserted a jurisdiction the claim never made: 경기 from
+      // 환경기초시설, 영국 from 총장 신영국, 수도권 from 비수도권. No suppression rule
+      // can separate those from a real 경기 수원시; the measured candidate rule
+      // destroyed correct values and substituted a DIFFERENT place name on 17 rows.
+      // The cell was also redundant: location is by construction a substring of
+      // claim_text, which renders twice in this same section (renderClaimList's
+      // <li> and .normalized-claim-text directly above) with no extra click. On 4
+      // rows the sentence clamp cut the source word, so the cell asserted a region
+      // the reader could not trace at all. Removing the row, not repairing it.
       // DESIGN-DETAIL-5a: each normalized claim is a populated-only definition list.
-      // Empty 주체/행동/대상/수치/시점/지역/객체 cells (raw "-"/blank) drop out; the
+      // Empty 주체/행동/대상/수치/시점/객체 cells (raw "-"/blank) drop out; the
       // formatter fields (상태/주장 유형/불확실성) are guarded so an empty raw value
       // is NOT rendered as a "자료 부족" placeholder row. Every populated field stays.
       // DETAIL-CLEANUP A6: the extractor stores the literal "unknown" for cells it
@@ -1805,7 +1820,6 @@
             ["대상", cell(claim.target)],
             ["수치", cell(claim.quantity)],
             ["시점", cell(claim.date_or_time)],
-            ["지역", cell(claim.location)],
             ["상태", claim.status ? formatClaimStatus(claim.status) : ""],
             ["주장 유형", claim.claim_type ? formatClaimType(claim.claim_type) : ""],
             ["불확실성", claim.uncertainty_level ? formatUncertainty(claim.uncertainty_level) : ""],
