@@ -130,3 +130,52 @@ services:
         value: "openai"
       - key: EMBEDDING_MODEL
         value: "text-embedding-3-small"
+  # DAILY-GRAPH — the daily brainmap rebuild (embed backfill -> graph build).
+  # 23:00 UTC daily (~08:00 KST), 30 min after the Sunday spine at 22:30 UTC.
+  # ★DOCUMENTATION-ONLY, like daily-collection: this cron is provisioned in the
+  # Render dashboard and this file is NOT a Blueprint — the block below exists
+  # so the repo (and scripts/b2b_readiness_audit.py, which parses this file)
+  # describes all THREE crons rather than two. It was absent until 2026-08-26.
+  # GRAPH-ALREADY-CURRENT (2026-08-25): the wrapper runs ONE read-only query
+  # first and skips both children when a graph strictly newer than the newest
+  # analysis_results row already exists — every Monday the weekly spine builds
+  # at ~22:46 UTC and this cron was rebuilding the identical corpus at ~23:16.
+  # The check fails OPEN: unset/unreachable DB, missing table or unparseable
+  # timestamp -> it builds exactly as before.
+  - type: cron
+    name: daily-graph
+    runtime: python
+    # No Chromium: this cron never runs analyze_pipeline (same reason
+    # weekly-spine's build omits it).
+    buildCommand: pip install -r requirements.txt
+    schedule: "0 23 * * *"
+    # DAILY-GRAPH-ALERT: pin-OUT wrapper (scripts/daily_graph_alert.py) around
+    # the chain the dashboard used to hold as one over-long line —
+    #     scripts/embed_backfill.py        asserted on "=== SUMMARY ==="
+    #     scripts/build_brainmap_graph.py  asserted on "wrote 1 brainmap_graph row"
+    # each gating the next, because BOTH children print guidance and return 0
+    # when DATABASE_URL / USE_POSTGRES_WRITE is unset. A missing marker exits 3.
+    # One ntfy notification per run — 일일 브레인맵 완료 / 실패 (high) /
+    # 이미 최신 (재빌드 생략).
+    startCommand: python scripts/daily_graph_alert.py
+    envVars:
+      # --- core (required) -------------------------------------------------
+      - key: DATABASE_URL
+        sync: false
+      - key: USE_POSTGRES_WRITE
+        value: "true"
+      # Embeddings are the whole job: embed_backfill refuses to run (and says
+      # so) unless all four of the next keys are present and correct
+      # (embed_backfill.py:32-39, 367-368).
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: SEMANTIC_MATCHING_ENABLED
+        value: "true"
+      - key: EMBEDDING_PROVIDER
+        value: "openai"
+      - key: EMBEDDING_MODEL
+        value: "text-embedding-3-small"
+      # Without this on THIS service, weekly_spine.notify prints the banner
+      # into the Render log instead of sending; the run is otherwise identical.
+      - key: NTFY_TOPIC
+        value: "joepark-cc-9273"

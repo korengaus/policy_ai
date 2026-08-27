@@ -191,3 +191,53 @@ The first ceiling rise since the classifier that separates signal from disclosur
 | 64 | Force-select path bypasses the title reject (opinion/obituary can become the analysis target) | `_fable_engine_health_day12.md:21` | replay `_force_select_best` on rows where every candidate was rejected |
 | 65 | 3rd notifier copy (topic-alert) still cannot send Korean titles | `ALERT-FIX` body, explicitly deferred | send one and read it back |
 | 66 | Self-referential 대조 검토 (card's own headline as the compared document) — 38/153 sampled, 2 clicks deep | backlog scan 07-31 | check whether the labelling work already covers it |
+
+## K. Operational baseline and infrastructure-adjacent state
+
+### PRE-CHANGE BASELINE — recorded 2026-08-26, before any Postgres plan change
+
+**These figures exist so that a later Postgres plan change (and any cron instance resize)
+can be evaluated against something measured rather than remembered.** Source: the ntfy
+completion notifications for the two daily crons and the Render dashboard's own metrics —
+**not a probe.** Nothing here was re-derived by querying the database; re-deriving it after
+the change would be reconstruction, not history.
+
+- **Daily collection** (`daily-collection`, 21:00 UTC / 06:00 KST).
+  08-25: **85** new rows, **59 min**, peak memory **1.50 GiB**.
+  08-26: **87** new rows, **60 min**, peak memory **1.71 GiB**.
+  Cron instance memory ceiling **2 GB**; overrun window **85 min**. The 08-26 peak is 86% of
+  the ceiling — the headroom, not the duration, is the number to watch.
+- **Daily graph** (`daily-graph`, 23:00 UTC / ~08:00 KST).
+  08-25: **84** new embeddings, **22 min**, lineage carried **1223** minted **4** merged_away **0**.
+  08-26: **87** new embeddings, **22 min**, lineage carried **1227** minted **5** merged_away **0**.
+  Vector `missing=0` on both days.
+- **Postgres.** Instance memory sustained at **~90% of a 1 GB limit**; disk **~20% of 10 GB**.
+  PITR runs daily **05:39–05:41**, retention **7 days**, and as of this date **no copy of the
+  database exists outside the Render account**.
+- **Corpus size.** **16,430** rows on the morning of 08-26; **16,517** at the time of the
+  three-surface diagnosis later the same day.
+
+*(The `daily-graph` cron was absent from `render.yaml` until 2026-08-26 — the file documented
+two of the three crons, and `scripts/b2b_readiness_audit.py` parses its spine schedule from
+that file. Adding the third block is documentation only; `render.yaml` is not a Blueprint and
+the dashboard remains authoritative for every schedule and command.)*
+
+### Open, measured, and NOT scheduled for repair
+
+| # | Defect | What it costs | First | State | Gate |
+|---|---|---|---|---|---|
+| 67 | Query assembly is non-deterministic across processes | a past row cannot be replayed to the query that was actually sent | 08-26 | **OPEN — not scheduled** | — |
+
+- **The mechanism.** `source_retrieval_agent._token_variants` returns a **set**, so iteration
+  order follows `PYTHONHASHSEED` and therefore differs between processes. Which terms survive
+  the **6-slot and 8-slot caps** changes with that order, so the same stored claim can assemble
+  a different query in two different runs.
+- **Measured.** Re-invoking the committed assembly over stored text reproduced the stored query
+  **byte-for-byte on 2,975 of 4,463** location-bearing claims — **67%**.
+- **Contributing cause, not the whole of it.** The chrome-strip and period-gate backfills
+  rewrote stored claim text *after* those queries were built, so part of the 33% is text that
+  has since changed rather than ordering alone. The set-iteration defect stands independently
+  of the backfills.
+- **Consequence, stated plainly:** re-running a past row does **not** reproduce the query that
+  was actually sent. Any retrieval post-mortem that assumes it does is reasoning about a query
+  the system may never have issued.
