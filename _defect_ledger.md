@@ -228,6 +228,10 @@ the dashboard remains authoritative for every schedule and command.)*
 |---|---|---|---|---|---|
 | 67 | Query assembly is non-deterministic across processes | a past row cannot be replayed to the query that was actually sent | 08-26 | **OPEN — not scheduled** | — |
 | 68 | `officialEvidenceInsufficientForExport` reads two columns the slim payload does not ship | the export guard is unusable on any card path, and would flatten every label to 사람 검토 대기 if called there | 08-28 | **OPEN — not scheduled** | — |
+| 69 | `domain_classifier` fails OPEN on a provider error | a day's rows are routed to 기타-미분류 with nothing recording that no model was consulted | 08-28 | **OPEN — not scheduled** | — |
+| 70 | `content_nature_classifier` fails OPEN the same way | same, into `mixed_or_unclear` | 08-28 | **OPEN — not scheduled** | — |
+| 71 | `hot_topics` fails open to an empty keyword list | the day silently collects only the fixed query list | 08-28 | **OPEN — not scheduled** | — |
+| 72 | Third, un-deduplicated ntfy notifier copy in `api_server.py` | latent recurrence of the three-day silent-send incident | 08-28 | **OPEN — not scheduled** (latent) | — |
 
 - **The mechanism.** `source_retrieval_agent._token_variants` returns a **set**, so iteration
   order follows `PYTHONHASHSEED` and therefore differs between processes. Which terms survive
@@ -263,3 +267,32 @@ the dashboard remains authoritative for every schedule and command.)*
   reader, and a future caller that reaches for it there would silently flatten every label
   rather than fail. Repair would mean conditioning the limb on the presence of the source
   arrays — a change to the guard itself, deliberately deferred.
+
+- **69/70/71 — the mechanism.** Three unattended paths on the daily-collection chain
+  swallow a provider error and return an in-band value that is **byte-identical to a
+  real answer**. `domain_classifier` returns `FALLBACK_LABEL = "기타-미분류"`
+  (`domain_classifier.py:45`, returned at `:189`); `content_nature_classifier` returns
+  `FALLBACK_LABEL = "mixed_or_unclear"` (`content_nature_classifier.py:43`);
+  `hot_topics` returns `[]` (`hot_topics.py:490`), after which `build_query_list` yields
+  only the fixed queries. All three are reached from `main.analyze_pipeline` /
+  `scheduler.py` with no operator present.
+- **69/70/71 — what it does NOT cost.** No verdict is corrupted: `domain` and
+  `content_nature` feed **no verdict field** (`main.py:1500`, `:1513` say so in the
+  source), `truth_claim` and `operator_review_required` are untouched, and a narrowed
+  query list collects fewer rows rather than wrong ones.
+- **69/70/71 — what it does cost.** An Anthropic credit outage would route a whole day
+  into those fallbacks with **no marking on the row**. Nothing distinguishes "the model
+  said 미분류" from "the model was never asked"; the only surviving evidence is a
+  `logger.warning` line in Render's log retention window. `hot_topics` is visible solely
+  as a lower 신규 N건 in the collection alert, with no attribution.
+- **72 — the mechanism.** `api_server.py:246-265` (`_honesty_notify`) is a THIRD ntfy
+  sender, never folded into `weekly_spine.notify` the way `queue_topic_alerts` was by
+  NOTIFY-DEDUP. It makes **one** attempt (no retry), times out at 5s, reports failure
+  only to `logger.warning`, and places the title in the `Title` header **raw** — it does
+  not go through `_header_title` (`weekly_spine.py:213-236`), the RFC-2047 encoder added
+  because a Korean header made urllib raise and a service logged nothing for three days.
+- **72 — latent, not live.** It sits on **no cron path**, and both call sites
+  (`api_server.py:346`, `:372`) pass ASCII titles, so the encoder gap cannot fire today.
+  Recorded because it is the same shape as the incident, one Korean title away from
+  repeating it, and because a reader looking for "the notifier" will find two correct
+  copies and this one.

@@ -208,6 +208,17 @@ def build_skip_notification(graph_ts, corpus_ts):
 # is optional: a missing line degrades that field to 미상 and never fails the
 # run — the assertions above are what decide success.
 RE_EMBEDDED = re.compile(r"^\s*newly embedded\s*:\s*(\d+)\s*$", re.M)
+# EMBED-FAILURE-VISIBLE: the failure tally embed_backfill.py:178 prints as
+#   "  embed failures (None)     : %d"
+# It was the ONE summary number this wrapper never read. On an OpenAI credit
+# outage every get_embedding returns None, the child counts them here, still
+# exits 0 and still prints the "=== SUMMARY ===" marker the assertion at :117
+# checks - so the run reported a completed build at default priority, text
+# byte-identical to a healthy day with no new rows. Mirrors RE_EMBEDDED's
+# shape exactly, escaping the literal parentheses. The child is NOT touched:
+# its exit code, marker, loop and pacing are unchanged; this only READS it.
+RE_EMBED_FAILED = re.compile(
+    r"^\s*embed failures \(None\)\s*:\s*(\d+)\s*$", re.M)
 RE_MISSING = re.compile(r"^\[brainmap\] corpus .*\bmissing=(\d+)", re.M)
 RE_ANCHOR = re.compile(r"^\[brainmap\] layout: (.+)$", re.M)
 RE_LINEAGE = re.compile(
@@ -245,6 +256,15 @@ def parse_embedded(text):
     return int(match.group(1)) if match else None
 
 
+def parse_embed_failed(text):
+    """Embedding failures reported by the child, or None when the line is
+    absent (a DRY-RUN summary omits it, and so does any older output). None
+    and 0 are treated identically downstream - both leave the notification
+    exactly as it is today; only a POSITIVE count changes anything."""
+    match = RE_EMBED_FAILED.search(text)
+    return int(match.group(1)) if match else None
+
+
 def parse_missing(text):
     match = RE_MISSING.search(text)
     return int(match.group(1)) if match else None
@@ -268,6 +288,7 @@ def build_notification(results, failure, minutes, steps=STEPS):
     """(title, message, priority) for one run. Pure — selftestable."""
     combined = "\n".join(text for _, _, text in results)
     embedded = parse_embedded(combined)
+    embed_failed = parse_embed_failed(combined)
     missing = parse_missing(combined)
     anchor = parse_anchor(combined)
     lineage = parse_lineage(combined)
@@ -278,10 +299,18 @@ def build_notification(results, failure, minutes, steps=STEPS):
     if skipped:
         ran.append("%s 미실행" % ", ".join(skipped))
 
+    counts_line = ("신규 임베딩 %s · 벡터 missing %s"
+                   % (("%d건" % embedded) if embedded is not None else "미상",
+                      ("%d" % missing) if missing is not None else "미상"))
+    # EMBED-FAILURE-VISIBLE: appended ONLY on a POSITIVE count, so a healthy
+    # run's message stays byte-identical to what it produces today (0 and an
+    # absent line are both falsy here). Existing vocabulary only - 임베딩,
+    # 실패 and 건 all already appear in this file's own strings.
+    if embed_failed:
+        counts_line += " · 임베딩 실패 %d건" % embed_failed
+
     lines = [
-        "신규 임베딩 %s · 벡터 missing %s"
-        % (("%d건" % embedded) if embedded is not None else "미상",
-           ("%d" % missing) if missing is not None else "미상"),
+        counts_line,
         "앵커링: %s" % (anchor or "미상"),
         "계보: %s" % (("carried=%d minted=%d merged_away=%d" % lineage)
                       if lineage else "미상"),
@@ -289,6 +318,15 @@ def build_notification(results, failure, minutes, steps=STEPS):
     ]
 
     if failure is None:
+        # EMBED-FAILURE-VISIBLE: both children returned 0 and printed their
+        # markers, so the EXIT CODE STAYS 0 - run() is untouched and the
+        # platform still records this run as successful. What changes is only
+        # what the operator is TOLD: a run that embedded nothing because every
+        # call failed must not read like a quiet day. Same 실패 vocabulary
+        # and same priority the rc / marker branches below already use.
+        if embed_failed:
+            title = ("일일 브레인맵 실패 — 임베딩 %d건 실패" % embed_failed)
+            return title, "\n".join(lines), "high"
         title = "일일 브레인맵 완료 — 신규 임베딩 %s" % (
             ("%d건" % embedded) if embedded is not None else "미상")
         return title, "\n".join(lines), "default"
@@ -619,10 +657,76 @@ def selftest() -> int:
             if value is not None:
                 os.environ[key] = value
 
+    # 13. EMBED-FAILURE-VISIBLE — the OpenAI-credit-outage shape: every
+    # get_embedding returned None, so the child counted 200 failures, still
+    # exited 0 and still printed the marker. Before this case existed the
+    # operator got the healthy-day text at default priority. The EXIT CODE
+    # MUST STAY 0 — both children really did return 0; only what the
+    # operator is TOLD changes.
+    sent.clear()
+    outage = SAMPLE_EMBED.replace(
+        "  newly embedded            : 12",
+        "  newly embedded            : 0").replace(
+        "  embed failures (None)     : 0",
+        "  embed failures (None)     : 200")
+    runner, state = scripted((0, outage), (0, SAMPLE_GRAPH))
+    rc = run(runner, notifier)
+    check("13 exit code unchanged (still 0)", rc == 0)
+    check("13 both steps ran", state["i"] == 2)
+    check("13 title says embeddings failed",
+          sent[0][0] == "일일 브레인맵 실패 — 임베딩 200건 실패")
+    check("13 priority high", sent[0][2] == "high")
+    check("13 count in the message",
+          "임베딩 실패 200건" in sent[0][1])
+    check("13 NOT the healthy title",
+          "완료" not in sent[0][0])
+
+    # 13b. A PARTIAL outage still escalates — 7 embedded, 5 failed.
+    sent.clear()
+    partial = SAMPLE_EMBED.replace(
+        "  embed failures (None)     : 0",
+        "  embed failures (None)     : 5")
+    runner, state = scripted((0, partial), (0, SAMPLE_GRAPH))
+    rc = run(runner, notifier)
+    check("13b partial still exits 0", rc == 0)
+    check("13b partial escalates", sent[0][2] == "high")
+    check("13b partial keeps the embedded count",
+          "신규 임베딩 12건" in sent[0][1])
+
+    # 13c. ZERO failures and an ABSENT failure line must both leave the
+    # notification EXACTLY as it was before this change — the healthy-day
+    # text is the thing a new field is most likely to break silently.
+    sent.clear()
+    quiet = SAMPLE_EMBED.replace(
+        "  newly embedded            : 12",
+        "  newly embedded            : 0")
+    runner, _ = scripted((0, quiet), (0, SAMPLE_GRAPH))
+    run(runner, notifier)
+    check("13c zero failures -> healthy title",
+          sent[0][0] == "일일 브레인맵 완료 — 신규 임베딩 0건")
+    check("13c zero failures -> default priority", sent[0][2] == "default")
+    check("13c no failure field on a healthy run",
+          "임베딩 실패" not in sent[0][1])
+    sent.clear()
+    # The failure line REPLACED by a duplicate of a neighbouring line, so
+    # the summary keeps its shape and only the parsed field disappears.
+    noline = SAMPLE_EMBED.replace(
+        "  embed failures (None)     : 0",
+        "  cache hits (skipped, $0)  : 188")
+    runner, _ = scripted((0, noline), (0, SAMPLE_GRAPH))
+    run(runner, notifier)
+    check("13c absent line -> unchanged text",
+          sent[0][2] == "default" and "임베딩 실패" not in sent[0][1])
+    check("13c parse_embed_failed(None) on absent line",
+          parse_embed_failed(noline) is None)
+    check("13c parser reads the real child line",
+          parse_embed_failed(SAMPLE_EMBED) == 0
+          and parse_embed_failed(outage) == 200)
+
     if failures:
         print("SELFTEST FAILED: " + ", ".join(failures))
         return 1
-    print("SELFTEST PASSED (21 cases, 54 assertions)")
+    print("SELFTEST PASSED (24 cases, 71 assertions)")
     return 0
 
 
