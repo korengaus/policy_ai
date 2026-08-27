@@ -227,6 +227,7 @@ the dashboard remains authoritative for every schedule and command.)*
 | # | Defect | What it costs | First | State | Gate |
 |---|---|---|---|---|---|
 | 67 | Query assembly is non-deterministic across processes | a past row cannot be replayed to the query that was actually sent | 08-26 | **OPEN — not scheduled** | — |
+| 68 | `officialEvidenceInsufficientForExport` reads two columns the slim payload does not ship | the export guard is unusable on any card path, and would flatten every label to 사람 검토 대기 if called there | 08-28 | **OPEN — not scheduled** | — |
 
 - **The mechanism.** `source_retrieval_agent._token_variants` returns a **set**, so iteration
   order follows `PYTHONHASHSEED` and therefore differs between processes. Which terms survive
@@ -241,3 +242,24 @@ the dashboard remains authoritative for every schedule and command.)*
 - **Consequence, stated plainly:** re-running a past row does **not** reproduce the query that
   was actually sent. Any retrieval post-mortem that assumes it does is reasoning about a query
   the system may never have issued.
+
+- **The mechanism.** `officialEvidenceInsufficientForExport` (`main.js:8511-8534`) builds its
+  `sources` array from `source_candidates` and `evidence_sources`, then requires the best
+  `semanticScore` across them to reach **30**. Neither column is in `_SLIM_LIST_COLUMNS`
+  (`postgres_storage.py:1434-1446`) — `source_candidates` was dropped by **PERF-4**,
+  `evidence_sources` by **PERF-2**. On any slim payload the array is empty, `semanticScore` is
+  **0**, and the final `semanticScore < 30` limb is **unconditionally true**, so the guard
+  returns 사람 검토 대기 for every row regardless of its evidence.
+- **Measured.** Rendering the committed chain over the 14 home pools, the guard fired on
+  **650 of 650** rows. On the two rows whose stored `has_genuine_official_support` is true
+  (**16438**, **16000**) the limb-by-limb comparison isolates the cause exactly: every other
+  limb agrees between the slim and full shapes, and only `limb_semantic` differs
+  (`nSources` 0 vs 71/26, `semantic` 0 vs 97).
+- **Not a live defect today.** The guard is only ever invoked on full rows — the detail
+  header, which fetches `GET /history/{id}`. Nothing currently calls it from a card path, and
+  the card badge was deliberately gated on `card.hasGenuineOfficial` instead (CARD-BADGE-HONESTY)
+  rather than on this guard, for exactly this reason.
+- **Consequence, stated plainly:** the guard cannot be reused on any surface fed by the slim
+  reader, and a future caller that reaches for it there would silently flatten every label
+  rather than fail. Repair would mean conditioning the limb on the presence of the source
+  arrays — a change to the guard itself, deliberately deferred.

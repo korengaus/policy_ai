@@ -689,6 +689,35 @@
     function verdictLabelKo(label) {
       return VERDICT_LABELS[String(label || "")] || "추가 검증 필요";
     }
+    // CARD-BADGE-HONESTY: the two verdict_label keys whose Korean ASSERTS that
+    // an official document matching the claim was found (공식 근거 확인 /
+    // 공식자료 참고). Both are set by verification_card.py gates that read
+    // evidence snippets only (verification_card.py:541-548/:561) and never
+    // examine an official document, so on a row whose official-evidence
+    // predicate is false the card face asserted evidence the row does not have
+    // while that same row's detail lede said 찾지 못했습니다. KEYS ONLY — no new
+    // label text, and no other label joins them: 공식 출처 확인 필요
+    // (draft_needs_official_confirmation) REQUESTS an official source, it does
+    // not claim one, and the remaining labels name a gate rather than evidence.
+    const OFFICIAL_CLAIMING_VERDICTS = new Set(["draft_verified", "draft_likely_true"]);
+    // The card-face verdict label, gated on the SAME official-evidence predicate
+    // the card already uses for its ✓ 공식 근거 chip and its 시장·시세 chip
+    // (card.hasGenuineOfficial, topicCardFromResult -> officialEvidenceIsGenuine).
+    // Deliberately NOT safeAiDraftVerdictForExport: that guard's first limb reads
+    // source_candidates / evidence_sources, which _SLIM_LIST_COLUMNS does not
+    // ship, so on a card its semanticScore is always 0 and it flattens every row
+    // to 사람 검토 대기 (measured 650/650) — see _defect_ledger.md.
+    // DISPLAY-ONLY and DOWNWARD-ONLY: an official-claiming label on a non-genuine
+    // row falls back to the EXISTING VERDICT_LABELS.draft_needs_review; a genuine
+    // row, and every non-official-claiming label, renders byte-identically. No
+    // stored value, no verdict_label, no alert level is touched.
+    function cardVerdictLabelKo(card) {
+      const label = String((card && card.verdictLabel) || "");
+      if (!(card && card.hasGenuineOfficial) && OFFICIAL_CLAIMING_VERDICTS.has(label)) {
+        return VERDICT_LABELS.draft_needs_review;
+      }
+      return verdictLabelKo(label);
+    }
     // DESIGN-C3h-3: a card is "verified today" iff its analysis created_at is on or
     // after KST (UTC+9) midnight. This is the EXACT rule the former 오늘의 검증 row
     // used; now the single source of truth for the per-card "오늘 검증" recency badge
@@ -3229,7 +3258,7 @@
             <div class="topic-card-verdict">
               ${sourcePill}
               <span class="verdict-pill ${verdictTierClass(card.verdictLabel)}">
-                <span class="verdict-text">AI 검증 상태 ${escapeHtml(verdictLabelKo(card.verdictLabel))}</span>
+                <span class="verdict-text">AI 검증 상태 ${escapeHtml(cardVerdictLabelKo(card))}</span>
               </span>
             </div>
             ${sourceBody}
@@ -3350,7 +3379,7 @@
                  Pill, classes and label text untouched; the evidence-axis ✓ pill
                  is a different axis and stays. -->
             <span class="verdict-pill ${verdictTierClass(card.verdictLabel)}">
-              <span class="verdict-text">AI 검증 상태 ${escapeHtml(verdictLabelKo(card.verdictLabel))}</span>
+              <span class="verdict-text">AI 검증 상태 ${escapeHtml(cardVerdictLabelKo(card))}</span>
             </span>
           </div>
           ${sourceBody}
@@ -4123,7 +4152,7 @@
             <!-- 6b: dot removed, same reason as the card face — it rendered one
                  neutral slate for every state and distinguished nothing. -->
             <span class="rank-verdict">
-              <span class="rank-verdict-text">AI 검증 상태 ${escapeHtml(verdictLabelKo(card.verdictLabel))}</span>
+              <span class="rank-verdict-text">AI 검증 상태 ${escapeHtml(cardVerdictLabelKo(card))}</span>
             </span>
           </div>
         </div>`;
