@@ -232,6 +232,7 @@ the dashboard remains authoritative for every schedule and command.)*
 | 70 | `content_nature_classifier` fails OPEN the same way | same, into `mixed_or_unclear` | 08-28 | **OPEN — not scheduled** | — |
 | 71 | `hot_topics` fails open to an empty keyword list | the day silently collects only the fixed query list | 08-28 | **OPEN — not scheduled** | — |
 | 72 | Third, un-deduplicated ntfy notifier copy in `api_server.py` | latent recurrence of the three-day silent-send incident | 08-28 | **OPEN — not scheduled** (latent) | — |
+| 73 | `z:title-outlet-tail` fires on 3 rows the strip cannot reach | the B2B readiness audit has been exit 1 since 08-26, so its exit code no longer gates a send | 08-26 | **OPEN — NOT SCHEDULED FOR REPAIR** | `z:title-outlet-tail` (the gate that is red) |
 
 - **The mechanism.** `source_retrieval_agent._token_variants` returns a **set**, so iteration
   order follows `PYTHONHASHSEED` and therefore differs between processes. Which terms survive
@@ -296,3 +297,40 @@ the dashboard remains authoritative for every schedule and command.)*
   Recorded because it is the same shape as the incident, one Korean title away from
   repeating it, and because a reader looking for "the notifier" will find two correct
   copies and this one.
+- **73 — what fires.** `scripts/card_render_audit.js` raises class `title-outlet-tail`
+  on **3 rows — 15511, 16511, 16596** — all from one outlet, `ktin.net` /
+  경인투데이뉴스. **16511 and 16596 are the same article**, `www.ktin.net/63717601`
+  under `http` and `https`, collected a day apart. C8 in `scripts/b2b_readiness_audit.py:1494`
+  turns red on any non-zero exit from the scan, so the audit has been **exit 1 since 2026-08-26**.
+- **73 — the string.** The stored title carries the outlet name **twice** — once glued after a
+  colon, once as a spaced-dash tail. `stripVerifiedOutletTail` (`main.js:882-913`) anchors on
+  `/ - ([^-]{2,40})$/` and removes **only the dash copy**; the colon-glued copy survives to the card.
+- **73 — COVERAGE, which is the whole of it.** The scan renders only `id % 14 === 0` or
+  `id > (max_id - 500)`. **870** stored titles match the audit's tail regex; **159 (18.3%)** fall
+  inside that window, **711 (81.7%)** are never rendered by C8. Rendering all 870 fires the class on
+  the same 3 rows — of which **15511 is outside the window and has never been seen by C8**.
+  Repairing 16511 and 16596 would turn the audit green while 15511 still renders the same string:
+  **a change to what the instrument sees, not to the defect.**
+- **73 — why it went red when it did.** 16511 was in-window and on screen for a full day on
+  2026-08-25 with the gate green. The class needs the evidence map to hold **>=2 same-apex rows**
+  (`main.js:904-910`), so one row alone reports nothing. **The gate measures whether the string
+  appears twice, not whether it appears.**
+- **73 — precedent.** Commit `5abde2ac45` (2026-08-20) introduced this machinery and **explicitly
+  declined this shape**: an outlet name with no dash before it stays, because detecting it would need
+  a registry of outlet names this project does not have and should not guess at. The colon-glued copy
+  is exactly that shape; it reaches the class today only because a second dash-separated copy supplies
+  the tail context. This is a **different class** from the one commit `bf217583ad` declined
+  (propositionless institution-name titles, 0.04%).
+- **73 — decision and why: NOT REPAIRED.** A stored-title backfill would **move the graph** —
+  `build_embed_text(title, claim)` is the embedding cache key, so a rewritten title misses its cached
+  vector, re-embeds at the next build, and cluster membership and `stable_id` lineage can shift.
+  Moving lineage for 3 rows is out of proportion. A render-time strip would fix only rows carrying a
+  **doubled** name and leave single colon-glued names untouched, and widening the anchor is the case
+  `5abde2ac45` refused. Narrowing the check is forbidden. The rows are **visually untidy; they do not
+  state anything false to a reader.**
+- **73 — OPERATING RULE WHILE THIS STANDS.** The audit's **exit code is not the send gate**.
+  Before a B2B send, run the audit and confirm **by eye** that the only FAIL line is
+  C8 `title-outlet-tail` and the only ids are **15511, 16511, 16596**. Any other class, or any other
+  id, **stops the send**.
+- **73 — re-open condition.** A different class appears, or an id outside that set appears, or the
+  pattern spreads beyond `ktin.net`.
