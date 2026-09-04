@@ -1067,7 +1067,7 @@
         [/\bdocument_type\s*:\s*/gi, "문서 유형: "],
         [/\bConnection reset by peer\b/gi, "공식 사이트 연결이 중단됐습니다"],
         // DISPLAY-LEAK-FIX-3 (99-APPLY) — a BYLINE EMAIL in stored evidence
-        // prose ("안은혜 기자 iamgrace_ahn@kakao.com", id 15718): the evidence
+        // prose ("안은혜 기자 ***@kakao.com", id 15718): the evidence
         // matcher harvested an article's trailer line as an evidence sentence
         // (a path the 71-APPLY extraction-time chrome strip never touches),
         // and the address's local part is machine text on a reader surface

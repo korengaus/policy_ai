@@ -315,9 +315,20 @@ def render_briefing_html(data):
             matched.append("도메인 " + ", ".join(item["matched_domains"]))
         if item["matched_keywords"]:
             matched.append("키워드 " + ", ".join(item["matched_keywords"]))
+        # NEAR-ANCHOR-LABEL-HONESTY (the site convention, now applied here):
+        # the STORED near_anchor_outlet_count includes the anchor's OWN outlet
+        # (build_brainmap_graph.py sim=1.0 self-pass), so every reader surface
+        # displays max(0, stored-1) — main.js:7489, claim.html:697,
+        # weekly.html:444. This render printed the RAW stored value, so one and
+        # the same cluster read "2개 매체" in a customer briefing and
+        # "1개 매체" on its own card. Converted AT DISPLAY only:
+        # item["near_anchor_outlet_count"] keeps the raw source-of-truth number
+        # in the audit JSON. The selection gate above (near >= 2) is UNTOUCHED
+        # — which clusters qualify is a separate decision. The sentence is
+        # unchanged; only the numeral moves, and it can only move down.
+        near_shown = max(0, int(item["near_anchor_outlet_count"] or 0) - 1)
         synd = ('<div class="synd">%s · %d개 매체</div>'
-                % (esc(item["syndication_note"]),
-                   item["near_anchor_outlet_count"])
+                % (esc(item["syndication_note"]), near_shown)
                 if item["syndication_note"] else "")
         links = []
         if item["card_url"]:
