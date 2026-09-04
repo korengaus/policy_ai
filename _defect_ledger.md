@@ -130,6 +130,43 @@ The first ceiling rise since the classifier that separates signal from disclosur
 - Tolerance left at 4.5pp and the mod14 baseline left at 6.3% (it measured 7.1%, inside tolerance).
   Reason recorded in `scripts/card_render_baselines.json` under this class's `_reason`.
 
+**`question_mojibake`, latest500: 4.0% → 18.6%. Measured 2026-09-04 (corpus max_id=17247). NOT a defect — CLOSED.**
+
+- **Denominator ruled out first.** `latest500` is `id > max_id - 500`, so its denominator is **fixed
+  at 500** in both readings. **13 → 93** matching rows in the same 500. The rate moved because the
+  corpus content moved, not because the window did.
+- **Measured cause: two official documents, entering and leaving the candidate pool.** By ingest day
+  the rate runs 6.4, 5.9, 1.1 (08-23…08-25), then **19.0** on **2026-08-26**, **29.1** on 08-27, and
+  22.1, 25.0, 26.7, 22.2, 25.9, 20.0 through **2026-09-02**. The step is exactly the arrival of an
+  **FSS 감사인 지정제도 online-briefing notice** (167 occurrences) and an **FSS 보험회사 경영실적
+  release** (118): `fss.or.kr` 285 occurrences, `korea.kr` 22. A step, not drift.
+- **Not article text.** **456 of 461** occurrences sit in **`source_candidates`** — attached
+  official-document text — against 1 each in `claim_text`, `claims`, `normalized_claims`,
+  `debug_summary`, `contradiction_checks`. No host dominates: 500 rows over **226** hosts, the top
+  host carrying 6 of 98 matching rows.
+- **Zero of the 461 are genuine question marks.** None has a Korean interrogative ending (까/나/요/죠)
+  before the mark; none has an interrogative word (왜/어떻게/무엇/누가/언제) within 90 characters.
+  The shapes are **250** lost separators in repeated `noun?noun?noun` lists, **192** lost quotation
+  brackets (closing `?` followed by a particle), **19** single `noun?noun`.
+- **The substitution is upstream, not ours.** The corpus contains **zero U+FFFD**, and our only lossy
+  steps — `article_extractor.py:162` and `text_utils.py:101`, both
+  `decode(encoding, errors="replace")` — emit **U+FFFD**, never `?`. No lossy encode exists in the
+  chain (every `.encode()` is UTF-8; `article_extractor.py:119` is strict on both sides and raises).
+  In one document **U+00B7 survives** while the enclosing brackets became `?`, yet **U+3141 also
+  survives** in the same text; **no single encoding produces that mix**, which points at a
+  publisher-side HWP-to-text conversion.
+- **Already receding on its own.** The rate had fallen to **5.3%** on **2026-09-03** as those two
+  documents left the pool.
+- **NO BASELINE IS TO BE RAISED FOR THIS.** The 4.0% / 1.9% figures in the table above stand
+  unchanged. A baseline moved to accommodate an excursion is not a baseline.
+
+**`bullet_char`, mod14: 60.7% → 66.9%. Measured 2026-09-04. NOT a defect — CLOSED. Arithmetic, not corpus change.**
+
+- The mod14 **denominator grew from 1,016 to 1,230** (+214) and matches grew by **210**, so the added
+  rows are **~98% `bullet_char`** — which is simply the recent-ingest saturation rate (`latest500` is
+  **99.6%**, 498/500; 499 of 500 rows across 225 of 226 hosts, all at 100%). The window accumulated
+  recent rows; the corpus did not change. Baseline unchanged.
+
 ## I. NOT A DEFECT — instrument error or misreading
 | # | Reported as | Truth | First |
 |---|---|---|---|
@@ -233,6 +270,7 @@ the dashboard remains authoritative for every schedule and command.)*
 | 71 | `hot_topics` fails open to an empty keyword list | the day silently collects only the fixed query list | 08-28 | **OPEN — not scheduled** | — |
 | 72 | Third, un-deduplicated ntfy notifier copy in `api_server.py` | latent recurrence of the three-day silent-send incident | 08-28 | **OPEN — not scheduled** (latent) | — |
 | 73 | `z:title-outlet-tail` fires on 3 rows the strip cannot reach | the B2B readiness audit has been exit 1 since 08-26, so its exit code no longer gates a send | 08-26 | **OPEN — NOT SCHEDULED FOR REPAIR** | `z:title-outlet-tail` (the gate that is red) |
+| 74 | Scan-window expiry: a row leaves C8's field of view about six days after ingest | a defect not caught inside that window becomes permanently invisible to this instrument | 09-04 | **OPEN — not scheduled** | — (this is the gate's own limit) |
 
 - **The mechanism.** `source_retrieval_agent._token_variants` returns a **set**, so iteration
   order follows `PYTHONHASHSEED` and therefore differs between processes. Which terms survive
@@ -328,9 +366,47 @@ the dashboard remains authoritative for every schedule and command.)*
   **doubled** name and leave single colon-glued names untouched, and widening the anchor is the case
   `5abde2ac45` refused. Narrowing the check is forbidden. The rows are **visually untidy; they do not
   state anything false to a reader.**
-- **73 — OPERATING RULE WHILE THIS STANDS.** The audit's **exit code is not the send gate**.
+- **73 — OPERATING RULE WHILE THIS STANDS — SUPERSEDED 2026-09-04. Kept verbatim; this register
+  does not rewrite its own records.** The audit's **exit code is not the send gate**.
   Before a B2B send, run the audit and confirm **by eye** that the only FAIL line is
   C8 `title-outlet-tail` and the only ids are **15511, 16511, 16596**. Any other class, or any other
-  id, **stops the send**.
+  id, **stops the send**. — *That instruction now has no target. Why, and what replaces it, is in the
+  three bullets below.*
+- **73 — WHY IT WAS SUPERSEDED: the instrument stopped seeing it. Measured 2026-09-04 (max_id 17247).**
+  All three ids now fall **outside both scan windows**. `id % 14` gives **13, 5, 6** — none is 0 — and
+  all three are `<= max_id - 500` (**16747**), so none is in `latest500` (**16748–17247**). The audit
+  therefore exits **0**, with C8 reported as a **WARN** (`zero-classes clean=true`) and the three ids
+  absent from the output entirely. The send gate was written to confirm a FAIL that can no longer occur.
+- **73 — THE DEFECT IS NOT REPAIRED. Measured 2026-09-04.** Nothing was fixed; the rows left the
+  window. The three ids were rendered through the **committed** chain with the window forced to cover
+  them: `RENDER-SCAN FAIL: ZERO-CLASS REGRESSION [latest500] title-outlet-tail: 3 row(s) e.g. ids
+  15511,16511,16596`, `zero-classes clean=false`, **EXIT=1**, 3 rows. The **stored titles are
+  unchanged** — `국가데이터처… :경인투데이뉴스 - 경인투데이뉴스` on all three. The decision recorded
+  above (NOT REPAIRED) still stands and is unaffected by this; only the observability changed.
+- **73 — OPERATING RULE IN FORCE FROM 2026-09-04.** **The audit can no longer observe this defect.**
+  Do not look for it in the audit output, and do not read C8 exit 0 as evidence that it is gone. To
+  check it, render the three ids **directly** through `scripts/card_render_audit.js` with the window
+  forced to cover them: select ids 15511, 16511, 16596 with the `RENDER_COLS` list
+  (`b2b_readiness_audit.py:1405-1413`), write them as the scanner's input JSON, and set
+  `_meta.max_id` low enough that the scanner's own cut `id > max_id - 500` reaches 15511 (**16010**
+  works; the render chain itself is untouched). Class still firing = unchanged. This is the check;
+  the audit's exit code is not.
 - **73 — re-open condition.** A different class appears, or an id outside that set appears, or the
   pattern spreads beyond `ktin.net`.
+
+- **74 — the mechanism.** `scripts/card_render_audit.js:2145` builds its two windows as
+  `id % 14 === 0` **OR** `id > (max_id - 500)`. The first is permanent and covers exactly 1 row in
+  14; the second is a **sliding** window of fixed size.
+- **74 — the headline fraction is NOT the issue.** Aggregate coverage is stable: **9.9%** at
+  max_id 16778 (1,661 of 16,773 rows) and **9.8%** at max_id 17247 (1,695 of 17,242). It decays only
+  toward the `mod14` floor of 1/14 = **7.14%**, so watching the percentage would show nothing.
+- **74 — the issue is per-row.** A row that is **not** a multiple of 14 is scanned **only** while it
+  sits within 500 of `max_id`. At roughly **80 new rows per day** that is about **six days**. After
+  that, **13 of every 14 rows are never scanned again**. A defect introduced and not caught inside
+  that window becomes **permanently invisible to this instrument** — not fixed, not reported, not
+  observable.
+- **74 — first observed instance: ledger 73.** Ids 15511, 16511 and 16596 aged out of both windows
+  between max_id 16778 and 17247. The class still fires on all three under a forced window (see the
+  73 bullets above); the audit stopped reporting it and turned green. Recorded, **not scheduled** —
+  every available remedy (an always-scan id list, a hash-stable sample, a larger window) is a change
+  to the instrument, and no such change is being made on the strength of one observation.
